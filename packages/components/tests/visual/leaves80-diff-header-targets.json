@@ -1,0 +1,336 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "ui-diffviewermigration--unified",
+    "ui-diffviewermigration--long-lines",
+    "ui-diffviewermigration--caller-overrides",
+    "ui-diffviewermigration--header-direct-child-overrides",
+    "ui-diffviewermigration--header-descendant-overrides",
+    "ui-diffviewermigration--header-logical-overrides",
+    "ui-diffviewermigration--custom-header"
+  ],
+  "ready": {
+    "ui-diffviewermigration--unified": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--long-lines": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--header-direct-child-overrides": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--header-descendant-overrides": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--header-logical-overrides": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-diffviewermigration--custom-header": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "ui-diffviewermigration--unified": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "open-file-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-diff-migration] output')?.textContent==='Opened src/local/diff-migration.ts'&&document.querySelector('[data-diff-migration] [aria-expanded]')?.getAttribute('aria-expanded')==='true'"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--long-lines": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--caller-overrides": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--header-direct-child-overrides": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--header-descendant-overrides": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--header-logical-overrides": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--custom-header": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-diff-custom-header] button"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]');return root?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-diff-custom-header] button",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-diff-migration]'),h=root?.querySelector('[aria-expanded]'),img=root?.querySelector('img');return !!h&&h.getAttribute('aria-expanded')==='true'&&(!img||(img.complete&&img.naturalWidth>0))&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

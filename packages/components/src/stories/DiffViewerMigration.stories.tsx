@@ -94,7 +94,10 @@ type Mode =
   | 'responsive'
   | 'error'
   | 'loading'
-  | 'caller';
+  | 'caller'
+  | 'header-direct-child'
+  | 'header-descendant'
+  | 'header-logical';
 function Fixture({ mode = 'unified' }: { mode?: Mode }) {
   const [action, setAction] = useState('Ready');
   const [open, setOpen] = useState(false);
@@ -165,6 +168,17 @@ function Fixture({ mode = 'unified' }: { mode?: Mode }) {
     ...(mode === 'caller'
       ? { className: 'max-w-[680px] rounded-none border-2 border-primary/40 shadow-none' }
       : {}),
+    ...(mode === 'header-direct-child'
+      ? {
+          className: '*:border-blue-500 *:rounded-none *:bg-emerald-100 dark:*:bg-emerald-950',
+        }
+      : {}),
+    ...(mode === 'header-descendant'
+      ? {
+          className:
+            '[&>div[aria-expanded]]:border-fuchsia-500 [&>div[aria-expanded]]:rounded-[3px] [&>div[aria-expanded]]:bg-cyan-100 dark:[&>div[aria-expanded]]:bg-cyan-950',
+        }
+      : {}),
     ...(mode === 'custom'
       ? {
           renderHeader: ({ fileName, additions, deletions, CollapseToggle }) => (
@@ -207,7 +221,12 @@ function Fixture({ mode = 'unified' }: { mode?: Mode }) {
       </div>
       <div
         data-diff-width-host
-        style={containerWidth === undefined ? undefined : { width: containerWidth }}
+        style={{
+          ...(containerWidth === undefined ? {} : { width: containerWidth }),
+          ...(mode === 'header-logical'
+            ? { direction: 'rtl', ['--spacing' as string]: '5px' }
+            : {}),
+        }}
       >
         <DiffViewer {...props} />
       </div>
@@ -231,3 +250,10 @@ export const ResponsiveContext: Story = { render: () => <Fixture mode="responsiv
 export const SourceError: Story = { render: () => <Fixture mode="error" /> };
 export const SourceLoading: Story = { render: () => <Fixture mode="loading" /> };
 export const CallerOverrides: Story = { render: () => <Fixture mode="caller" /> };
+export const HeaderDirectChildOverrides: Story = {
+  render: () => <Fixture mode="header-direct-child" />,
+};
+export const HeaderDescendantOverrides: Story = {
+  render: () => <Fixture mode="header-descendant" />,
+};
+export const HeaderLogicalOverrides: Story = { render: () => <Fixture mode="header-logical" /> };

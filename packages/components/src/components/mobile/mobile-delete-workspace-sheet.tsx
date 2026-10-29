@@ -8,6 +8,7 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } fr
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
@@ -27,6 +28,7 @@ export type MobileDeleteWorkspaceSheetProps = {
 };
 
 const styles = stylex.create({
+  fieldLabel: { [field.labelSize]: '0.78rem' },
   /** The title, with the warning mark in front of it. */
   titleRow: {
     display: 'inline-flex',
@@ -197,7 +199,7 @@ export function MobileDeleteWorkspaceSheet({
             <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
-                className="text-[0.78rem] font-medium text-foreground"
+                className={`font-medium text-foreground ${stylex.props(styles.fieldLabel).className}`}
               >
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: workspaceName,

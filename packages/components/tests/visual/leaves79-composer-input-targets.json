@@ -1,0 +1,320 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposerinput--landing",
+    "migration-ownedcomposerinput--session",
+    "migration-ownedcomposerinput--dialog",
+    "migration-ownedcomposerinput--outer-group",
+    "migration-ownedcomposerinput--disabled",
+    "migration-ownedcomposerinput--plain-fallback"
+  ],
+  "ready": {
+    "migration-ownedcomposerinput--landing": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===true&&t.disabled===false&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--session": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===true&&t.disabled===false&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--dialog": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===true&&t.disabled===false&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--outer-group": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===true&&t.disabled===false&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--disabled": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===true&&t.disabled===true&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--plain-fallback": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!r&&!!t&&t.value===''&&getComputedStyle(t).resize==='none'&&Boolean(r.querySelector('[data-mention-highlighter]'))===false&&t.disabled===false&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcomposerinput--landing": [
+      {
+        "name": "focused-empty",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "typed-wrapping",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#migration-composer-input",
+            "value": "A long controlled draft with text that wraps across the narrow viewport.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\n"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value.startsWith('A long controlled draft')&&r.querySelector('[data-input-value]').textContent===t.value&&!h&&getComputedStyle(t).resize==='none'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "cleared-outer-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-clear-input]"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value===''&&document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0.5')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposerinput--session": [
+      {
+        "name": "focused-empty",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "typed-wrapping",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#migration-composer-input",
+            "value": "A long controlled draft with text that wraps across the narrow viewport.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\n"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value.startsWith('A long controlled draft')&&r.querySelector('[data-input-value]').textContent===t.value&&!h&&getComputedStyle(t).resize==='none'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "cleared-outer-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-clear-input]"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value===''&&document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0.5')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposerinput--dialog": [
+      {
+        "name": "focused-empty",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "typed-wrapping",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#migration-composer-input",
+            "value": "A long controlled draft with text that wraps across the narrow viewport.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\n"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value.startsWith('A long controlled draft')&&r.querySelector('[data-input-value]').textContent===t.value&&!h&&getComputedStyle(t).resize==='none'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "cleared-outer-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-clear-input]"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value===''&&document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0.5')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposerinput--outer-group": [
+      {
+        "name": "focused-empty",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "typed-wrapping",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#migration-composer-input",
+            "value": "A long controlled draft with text that wraps across the narrow viewport.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\n"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value.startsWith('A long controlled draft')&&r.querySelector('[data-input-value]').textContent===t.value&&!h&&getComputedStyle(t).resize==='none'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "cleared-outer-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-clear-input]"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value===''&&document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposerinput--plain-fallback": [
+      {
+        "name": "focused-empty",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "typed-wrapping",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#migration-composer-input",
+            "value": "A long controlled draft with text that wraps across the narrow viewport.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\nFollowing line of synthetic text.\n"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value.startsWith('A long controlled draft')&&r.querySelector('[data-input-value]').textContent===t.value&&!h&&getComputedStyle(t).resize==='none'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "cleared-outer-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-clear-input]"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return t.value===''&&document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0.5')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

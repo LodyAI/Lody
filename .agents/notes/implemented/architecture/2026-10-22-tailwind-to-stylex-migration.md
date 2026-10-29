@@ -1994,6 +1994,46 @@ images are After-only and cannot establish an application-wide Before comparison
 The root check remains blocked by the existing ACP prerequisite, outside this UI
 migration.
 
+The private-focus and field-label continuation removes eighteen utilities in
+five product sources. Two resize declarations are redundant across the actual
+CombinedMentionTextarea branches; the fallback has its own resize API and the
+mention input already owns the same rule. This is a rendering-call-graph claim,
+not a promise that an exported class helper styles an arbitrary bare textarea.
+The focus hint observes every original `.group` ancestor, including outside the
+composer. Full compilation doubled the conditional StyleX class, so the final
+`:where(.group:focus-within *)` keeps the original total specificity of two.
+Moving layers still changes a synthetic same-element `opacity-100` injection;
+that negative remains explicit. The private hint has no caller class/style slot,
+and no additional specificity conceals that boundary.
+
+DiffViewer's default header preserves its public caller and conditional dark
+border contract, while its native custom Chevron keeps the original non-square
+shrink behavior. Six fixed-text Field.Label sites write existing label tokens;
+Login retains both the original size and leading expression, while mobile labels
+change only size. Their associated inputs are siblings, and there are no token
+readers inside the labels. Weight writers and other compatibility classes stay.
+
+`leaves79-81-acceptance.html` retains **296 formal pairs / 292 byte-exact /
+14,056 identical full standard records**. Four originals remain OPEN (1,075 raw /
+zero threshold pixels). A supplementary DiffViewer bottom-corner pair separately
+remains OPEN (22 raw / zero threshold); matching bounded controls do not establish
+the original raster causes. The initial missing-hint fixture, rejected selector
+source without invented After images, actual layer negatives and all earlier
+OPENs remain inspectable. Owning suites pass twenty, twenty-five and nineteen
+tests respectively, with passing types and zero lint errors; the earlier complete
+regression retains its exact through78 boundary.
+
+Field-label native verification explicitly focuses an input first. An observed
+stage `scrollLeft=804` put the original rest labels outside the viewport; the
+real input focus restored it to zero without assigning scroll positions or
+changing product styles. Eighteen strictly painted focused pairs agree; six
+inline-token negative pairs differ. Original offscreen and changing-geometry
+captures remain rejected. Both final native processes recorded all twenty-four
+rows but stalled after the last checkpoint with no Chrome child; their own Node
+processes were terminated. Original `complete:false` records remain, and the last
+label-click/cleanup outcome is UNKNOWN. This establishes the completed screenshot
+rows, not normal closure or the unobserved final behavior.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -2019,6 +2059,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 71, with partial visual acceptance    | v2             |       1,554 |   165 |        718 |
 | Exact source through 73, with partial visual acceptance    | v2             |       1,542 |   165 |        718 |
 | Exact source through 78, with partial visual acceptance    | v2             |       1,507 |   163 |        718 |
+| Exact source through 81, with partial visual acceptance    | v2             |       1,489 |   163 |        724 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2038,11 +2079,13 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 78 v2 split is components: 1,063 occurrences/147 files/625
-unresolved, legacy UI: 439/14/93 and routes: 5/2/0. These totals cover only those
+The published through 81 v2 split is components: 1,054 occurrences/147 files/631
+unresolved, legacy UI: 430/14/93 and routes: 5/2/0. These totals cover only those
 three source roots. All 789 three-root files are recorded with byte hashes.
-The through 78 snapshot updates sixteen frozen through 73 sources and records the
-shared UI Button owner separately, outside these roots; it excludes later work.
+The through 81 snapshot updates five frozen through 78 sources and excludes
+batch82 onward. The shared UI Button owner stays separately frozen through78,
+outside these roots. Six new unresolved expressions are the exact Field.Label
+StyleX class templates, not six new unknown Tailwind utilities.
 The through 67 transition below explains its
 unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub

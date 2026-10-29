@@ -1,0 +1,159 @@
+{
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "ids": [
+    "components-ownedmobileworkspacesheetsmigration--create",
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text"
+  ],
+  "ready": {
+    "components-ownedmobileworkspacesheetsmigration--create": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"mobile-create-workspace-name\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"mobile-create-workspace-slug\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"mobile-delete-workspace-confirm\"]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedmobileworkspacesheetsmigration--create": [
+      {
+        "name": "name-entered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-name",
+            "value": "Synthetic Team"
+          }
+        ]
+      },
+      {
+        "name": "invalid-slug",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-slug",
+            "value": "a"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Create"
+          }
+        ]
+      },
+      {
+        "name": "reset-suggestion",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Use suggestion"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"drawer-content\"]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "mismatch",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic WorkspacE"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "matching",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic collaborative development workspace \u2014 international team"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete Permanently"
+          },
+          {
+            "action": "disabled",
+            "selector": "#mobile-delete-workspace-confirm"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "button:has([data-slot=\"spinner\"])"
+          }
+        ]
+      }
+    ]
+  }
+}

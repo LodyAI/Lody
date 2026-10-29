@@ -1417,6 +1417,33 @@ utilities 层排序合同，较早的 StyleX 声明不能保留原胜负。其�
 620 文件／6,207 测试、UI 25／307、真实 OSS Electron 构建及四页冒烟；应用图仅为 After，
 不能证明全应用 Before 等价。根检查仍受既有 ACP 前置失败阻塞，位于 UI 迁移范围之外。
 
+私有焦点与标签续迁在五份产品源码中移除十八处 utility。两处 resize 声明在实际
+CombinedMentionTextarea 两条路径中均冗余：fallback 自带 resize API，mention 输入也已
+拥有同一规则。这是实际渲染调用图的结论，不承诺导出的 class helper 能为任意裸 textarea
+提供该行为。焦点提示继续观察原有所有 `.group` 祖先，包括 composer 外层。完整编译对
+条件 StyleX class 加倍，最终 `:where(.group:focus-within *)` 保留原总 specificity 二。
+迁移样式层仍会改变在同元素人工注入 `opacity-100` 的胜负，该负控明确保留。私有提示
+没有公开 caller class/style 槽，也未用额外 specificity 掩盖层边界。
+
+DiffViewer 默认 Header 保留公开调用方与条件 dark 边框合同，自定义原生 Chevron 保留
+原非正方形收缩行为。六个固定文本 Field.Label 写既有标签 Token：Login 同时保留原字号
+和 leading 表达式，移动标签仅改字号。关联输入为兄弟节点，标签内没有其他 Token 读取者；
+字重 writer 及其余兼容类继续保留。
+
+`leaves79-81-acceptance.html` 保留 **296 对正式图／292 对逐字节一致／14,056 条完整标准
+记录相同**。四对原图仍 OPEN（1,075 原始／零阈值像素）；另有 DiffViewer 底角补充对
+仍 OPEN（22 原始／零阈值像素）。有界匹配控制不能证明原始栅格原因。最初缺少 hint 的
+夹具、没有伪造 After 图的被拒 selector 源码、真实层负控及所有更早 OPEN 均可查。
+各归属套件分别通过二十、二十五、十九个测试，类型通过且 lint 零错误；更早全量回归
+继续保留准确的截至 78 边界。
+
+标签 native 验证明确先聚焦真实输入。观测到原 rest 流程的 stage `scrollLeft=804` 将标签
+移出视口，真实输入 focus 使其归零，没有赋值滚动位置或改产品样式。十八对严格可见的
+focused 图相同，六对 inline Token 负控不同；原视口外及几何变化采集仍拒绝。两个最终
+native 进程记录二十四行后，在末 checkpoint 后停滞且已无 Chrome 子进程，已仅终止
+它们自己的 Node。原 `complete:false` 记录保留，末 label-click／cleanup 结果 UNKNOWN；
+完成的截图行不代表正常关闭或未观察到的末行为通过。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1441,6 +1468,7 @@ utilities 层排序合同，较早的 StyleX 声明不能保留原胜负。其�
 | 精确截至 71 的源码，视觉部分验收 | v2       |    1,554 |  165 |    718 |
 | 精确截至 73 的源码，视觉部分验收 | v2       |    1,542 |  165 |    718 |
 | 精确截至 78 的源码，视觉部分验收 | v2       |    1,507 |  163 |    718 |
+| 精确截至 81 的源码，视觉部分验收 | v2       |    1,489 |  163 |    724 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1453,10 +1481,12 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 78 的 v2 分项为 components 1,063 处／147 文件／625 未解析，旧 UI 439／14／93，
+已发布截至 81 的 v2 分项为 components 1,054 处／147 文件／631 未解析，旧 UI 430／14／93，
 routes 五处／两文件／零；总数仅覆盖这三个源码根。三根全部 789 份文件逐一记录字节哈希。
-截至 78 快照在冻结截至 73 上更新十六份源码，共享 UI Button 归属层位于三根之外并单独记录；
-不含后续工作。此前截至 67 时，五个 Usage 模板表达式和一个 Archive
+截至 81 快照在冻结截至 78 上更新五份源码，不含第 82 批起的工作；共享 UI Button 归属层
+位于三根之外，单独保留截至 78 的冻结哈希。新增六个未解析表达式均为明确的 Field.Label
+StyleX class 模板，不代表六个新增未知 Tailwind utility。
+此前截至 67 时，五个 Usage 模板表达式和一个 Archive
 类查找消失，新增两个 FileError／Bub
 StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一次 helper 审查在 lib／hooks 两个文件中发现另外九处，位于三根范围之外；
 不混入同边界总数，也不称为新增产品

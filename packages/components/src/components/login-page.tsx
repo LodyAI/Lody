@@ -28,6 +28,7 @@ import {
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
@@ -1554,7 +1555,10 @@ export function LoginPage({
         <div {...stylex.props(styles.fields)}>
           <LoginExpandingRow open={isSignUp} reducedMotion={!!prefersReducedMotion}>
             <div {...stylex.props(styles.nameField)}>
-              <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
+              <UiField.Label
+                htmlFor="email-auth-name"
+                className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+              >
                 {t('login.nameLabel', 'Name')}
               </UiField.Label>
               <Input
@@ -1574,7 +1578,10 @@ export function LoginPage({
           </LoginExpandingRow>
 
           <div {...stylex.props(styles.emailField)}>
-            <UiField.Label htmlFor="email-auth-email" className="text-xs font-medium">
+            <UiField.Label
+              htmlFor="email-auth-email"
+              className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+            >
               {t('login.emailLabel', 'Email address')}
             </UiField.Label>
             <Input
@@ -1598,7 +1605,10 @@ export function LoginPage({
           <div {...stylex.props(styles.passwordField)}>
             <div {...stylex.props(styles.passwordGrid)}>
               <div {...stylex.props(styles.passwordHead)}>
-                <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
+                <UiField.Label
+                  htmlFor="email-auth-password"
+                  className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+                >
                   {t('login.passwordLabel', 'Password')}
                 </UiField.Label>
               </div>
@@ -2007,6 +2017,10 @@ const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
 const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
 
 const styles = stylex.create({
+  authFieldLabel: {
+    [field.labelSize]: 'var(--text-xs)',
+    [field.labelLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+  },
   providerIcon: {
     display: 'flex',
     height: '18px',

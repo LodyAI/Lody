@@ -66,6 +66,8 @@ import {
 const styles = stylex.create({
   fullWidth: { width: '100%' },
   toggleGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[200],
     transitionTimingFunction:
@@ -96,6 +98,22 @@ const styles = stylex.create({
     overflow: 'hidden',
     borderRadius: themeRadius.xl,
     fontSize: '0.8rem',
+  },
+  defaultHeader: {
+    insetInline: 'calc(var(--spacing) * 0)',
+    borderRadius: 0,
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingLeft: 'calc(var(--spacing) * 1)',
+    paddingRight: 'calc(var(--spacing) * 4)',
+  },
+  defaultHeaderOpen: {
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+    },
   },
   customContent: {
     overflow: 'hidden',
@@ -494,7 +512,7 @@ function CollapseToggle({ className }: { className?: string }) {
         <ChevronDown
           className={cn(
             stylex.props(styles.toggleGlyph).className,
-            'h-4 w-4 [[data-state=closed]_&]:-rotate-90'
+            '[[data-state=closed]_&]:-rotate-90'
           )}
         />
       </Button>
@@ -1351,10 +1369,11 @@ function DiffViewerImpl({
           sticky={false}
           position="relative"
           className={cn(
-            'inset-x-0 h-8 rounded-none bg-background pl-1 pr-4',
+            'h-8',
+            stylex.props(styles.defaultHeader, isOpen && styles.defaultHeaderOpen).className,
             // Separator only when open — collapsed cards must not stack border-b
             // on the outer bottom edge (dirty corner AA).
-            isOpen && 'border-b border-foreground/[0.08] dark:border-border'
+            isOpen && 'dark:border-border'
           )}
         >
           <FileIcon filePath={path} className={stylex.props(styles.fileIcon).className} />

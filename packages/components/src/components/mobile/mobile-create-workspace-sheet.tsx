@@ -9,6 +9,7 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } fr
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { withClassName } from '@/lib/stylex';
@@ -32,6 +33,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  fieldLabel: { [field.labelSize]: '0.78rem' },
   /** The sheet's description, under the header. */
   description: {
     whiteSpace: 'pre-line',
@@ -217,7 +219,7 @@ export function MobileCreateWorkspaceSheet({
                 <div className="space-y-1.5">
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
-                    className="text-[0.78rem] font-medium"
+                    className={`font-medium ${stylex.props(styles.fieldLabel).className}`}
                   >
                     {t('organization.workspaceName', 'Workspace name')}
                   </UiField.Label>
@@ -236,7 +238,7 @@ export function MobileCreateWorkspaceSheet({
                   <div {...stylex.props(styles.slugHead)}>
                     <UiField.Label
                       htmlFor="mobile-create-workspace-slug"
-                      className="text-[0.78rem] font-medium"
+                      className={`font-medium ${stylex.props(styles.fieldLabel).className}`}
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
                     </UiField.Label>

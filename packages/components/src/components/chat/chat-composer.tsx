@@ -411,7 +411,8 @@ const styles = stylex.create({
     zIndex: 10,
     display: 'flex',
     alignItems: 'center',
-    opacity: 0.5,
+    // Match every original .group ancestor, including one outside this composer.
+    opacity: { default: 0.5, ':where(.group:focus-within *)': 0 },
     transitionProperty: 'opacity',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -720,7 +721,7 @@ export function getChatComposerTextareaClassName({
   const isLanding = variant === 'landing';
 
   return cn(
-    'input-scrollbar resize-none transition-shadow',
+    'input-scrollbar transition-shadow',
     stylex.props(typography.prompt).className,
     isLanding
       ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
@@ -1134,7 +1135,7 @@ export function ChatComposer({
     : undefined;
 
   const dialogTextareaClassName = cn(
-    'input-scrollbar min-h-[120px] resize-none px-4 py-3 transition-shadow sm:min-h-[120px]',
+    'input-scrollbar min-h-[120px] px-4 py-3 transition-shadow sm:min-h-[120px]',
     stylex.props(typography.prompt).className,
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
@@ -1566,14 +1567,7 @@ export function ChatComposer({
 
               {showFocusHint ? (
                 <div
-                  className={[
-                    stylex.props(styles.focusHint).className,
-                    // The hint fades when the box takes focus: the group variant
-                    // needs an ancestor, which StyleX cannot select.
-                    'group-focus-within:opacity-0',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
+                  {...stylex.props(styles.focusHint)}
                   title={t('chat.composer.focusHint', {
                     defaultValue: 'Press {{shortcut}} to focus',
                     shortcut: formatKeyBinding(focusHintBinding!),

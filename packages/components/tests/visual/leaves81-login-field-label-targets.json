@@ -1,0 +1,193 @@
+{
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "at-login-breakpoint",
+      "width": 860,
+      "height": 900
+    },
+    {
+      "name": "above-login-breakpoint",
+      "width": 861,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "ids": [
+    "components-loginpage--email-create-account-view",
+    "components-ownedloginmigration--email-pending",
+    "components-ownedloginmigration--scoped-email-pending"
+  ],
+  "ready": {
+    "components-loginpage--email-create-account-view": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"email-auth-name\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"email-auth-email\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "label[for=\"email-auth-password\"]"
+      }
+    ],
+    "components-ownedloginmigration--email-pending": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      }
+    ]
+  },
+  "states": {
+    "components-loginpage--email-create-account-view": [
+      {
+        "name": "name-label-focus",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "label[for=\"email-auth-name\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.id === \"email-auth-name\""
+          },
+          {
+            "action": "visible",
+            "selector": "#login-title"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+          }
+        ]
+      }
+    ],
+    "components-ownedloginmigration--email-pending": [
+      {
+        "name": "email-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#email-auth-email",
+            "value": "fixture@example.com"
+          },
+          {
+            "action": "fill",
+            "selector": "input[type=\"password\"]",
+            "value": "synthetic-password"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+          }
+        ]
+      },
+      {
+        "name": "email-submitting",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[type=\"submit\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[type=\"submit\"] [data-slot=\"spinner\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "button[type=\"submit\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-login-intent]:text-is(\"Synthetic email requested\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+          }
+        ]
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "name": "email-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#email-auth-email",
+            "value": "fixture@example.com"
+          },
+          {
+            "action": "fill",
+            "selector": "input[type=\"password\"]",
+            "value": "synthetic-password"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+          }
+        ]
+      },
+      {
+        "name": "email-submitting",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[type=\"submit\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[type=\"submit\"] [data-slot=\"spinner\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "button[type=\"submit\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-login-intent]:text-is(\"Synthetic email requested\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+          }
+        ]
+      }
+    ]
+  }
+}

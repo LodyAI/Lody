@@ -1,0 +1,102 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposerinput--keyboard-hint",
+    "migration-ownedcomposerinput--outer-group-keyboard-hint"
+  ],
+  "ready": {
+    "migration-ownedcomposerinput--keyboard-hint": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!t&&t.value===''&&Boolean(h)===(innerWidth>=768&&matchMedia('(pointer:fine)').matches)&&(!h||getComputedStyle(h).opacity==='0.5')&&!!r.querySelector('[data-mention-highlighter]')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedcomposerinput--outer-group-keyboard-hint": [
+      {
+        "action": "visible",
+        "selector": "#migration-composer-input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return !!t&&t.value===''&&Boolean(h)===(innerWidth>=768&&matchMedia('(pointer:fine)').matches)&&(!h||getComputedStyle(h).opacity==='0.5')&&!!r.querySelector('[data-mention-highlighter]')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcomposerinput--keyboard-hint": [
+      {
+        "name": "local-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "outer-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0.5')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposerinput--outer-group-keyboard-hint": [
+      {
+        "name": "local-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#migration-composer-input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement===t&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "outer-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-outer-focus]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-composer-input-fixture]'),t=r?.querySelector('textarea'),h=r?.querySelector('[data-lody-composer-box] [aria-hidden=true][title]');return document.activeElement?.hasAttribute('data-outer-focus')&&(!h||getComputedStyle(h).opacity==='0')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

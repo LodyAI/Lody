@@ -249,6 +249,14 @@ belong to the migrated surface. Do not replace app-wide `.dark` handling with
 `prefers-color-scheme`: users can select a theme independently of the OS, and
 nested light/dark scopes and portals must continue to work.
 
+For an existing contract observing any external `.group` ancestor, preserve that
+raw ancestor condition rather than narrowing it to a new owned marker. Inspect
+the full compiled selector: the compiler may duplicate the StyleX class and
+increase specificity. A zero-specificity `:where(...)` condition can preserve the
+original total specificity, but it does not restore the old utilities-layer
+priority. Keep actual public caller behavior and synthetic same-element negative
+controls separate; an unavailable private class slot is not a general override API.
+
 The default marker is shared across components. Qualify an ancestor selector
 with an owned data attribute, as the project row and disabled context action do,
 so an unrelated outer marker cannot reveal a nested control. Verify outer hover

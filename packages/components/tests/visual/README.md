@@ -73,7 +73,9 @@ original screenshot, and a derived diff mask is labelled separately.
 
 Each capture waits for Storybook completion, visible content, fonts, visible
 image loading/decoding, finite animations and stable geometry throughout the body,
-including portal positioners that resize after their trigger has settled. Stable
+including portal positioners that resize after their trigger has settled. A target
+label must also intersect its clipping ancestors and pass a real hit/paint check;
+a visible input alone does not establish that its label is on screen. Stable
 geometry and identical pixels alone do not establish the intended state: constrain
 sibling copy-feedback icons when a timer can reset them, and record actual popup
 and ancestor opacity/visibility before accepting dialog captures. Keep byte-equal
@@ -85,7 +87,9 @@ permits deliberately blank or textless skeleton roots and portal-only stories;
 skeleton profiles require a visible painted placeholder, and portal-only profiles
 require a visible actual portalled control through `ready`. It never exempts that
 required content. Failed image loads or missing content
-fail the capture. Portalled content is part of the layout snapshot. A fixed
+fail the capture. Saved, validated frame checkpoints from a stalled runner remain
+frame evidence only: final behavior assertions and normal process/browser closure
+require their own completion signals. Portalled content is part of the layout snapshot. A fixed
 Date value stabilizes relative-time labels without stopping the browser's timers.
 Every story gets a fresh page in its browser context. Reusing worker pages would
 make native Back/Forward availability depend on which earlier story that worker
@@ -100,7 +104,9 @@ For native browser controls, a decoded media source and `readyState` do not esta
 that the browser's internal controls painted the same state. Preserve original
 frames and inspect the user-agent shadow controls when ordinary DOM records agree
 but duration labels or control positions differ. A later settled capture cannot
-retroactively prove the original state or close its unexplained pixels.
+retroactively prove the original state or close its unexplained pixels. A state
+key does not establish focus: ordered fill steps may finish on a different control.
+Preserve inherited capture keys and annotate the actual focused state separately.
 
 Check migrated custom-property writers in the complete built CSS, including their
 layer ancestors. A writer-only compiler probe can omit priority-zero root/theme
@@ -627,6 +633,7 @@ artifacts out of commits.
 | `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                      | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                                             |
 | `artifacts/visual/leaves72-73-acceptance.html` | 12 utilities in six files: exact local title typography and closed command backdrop/layout                                   | 111/112 PNG pairs exact; 9,748 full standard records equal                                    | Original429raw/0thresholdOPEN retained; rejected fallback/descendant-token candidates, known negatives and legacy-label correction explicit                                 |
 | `artifacts/visual/leaves74-78-acceptance.html` | 35 utilities in 16 sources plus the Button typography API owner: Tooltip values, edge handles and DiffNotice header          | 305/310 PNG pairs exact; 30,303 full standard records equal                                   | Five formal OPENs/13 raw pixels, two supplemental sidebar OPENs/882 raw pixels, rejected CSS-wide semantics, original failures and four Electron After-only images retained |
+| `artifacts/visual/leaves79-81-acceptance.html` | 18 utilities in five sources: composer resize/hint, private DiffViewer header and fixed Field labels                         | 292/296 PNG pairs exact; 14,056 full standard records equal                                   | Four formal OPENs/1,075 raw pixels, one native OPEN/22 raw pixels, same-element negatives, unpainted calibration and unknown final native process closure retained          |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -636,12 +643,13 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 78 inventory is 1,507 occurrences/163 files/718 unresolved
+The normalized through 81 inventory is 1,489 occurrences/163 files/724 unresolved
 expressions across components, legacy UI and routes only. All 789 three-root files
-are frozen from through 73 plus sixteen verified source updates; the shared UI
-Button owner is separately hash-identified outside these three roots. Later
-candidates are excluded. The prior through 73 inventory remains frozen at
-1,542 occurrences/165 files/718 unresolved expressions.
+are frozen from through 78 plus five verified product updates; the shared UI
+Button owner is separately hash-identified outside these roots. The six additional
+unresolved expressions are known StyleX template concatenations in batch 81, not
+six new Tailwind rules. Batch 82+ candidates are excluded. Through 78 remains frozen
+at 1,507/163/718, and through 73 at 1,542/165/718.
 Earlier inventories remain frozen. A separate lib/hooks audit identifies
 nine more occurrences in two files outside those roots; do not merge scopes or call
 that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and
@@ -685,6 +693,21 @@ retain separate evidence and unresolved causes. The through 78 source-stable
 components/UI suites, desktop rebuild and four actual Electron After-only images
 are recorded in `artifacts/visual/leaves78-stable-full-regression-verification.json`;
 they do not close historical pixel differences or establish a full-app Before.
+
+The 79–81 report separates 296 formal pairs from 91 supplemental/negative/calibration
+pairs and nine actual diagnostic images. Composer ancestor conditions preserve
+both matching and complete-build specificity; the private same-element opacity
+utility negative still exposes a layer boundary. DiffViewer keeps the original
+shrinking glyph and dark border winner. Field labels use existing atoms only at
+fixed plain-text sites, with six real inline-token negatives retained. Original
+offscreen native label frames are calibration; the focused recovery states have
+explicit new origins and paint/hit checks. Batch 81 saves all 24 per-side focused
+frame checkpoints, but the final label-click assertion and process closure remain
+unknown after a verified self-owned process stop. A completed image matrix does
+not prove that complete behavioral run. The report's original pixel differences
+remain open despite matching bounded controls. Batch 80's old `UI84` aggregate
+key is corrected by a separate count proof: its manifests contain 85 source entries,
+and the original source locks are unchanged.
 
 ## Real desktop smoke
 
