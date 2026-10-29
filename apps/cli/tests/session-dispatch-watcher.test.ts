@@ -3559,6 +3559,8 @@ describe('SessionDispatchWatcher', () => {
         (_, index) => `metadata-burst-${index}` as SessionId
       );
       const releaseHistory = createDeferred();
+      const slowHistory = createDeferred();
+      const lateStarted = createDeferred();
       const firstBatchStarted = createDeferred();
       const allHistoryStarted = createDeferred();
       let metadataCallback: ((event: { kind: 'doc-metadata'; docId: string }) => void) | undefined;
@@ -3586,6 +3588,7 @@ describe('SessionDispatchWatcher', () => {
       const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
+        if (sessionId === 'late') lateStarted.resolve();
         if (!openedSessionIds.has(sessionId)) {
           openedSessionIds.add(sessionId);
           historyReadCount += 1;
@@ -3593,7 +3596,7 @@ describe('SessionDispatchWatcher', () => {
           maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
           if (historyReadCount === 4) firstBatchStarted.resolve();
           if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
-          await releaseHistory.promise;
+          await (sessionId === sessionIds[4] ? slowHistory.promise : releaseHistory.promise);
           activeHistoryReads -= 1;
         }
         return withSessionData(
@@ -3657,6 +3660,12 @@ describe('SessionDispatchWatcher', () => {
       await flushMicrotasks(20);
       expect(historyReadCount).toBe(sessionIds.length);
       expect(maxActiveHistoryReads).toBe(4);
+      const lateId = 'late' as SessionId;
+      metaBySession.set(lateId, { ...metaBySession.get(sessionIds[0]!)!, id: lateId });
+      metadataCallback?.({ kind: 'doc-metadata', docId: `session-${lateId}` });
+      await lateStarted.promise;
+      slowHistory.resolve();
+      await flushMicrotasks(20);
       watcher.stop();
     } finally {
       vi.useRealTimers();

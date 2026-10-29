@@ -50,6 +50,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
+  Catalog scans skip unreadable profiles with one warning per file; selected-account validation stays strict.
 - `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
   Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
   npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.

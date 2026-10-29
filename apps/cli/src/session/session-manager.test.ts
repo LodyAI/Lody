@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   encodeProjectPreparationProgress,
@@ -388,6 +388,24 @@ describe('SessionManager Codex provider binding', () => {
         configId: provider.id,
         profile: provider.codexAuth,
       });
+      const profileFile = path.join(root, readyProfile.profile.profileId, 'profile.json');
+      const original = readFileSync(profileFile, 'utf8');
+      writeFileSync(profileFile, '{broken');
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile({ ...restoredConfig(), codexAuth: undefined })).rejects.toThrow(
+        'This Codex provider account reference is missing'
+      );
+      await expect(
+        freezeProfile({
+          ...restoredConfig(),
+          agentConfigId: 'unrelated' as AgentConfigId,
+          codexAuth: undefined,
+        })
+      ).resolves.toBeUndefined();
+      getProvider.mockResolvedValue(provider);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow('metadata could not be read');
+      writeFileSync(profileFile, original);
+      await expect(freezeProfile(restoredConfig())).resolves.toBeUndefined();
     } finally {
       storeSpy.mockRestore();
       rmSync(root, { recursive: true, force: true });

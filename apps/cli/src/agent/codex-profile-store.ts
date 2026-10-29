@@ -1,4 +1,5 @@
 import { toShared } from '@/platform/process-options';
+import { getLogger } from '@/utils/logger';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -58,6 +59,7 @@ const identity = (owner: CodexProfileOwner) =>
 
 export class CodexProfileStore {
   private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly warnedProfiles = new Set<string>();
 
   constructor(
     private readonly root = path.join(getLodyDataDir(), 'codex-profiles'),
@@ -320,6 +322,16 @@ export class CodexProfileStore {
     });
   }
 
+  async hasBinding(owner: CodexProfileOwner): Promise<boolean> {
+    try {
+      await lstat(path.join(this.root, `binding-${identity(owner)}.json`));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
   async list(workspaceId: string): Promise<ResolvedCodexProfile[]> {
     const entries = await readdir(this.root, { withFileTypes: true }).catch(
       (error: NodeJS.ErrnoException) => {
@@ -330,14 +342,21 @@ export class CodexProfileStore {
     const profiles: ResolvedCodexProfile[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !z.uuid().safeParse(entry.name).success) continue;
-      const directory = await this.directory(entry.name);
-      const record = await this.read(directory);
-      if (record?.workspaceId === workspaceId)
-        profiles.push({
-          ...record,
-          home: path.join(directory, 'home'),
-          authStore: resolveAuthStore(record),
-        });
+      try {
+        const directory = await this.directory(entry.name);
+        const record = await this.read(directory);
+        if (record?.workspaceId === workspaceId)
+          profiles.push({
+            ...record,
+            home: path.join(directory, 'home'),
+            authStore: resolveAuthStore(record),
+          });
+      } catch {
+        if (!this.warnedProfiles.has(entry.name)) {
+          this.warnedProfiles.add(entry.name);
+          getLogger().warn(`Skipping unreadable Codex profile ${entry.name}`);
+        }
+      }
     }
     return profiles;
   }

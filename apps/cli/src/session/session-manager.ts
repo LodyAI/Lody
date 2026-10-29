@@ -1054,9 +1054,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!config.codexAuth) {
       if (
         config.agentConfigId &&
-        (await store.list(this.workspaceId)).some(
-          (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
-        )
+        ((await store.hasBinding({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          configId: config.agentConfigId,
+        })) ||
+          (await store.list(this.workspaceId)).some(
+            (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
+          ))
       ) {
         throw new Error(
           'This Codex provider account reference is missing; restore its configuration'

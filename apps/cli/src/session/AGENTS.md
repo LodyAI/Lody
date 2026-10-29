@@ -21,6 +21,7 @@
 
 ## Dispatch
 
+- Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.

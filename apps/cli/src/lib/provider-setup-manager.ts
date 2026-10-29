@@ -154,7 +154,11 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
-      await this.reconcileCodexProfiles();
+      try {
+        await this.reconcileCodexProfiles();
+      } catch {
+        this.logger.warn('[provider-setup] Codex profile scan failed; continuing setup queue');
+      }
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);

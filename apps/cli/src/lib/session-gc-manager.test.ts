@@ -4,6 +4,7 @@ import {
   SessionGCManager,
   SessionGCConfig,
   type SessionNativeWork,
+  type SessionGCDeps,
   loadGCConfig,
   evaluateMemoryPressure,
 } from './session-gc-manager';
@@ -72,7 +73,8 @@ describe('SessionGCManager', () => {
   // host-dependent default would make these pass or fail based on the developer's laptop.
   const createManager = (
     config?: Partial<SessionGCConfig>,
-    platform: NodeJS.Platform = 'linux'
+    platform: NodeJS.Platform = 'linux',
+    overrides: Partial<SessionGCDeps> = {}
   ) => {
     const defaultConfig: SessionGCConfig = {
       idleTimeoutMs: 20 * 60 * 1000, // 20 minutes
@@ -106,10 +108,73 @@ describe('SessionGCManager', () => {
         sleep: async (ms: number) => {
           sleepCalls.push(ms);
         },
+        ...overrides,
       },
       platform
     );
   };
+
+  it.each(['idle', 'memory'] as const)(
+    'isolates a failed eligibility read and retries it: %s',
+    async (mode) => {
+      const broken = 'broken' as SessionId;
+      const healthy = 'healthy' as SessionId;
+      sessionActivities.set(broken, Date.now() - 30 * 60_000);
+      sessionActivities.set(healthy, Date.now() - 25 * 60_000);
+      mockedGetMemoryPressureSnapshot.mockResolvedValue({ availableMemoryBytes: 512 * 1024 ** 2 });
+      let failed = true;
+      const cleaned = new Set<SessionId>();
+      const manager = createManager(undefined, 'linux', {
+        hasPendingUserWork: async (id) => {
+          if (id === broken && failed) throw new Error('metadata unavailable');
+          return false;
+        },
+        cleanSession: async (id) => {
+          cleaned.add(id);
+        },
+      });
+      const collect = () => (mode === 'idle' ? manager.sweep() : manager.evictForMemoryPressure());
+      await collect();
+      expect([...cleaned]).toEqual([healthy]);
+      failed = false;
+      await collect();
+      expect(cleaned.has(broken)).toBe(true);
+    }
+  );
+
+  it.each([false, true])(
+    'bounds slow reclamation and uses live pressure, block=%s',
+    async (block) => {
+      const id = 'slow' as SessionId;
+      sessionActivities.set(id, Date.now() - 30 * 60_000);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<boolean>();
+      const cleaned = Promise.withResolvers<void>();
+      let healthy = false;
+      const manager = createManager(undefined, 'linux', {
+        hasPendingUserWork: () => {
+          entered.resolve();
+          return release.promise;
+        },
+        cleanSession: async () => {
+          cleaned.resolve();
+        },
+      });
+      mockedGetMemoryPressureSnapshot.mockImplementation(async () => ({
+        availableMemoryBytes: healthy ? 4 * 1024 ** 3 : 512 * 1024 ** 2,
+      }));
+      const first = manager.evictForMemoryPressure();
+      await entered.promise;
+      healthy = !block;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect((await first).stillUnderPressure).toBe(block);
+      expect((await manager.evictForMemoryPressure()).stillUnderPressure).toBe(block);
+      release.resolve(false);
+      await cleaned.promise;
+      await manager.evictForMemoryPressure();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
 
   describe('loadGCConfig', () => {
     it('returns default config with 20 minute timeout', () => {
