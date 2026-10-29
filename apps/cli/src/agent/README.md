@@ -253,8 +253,9 @@ Lody-maintained runtime source and implements the shared `acp-extension-core` co
 
 Corrupt caches are reported absent with a warning; launch never executes them. Installation
 publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing
-paths untouched, including same-version replacements. Resolution prefers the newest validated
-generation. Best-effort cleanup conservatively retains corrupt originals and generation trees
+paths untouched, including same-version replacements. Status, installation and launch share a
+selector: filter the base and all completed generations by current pins and host compatibility,
+then rank eligible candidates by installedAt and command. Best-effort cleanup conservatively retains corrupt originals and generation trees
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
 progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 

@@ -735,33 +735,49 @@ export class ManagedAgentRuntimeManager {
   private async readInstallation(
     name: ManagedRuntimeName,
     version: string,
-    platformArch: string
+    platformArch: string,
+    acceptsMetadata?: (metadata: ManagedRuntimeInstallMetadata) => boolean
   ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
     const dir = this.targetDir(name, version, platformArch);
     const entries = await readdir(dirname(dir), { withFileTypes: true }).catch(() => []);
-    const generations = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith(`${sanitizeSegment(platformArch)}.gen-`))
-        continue;
+    const directories = [
+      dir,
+      ...entries
+        .filter(
+          (entry) =>
+            entry.isDirectory() && entry.name.startsWith(`${sanitizeSegment(platformArch)}.gen-`)
+        )
+        .map((entry) => join(dirname(dir), entry.name)),
+    ];
+    const installations = [];
+    let corruption: CorruptRuntimeCacheError | undefined;
+    for (const candidateDir of directories) {
       try {
         const installation = await this.readInstallationDirectory(
           name,
           version,
           platformArch,
-          join(dirname(dir), entry.name)
+          candidateDir
         );
-        if (installation) generations.push(installation);
+        if (installation) installations.push(installation);
       } catch (error) {
         if (!(error instanceof CorruptRuntimeCacheError)) throw error;
-        this.warnCacheMaintenanceFailure(name, 'cache generation', error);
+        corruption ??= error;
+        if (candidateDir !== dir) this.warnCacheMaintenanceFailure(name, 'cache generation', error);
       }
     }
-    generations.sort(
+    if (installations.length === 0 && corruption) throw corruption;
+    const eligible = installations.filter(
+      (installation) =>
+        this.isHostCompatible(installation) &&
+        (!acceptsMetadata || acceptsMetadata(installation.metadata))
+    );
+    eligible.sort(
       (a, b) =>
         b.metadata.installedAt.localeCompare(a.metadata.installedAt) ||
         b.command.localeCompare(a.command)
     );
-    return generations[0] ?? this.readInstallationDirectory(name, version, platformArch, dir);
+    return eligible[0] ?? null;
   }
 
   private async readInstallationDirectory(
@@ -855,20 +871,17 @@ export class ManagedAgentRuntimeManager {
     platformArch: string,
     archive: RuntimeArchive
   ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
-    const installation = await this.readInstallation(name, definition.version, platformArch);
-    if (!installation) return null;
-    if (
-      installation.metadata.command !== archive.cmd ||
-      installation.metadata.archiveSha256 !== archive.sha256 ||
-      installation.metadata.archiveSize !== archive.size ||
-      installation.metadata.minNodeVersion !== definition.minNodeVersion
-    ) {
-      // A repacked artifact can keep its source version but change its integrity
-      // pins. It is not the current installation: never launch it, and let the
-      // normal verified install path replace it instead of blocking CLI startup.
-      return null;
-    }
-    return installation;
+    // Same-version repacks can coexist: filter every candidate before ranking.
+    return this.readInstallation(
+      name,
+      definition.version,
+      platformArch,
+      (metadata) =>
+        metadata.command === archive.cmd &&
+        metadata.archiveSha256 === archive.sha256 &&
+        metadata.archiveSize === archive.size &&
+        metadata.minNodeVersion === definition.minNodeVersion
+    );
   }
 
   private async findReusableInstallation(

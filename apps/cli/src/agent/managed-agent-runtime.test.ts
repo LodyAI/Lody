@@ -67,10 +67,13 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function createTinyRuntimeArchive(rootDir: string): Promise<Uint8Array> {
+async function createTinyRuntimeArchive(
+  rootDir: string,
+  commandText = 'tiny-codex'
+): Promise<Uint8Array> {
   const srcDir = await mkdtemp(join(rootDir, 'runtime-src-'));
   await mkdir(join(srcDir, 'bin'), { recursive: true });
-  await writeFile(join(srcDir, 'bin', 'codex'), 'tiny-codex');
+  await writeFile(join(srcDir, 'bin', 'codex'), commandText);
   const tarPath = join(srcDir, 'runtime.tar');
   await tar.c({ file: tarPath, cwd: srcDir }, ['bin']);
   const compressed = await compressStream(
@@ -347,6 +350,71 @@ describe('ManagedAgentRuntimeManager', () => {
       expect(existsSync(retained)).toBe(true);
     } finally {
       prune.mockRestore();
+    }
+  });
+
+  it('selects matching pins before ranking base and same-version generations without redownloading', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('artifact-a.tar.zst');
+    const pinA = definition.platforms['linux-x64'];
+    const bytesB = await createTinyRuntimeArchive(rootDir, 'repacked-codex-b');
+    const pinB = {
+      ...pinA,
+      fileName: 'artifact-b.tar.zst',
+      sha256: await sha256(bytesB),
+      size: bytesB.byteLength,
+    };
+    const options = {
+      rootDir,
+      platform: 'linux' as const,
+      arch: 'x64',
+      runtimeBaseUrl: 'https://runtime.example.test',
+    };
+    let offline = false;
+    let downloads = 0;
+    const fetch =
+      (bytes: Uint8Array): FetchImpl =>
+      async () => {
+        downloads += 1;
+        if (offline) throw new Error('offline: cached artifacts must be reused');
+        return new Response(bytes);
+      };
+    const managerA = new ManagedAgentRuntimeManager({ ...options, fetchImpl: fetch(archiveBytes) });
+    const managerB = new ManagedAgentRuntimeManager({ ...options, fetchImpl: fetch(bytesB) });
+    try {
+      const installedA = await managerA.ensureCurrentRuntime('codex');
+      definition.platforms['linux-x64'] = pinB;
+      const installedB = await managerB.ensureCurrentRuntime('codex');
+      expect(installedB.command).not.toBe(installedA.command);
+      const versionDir = dirname(dirname(dirname(installedA.command)));
+      const directories = (await readdir(versionDir)).sort();
+      offline = true;
+      // Switch the manifest pins between calls to emulate builds A and B in one test process.
+      for (let round = 0; round < 3; round += 1) {
+        for (const build of [
+          { pin: pinA, manager: managerA, command: installedA.command },
+          { pin: pinB, manager: managerB, command: installedB.command },
+        ]) {
+          definition.platforms['linux-x64'] = build.pin;
+          await expect(build.manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+            kind: 'installed',
+            command: build.command,
+          });
+          await expect(build.manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+            command: build.command,
+          });
+          await expect(build.manager.ensureCurrentRuntime('codex')).resolves.toMatchObject({
+            command: build.command,
+          });
+          await build.manager.prepareCache();
+        }
+      }
+      expect(downloads).toBe(2);
+      expect((await readdir(versionDir)).sort()).toEqual(directories);
+      expect(await readFile(installedA.command, 'utf8')).toBe('tiny-codex');
+      expect(await readFile(installedB.command, 'utf8')).toBe('repacked-codex-b');
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
     }
   });
 

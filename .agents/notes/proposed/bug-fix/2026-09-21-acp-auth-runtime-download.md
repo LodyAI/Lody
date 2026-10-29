@@ -68,8 +68,11 @@ Alternatives considered:
 - Corrupt metadata remains unlaunchable; status reports not-installed with a warning.
   Repairs publish a verified sibling `<arch>.gen-<uuid>` and preserve the original
   path and bytes, including on failed downloads. Same-version replacements also use
-  a generation; publication never deletes an existing installation. Resolution picks
-  the newest structurally valid completed generation and still checks current pins.
+  a generation; publication never deletes an existing installation. Status, install
+  and launch share selection across the base and all completed generations: filter
+  current pins and host compatibility first, then rank by installedAt and command.
+  Choosing a generation before checking pins hides valid same-version artifacts
+  from another build, causing offline failures and repeated downloads.
   Bad older entries are skipped during reuse. Moving a directory before download,
   or even after verification, breaks active readers: the manager owns installs but
   has no process-lifetime leases to prove those readers absent. Independent generations
