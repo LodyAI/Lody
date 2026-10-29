@@ -23,4 +23,4 @@ owner 提供的 0.107.2 事故中，桌面退出时三秒后强杀 CLI，没有�
 
 `apps/cli/src/orchestration/inbox/inbox.test.ts` 用真实 SQLite 覆盖退役、历史阻塞、未知不重放、首份回执与资源身份保留。 `apps/cli/tests/session-execution-service.test.ts` 覆盖终止失败、新 ACP 执行与可见提示，Coordinator 测试覆盖终止关闭。 上述事故数字由 owner 提供，未访问私有数据复现。不声称真实孤儿清理、Windows 主机或桌面安装包验收。
 
-原始 ACP 排空或确认终止后，先写释放回执，再做 Git、diff/usage、Code Collab 和 batch 历史投影。每个统计与展示步骤最多等待 30 秒；`ownedWork` 持有原始任务并观察迟到失败。yielded 链超时也继续归该 owner 管理，不阻断后继。退出时跳过这段可选等待，在消息队列 drain 前并行取消所有活跃执行；CLI 总预算七秒，其中先用最多六秒等待释放回执，桌面宽限十秒，实际退出则立即结束等待。取消历史、ACP 收尾和 idle 语义仍在释放前，因为 reconciliation 和下一轮会读取它们。Session／ACP 依赖链仍未完成，本次不扩大原生迁移。
+读取工作区并写入本轮结果的步骤保留在释放前：diff/usage 持久化（含 edit gap-fill）、dirty/unpushed 探测、分支同步、PR 检测、diff 统计，以及 Code Collab 的文件扫描。这些步骤共享 20 秒预算，大于 Git 观察命令的 15 秒超时。截止或 shutdown 会取消本次采集并跳过后续步骤；读取和结果写入前检查 signal，防止迟到任务把下一轮内容写进旧轮或清掉新状态。已取消的 gap-fill 直接丢弃，不对后来的文件重试。缺少本轮统计或保留旧值是可接受降级；独立复现已证明后移这些读取会串入后继内容并覆盖状态，因此否决该方案。只有 batch 历史投影、完成分析和通知放在释放后，并保留有上限的等待和任务归属。yielded 链仍有 30 秒等待上限并持有原始任务。退出跳过工作区统计，在消息队列 drain 前并行取消所有活跃执行，CLI 总预算七秒，其中最多六秒优先等待释放回执；桌面宽限十秒，实际退出则立即结束等待。取消历史、ACP 收尾和 idle 顺序保持不变。Session／ACP 依赖链仍未完成，本次不扩大原生迁移。

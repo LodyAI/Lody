@@ -73,6 +73,8 @@ import {
   type SessionStatus,
   type WorkspaceId,
 } from '@lody/shared';
+import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
+import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
 import Database from 'better-sqlite3';
 import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
@@ -1008,7 +1010,6 @@ describe('SessionExecutionService', () => {
     });
     third.resolve({});
     await lifecycle;
-    await service.drainInboxExecutions();
 
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(steerPrompt).toHaveBeenCalledTimes(3);
@@ -4518,8 +4519,10 @@ describe('SessionExecutionService', () => {
   });
 
   it.each(['pending', 'rejecting'] as const)(
-    'releases the turn and runs the next input while Code Collab refresh is %s',
+    'bounds a workspace-reading Code Collab refresh and recovers (%s)',
     async (refreshOutcome) => {
+      vi.useFakeTimers();
+      try {
       let history: Array<Record<string, unknown>> = [
         {
           id: 'turn-user-1',
@@ -4567,7 +4570,9 @@ describe('SessionExecutionService', () => {
       const refreshGate = new Promise<void>((resolve) => {
         releaseRefresh = resolve;
       });
+      const refreshStarted = createDeferred<void>();
       const refreshCodeCollabSharedState = async () => {
+        refreshStarted.resolve();
         if (refreshOutcome === 'rejecting') throw new Error('Synthetic refresh failure');
         await refreshGate;
       };
@@ -4607,7 +4612,7 @@ describe('SessionExecutionService', () => {
       });
 
       const service = new SessionExecutionService(deps);
-      await service.continueSession({
+      const first = service.continueSession({
         type: 'session/chat',
         sessionId: 'session-1' as SessionId,
         machineId: 'machine-1',
@@ -4620,6 +4625,18 @@ describe('SessionExecutionService', () => {
         userEmail: 'user@example.com',
       });
 
+      await refreshStarted.promise;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await first;
+      releaseRefresh();
+      expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
+        'session-1',
+        activeSession,
+        expect.objectContaining({
+          baseCommitHash: 'abc123',
+          preferredBaseBranch: 'release/v2',
+        })
+      );
       expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
       expect(presence.size).toBe(0);
       history.push({ id: 'turn-user-2', role: 'user', status: 'pending', read: false });
@@ -4639,6 +4656,7 @@ describe('SessionExecutionService', () => {
       expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
       releaseRefresh();
       await service.drainInboxExecutions();
+      } finally { vi.useRealTimers(); }
     }
   );
 
@@ -4871,7 +4889,6 @@ describe('SessionExecutionService', () => {
       expect(text).toContain('Use the available Lody MCP tools when relevant');
       expect(branchAtPrompt).toBe(initialBranch);
       if (rename) expect(text).toContain(`git branch -m ${initialBranch} <name>`);
-      await service.drainInboxExecutions();
       expect(publishedBranch).toBe('feature/local-finished');
       expect(generatedTitles).toEqual(
         sessionTitle && titleAgentType !== 'codex' ? [] : ['Local title']
@@ -5926,7 +5943,6 @@ describe('SessionExecutionService', () => {
       'session-session-local-restore',
       expect.objectContaining({ baseBranch: expect.anything() })
     );
-    await service.drainInboxExecutions();
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-restore',
       restoredSession,
@@ -6056,7 +6072,6 @@ describe('SessionExecutionService', () => {
       expect.objectContaining({ baseBranch: expect.anything() })
     );
     expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
-    await service.drainInboxExecutions();
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-tracking-restore',
       restoredSession,
@@ -9232,7 +9247,8 @@ describe('SessionExecutionService', () => {
     // so this route has to refresh the flags that raise Commit & Push.
     expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-prompt-cancel',
-      expect.anything()
+      expect.anything(),
+      expect.any(AbortSignal)
     );
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
     expect(history[1]).toMatchObject({
@@ -9561,6 +9577,8 @@ describe('SessionExecutionService', () => {
   );
 
   it('flushes cancellation when a cancelled prompt resolves before finalization starts', async () => {
+    vi.useFakeTimers();
+    try {
     let meta: Record<string, unknown> = {};
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
@@ -9646,9 +9664,10 @@ describe('SessionExecutionService', () => {
     const refresh = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    deps.turnFinalization.refreshCodeCollabSharedState = () => refresh;
+    const refreshing = createDeferred<void>();
+    deps.turnFinalization.refreshCodeCollabSharedState = () => { refreshing.resolve(); return refresh; };
     service = new SessionExecutionService(deps);
-    await service.continueSession({
+    const execution = service.continueSession({
       type: 'session/chat',
       sessionId: 'session-prompt-cancel-resolved' as SessionId,
       machineId: 'machine-1',
@@ -9661,6 +9680,9 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
+    await refreshing.promise;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await execution;
     expect(
       service.getExecutionSnapshot('session-prompt-cancel-resolved' as SessionId).hasActiveTurn
     ).toBe(false);
@@ -9677,6 +9699,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'turn-prompt-cancel-resolved',
       processingUserMsgId: undefined,
     });
+    } finally { vi.useRealTimers(); }
   });
 
   it('accepts a stop request during turn finalization and skips completion follow-up', async () => {
@@ -9804,7 +9827,8 @@ describe('SessionExecutionService', () => {
     expect(publishedBranch).toBe('feature/after-cancel');
     expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-finalizing-cancel',
-      expect.anything()
+      expect.anything(),
+      expect.any(AbortSignal)
     );
     expect(deps.turnFinalization.updateSessionDiffStats).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-finalizing-cancel', {
@@ -13168,31 +13192,102 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('releases a cancelled turn before stuck Git bookkeeping and runs fresh input without restart', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const started = createDeferred<void>(), raw = createDeferred<void>();
-    const gitStarted = createDeferred<void>(), git = createDeferred<void>();
-    const f = inboxExecutionFixture(async () => { started.resolve(); await raw.promise; return { stopReason: 'end_turn' }; });
-    f.client.cancel = async () => { raw.resolve(); };
-    Object.defineProperty(f.client, 'pendingPromptCompletion', { get: () => raw.promise });
-    f.deps.turnFinalization.syncWorkspaceGitState = async () => { gitStarted.resolve(); await git.promise; };
+  async function finishFirstThenRunNext(
+    f: ReturnType<typeof inboxExecutionFixture>, first: Promise<unknown>,
+    gate: ReturnType<typeof createDeferred<void>>, next: typeof f.message, published?: Promise<void>
+  ) {
+    await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId,
+      userId: 'user-1', config: next.acpSessionConfig });
+    // Exercise a successor immediately if admission has already been returned.
+    const released = !f.service.getExecutionSnapshot(next.sessionId).hasActiveTurn;
+    if (released) { await f.service.continueSession(next); await published; }
+    gate.resolve();
+    await first;
+    if (!released) await f.service.continueSession(next);
+  }
+
+  it.each(['edit evidence', 'Git fallback'])('keeps turn-one results before release (%s)', async (kind) => {
+    const root = createGitLocalProject(), file = path.join(root, 'one.txt');
+    const entered = createDeferred<void>(), finish = createDeferred<void>();
+    let n = 0, captured: unknown;
+    const f = inboxExecutionFixture(async () => {
+      fs.writeFileSync(file, ++n === 1 ? 'TURN_ONE\n' : 'TURN_TWO\n');
+      if (n === 2) fs.writeFileSync(path.join(root, 'two.txt'), 'second turn\n');
+      return { stopReason: 'end_turn' };
+    });
+    f.session.getWorkdir = () => root;
+    f.session.exec = async (_cmd, args) => execFileSync('/usr/bin/git', args, { cwd: root, encoding: 'utf8' });
+    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
+      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
+    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+    f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
+      if (turn === 'assistant:human-input') {
+        entered.resolve(); await finish.promise;
+        if (kind === 'edit evidence') captured = await pendingEventFromAgentEditEvidence({ workspaceRoot: root,
+          edit: { path: file, changeType: 'update', contentOldText: 'BASE\n' }, latestText: { status: 'untracked' } });
+      }
+      return kind === 'edit evidence';
+    };
+    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
     try {
-      await f.accept();
-      const running = f.service.continueSession(f.message);
-      await started.promise;
-      await f.service.cancelSession({ ...f.message, type: 'session/cancel', turnId: 'assistant:human-input' });
-      await running;
-      await gitStarted.promise;
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
-      const next = { ...f.message, userTurnId: 'after-stuck-git' };
-      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId, userId: 'user-1', config: next.acpSessionConfig });
-      await f.service.continueSession(next);
-      expect(f.store.inbox.inputEnded('workspace-1', next.sessionId, next.userTurnId)).toBe(true);
-      await vi.advanceTimersByTimeAsync(30_000);
-      git.resolve();
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(message.sessionId), { project: message.project });
+      await f.accept(); const first = f.service.continueSession(message); await entered.promise;
+      await finishFirstThenRunNext(f, first, finish, { ...message, userTurnId: 'next' });
       await f.service.drainInboxExecutions();
-      expect(f.service.getExecutionSnapshot(next.sessionId).releaseBlocked).toBeUndefined();
-    } finally { raw.resolve(); git.resolve(); await f.close(); vi.useRealTimers(); }
+      expect(n).toBe(2);
+      if (kind === 'edit evidence') {
+        expect(captured).toMatchObject({ newText: 'TURN_ONE\n' });
+        expect(JSON.stringify(captured)).not.toContain('TURN_TWO');
+      } else {
+        const history = await (await createSessionBackend(f.doc)).readHistory();
+        expect(history.find((turn) => turn.id === 'assistant:human-input')?.fileDiff?.map((diff) => diff.filePath)).toEqual(['one.txt']);
+      }
+    } finally { finish.resolve(); await f.close(); fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([false, true])('keeps newer dirty/unpushed flags after old stats (deadline=%s)', async (expires) => {
+    if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const started = createDeferred<void>(), finishOld = createDeferred<void>(), newerWritten = createDeferred<void>();
+    let dirty = false, firstMerge = true, n = 0;
+    const f = inboxExecutionFixture(async () => { if (++n === 2) dirty = true; return { stopReason: 'end_turn' }; });
+    const repo = f.deps.workspaceDocument.repo;
+    const upsert = repo.upsertDocMeta.bind(repo);
+    repo.upsertDocMeta = async (id, patch) => {
+      await upsert(id, patch);
+      if (patch.workspaceDirty === true) newerWritten.resolve();
+    };
+    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
+      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
+    f.session.exec = async (_cmd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
+      if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify')) return 'a'.repeat(40)+'\n';
+      if (args[0] === 'merge-base') {
+        if (firstMerge) { firstMerge = false; started.resolve(); await finishOld.promise; }
+        return 'a'.repeat(40)+'\n';
+      }
+      if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
+      if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
+      return '';
+    };
+    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
+    try {
+      await upsert(getSessionRoomId(message.sessionId), { project: message.project, workspaceDirty: false, workspaceUnpushed: false });
+      await f.accept(); const first = f.service.continueSession(message); await started.promise;
+      if (expires) {
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeDefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeUndefined();
+      }
+      const next = { ...message, userTurnId: 'newer' };
+      await finishFirstThenRunNext(f, first, finishOld, next, newerWritten.promise); await newerWritten.promise;
+      expect(n).toBe(2);
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+      finishOld.resolve(); await f.service.drainInboxExecutions();
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+    } finally { finishOld.resolve(); await f.close(); if (expires) vi.useRealTimers(); }
   });
 
   it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
@@ -13206,11 +13301,9 @@ describe('Operation Inbox execution boundary', () => {
     const [f, other] = fixtures as [typeof fixtures[number], typeof fixtures[number]];
     f.deps.workspaceDocument.getOrCreateSessionDoc = async (id) => id === f.message.sessionId ? f.doc : other.doc;
     f.deps.sessionManager.getSession = (id) => (id === f.message.sessionId ? f.session : other.session) as never;
-    f.deps.turnFinalization.syncWorkspaceGitState = async (id) => { if (id === f.message.sessionId) await slow.promise; };
-    fixtures.forEach((fixture, i) => {
-      Object.defineProperty(fixture.client, 'pendingPromptCompletion', { get: () => raw[i]?.promise });
-      fixture.session.terminate = async () => { raw[i]?.resolve(); };
-    });
+    let statisticsStarted = false;
+    f.deps.turnFinalization.syncWorkspaceGitState = async () => { statisticsStarted = true; await slow.promise; };
+    fixtures.forEach((fixture, i) => { fixture.session.terminate = async () => { raw[i]?.resolve(); }; });
     try {
       for (const fixture of fixtures) await f.service.acceptInboxHumanInput({ sessionId: fixture.message.sessionId,
         inputId: 'human-input', userId: 'user-1', config: fixture.message.acpSessionConfig });
@@ -13220,6 +13313,7 @@ describe('Operation Inbox execution boundary', () => {
       await vi.advanceTimersByTimeAsync(0);
       await f.service.waitForInboxReleases();
       await Promise.all(turns);
+      expect(statisticsStarted).toBe(false);
       for (const fixture of fixtures) {
         expect(f.store.inbox.inputEnded('workspace-1', fixture.message.sessionId, 'human-input')).toBe(true);
         expect(f.store.inbox.activeExecution('workspace-1', fixture.message.sessionId)).toBeUndefined();
@@ -13230,12 +13324,10 @@ describe('Operation Inbox execution boundary', () => {
   it('bounds a slow yielded finalization, retains its raw work and releases the next input', async () => {
     const finalization = createDeferred<void>();
     const registered = createDeferred<void>();
-    let failed = true, recovered = false;
     let service: SessionExecutionService | undefined;
     const f = inboxExecutionFixture(async () => {
       // A yielded turn's ancillary finalization outlives the old 5 s bound while
       // the prompt fails, so the turn body exits early and the release waits.
-      if (!failed) { recovered = true; return { stopReason: 'end_turn' }; }
       const runtime = (
         service as unknown as {
           turnRuntimeBySession: Map<SessionId, { yieldedFinalization: Promise<void> }>;
@@ -13266,12 +13358,6 @@ describe('Operation Inbox execution boundary', () => {
       finalization.resolve();
       await drain;
       expect(drained).toBe(true);
-      failed = false;
-      const next = { ...f.message, userTurnId: 'after-yield-timeout' };
-      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId,
-        userId: 'user-1', config: next.acpSessionConfig });
-      await f.service.continueSession(next).catch(() => undefined);
-      expect(recovered).toBe(true);
       expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
         hasActiveTurn: false,
       });

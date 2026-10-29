@@ -72,7 +72,7 @@
 
 ## Lifecycle
 
-- Optional turn bookkeeping follows release, has bounded waits, and stays owned through raw completion. Shutdown prioritizes active release receipts before queue drain and other cleanup.
+- Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Only presentation follows release with bounded owned waits. Shutdown prioritizes active release receipts before other cleanup.
 
 - [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;

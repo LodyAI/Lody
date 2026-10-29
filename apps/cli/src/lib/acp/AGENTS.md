@@ -104,7 +104,7 @@ into Code Collab evidence. Evidence arriving for a finalized target is serialize
 through the same per-turn persistence chain as normal finalization; a failed attempt
 restores both captured evidence sets ahead of concurrently collected evidence and
 schedules bounded, evidence-only backoff retries that never replay the
-already-persisted ACP history update.
+already-persisted ACP history update. Budget/shutdown cancellation discards the captured gap-fill attempt instead of retrying against a successor's files.
 
 Shutdown order: cancel those timers, stop SessionManager producers while keeping
 workspace documents open, wait for already-started async evidence collectors, flush

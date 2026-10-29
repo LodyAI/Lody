@@ -3105,23 +3105,23 @@ export class MessageHandler {
           modelInfo,
           userTurnId
         ),
-      syncSessionBranchName: (sessionId, session) =>
-        workspaceGitService.syncSession(sessionId, session),
+      syncSessionBranchName: (sessionId, session, signal) =>
+        workspaceGitService.syncSession(sessionId, session, signal),
       turnFinalization: {
         finalizeACPState: async (sessionId, turnId) =>
           await this.finalizeACPState(sessionId, turnId),
-        persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
-          await this.persistCodeCollabTurnDiffs(sessionId, turnId),
+        persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
+          await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
-        refreshCodeCollabSharedState: async (sessionId) => {
-          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId });
+        refreshCodeCollabSharedState: async (sessionId, signal) => {
+          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId, signal });
         },
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
-        syncWorkspaceGitState: async (sessionId, session) =>
-          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session),
+        syncWorkspaceGitState: async (sessionId, session, signal) =>
+          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session, signal),
         onTurnOutcome: async (fact) => {
           if (this.deletedSessionIds.has(fact.sessionId)) return;
           const attention = projectTurnAttention(fact);
@@ -5542,7 +5542,8 @@ export class MessageHandler {
     ownerSessionId: SessionId,
     acpEvents: readonly CodeCollabV2PendingDiffStoreEvent[],
     editEvidence: readonly AcpAgentEditEvidence[],
-    fileRoots?: readonly SessionFileRoot[]
+    fileRoots?: readonly SessionFileRoot[],
+    signal?: AbortSignal
   ): Promise<CodeCollabV2PendingDiffStoreEvent[]> {
     if (editEvidence.length === 0) {
       return [];
@@ -5562,6 +5563,7 @@ export class MessageHandler {
     }
     const gapEvents: CodeCollabV2PendingDiffStoreEvent[] = [];
     for (const edit of latestEditByPath.values()) {
+      signal?.throwIfAborted();
       const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, edit.path, fileRoots);
       if (!resolved || coveredRelativePaths.has(resolved.relativePath)) {
         continue;
@@ -5591,6 +5593,7 @@ export class MessageHandler {
           path: resolved.relativePath,
           maxRawBytes: CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes,
         });
+        signal?.throwIfAborted();
         event = await pendingEventFromAgentEditEvidence({
           workspaceRoot,
           fileRoots,
@@ -5598,6 +5601,7 @@ export class MessageHandler {
           latestText,
         });
       }
+      signal?.throwIfAborted();
       if (!event) {
         const message = `Code Collab v2 edit evidence for ${edit.path} (${edit.changeType}) could not be converted into a turn diff event; missing pre-image or unreadable current file`;
         this.logger.error(
@@ -5618,9 +5622,12 @@ export class MessageHandler {
 
   private async persistCodeCollabTurnDiffsOnce(
     sessionId: SessionId,
-    turnId: string
+    turnId: string,
+    signal?: AbortSignal
   ): Promise<boolean> {
+    signal?.throwIfAborted();
     await this.flushCodeCollabEvidenceWrites(sessionId);
+    signal?.throwIfAborted();
     const key = this.codeCollabTurnDiffKey(sessionId, turnId);
     const acpEvents = this.codeCollabV2TurnDiffs.get(key) ?? [];
     this.codeCollabV2TurnDiffs.delete(key);
@@ -5640,13 +5647,16 @@ export class MessageHandler {
         );
         return false;
       }
+      signal?.throwIfAborted();
       const gapEvents = await this.buildCodeCollabEditGapEvents(
         resolved.workspaceRoot,
         resolved.ownerSessionId,
         acpEvents,
         editEvidence,
-        resolved.fileRoots
+        resolved.fileRoots,
+        signal
       );
+      signal?.throwIfAborted();
       const mergedEvents = this.mergeCodeCollabTurnDiffEvents([...acpEvents, ...gapEvents]);
       if (mergedEvents.length === 0) {
         return false;
@@ -5656,6 +5666,7 @@ export class MessageHandler {
       const recordedAtMs = getServerNow();
       const turnStorageMetadata = await backend.getTurnStorageMetadata(turnId);
       const capturedAtMs = turnStorageMetadata?.capturedAtMs ?? recordedAtMs;
+      signal?.throwIfAborted();
       const fileDiff = await this.codeCollabV2DiffStore.recordTurnDiffs({
         workspaceRoot: resolved.workspaceRoot,
         fileRoots: resolved.fileRoots,
@@ -5671,6 +5682,7 @@ export class MessageHandler {
       if (fileDiff.length === 0) {
         return false;
       }
+      signal?.throwIfAborted();
       const updated =
         (
           await backend.applyHistoryAction({
@@ -5686,6 +5698,7 @@ export class MessageHandler {
       }
       return updated;
     } catch (error) {
+      if (signal?.aborted) return false;
       // A later finalized-turn update is a natural retry trigger. Put the
       // captured evidence back ahead of anything collected concurrently so a
       // transient workspace/SQLite/history failure cannot lose it.
@@ -5703,20 +5716,33 @@ export class MessageHandler {
     }
   }
 
-  private async persistCodeCollabTurnDiffs(sessionId: SessionId, turnId: string): Promise<boolean> {
+  private async persistCodeCollabTurnDiffs(
+    sessionId: SessionId,
+    turnId: string,
+    signal?: AbortSignal
+  ): Promise<boolean> {
     const key = this.codeCollabTurnDiffKey(sessionId, turnId);
+    const discard = () => {
+      this.codeCollabV2TurnDiffs.delete(key);
+      this.codeCollabV2TurnEdits.delete(key);
+      this.clearCodeCollabTurnRetry(sessionId, turnId);
+    };
+    signal?.addEventListener('abort', discard, { once: true });
+    if (signal?.aborted) discard();
     const previous = this.codeCollabV2TurnPersistChains.get(key) ?? Promise.resolve();
     let persisted = false;
     const next = previous
       .catch(() => {})
       .then(async () => {
-        persisted = await this.persistCodeCollabTurnDiffsOnce(sessionId, turnId);
+        signal?.throwIfAborted();
+        persisted = await this.persistCodeCollabTurnDiffsOnce(sessionId, turnId, signal);
       });
     this.codeCollabV2TurnPersistChains.set(key, next);
     try {
       await next;
       return persisted;
     } finally {
+      signal?.removeEventListener('abort', discard);
       if (this.codeCollabV2TurnPersistChains.get(key) === next) {
         this.codeCollabV2TurnPersistChains.delete(key);
       }
