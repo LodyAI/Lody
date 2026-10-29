@@ -5,8 +5,9 @@
 
 - One shell Registry subscription supplies list/provenance; details acquire/release
   one WorkspaceRuntime Schedule store. Writes use `withScheduleStore`; full messages
-  have their own editor. Listing never opens all definitions. No developer/beta gate
-  on navigation, commands, Registry, proposals or Agent tools.
+  have their own editor. Listing opens only scheduled-message bodies: local
+  first, one-shot sync when missing. No developer/beta gate on navigation,
+  commands, Registry, proposals or Agent tools.
 - `schedule-view.tsx` is presentational with Storybook fixtures;
   `schedules-workspace.tsx` owns domain writes, selectors and composition.
   `schedule-save-blockers.ts` is the one save rule, `schedule-format.ts` the one
@@ -84,12 +85,13 @@
   create/edit/resume/run require the machine's protocol capability. Never fall
   back to a different Agent.
 - List (`schedule-list.tsx`): two sections, Scheduled tasks and Scheduled
-  messages. Only messages get an ⓘ popover (hover or click) saying they send
-  once; tasks need no explanation, and a second one only confused. Rows are name + summary (frequency · Agent · machine), destination (a
+  messages. Only messages get an ⓘ popover saying they send once; tasks need
+  none. Rows are name + summary (frequency · Agent · machine), destination (a
   chat destination is a button that opens the chat) and status in words from
-  `describeScheduleState`; colour and a glyph mark only states that need a
-  look. No status pills or dots, no resizable columns. Project and status
-  filters and sort sit above the sections. Every row has a ⋯ menu and the same
+  `describeScheduleState`; colour and glyph mark only states needing a look.
+  A scheduled message shows its own text (the stored title is fallback only)
+  on the viewer's clock. No status pills or dots, no resizable columns. Project
+  and status filters and sort sit above the sections. Every row has a ⋯ menu and the same
   context menu (open, run, pause/resume, open chat, last run, delete); delete
   always confirms. The hover action is Run for a manual task, Pause/Resume
   (`RotateCcw`, never `Play`) for a timed one, Delete for a finished message;

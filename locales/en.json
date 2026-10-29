@@ -5773,6 +5773,8 @@
   "scheduledMessage.attachmentLimit": "The message has reached its attachment limit.",
   "scheduledMessage.reference": "Reference",
   "scheduledMessage.failed": "Scheduled message not sent",
+  "scheduledMessage.editTitle": "Edit scheduled message",
+  "scheduledMessage.loadError": "Could not load this scheduled message.",
   "scheduledMessage.removeTime": "Remove time",
   "scheduledMessage.cancelHelp": "Stop this scheduled message. Messages already sent are kept.",
   "scheduledMessage.upgrade": "Update the target machine’s CLI to schedule complete messages.",

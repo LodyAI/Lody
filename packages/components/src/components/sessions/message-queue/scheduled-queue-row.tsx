@@ -11,7 +11,8 @@ import { IconAction, MoreTrigger } from './message-queue-row';
 
 export type ScheduledQueueItem = {
   scheduleId: string;
-  title: string;
+  /** The message's own text; its schedule title is not shown in the queue. */
+  content: string;
   at: number;
   timeZone: string;
   state: 'pending' | 'failed';
@@ -60,7 +61,7 @@ export function ScheduledQueueRow({
   return (
     <div
       data-scheduled-row=""
-      title={item.title}
+      title={item.content}
       {...stylex.props(queueSurface.row, roomy && queueSurface.roomyRow)}
     >
       <span {...stylex.props(roomy && queueSurface.leading)}>
@@ -90,7 +91,7 @@ export function ScheduledQueueRow({
           {failed ? <CircleAlert size={12} strokeWidth={2} aria-hidden="true" /> : null}
           {time}
         </button>{' '}
-        {item.title}
+        {item.content}
       </div>
       {hasActions ? (
         <div {...stylex.props(queueSurface.actions, roomy && queueSurface.roomyActions)}>

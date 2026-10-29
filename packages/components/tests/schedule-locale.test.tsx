@@ -13,6 +13,7 @@ import {
   formatInstant,
   formatTimeOfDay,
   formatUpcoming,
+  scheduleRowTimeZone,
   weekdayNames,
 } from '../src/components/schedules/schedule-format';
 import type { ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
@@ -90,6 +91,21 @@ describe('Chinese is a product language, not an Intl locale', () => {
     }
   });
 
+  it('shows a scheduled message on the viewer clock and other schedules on the machine clock', () => {
+    const original = process.env.TZ;
+    process.env.TZ = 'Asia/Shanghai';
+    try {
+      const once = { kind: 'once' as const, at: '2026-09-07T09:00:00.000Z' };
+      expect(scheduleRowTimeZone({ ...row, scheduledMessage: true, trigger: once }, 'UTC')).toBe(
+        'Asia/Shanghai'
+      );
+      expect(scheduleRowTimeZone({ ...row, trigger: once }, 'UTC')).toBe('UTC');
+      expect(scheduleRowTimeZone(row, 'UTC')).toBe('Asia/Shanghai');
+    } finally {
+      process.env.TZ = original;
+    }
+  });
+
   it('renders a persisted scheduled queue row under zh_CN', () => {
     // A reservation re-renders on every load, so a throw here took down the app.
     vi.useFakeTimers({ toFake: ['Date'], now: NOW });
@@ -99,7 +115,7 @@ describe('Chinese is a product language, not an Intl locale', () => {
         <ScheduledQueueRow
           item={{
             scheduleId: 's',
-            title: '每天回顾',
+            content: '每天回顾',
             at,
             timeZone: 'Asia/Shanghai',
             state: 'pending',

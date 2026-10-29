@@ -5764,6 +5764,8 @@
   "scheduledMessage.attachmentLimit": "消息附件数量已达到上限。",
   "scheduledMessage.reference": "引用",
   "scheduledMessage.failed": "定时消息未发送",
+  "scheduledMessage.editTitle": "编辑定时消息",
+  "scheduledMessage.loadError": "无法加载这条定时消息。",
   "scheduledMessage.removeTime": "取消定时",
   "scheduledMessage.cancelHelp": "停止此定时消息；已经发送的消息会保留。",
   "scheduledMessage.upgrade": "请升级目标机器的 CLI，以支持完整消息定时发送。",

@@ -167,6 +167,20 @@ export function triggerTimeZone(
   return trigger.kind === 'cron' ? trigger.timeZone : machineTimeZone;
 }
 
+/**
+ * A list row's display clock. A one-time scheduled message is personal, so its
+ * instant reads on the viewer's current clock; other schedules keep the target
+ * machine's clock (and calendar rules keep their authored zone).
+ */
+export function scheduleRowTimeZone(
+  row: Pick<ScheduleRegistryRow, 'scheduledMessage' | 'trigger'>,
+  machineTimeZone = getDeviceTimeZone()
+): string {
+  return row.scheduledMessage
+    ? getDeviceTimeZone(machineTimeZone)
+    : triggerTimeZone(row.trigger, machineTimeZone);
+}
+
 export function formatInstant(at: number, timeZone: string, locale?: string): string {
   return dateFormat(intl(locale), {
     dateStyle: 'medium',
