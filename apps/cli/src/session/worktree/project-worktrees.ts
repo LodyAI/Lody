@@ -379,7 +379,12 @@ export async function materializeProjectGroup(
             logger: options.logger,
           }).initializeMissingProjectSubmodules(
             path.join(root, member.path),
-            await options.brokerAuth(target.source)
+            await options.brokerAuth(target.source),
+            members.flatMap(([, child]) =>
+              child.placement.kind === 'submodule' && child.placement.parent === id
+                ? [child.placement.path]
+                : []
+            )
           );
         })
       );
