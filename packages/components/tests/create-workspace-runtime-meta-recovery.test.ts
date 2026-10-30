@@ -2789,6 +2789,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const repo = await RealRepo.create({});
       mocks.repoOverride = repo;
       const intents: unknown[][] = [];
+      const featurePreparations: unknown[][] = [];
       const original = {
         requestId: '11'.repeat(16),
         targetMachineId: 'remote-machine',
@@ -2805,7 +2806,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
             acceptDispatchResponse: async () => ({}),
             ...(support === 'complete'
               ? {
-                  prepareFeatureRpc: async () => original,
+                  prepareFeatureRpc: async (...args: unknown[]) => {
+                    featurePreparations.push(args);
+                    return original;
+                  },
                   acceptFeatureRpcResponse: async () => null,
                 }
               : {}),
@@ -2855,8 +2859,31 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         } else {
           await expect(
             runtime.requestFilePreview('remote-machine' as MachineId, {} as never)
-          ).resolves.toMatchObject({ status: 'error', message: 'e2ee_rpc_unavailable' });
+          ).resolves.toMatchObject({
+            status: 'error',
+            code: 'permission_denied',
+            retryable: false,
+            message: 'Encrypted workspaces do not yet support remote machine operations.',
+          });
         }
+        // Writes follow the verified ledger role; a Guest is refused before any signing.
+        access.updateStatus({
+          epoch: 0,
+          rotationRequired: false,
+          hasCurrentKey: true,
+          memberRole: 'guest',
+        });
+        expect(runtime.protectedCodeCollabRole?.get()).toBe('read');
+        await expect(
+          runtime.requestCodeCollabSaveText('remote-machine' as MachineId, {
+            sessionId: 'session',
+            requestedByUserId: 'guest',
+            path: 'a.ts',
+            baseDigest: `sha256:${'0'.repeat(64)}`,
+            text: { encoding: 'plain', text: 'x', rawBytes: 1 },
+          })
+        ).resolves.toMatchObject({ status: 'error', code: 'permission_denied', retryable: false });
+        expect(featurePreparations).toEqual([]);
         // Preparation needs no local agent or ordinary transport/token.
         expect(cloudAttachCalls()).toEqual([]);
         expect(mocks.authInvocations).toEqual([]);
@@ -2910,7 +2937,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         runtime.requestFilePreview('machine-1' as MachineId, {} as never)
       ).resolves.toMatchObject({
         status: 'error',
-        message: 'e2ee_rpc_unavailable',
+        code: 'permission_denied',
+        retryable: false,
       });
       const schedule = await runtime.acquireScheduleStore('schedule-1');
       expect(schedule.roomId).toBe('schedule-schedule-1');

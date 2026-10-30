@@ -29,6 +29,8 @@ import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { SessionMeta } from '@lody/shared';
 import { useWorkspaceFeature } from '../src/hooks/use-workspace-feature';
+import { useCodeCollabRequestedRole } from '../src/hooks/use-code-collab-requested-role';
+import { TestCloudPlatformProvider } from './test-platform';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -284,6 +286,42 @@ it.each(['en', 'zh_CN'])(
     expect(container.querySelector('button')?.disabled).toBe(false);
   }
 );
+
+it('takes the encrypted Code Collab role from the verified ledger, not the organization listing', async () => {
+  let role: 'read' | 'write' = 'write';
+  const listeners = new Set<() => void>();
+  const store = encryptedStore();
+  store.set(runtimeAtom, {
+    contentMode: 'e2ee',
+    protectedRpcAvailable: true,
+    accountId: 'user',
+    workspaceId: 'workspace',
+    workspaceSlug: 'encrypted',
+    protectedCodeCollabRole: {
+      get: () => role,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+  } as unknown as WorkspaceRuntime);
+  function Role() {
+    return <output>{useCodeCollabRequestedRole()}</output>;
+  }
+  await act(async () =>
+    root.render(
+      <TestCloudPlatformProvider>
+        <Provider store={store}>
+          <Role />
+        </Provider>
+      </TestCloudPlatformProvider>
+    )
+  );
+  expect(container.textContent).toBe('write');
+  role = 'read';
+  await act(async () => listeners.forEach((listener) => listener()));
+  expect(container.textContent).toBe('read');
+});
 
 it('shares a scheduled draft through observer replacement and preserves it after remount', async () => {
   const store = createStore();

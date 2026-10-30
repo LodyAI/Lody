@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
@@ -6,7 +7,9 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
+import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
+import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
 
 vi.mock('../src/lib/preview-control-api', () => ({ mintPreviewControlProof: vi.fn() }));
@@ -1313,4 +1316,248 @@ it('keeps encrypted same-machine Code Collab on local IPC even when its document
     text: { encoding: 'plain', text: 'local edit', rawBytes: 10 },
   });
   expect(saved.get('private.ts')).toBe('local edit');
+});
+
+describe('encrypted remote files from a browser or mobile device', () => {
+  const digestOf = (text: string) =>
+    `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}` as const;
+
+  /** Synthetic receiving machine: answers only after the protected feature boundary. */
+  function encryptedMachine(initial: Record<string, string>) {
+    const files = new Map(Object.entries(initial));
+    const methods: string[] = [];
+    const requestEncryptedFeature = async (request: LocalMachineRpcRequest) => {
+      methods.push(request.method);
+      if (request.workspaceId !== workspaceId || request.machineId !== remoteMachineId)
+        return { ok: false as const, error: 'wrong target' };
+      const params = request.params as Record<string, unknown>;
+      const path = String(params.path);
+      if (request.method === 'file/preview') {
+        const text = files.get(path);
+        if (text === undefined)
+          return { ok: true as const, result: { status: 'error', v: 3, code: 'file_not_found' } };
+        return {
+          ok: true as const,
+          result: {
+            status: 'ok',
+            v: 3,
+            path,
+            digest: digestOf(text),
+            kind: 'text',
+            sizeBytes: text.length,
+            content: { encoding: 'utf8-plain', text, rawBytes: text.length },
+          },
+        };
+      }
+      if (request.method === 'code-collab/refresh-text') {
+        const text = files.get(path) ?? '';
+        if (params.digest === digestOf(text))
+          return {
+            ok: true as const,
+            result: { status: 'up_to_date', path, digest: digestOf(text) },
+          };
+        return {
+          ok: true as const,
+          result: {
+            status: 'updated',
+            path,
+            digest: digestOf(text),
+            text: { encoding: 'plain', text, rawBytes: text.length },
+          },
+        };
+      }
+      if (request.method === 'code-collab/save-text') {
+        const current = files.get(path) ?? '';
+        const payload = params.text as { encoding: string; text: string; rawBytes: number };
+        if (params.baseDigest !== digestOf(current))
+          return {
+            ok: true as const,
+            result: {
+              status: 'conflict',
+              reason: 'digest_mismatch',
+              path,
+              baseDigest: params.baseDigest,
+              diskDigest: digestOf(current),
+              diskText: { encoding: 'plain', text: current, rawBytes: current.length },
+            },
+          };
+        files.set(path, payload.text);
+        return {
+          ok: true as const,
+          result: {
+            status: 'ok',
+            path,
+            digest: digestOf(payload.text),
+            rawBytes: payload.rawBytes,
+          },
+        };
+      }
+      return { ok: true as const, result: { status: 'error', code: 'transient_io' } };
+    };
+    return { files, methods, requestEncryptedFeature };
+  }
+
+  const encryptedFacade = (
+    machine: ReturnType<typeof encryptedMachine> | null,
+    role: () => 'read' | 'write' = () => 'write'
+  ) =>
+    createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: role,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC must stay closed');
+      },
+      ...(machine ? { requestEncryptedFeature: machine.requestEncryptedFeature } : {}),
+    });
+
+  const providerFor = (facade: ReturnType<typeof encryptedFacade>, role: 'read' | 'write') =>
+    new CodeCollabSessionFileProvider({
+      role,
+      fileTree: { 'src/app.ts': true },
+      runtime: {
+        sessionId,
+        previewFile: (path, knownDigest) =>
+          facade.requestFilePreview(
+            remoteMachineId,
+            { sessionId, path, ...(knownDigest === undefined ? {} : { knownDigest }) },
+            { ownerSessionId: sessionId }
+          ),
+        openText: (path) => facade.requestCodeCollabOpenText(remoteMachineId, { sessionId, path }),
+        refreshText: (path, digest) =>
+          facade.requestCodeCollabRefreshText(remoteMachineId, { sessionId, path, digest }),
+        saveText: (path, baseDigest, text, format) =>
+          facade.requestCodeCollabSaveText(remoteMachineId, {
+            sessionId,
+            requestedByUserId: 'owner',
+            path,
+            baseDigest,
+            text,
+            ...(format === undefined ? {} : { format }),
+          }),
+        openCurrentDiff: (path) =>
+          facade.requestCodeCollabOpenCurrentDiff(remoteMachineId, { sessionId, path }),
+        openAllChangesDiff: () =>
+          facade.requestCodeCollabOpenAllChangesDiff(remoteMachineId, { sessionId }),
+        openTurnDiff: (path, turnId) =>
+          facade.requestCodeCollabOpenTurnDiff(remoteMachineId, { sessionId, path, turnId }),
+        initDirectory: (path) =>
+          facade.requestCodeCollabInitDirectory(remoteMachineId, { sessionId, path }),
+        lspDefinition: async () => ({ status: 'unsupported', code: 'lsp_not_wired' }),
+        lspReferences: async () => ({ status: 'unsupported', code: 'lsp_not_wired' }),
+      },
+    });
+
+  it('saves through the protected channel and reads the same bytes back on another device', async () => {
+    const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
+    const editor = providerFor(encryptedFacade(machine), 'write');
+    expect(await editor.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'one\n' },
+    });
+    expect(await editor.saveText('src/app.ts', 'two\n')).toMatchObject({ status: 'ready' });
+    expect(machine.files.get('src/app.ts')).toBe('two\n');
+    // Our own save is not an external change, and a fresh reader sees the saved bytes.
+    expect(await editor.checkTextChanged('src/app.ts')).toMatchObject({ status: 'up_to_date' });
+    const reader = providerFor(encryptedFacade(machine), 'write');
+    expect(await reader.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'two\n' },
+    });
+  });
+
+  it('rejects a save based on an old digest without overwriting the newer file', async () => {
+    const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
+    const stale = providerFor(encryptedFacade(machine), 'write');
+    await stale.openFile('src/app.ts');
+    machine.files.set('src/app.ts', 'external\n');
+    await expect(stale.saveText('src/app.ts', 'mine\n')).rejects.toMatchObject({
+      name: 'SaveTextConflictError',
+    });
+    expect(machine.files.get('src/app.ts')).toBe('external\n');
+  });
+
+  it('refuses Guest writes and diffs before signing, while reads stay available', async () => {
+    let role: 'read' | 'write' = 'write';
+    const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
+    const facade = encryptedFacade(machine, () => role);
+    const guest = providerFor(facade, 'read');
+    await guest.openFile('src/app.ts');
+    // A demotion observed after the provider was created still fences the next write.
+    role = 'read';
+    machine.methods.length = 0;
+    const save = await facade.requestCodeCollabSaveText(remoteMachineId, {
+      sessionId,
+      requestedByUserId: 'guest',
+      path: 'src/app.ts',
+      baseDigest: digestOf('one\n'),
+      text: { encoding: 'plain', text: 'guest\n', rawBytes: 6 },
+    });
+    const denied = {
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message:
+        'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+    };
+    expect(save).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenCurrentDiff(remoteMachineId, {
+        sessionId,
+        path: 'src/app.ts',
+      })
+    ).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenAllChangesDiff(remoteMachineId, { sessionId })
+    ).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenTurnDiff(remoteMachineId, {
+        sessionId,
+        path: 'src/app.ts',
+        turnId: 'turn-1',
+      })
+    ).toEqual(denied);
+    expect(machine.methods).toEqual([]);
+    expect(machine.files.get('src/app.ts')).toBe('one\n');
+    expect(await guest.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'one\n' },
+    });
+    expect(machine.methods).toEqual(['file/preview']);
+  });
+
+  it('keeps file entry points unavailable, not retryable, when the host has no protected RPC', async () => {
+    const facade = encryptedFacade(null);
+    const unavailable = {
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message: 'Encrypted workspaces do not yet support remote machine operations.',
+    };
+    expect(
+      await facade.requestCodeCollabSaveText(remoteMachineId, {
+        sessionId,
+        requestedByUserId: 'owner',
+        path: 'src/app.ts',
+        baseDigest: digestOf('one\n'),
+        text: { encoding: 'plain', text: 'x', rawBytes: 1 },
+      })
+    ).toEqual(unavailable);
+    expect(
+      await facade.requestCodeCollabOpenText(remoteMachineId, { sessionId, path: 'src/app.ts' })
+    ).toEqual(unavailable);
+    expect(
+      await facade.requestFilePreview(remoteMachineId, { sessionId, path: 'src/app.ts' })
+    ).toMatchObject({
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message: unavailable.message,
+    });
+  });
 });

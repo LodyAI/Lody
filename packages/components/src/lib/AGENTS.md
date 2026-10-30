@@ -67,6 +67,10 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
   or Flock publish. Electron verifies disk machine identity and reads via local IPC,
   independent of daemon/index readiness. Unknown targets never fall back to Streams;
   confirmed remote targets retain restricted, bounded `file/preview`.
+- Encrypted remote file roles come from the verified ledger status, never the organization
+  listing. Refuse methods outside the closed read list for non-writers, and every remote file
+  method without host feature RPC, before signing, with non-retryable copy; the receiving
+  machine still authorizes. [Decision](../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md#browser-and-mobile-consumers).
 - Small local text may enter the full-document editor/cache. `paged-text` is a separate
   readonly snapshot with bounded random reads; never seed the save cache, executable
   HTML, rendered Markdown/SVG, or full-document copy/download from it. Hidden paged

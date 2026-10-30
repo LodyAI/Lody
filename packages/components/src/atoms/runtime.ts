@@ -208,6 +208,11 @@ export type WorkspaceRuntime = {
   readonly contentMode?: 'plaintext' | 'e2ee';
   /** Host RPC support only; each operation still requires live admission and grants. */
   readonly protectedRpcAvailable?: boolean;
+  /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
+  readonly protectedCodeCollabRole?: {
+    get(): 'read' | 'write';
+    subscribe(listener: () => void): () => void;
+  };
   readonly attachmentToken?: () => Promise<string>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */

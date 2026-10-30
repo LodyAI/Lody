@@ -39,6 +39,7 @@ import {
   machineSupportsSessionHistoryProtocol,
   type MachineProtocolCapabilities,
   type AgentConfigId,
+  type CodeCollabRole,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
   type CodeCollabV2FileIndexSnapshot,
@@ -98,6 +99,11 @@ import {
   sessionEditAndResendFailure,
 } from '@lody/shared';
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
+import {
+  protectedFileWriteDeniedMessage,
+  workspaceFeatureUnavailableMessage,
+} from '@/lib/workspace-feature';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { WorkspaceTargetRouter } from './workspace-target-router';
 
@@ -126,6 +132,10 @@ export type WorkspaceMachineRpcFacadeDeps = {
     request: LocalMachineRpcRequest
   ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
+  /** Encrypted content: remote file work uses only `requestEncryptedFeature`, when the host has it. */
+  protectedContent?: boolean;
+  /** Verified ledger role for display gates; the receiving machine still authorizes every request. */
+  protectedCodeCollabRole?: () => CodeCollabRole;
   /** Trusted same-computer control/file surfaces only; never enables network RPC. */
   isLocalControlMachine?: (machineId: MachineId) => boolean;
   workspaceId: WorkspaceId;
@@ -214,6 +224,26 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return response.result;
   };
 
+  /** Refuse before signing: a missing host port or a non-writer role cannot become a timeout. */
+  const protectedRemoteRefusal = (method: string): CodeCollabV2Error | null => {
+    if (!deps.protectedContent) return null;
+    if (!deps.requestEncryptedFeature)
+      return {
+        status: 'error',
+        code: 'permission_denied',
+        retryable: false,
+        message: workspaceFeatureUnavailableMessage('rpc'),
+      };
+    if (!isE2eeReadQuery(method, undefined) && deps.protectedCodeCollabRole?.() !== 'write')
+      return {
+        status: 'error',
+        code: 'permission_denied',
+        retryable: false,
+        message: protectedFileWriteDeniedMessage(),
+      };
+    return null;
+  };
+
   const requestCodeCollab = async <TResult>(
     machineId: MachineId,
     localRequest: LocalMachineRpcRequest,
@@ -226,6 +256,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           | CodeCollabV2Error
           | null;
       }
+      const refusal = protectedRemoteRefusal(localRequest.method);
+      if (refusal) return refusal;
       if (deps.requestEncryptedFeature) {
         const response = await deps.requestEncryptedFeature(localRequest);
         if (!response.ok) throw new Error(response.error);
@@ -339,6 +371,13 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     );
   };
 
+  const protectedPreviewUnavailable = (path: string) =>
+    filePreviewV3Error('permission_denied', {
+      message: workspaceFeatureUnavailableMessage('rpc'),
+      path,
+      retryable: false,
+    });
+
   const requestFilePreview = async (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -398,6 +437,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           }
           if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
             return unsupportedMarkdownLinks();
+          if (deps.protectedContent && !deps.requestEncryptedFeature)
+            return protectedPreviewUnavailable(request.path);
           if (deps.requestEncryptedFeature) {
             const response = await deps.requestEncryptedFeature({
               machineId,
@@ -419,6 +460,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
           return unsupportedMarkdownLinks();
+        if (deps.protectedContent && !deps.requestEncryptedFeature)
+          return protectedPreviewUnavailable(request.path);
         if (deps.requestEncryptedFeature) {
           const response = await deps.requestEncryptedFeature({
             machineId,

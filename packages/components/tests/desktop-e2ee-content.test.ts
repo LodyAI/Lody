@@ -39,6 +39,31 @@ describe('desktop E2EE content epoch safety', () => {
       }
     }
   );
+  it('derives the file write role from verified ledger status and drops it on close', async () => {
+    const access = createDesktopE2eeContent({
+      runtime: {} as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    const seen: string[] = [];
+    const unsubscribe = access.e2ee.codeCollabRole.subscribe(() =>
+      seen.push(access.e2ee.codeCollabRole.get())
+    );
+    // No verified status yet: fail closed.
+    expect(access.e2ee.codeCollabRole.get()).toBe('read');
+    const status = { epoch: 0, rotationRequired: false, hasCurrentKey: true };
+    access.updateStatus({ ...status, memberRole: 'member' });
+    access.updateStatus({ ...status, memberRole: 'member' });
+    access.updateStatus({ ...status, memberRole: 'guest' });
+    access.updateStatus({ ...status, memberRole: 'admin' });
+    expect(seen).toEqual(['write', 'read', 'write']);
+    await access.close();
+    expect(access.e2ee.codeCollabRole.get()).toBe('read');
+    expect(seen).toEqual(['write', 'read', 'write', 'read']);
+    unsubscribe();
+  });
   it('does not hydrate a previous epoch token when a retired provider left a cache row', async () => {
     const entries = new Map<string, string>();
     vi.stubGlobal('localStorage', {

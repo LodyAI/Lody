@@ -1,6 +1,6 @@
 import { isE2eeMemberRemoved } from '../lib/e2ee-member-removal';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
-import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } from '@lody/shared';
 import {
   encryptedWorkspaceNamespace,
@@ -39,6 +39,7 @@ export function createE2eeContent(input: {
   const observeRemoval = (error: unknown) => {
     if (!isE2eeMemberRemoved(error)) return false;
     if (!memberRemoved) {
+      setMemberRole(null);
       memberRemoved = true;
       try {
         input.onMemberRemoved?.();
@@ -82,12 +83,32 @@ export function createE2eeContent(input: {
       if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
     },
   });
+  // Display gate only. Missing or unverified roles read as `read`; the receiving
+  // machine still applies its own ledger check to every signed request.
+  let memberRole: E2eeRuntimeStatus['memberRole'] = null;
+  const roleListeners = new Set<() => void>();
+  const codeCollabRole = (): 'read' | 'write' =>
+    !closed && !memberRemoved && memberRole && memberRole !== 'guest' ? 'write' : 'read';
+  const setMemberRole = (next: E2eeRuntimeStatus['memberRole']) => {
+    const before = codeCollabRole();
+    memberRole = next;
+    if (codeCollabRole() === before) return;
+    for (const listener of [...roleListeners]) {
+      try {
+        listener();
+      } catch {
+        /* Observational only. */
+      }
+    }
+  };
   const updateStatus = (status: {
     epoch: number;
     rotationRequired: boolean;
     hasCurrentKey?: boolean;
+    memberRole?: E2eeRuntimeStatus['memberRole'];
   }) => {
     if (closed) return;
+    setMemberRole(status.memberRole ?? null);
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
   };
@@ -205,6 +226,7 @@ export function createE2eeContent(input: {
     phase: transition.phase,
     needsUpdate: transition.needsUpdate,
     close: () => {
+      setMemberRole(null);
       closed = true;
       return transition.close();
     },
@@ -265,6 +287,15 @@ export function createE2eeContent(input: {
         return withinContent(() =>
           input.runtime.acceptDispatchResponse!(input.workspaceId, machineId, args, frame)
         );
+      },
+      codeCollabRole: {
+        get: codeCollabRole,
+        subscribe: (listener: () => void) => {
+          roleListeners.add(listener);
+          return () => {
+            roleListeners.delete(listener);
+          };
+        },
       },
       bucketId: () => bucketId,
       createTokenProvider: (signal: AbortSignal) => makeTokenProvider(signal),

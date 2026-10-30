@@ -225,10 +225,17 @@ export function resolveWorkspaceRuntimeCacheIdentity(
   };
 }
 
+export type ProtectedCodeCollabRole = {
+  get(): 'read' | 'write';
+  subscribe(listener: () => void): () => void;
+};
+
 export type WorkspaceE2eeTransport = {
   supportsDispatch?: boolean;
   /** Whether the actual injected host implements the closed signed RPC ports. */
   supportsRpc?: boolean;
+  /** Verified ledger file role; absent means read-only. Never an authorization. */
+  codeCollabRole?: ProtectedCodeCollabRole;
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -2076,6 +2083,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     targetRouter,
     getMachineRpcClient,
     ...(protectedContent
+      ? {
+          protectedContent: true,
+          protectedCodeCollabRole: () => deps.e2ee?.codeCollabRole?.get() ?? 'read',
+        }
+      : {}),
+    ...(protectedRpcAvailable
       ? {
           requestEncryptedFeature: async (
             request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
@@ -5737,6 +5750,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
     waitForContentAdmission,
     protectedRpcAvailable,
+    ...(protectedContent
+      ? {
+          protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
+            get: () => 'read' as const,
+            subscribe: () => () => undefined,
+          },
+        }
+      : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
