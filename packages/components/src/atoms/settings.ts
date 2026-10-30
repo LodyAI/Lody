@@ -296,6 +296,18 @@ export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
 );
 
+/** Post-MVP recovery vault controls. Main independently requires LODY_E2EE_RECOVERY_VAULT=1. */
+export const e2eeRecoveryVaultEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-recovery-vault-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeRecoveryVaultFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeRecoveryVaultEnabledAtom)
+);
+
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,

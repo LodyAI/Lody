@@ -19,9 +19,12 @@ import {
   LedgerLogError,
   BackendError,
   EpochStagingStore,
-  KeyMailbox
+  KeyMailbox,
+  type RecoveryVaultStore
 } from '@lody/e2ee-core/services'
 import {
+  decodeRecoveryVaultCiphertext,
+  encodeRecoveryVaultCiphertext,
   decodeEpochStagedGroup,
   encodeEpochStagedGroup,
   ownEpochStagedGroup,
@@ -657,7 +660,68 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         signal
       )
     },
-    staging
+    staging,
+    /** Opaque recovery-vault ciphertext storage. Login gates retrieval only; the
+     * service never decrypts, selects ledger trust or proves an active Recovery device. */
+    recoveryVault: (signal?: AbortSignal): RecoveryVaultStore['Service'] => {
+      const ciphertext = (value: unknown) => {
+        if (value === null) return Effect.succeed(null)
+        const decoded = decodeRecoveryVaultCiphertext(value)
+        return Result.isSuccess(decoded)
+          ? Effect.succeed(decoded.success)
+          : Effect.fail(
+              new BackendError({ service: 'RecoveryVaultStore', reason: 'invalid-response' })
+            )
+      }
+      const ok = z.object({ ok: z.literal(true) })
+      return {
+        putImmutable: (vaultId, entry) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.putImmutable, {
+                vaultId,
+                entry: encodeRecoveryVaultCiphertext(entry)
+              }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        readEntry: (vaultId, entryId) =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId }),
+            z.unknown(),
+            signal
+          ).pipe(Effect.flatMap(ciphertext)),
+        readIndex: (vaultId) =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.readIndex, { vaultId }),
+            z.unknown(),
+            signal
+          ).pipe(Effect.flatMap(ciphertext)),
+        compareAndSwapIndex: (vaultId, expected, next, referencedEntryIds) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.compareAndSwapIndex, {
+                vaultId,
+                expected: expected && { revision: expected.revision, digest: expected.digest },
+                next: encodeRecoveryVaultCiphertext(next),
+                referencedEntryIds: [...referencedEntryIds]
+              }),
+            z.object({ outcome: z.enum(['Committed', 'Conflict']) }),
+            signal
+          ).pipe(Effect.map((value) => value.outcome)),
+        deleteUnreferenced: (vaultId, entryId, expectedIndex) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.deleteUnreferenced, {
+                vaultId,
+                entryId,
+                expectedIndex: { revision: expectedIndex.revision, digest: expectedIndex.digest }
+              }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid)
+      }
+    }
   })
 })
 export type E2eeCloudClient = Effect.Success<ReturnType<typeof makeE2eeCloudClient>>

@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useState } from 'react';
+import { RecoveryVaultSection } from './recovery-vault-section';
 import { E2eeSecurityPanel } from './security-panel';
 import { useSecurityState } from './security-state';
 import { AccountSettingsComponent } from '../account-setting';
@@ -80,7 +81,10 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
 export function WorkspaceSettings() {
   const scope = useSecurityState();
   return scope.encrypted ? (
-    <SecuritySettings key={`${scope.accountId}:${scope.workspaceId}`} scope={scope} />
+    <>
+      <SecuritySettings key={`${scope.accountId}:${scope.workspaceId}`} scope={scope} />
+      <RecoveryVaultSection />
+    </>
   ) : (
     <AccountSettingsComponent surface="workspace" />
   );
