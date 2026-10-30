@@ -516,6 +516,10 @@ GC inspects goals through synchronous Loro fields or Roost's certified projectio
 and reverse logical pages. See the
 [goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
 
+Ordinary Roost callers and recovery still include complete-body reads. The
+[selective-history execution plan](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+separates necessary global access from field queries, ownership lookup and local mutations.
+
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing

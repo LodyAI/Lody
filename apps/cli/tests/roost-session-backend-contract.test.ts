@@ -1,3 +1,9 @@
+import {
+  readSessionTranscript,
+  toSessionTranscriptEntries,
+  selectSessionTranscriptEntries,
+} from '../src/commands/session';
+import { buildReplayPromptFromHistory, createReplayPromptBuilder } from '@lody/shared';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1304,7 +1310,7 @@ describe('Production Roost history semantics', () => {
     const before = await fixture.backend.readTurn(turnId);
     const beforeCopy = structuredClone(before);
     const reread = vi
-      .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages')
       .mockRejectedValue(new Error('Synthetic body reread unavailable'));
     try {
       for (const [i, text] of ['🙂', '漢字', '\n🚀'].entries()) {
@@ -1435,7 +1441,7 @@ describe('Production Roost history semantics', () => {
         return { ...(await commit.apply(this, args)), metadataAttached: false };
       });
     const reread = vi
-      .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages')
       .mockRejectedValue(new Error('Synthetic authoritative refresh failure'));
     try {
       await expect(fixture.backend.applyAgentBatch(input)).rejects.toThrow(
@@ -2527,7 +2533,7 @@ describe('Production Roost history semantics', () => {
           .spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage')
           .mockRejectedValue(body);
         const indexed = vi
-          .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+          .spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages')
           .mockRejectedValue(body);
         try {
           expect(await readGoal()).toEqual(reference);
@@ -2588,7 +2594,7 @@ describe('Production Roost history semantics', () => {
     const rpc = {
       ...ports,
       getSessionBackend: async () => ({
-        readHistory: async () => [{ items: [{ ...legacy, status: 'paused' }] }],
+        readLatestGoal: async () => ({ ...legacy, status: 'paused' }),
       }),
     } as unknown as MessageHandler;
     expect(await MessageHandler.prototype.hasActiveGoal.call(rpc, fixture.doc.sessionId)).toBe(
@@ -2673,11 +2679,9 @@ describe('Production Roost history semantics', () => {
     await invalidateGoalIndex(id);
     fixture = await nativeFixture(id);
     const peer = await nativeFixture(fixture.doc.sessionId);
-    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    const readPage = RoostDispatchIndex.prototype.range;
     let changed = false;
-    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(async function (
-      ...args
-    ) {
+    vi.spyOn(RoostDispatchIndex.prototype, 'range').mockImplementation(async function (...args) {
       const page = await readPage.apply(this, args);
       if (!changed) {
         changed = true;
@@ -2749,23 +2753,23 @@ describe('Production Roost history semantics', () => {
     );
     const reopened = await nativeFixture(id);
     await reopened.backend.flushLocalWrites();
-    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    const readPage = NodeLodyHistory.prototype.readActiveBranchMembers;
     let switched = false;
-    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(async function (
-      ...args
-    ) {
-      const result = await readPage.apply(this, args);
-      if (armed && !switched) {
-        switched = true;
-        const before = await this.observedEventCursor();
-        await this.stream.compareAndWriteIndex(
-          [{ ...pointer, value: null }],
-          [{ ...pointer, value: activation }]
-        );
-        expect(await this.observedEventCursor()).toBe(before);
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMembers').mockImplementation(
+      async function (...args) {
+        const result = await readPage.apply(this, args);
+        if (armed && !switched) {
+          switched = true;
+          const before = await this.observedEventCursor();
+          await this.stream.compareAndWriteIndex(
+            [{ ...pointer, value: null }],
+            [{ ...pointer, value: activation }]
+          );
+          expect(await this.observedEventCursor()).toBe(before);
+        }
+        return result;
       }
-      return result;
-    });
+    );
     armed = true;
     try {
       expect(await reopened.backend.readLatestGoal?.()).toEqual(goal);
@@ -2854,9 +2858,9 @@ describe('Production Roost history semantics', () => {
     const fixture = await nativeFixture();
     await fixture.backend.appendHistoryTurn(nativeUser('lost-u'));
     await fixture.backend.appendHistoryTurn(nativeAssistant('lost-a'));
-    const original = RoostHistoryGeneration.prototype.fork;
+    const original = RoostHistoryGeneration.prototype.replaceMembers;
     const spy = vi
-      .spyOn(RoostHistoryGeneration.prototype, 'fork')
+      .spyOn(RoostHistoryGeneration.prototype, 'replaceMembers')
       .mockImplementationOnce(async function (...args) {
         await original.apply(this, args);
         throw new Error('Injected lost branch reply');
@@ -3127,14 +3131,14 @@ describe('Production Roost history semantics', () => {
     await fixture.backend.appendHistoryTurn(nativeUser('old-u'));
     await fixture.backend.appendHistoryTurn(nativeAssistant('old-a'));
     const before = await fixture.backend.readHistory();
-    const original = NodeLodyHistory.prototype.acceptToView;
+    const original = RoostNativeClient.prototype.request;
     let stages = 0;
     const spy = vi
-      .spyOn(NodeLodyHistory.prototype, 'acceptToView')
-      .mockImplementation(async function (input) {
-        if (input.operationId.startsWith('stage:') && ++stages === 2)
+      .spyOn(RoostNativeClient.prototype, 'request')
+      .mockImplementation(async function (input, options) {
+        if (input.method === 'writeBatch' && input.requireLocalInterval === true && ++stages === 2)
           throw new Error('Injected stage failure');
-        return original.call(this, input);
+        return original.call(this, input, options);
       });
     await expect(
       fixture.backend.applyHistoryAction({
@@ -5073,11 +5077,11 @@ describe('Production Roost dispatch projection', () => {
         read: true,
       });
     const peer = await nativeFixture(fixture.doc.sessionId);
-    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    const read = NodeLodyHistory.prototype.readActiveBranchMessages;
     let injected = false;
-    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
       async function (...args) {
-        if (!injected && args[0].some((id) => id !== undefined)) {
+        if (!injected && args[1].length > 0) {
           injected = true;
           await peer.backend.applyHistoryAction({
             kind: 'upsert-turn',
@@ -5173,9 +5177,9 @@ describe('Production Roost dispatch projection', () => {
     await fixture.close();
     const reopened = await nativeFixture(id);
     const peer = await nativeFixture(id);
-    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    const read = NodeLodyHistory.prototype.readActiveBranchMessages;
     let injected = false;
-    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
       async function (...args) {
         const result = await read.apply(this, args);
         if (!injected) {
@@ -5248,9 +5252,9 @@ describe('Production Roost dispatch projection', () => {
     );
     const reopened = await nativeFixture(id);
     await reopened.backend.flushLocalWrites();
-    const read = NodeLodyHistory.prototype.readProjectedMessagesById;
+    const read = NodeLodyHistory.prototype.readActiveBranchMessages;
     let switched = false;
-    vi.spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById').mockImplementation(
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
       async function (...args) {
         const result = await read.apply(this, args);
         if (!switched) {
@@ -5318,7 +5322,7 @@ describe('Production Roost dispatch projection', () => {
         vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(
           async function (...args) {
             const result = await page.apply(this, args);
-            return args[1]?.before ? { ...result, complete: false, messages: [] } : result;
+            return args[1]?.from === 0 ? { ...result, complete: false, messages: [] } : result;
           }
         );
         await expect(reopened.backend.history.readRange(0, 2)).rejects.toThrow('incomplete');
@@ -5550,4 +5554,70 @@ describe('Production Roost dispatch projection', () => {
     vi.restoreAllMocks();
     expect(await fixture.backend.readHistory()).toEqual(stored);
   });
+});
+
+it('keeps rooted directory cursors, metadata selection and bounded replay equivalent to complete history', async () => {
+  const fixture = await nativeFixture();
+  for (let index = 0; index < 48; index++)
+    await fixture.backend.appendHistoryTurn({
+      ...nativeUser(`rooted-${index}`),
+      userId: index === 2 ? 'earlier-author' : 'author',
+      items: [{ type: 'text', text: index === 0 ? 'prefix'.repeat(50000) : `question ${index}` }],
+      ...(index === 3
+        ? {
+            scheduleRun: {
+              scheduleId: 'schedule',
+              turnId: 'scheduled-turn',
+              title: 'Synthetic run',
+            },
+          }
+        : {}),
+    });
+  await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'rooted-17' });
+  const expected = await fixture.backend.readHistory();
+  const full = vi
+    .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
+    .mockRejectedValue(new Error('whole history forbidden'));
+  const all = vi
+    .spyOn(fixture.backend.history, 'readAll')
+    .mockRejectedValue(new Error('whole history forbidden'));
+  try {
+    const ids: string[] = [];
+    let page = await fixture.backend.history.readLatestDirectoryPage!(7);
+    for (;;) {
+      ids.unshift(...page.rows.map((row) => row.turnId!));
+      if (!page.hasMoreOlder || !page.cursor) break;
+      page = await fixture.backend.history.readOlderDirectoryPage!(page.cursor, 7);
+    }
+    expect(ids).toEqual(expected.map((row) => row.id));
+    const body = NodeLodyHistory.prototype.readActiveBranchMessages;
+    const selected = vi
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages')
+      .mockImplementation(function (viewId, requested) {
+        if (requested.some((id) => !['rooted-45', 'rooted-46', 'rooted-47'].includes(id)))
+          throw new Error('unrelated body forbidden');
+        return body.call(this, viewId, requested);
+      });
+    try {
+      const transcript = toSessionTranscriptEntries(expected);
+      expect(await readSessionTranscript(fixture.backend, { limit: 3 })).toEqual({
+        total: transcript.length,
+        entries: selectSessionTranscriptEntries(transcript, { limit: 3 }),
+      });
+      const query = await fixture.backend.readHistoryQuery();
+      expect(query.map((row) => row.id)).toEqual(ids);
+    } finally {
+      selected.mockRestore();
+    }
+    const builder = await fixture.backend.foldHistory(
+      () => createReplayPromptBuilder({ maxChars: 511 }),
+      (state, entry) => state.add(entry)
+    );
+    expect(builder.finish()).toEqual(
+      buildReplayPromptFromHistory({ history: expected, maxChars: 511 })
+    );
+  } finally {
+    all.mockRestore();
+    full.mockRestore();
+  }
 });

@@ -9,6 +9,22 @@ import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS, type SessionDirectoryScalars } fro
 // shallow record (a Loro map's `getShallowValue()`, or a stored domain turn)
 // into those fields so every adapter projects the same shape.
 
+export const SESSION_DIRECTORY_SCALAR_KEYS = [
+  'id',
+  'role',
+  'timestamp',
+  'status',
+  'read',
+  'cancellationReason',
+  'finished',
+  'endedAt',
+  'sendStatus',
+  'userTurnId',
+  'acpTurnId',
+  'startedAt',
+  'permissionWaitMs',
+] as const;
+
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 

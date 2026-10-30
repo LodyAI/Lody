@@ -1,3 +1,4 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -58,7 +59,7 @@ export async function isPreparedSessionDispatched(
   const backend = await createSessionBackend(session, record.meta as SessionMeta);
   return hasSessionDispatchEvidence(
     record.meta as SessionMeta,
-    await backend.readHistory(),
+    await readSessionHistoryMetadata(backend.history),
     prepared.userTurn.id
   );
 }
@@ -87,10 +88,12 @@ export async function materializePreparedSessionInput(
     session,
     (existing?.meta as SessionMeta | undefined) ?? prepared.meta
   );
-  const history = await backend.readHistory();
   for (const entry of [prepared.source, prepared.userTurn]) {
     if (!entry) continue;
-    const prior = history.find((item) => item.id === entry.id);
+    const [prior] = await backend.readHistorySelection((rows) => {
+      const index = rows.findIndex((row) => row.id === entry.id);
+      return index < 0 ? [] : [index];
+    });
     if (prior) {
       if (
         prior.role !== entry.role ||

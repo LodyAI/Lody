@@ -15,6 +15,7 @@ import {
   readLatestTurn as readLatestHistoryTurn,
   type HistoryImportInput,
   type HistoryAction,
+  type HistoryQueryRow,
   type ReplaceEditableTailInput,
   type SessionImportResult,
   type SessionActionResult,
@@ -51,8 +52,22 @@ export interface SessionBackend {
 
   initialize(options: { skipAutoRead: boolean }): Promise<void>;
   readHistory(): Promise<SessionHistoryInput[]>;
-  /** Local goal inspection; RPC-backed services retain their existing history read. */
-  readonly readLatestGoal?: () => Promise<SessionGoalMessage | null>;
+  foldHistory<T>(
+    create: () => T,
+    visit: (state: T, entry: SessionHistoryInput) => void
+  ): Promise<T>;
+  readHistoryQuery(options?: {
+    from?: number;
+    to?: number;
+    transcriptVisibility?: boolean;
+  }): Promise<readonly HistoryQueryRow[]>;
+  readHistorySelection(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ): Promise<SessionHistoryInput[]>;
+  /** Complete selected goal, observed locally without reading unrelated bodies. */
+  readonly readLatestGoal: () => Promise<SessionGoalMessage | null>;
+  readonly readLatestUserId?: () => Promise<string | undefined>;
   readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]>;
   readDispatchSelection(
     includeTurnIds: readonly string[],
@@ -226,8 +241,38 @@ class LoroSessionBackend implements SessionBackend {
     return readSessionHistory(this.sessionDoc.sessionData.history) as SessionHistoryInput[];
   }
 
+  async foldHistory<T>(
+    create: () => T,
+    visit: (state: T, entry: SessionHistoryInput) => void
+  ): Promise<T> {
+    const state = create();
+    this.sessionDoc.sessionData.writer.forEachStored((entry) => visit(state, entry));
+    return state;
+  }
+
+  async readHistoryQuery(options?: {
+    from?: number;
+    to?: number;
+    transcriptVisibility?: boolean;
+  }): Promise<readonly HistoryQueryRow[]> {
+    return this.sessionDoc.sessionData.writer
+      .readQuery(options)
+      .slice(options?.from ?? 0, options?.to);
+  }
+
+  async readHistorySelection(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ): Promise<SessionHistoryInput[]> {
+    return this.sessionDoc.sessionData.writer.readSelected(select, options);
+  }
+
   async readLatestGoal(): Promise<SessionGoalMessage | null> {
     return this.sessionDoc.sessionData.readLatestGoal();
+  }
+
+  async readLatestUserId(): Promise<string | undefined> {
+    return this.sessionDoc.sessionData.readLatestUserId();
   }
 
   readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]> {

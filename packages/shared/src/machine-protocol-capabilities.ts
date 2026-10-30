@@ -52,6 +52,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionHistory: 'sessionHistory',
   sessionHistoryIncremental: 'sessionHistoryIncremental',
   sessionHistoryWatch: 'sessionHistoryWatch',
+  sessionHistoryInspection: 'sessionHistoryInspection',
   sessionHistoryPatches: 'sessionHistoryPatches',
   sessionInputAcceptance: 'sessionInputAcceptance',
   sessionInputDispatch: 'sessionInputDispatch',
@@ -205,6 +206,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch]: SESSION_HISTORY_WATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,

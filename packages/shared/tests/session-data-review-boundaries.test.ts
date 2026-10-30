@@ -1,7 +1,11 @@
 import { it, expect, vi } from 'vitest';
 import { LoroDoc, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { resolveLatestSessionGoalFromHistory } from '../src/goal';
-import { createLoroSessionData, type SessionDataChange } from '../src/session-data';
+import {
+  createLoroSessionData,
+  readSessionHistoryMetadata,
+  type SessionDataChange,
+} from '../src/session-data';
 import { createHistoryWriter } from '../src/history-writer';
 import type { SessionId } from '../src/ids';
 const sessionId = 'review-boundaries' as SessionId;
@@ -410,6 +414,43 @@ it('preserves stored extension keys that overlap Object prototype methods in dis
   try {
     expect(data.history.readTurnForDisplay('owner')).toEqual(data.history.readTurn('owner'));
   } finally {
+    data.dispose();
+  }
+});
+
+it('reads legacy text-container identities and configuration through metadata only', async () => {
+  const doc = new LoroDoc(),
+    row = doc.getList('history').pushContainer(new LoroMap());
+  const text = (map: LoroMap, key: string, value: string) =>
+    map.setContainer(key, new LoroText()).insert(0, value);
+  text(row, 'id', 'legacy-user');
+  text(row, 'role', 'user');
+  text(row, 'timestamp', 'synthetic');
+  text(row, 'userId', 'legacy-author');
+  const config = row.setContainer('inputConfig', new LoroMap());
+  text(config, 'modelId', 'legacy-model');
+  text(config, 'modeId', 'legacy-mode');
+  row
+    .setContainer('items', new LoroList())
+    .pushContainer(new LoroMap())
+    .setContainer('text', new LoroText())
+    .insert(0, 'old payload'.repeat(10000));
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId });
+  const full = vi.spyOn(data.history, 'readAll').mockImplementation(() => {
+    throw new Error('whole history forbidden');
+  });
+  try {
+    expect(await readSessionHistoryMetadata(data.history)).toMatchObject([
+      {
+        id: 'legacy-user',
+        role: 'user',
+        userId: 'legacy-author',
+        inputConfig: { modelId: 'legacy-model', modeId: 'legacy-mode' },
+      },
+    ]);
+  } finally {
+    full.mockRestore();
     data.dispose();
   }
 });

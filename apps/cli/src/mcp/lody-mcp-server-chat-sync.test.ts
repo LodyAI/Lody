@@ -92,7 +92,10 @@ vi.mock('@/session/session-backend', async (importOriginal) => {
     createSessionBackend: vi.fn(async (doc, meta) =>
       doc?.sessionData
         ? actual.createSessionBackend(doc, meta)
-        : { history: { readTurn: mocks.readTurn }, readHistory: async () => [] }
+        : {
+            history: { readTurn: mocks.readTurn, readMetadata: async () => [] },
+            readHistory: async () => [],
+          }
     ),
   };
 });

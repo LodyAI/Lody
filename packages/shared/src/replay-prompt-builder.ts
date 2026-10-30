@@ -550,6 +550,110 @@ export function buildReplayPromptFromHistory(
   };
 }
 
+/** A single traversal preserves the A/B/C/D decisions while retaining at most
+ * the prompt budget per candidate, plus the required unique file paths. */
+export function createReplayPromptBuilder(options: Omit<BuildReplayPromptOptions, 'history'> = {}) {
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+  const terminalTailChars = options.terminalTailChars ?? DEFAULT_TERMINAL_TAIL_CHARS;
+  const capacity = Number.isFinite(maxChars) ? Math.max(0, Math.ceil(maxChars)) : Infinity;
+  const candidates = [
+    { includeTerminal: true, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: false, terminalTailChars },
+  ].map((pass) => ({ pass, length: 0, head: '', tail: '', messages: 0 }));
+  type Candidate = (typeof candidates)[number];
+  const append = (candidate: Candidate, text: string) => {
+    candidate.length += text.length;
+    if (candidate.length <= capacity) candidate.head += text;
+    else candidate.head = '';
+    if (candidate === candidates[2])
+      candidate.tail =
+        capacity === Infinity
+          ? candidate.tail + text
+          : text.length >= capacity
+            ? text.slice(-capacity || text.length)
+            : (candidate.tail + text).slice(-capacity || text.length);
+  };
+  for (const candidate of candidates)
+    append(candidate, '=== Previous Conversation Context ===\n\n');
+  const paths = new Map<string, 'read' | 'edit' | 'other'>();
+  return {
+    add(entry: SessionHistoryInput): void {
+      if ((options.excludeTurnId && entry.id === options.excludeTurnId) || entry.role === 'system')
+        return;
+      for (const item of entry.items ?? [])
+        if (item.type === 'tool_call')
+          for (const path of collectPathsFromToolCall(item)) {
+            const prior = paths.get(path.path);
+            if (!prior || path.kind === 'edit' || (path.kind === 'read' && prior === 'other'))
+              paths.set(path.path, path.kind);
+          }
+      for (const candidate of candidates) {
+        let parts = 0;
+        for (const item of entry.items ?? []) {
+          const text = extractTextFromItem(item as MessageContent, candidate.pass);
+          if (!text) continue;
+          append(candidate, parts ? '\n\n' : entry.role === 'user' ? '[User]\n' : '[Assistant]\n');
+          append(candidate, text);
+          parts++;
+        }
+        if (parts) {
+          append(candidate, '\n\n');
+          candidate.messages++;
+        }
+      }
+    },
+    finish(): ReplayPromptResult {
+      let footer = '';
+      if (paths.size) {
+        footer = '=== Files Referenced ===\n';
+        for (const [kind, label] of [
+          ['read', 'Read'],
+          ['edit', 'Edit'],
+          ['other', 'Other'],
+        ] as const) {
+          const values = [...paths].filter(([, value]) => value === kind).map(([path]) => path);
+          if (values.length) footer += `${label}: ${values.join(', ')}\n`;
+        }
+        footer += '\n';
+      }
+      const end = '=== End of Previous Context ===\n';
+      for (const candidate of candidates) append(candidate, footer);
+      const index = candidates.findIndex((candidate) => candidate.length + end.length <= maxChars);
+      const chosen = candidates[index < 0 ? 2 : index]!;
+      let text = chosen.head + end,
+        truncated = false;
+      if (index < 0) {
+        truncated = true;
+        const budget = maxChars - end.length - 50;
+        text =
+          budget <= 0
+            ? '... [Context truncated due to length] ...\n\n' + end
+            : '... [Earlier context truncated] ...\n\n' + chosen.tail.slice(-budget) + end;
+      }
+      const terminalOmitted = index !== 0,
+        thinkingOmitted = index < 0 || index === 2;
+      return {
+        promptText: text,
+        stats: {
+          usedChars: text.length,
+          truncated,
+          terminalOmitted,
+          terminalTailApplied: !terminalOmitted,
+          thinkingOmitted,
+          pathsCount: paths.size,
+          messagesIncluded: chosen.messages,
+        },
+        noticeMeta: {
+          ...(truncated ? { truncated: true } : {}),
+          ...(terminalOmitted ? { terminalOmitted: true } : {}),
+          ...(thinkingOmitted ? { thinkingOmitted: true } : {}),
+        },
+      };
+    },
+  };
+}
+
 /**
  * Check if the last entry before the latest user message is already a resume notice.
  * This prevents duplicate notices when the user sends multiple messages in quick succession

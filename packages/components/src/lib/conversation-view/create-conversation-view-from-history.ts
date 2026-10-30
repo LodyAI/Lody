@@ -1,3 +1,8 @@
+import {
+  createRoostDirectoryRow,
+  readSessionHistoryMetadata,
+  type SessionEntry,
+} from '@lody/shared/session-data';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { indexRowFromEntry } from './index-row';
 import { type ConversationView, type ConversationViewListener, type TurnIndexRow } from './types';
@@ -63,6 +68,13 @@ export function createConversationViewFromHistory(
 
   return {
     readAll: async () => history.slice(),
+    readMetadata: () =>
+      readSessionHistoryMetadata({
+        readDirectory: () =>
+          history.map((entry, position) =>
+            createRoostDirectoryRow(position, entry as SessionEntry)
+          ),
+      }),
     sessionId: options.sessionId,
     get turnCount() {
       return history.length;

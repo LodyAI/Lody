@@ -224,6 +224,18 @@ conflicting edit. A cached goal guard is valid only for its exact history versio
 missing, invalid or concurrently changed cache evidence requires an authoritative
 check. Cache absence never establishes that no active goal exists.
 
+Ordinary Roost queries and mutations select logical fields and affected bodies;
+absence checks may traverse global metadata. Structural changes may activate an
+SDK-owned membership manifest that reuses unchanged physical segments and gives a
+reinserted business identity a distinct physical primary. The manifest, branch
+revision and operation receipts activate atomically; private preparation alone
+never acknowledges a completed operation. Exact ordered membership and retained
+body contents remain authoritative across restart, append, rollback and partial
+replication. This format requires matching SDK and Native capabilities; unsupported
+readers must not silently reinterpret it as an older branch format. Necessary
+complete-content operations remain available, and recovery replay may traverse
+all entries while retaining only its bounded prompt candidates and required paths.
+
 Opening a Roost conversation reads the latest active-branch window. Scrolling
 up loads older logical turns through a reverse cursor. Whole-history search,
 outline navigation, counts and facts must cover earlier pages without requiring

@@ -100,6 +100,8 @@ export type SessionTurnRead =
 
 /** A shallow directory row: identity and state without the turn body. */
 export type SessionDirectoryRow = {
+  /** Attribution/config/schedule fields are complete, including absence. */
+  readonly metadataVersion?: 1;
   readonly position: number;
   readonly state: 'ready' | 'invalid' | 'missing' | 'unavailable';
   /** Business id when the slot declares one; absent for invalid/unknown slots. */
@@ -116,6 +118,8 @@ export type SessionDirectoryRow = {
    * the body is hydrated.
    */
   readonly inputConfig?: unknown;
+  readonly userId?: string;
+  readonly scheduleRun?: unknown;
   /** Item / plan counts when cheaply available; omitted rather than guessed. */
   readonly itemCount?: number;
   readonly planCount?: number;
@@ -138,6 +142,10 @@ export type SessionDirectoryScalars = {
   readonly startedAt?: number;
   readonly permissionWaitMs?: number;
 };
+
+/** State/configuration observation; never a write replacement. */
+export type SessionHistoryMetadata = SessionDirectoryScalars &
+  Pick<SessionTurn, 'userId' | 'scheduleRun'> & { readonly inputConfig?: SessionTurnInputConfig };
 
 /**
  * The body-independent send-config keys a directory row may carry. Kept here so
