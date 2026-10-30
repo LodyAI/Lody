@@ -334,15 +334,11 @@ function WorkspaceControlRoute() {
             /* Native receipt still retries local cleanup on the next open. */
           }
           try {
-            if (hostOpened) {
-              await port!.runtime!.close(workspaceId, accountId!, readerOwner);
-              // Unmount must not release this confirmed reader a second time.
-              hostOpened = false;
-            }
+            // Unmount joins this same retirement instead of releasing the reader again.
+            if (hostOpened) await closeHost();
           } catch (closeError) {
-            // Preserve the full reader owner and never erase borrowed stores
-            // before the actual host close can finish.
-            void closeHost().catch(reportClose);
+            // The retained retirement keeps the full reader owner and never erases
+            // borrowed stores before the actual host close can finish.
             setState((previous) =>
               previous.scope === scope
                 ? { ...previous, loading: false, failure: classifyE2eeControlFailure(closeError) }
