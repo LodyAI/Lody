@@ -1,0 +1,42 @@
+{
+  "scope": "Final144 only private paste Drawer gap-0 \u2192 existingdialog.gap local calc(var(--spacing)*0); p0/rounded-t-2xl/Dialog max-h85vh remain compatibility.",
+  "story": "chat-chatcomposer--landing-with-pasted-text",
+  "themes": ["light", "dark"],
+  "surfaces": [
+    {
+      "device": "phone/iPhone13descriptor",
+      "width": 390,
+      "height": 960,
+      "browserSafeAreaOverrideBottom": 34
+    },
+    {
+      "device": "desktop",
+      "width": 1280,
+      "height": 960,
+      "scope": "unchanged Dialog control"
+    }
+  ],
+  "states": ["opened", "actualEditedEscapeReopenPersisted"],
+  "variables": [
+    "local--radius-2xl27px",
+    "local--spacing7px/font20px",
+    "ancestoruiTokensGap19Radius29Padding31",
+    "sameelement--spacinginitial",
+    "sameelement--spacinginheritfrom7px",
+    "ancestor--spacing9px",
+    "ancestor--spacinginitial"
+  ],
+  "negative": "Sameelementexistingdialog.gap19px versusoldphysicalgap0;2themes. Sameelementradius29px isretainedcompatibilitycontrol; finaldoesnotmigrateit.",
+  "totalCells": 26,
+  "positiveCells": 24,
+  "formalMigratedDrawerCells": 4,
+  "controlCells": 20,
+  "negativeCells": 2,
+  "beforeAssembly": "18 original +8spacing; realimmutable141After2391sourcegraph. No newprovider/story.",
+  "portalScope": "Defaultbody host realchecked; productionlegacyVaul independentpopupHost sourcegraph audited, not realruntimecovered. PublicChatComposerclassName onroot doesnotcontaindefaultorproduction-sibling-host portal; no universal claim about externallyimperative reparenting/ancestorselectors.",
+  "rejections": [
+    "paddingtoken0 keeps actualsafearea34; originalp0clearsit",
+    "radius tokenlogicalflush changes vertical-rl corners; originalphysicaltoputilitywins",
+    "DialogmaxHeightprimitiveowned no narrowboundsAPI; keepoldcompatibilityratherthaninlinecascadechange"
+  ]
+}

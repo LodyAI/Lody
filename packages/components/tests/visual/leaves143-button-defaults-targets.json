@@ -1,0 +1,222 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-buttontogglemigration--button-variants",
+    "code-review-helper-buttontogglemigration--button-sizes",
+    "code-review-helper-buttontogglemigration--button-defaults",
+    "code-review-helper-buttontogglemigration--button-slot"
+  ],
+  "ready": {
+    "code-review-helper-buttontogglemigration--button-variants": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-sizes": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-defaults": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-slot": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-buttontogglemigration--button-variants": [
+      {
+        "name": "hover-default",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "hover-destructive",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=destructive]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "hover-outline",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=outline]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "hover-secondary",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=secondary]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "hover-ghost",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=ghost]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "hover-link",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=link]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('[data-case=default]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-sizes": [
+      {
+        "name": "caller-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "text": "Utility caller"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-defaults": [
+      {
+        "name": "null-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-case=null]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-buttontogglemigration--button-slot": [
+      {
+        "name": "child-link-activation",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-case=slot-classes]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => location.hash==='#local-classes'&&document.activeElement===document.querySelector('[data-case=slot-classes]')&&document.activeElement.tagName==='A'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-button-toggle-migration]');if(!e)return false;const value=JSON.stringify([...e.querySelectorAll('*')].map(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(n).color,getComputedStyle(n).backgroundColor]}));const old=window.__settle106??{value:'',n:0};old.n=old.value===value?old.n+1:0;old.value=value;window.__settle106=old;return old.n>=3&&document.fonts.status==='loaded'&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

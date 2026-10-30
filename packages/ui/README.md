@@ -72,6 +72,13 @@ line-height expression, including any local `--tw-leading` fallback. The existin
 `style` and rendered-element merge paths are preserved; the fields add no token,
 named size or generic style API.
 
+`labelColor` is an optional CSS-typed constant foreground for the label and
+`currentColor` glyphs, across rest, hover and press. It follows the same actual-field
+and omission rules as typography. It does not write palette tokens: a secondary
+button's hover fill still mixes toward the palette's label, independently of this
+field. Use it for a fixed private ink override; keep controls whose ink changes
+between states on their existing variant or verified styling contract.
+
 The existing `text` tokens derive sizes and leading from document `--ui-font-size`
 (14px when unset), so body, controls, hints and headings scale once, including
 portalled overlays. Their 14px-baseline roles are caption 11/16, footnote 12/16,

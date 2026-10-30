@@ -2523,23 +2523,88 @@ changed pixels and are not summed. The sharing state is an existing synthetic
 cloud-capability fixture, not evidence of OSS cloud composition. Every public
 compiled CSS rule remains equal; the added description writer is locally scoped.
 
-The latest fixed actual-root cut at132 includes130/131 and passes620 component
-files/6,209 tests with3,154 inputs unchanged. Its790 production scanner sources
-match both the stable test graph and the successful OSS renderer build. Shared UI's
-latest independent run remains25 files/313 tests with114 stable inputs. The
-renderer-only build first exhausted Node's4GB heap; the retained failed attempt
-changed no inputs or335 main/CLI/lock artifacts. The same inputs build successfully
-with an8GB heap, without a source/configuration patch. Four real Electron
-onboarding/setup/Explore/local-chat images pass in isolated data and close cleanly;
-they are After-only, while124 has its separate actual target Before/After above.
-These checks exclude133/134, do not accept rejected helper candidates, do not close
-raster OPENs and do not clear the known root ACP prerequisite failure.
+The fixed integration cut at146 passes620 component files/6,209 tests with3,200
+recorded inputs unchanged. Its790 scanner source hashes match both that run and
+the actual OSS renderer input graph. The three-root lower bound is1,379/156/727;
+visual qualification remains separate. New UI owner141 independently passes25
+files/313 tests and types with its four owner files hash-locked. Both146 renderer
+builds exit zero and keep335 main/CLI/lock artifacts unchanged. The original wide
+After gate remains FAIL: besides the consumer, this guide changed between builds.
+An independent qualified comparison excludes only that proven unconsumed Markdown
+file; all3,834 remaining observed inputs differ only at the consumer, and the
+complete emitted CSS is byte-identical. The original full gate is not rewritten.
+The earlier132 default4GB heap failure, same-source8GB success and four actual
+After-only Electron smoke pages remain separate evidence, not a whole-app baseline.
+No check clears the existing root ACP prerequisite failure or old raster OPENs.
 
 The helper's exact through129 inventory has392 occurrences/eight used files/21
 unresolved expressions across30 production sources, each checked against its
 successful293-input build. Its decrease from407 separates14 migrations from one
 redundant cleanup. Stories, tests and later candidates are excluded. The core
 inventory below remains independent of browser coverage.
+
+### Independent ink fields and exact compiled conditions
+
+A primitive's label token can also feed its background. The rejected139 secondary
+candidate changed real coarse-pointer hover fills: four cases changed9,568 raw /
+3,699 threshold pixels. Those six classes were restored. Button141 therefore adds
+only the opt-in physical `labelColor` field beside its existing typography fields,
+without a token group, variant, background or default change. CSS-wide keywords
+reach the actual field; omitted values preserve the original style branch. Existing
+Base UI render-element style precedence remains separately verified. This explicit
+inline API does not promise arbitrary DOM/class injection keeps its former priority:
+140's same-element `.dark` diagnostic hits Konsta's real unlayered rule and fails.
+The fixed Account consumers have no such class/style/render port; actual loaded-rule
+and caller audits support that bounded scope, not a public cascade guarantee.
+
+All96 default-owner raw objects match;94 PNGs match and two remain OPEN (347 raw /
+82 threshold). All152 Account and36 callback pairs match rendered fields and PNGs;
+only360 exact inline-color attribute carriers differ. Root independently reopened
+all284 original compressed records and decoded their PNGs, preserving both OPENs.
+The216 CSS keyword/reference API frames are After-only, not paired screenshots.
+The new owner passes25 UI files /313 tests and typecheck; its four owner files are
+hash-locked, without claiming a fresh stable-input gate over the entire UI graph.
+
+| Unit                    | Source utilities migrated | Verified boundary and remaining limits                                                                                                                                          |
+| ----------------------- | ------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native helper138        |                         9 | Formal48/47 exact; native58/40; file14/12. Two group-hover colors restored after compiled specificity increased; raster OPENs remain.                                           |
+| Account139/141          |                      3 +6 | Primary139 retained; secondary141 uses independent ink. Semantic-background failure and139 incomplete normal-motion cleanup remain.                                             |
+| PR merge140             |                         2 | All60 positive pairs exact. Static hover background and two ink classes remain; two held-touch states NOT_ACCEPTED.                                                             |
+| Helper142               |                         8 | Formal55 exact; complete134-pair set108 exact. Fractional-rem and20px initial-font tests retain exact original media predicate;26 raster OPENs remain. One cleanup is separate. |
+| Helper143               |                        13 | Local Button opt-in width/height/ink preserves raw selectors and Slot merge;210 pairs204 exact, six OPENs387 raw/143 threshold. Invalid menu-state captures remain rejected.    |
+| Private paste144        |                         1 | Positive24 target/context pairs and580 full records match. Real34px safe-area and vertical-rl corner failures keep padding/radius classes.                                      |
+| Fixed Mermaid/Banner145 |                         2 | Source2/runtime5;144 pairs143 exact. One SVG OPEN4 raw/zero threshold. Rejected touch captures and persistence gaps remain unaccepted.                                          |
+
+The helper's new fields stay in its independent owner; product primitives are not
+imported. The original raw variant factory and Slot child precedence remain intact.
+A media condition written as `<64rem` was compiled to `<=63.99rem`, leaving a real
+fractional interval different. The accepted142 source keeps the exact original
+`not all and (width >= 64rem)` predicate. Real20px initial-font cases distinguish
+React's1024px mount decision from CSS's64rem visibility threshold; default16px
+screenshots cannot authorize removing the hidden rule.
+
+Paste144 keeps `calc(var(--spacing) * 0)`, including local initial/inherit cases.
+Direct gap-token negatives change computed gap0→19px but have identical PNGs
+because there is one content child; that is a valid nonvisual negative. Actual
+safe-area emulation exposes padding0→34px and height816→850px without `p-0`;
+vertical writing exposes different logical corner mapping without the radius
+class. The production legacy sibling portal host has source-graph evidence only;
+the fixture verifies its actual body portal, not an unmounted nested Composer.
+These bounded checks do not close old Sidebar, pixel, portal, native-input or
+cleanup failures.
+
+Navigation146 migrates one fixed Electron navigation-button ink occurrence. All24
+positive cells retain ordinary/pseudo fields, geometry, flags and custom values
+except576 explicit inherited `--lody-boot-elapsed` values; complete raw objects are
+not equal. That variable has real boot-shell animation readers, so it is not
+called unused diagnostic data. These target observations do not establish full
+page computed-field equality. Twenty-one target and21 context views match; three
+target OPENs total45 raw/14 threshold pixels and three context OPENs total5,676 /
+261 remain separately counted. Views overlap and are not independent state pairs.
+Two same-element-dark DOM negatives remain outside the fixed caller graph, and
+all click/Enter/Meta+B paths match. The two original zero-frame collector failures
+and the original wide build-gate failure remain in the evidence, without resampling
+successful cells or assigning an unproved paint cause.
 
 ## Remaining work
 
@@ -2548,33 +2613,45 @@ validates AST-discovered candidates with the locked Tailwind compiler. Counts
 are source-occurrence lower bounds, not runtime coverage, emitted CSS size or a
 completion percentage. Unresolved expressions remain a separate work list.
 
-| Source boundary                                              | Scanner method | Occurrences | Files | Unresolved |
-| ------------------------------------------------------------ | -------------- | ----------: | ----: | ---------: |
-| Frozen 29–30                                                 | v1             |       1,736 |   175 |        721 |
-| Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
-| Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
-| Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
-| Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
-| Frozen source through 43                                     | v2             |       1,664 |   173 |        721 |
-| Frozen source through 45                                     | v2             |       1,656 |   171 |        721 |
-| Frozen source through 47                                     | v2             |       1,646 |   169 |        721 |
-| Exact source through 49                                      | v2             |       1,637 |   169 |        721 |
-| Exact source through 54, visual limits recorded separately   | v2             |       1,620 |   168 |        721 |
-| Exact source through 59, excluding later candidates          | v2             |       1,602 |   168 |        722 |
-| Exact source through 63, with partial visual acceptance      | v2             |       1,594 |   167 |        722 |
-| Exact source through 67, with partial visual acceptance      | v2             |       1,572 |   166 |        718 |
-| Exact source through 71, with partial visual acceptance      | v2             |       1,554 |   165 |        718 |
-| Exact source through 73, with partial visual acceptance      | v2             |       1,542 |   165 |        718 |
-| Exact source through 78, with partial visual acceptance      | v2             |       1,507 |   163 |        718 |
-| Exact source through 81, with partial visual acceptance      | v2             |       1,489 |   163 |        724 |
-| Exact source through 84, with partial visual acceptance      | v2             |       1,474 |   163 |        726 |
-| Exact source through 88, with partial visual acceptance      | v2             |       1,451 |   159 |        726 |
-| Exact source through 93, with partial visual acceptance      | v2             |       1,445 |   157 |        725 |
-| Exact source through 95, with partial visual acceptance      | v2             |       1,430 |   157 |        725 |
-| Exact source through 99, with partial visual acceptance      | v2             |       1,424 |   157 |        725 |
-| Exact product source through 120, including final Search118  | v2             |       1,414 |   157 |        726 |
-| Qualified product source through 128, excluding later131/130 | v2             |       1,404 |   157 |        725 |
-| Exact fixed core at132, includes130/131 and excludes133/134  | v2             |       1,399 |   157 |        726 |
+| Source boundary                                                 | Scanner method | Occurrences | Files | Unresolved |
+| --------------------------------------------------------------- | -------------- | ----------: | ----: | ---------: |
+| Frozen 29–30                                                    | v1             |       1,736 |   175 |        721 |
+| Frozen 31–33                                                    | v1             |       1,715 |   175 |        717 |
+| Same pre31 source snapshot                                      | v2             |       1,741 |   176 |        725 |
+| Frozen source through 35                                        | v2             |       1,705 |   175 |        721 |
+| Frozen source through 40                                        | v2             |       1,676 |   175 |        721 |
+| Frozen source through 43                                        | v2             |       1,664 |   173 |        721 |
+| Frozen source through 45                                        | v2             |       1,656 |   171 |        721 |
+| Frozen source through 47                                        | v2             |       1,646 |   169 |        721 |
+| Exact source through 49                                         | v2             |       1,637 |   169 |        721 |
+| Exact source through 54, visual limits recorded separately      | v2             |       1,620 |   168 |        721 |
+| Exact source through 59, excluding later candidates             | v2             |       1,602 |   168 |        722 |
+| Exact source through 63, with partial visual acceptance         | v2             |       1,594 |   167 |        722 |
+| Exact source through 67, with partial visual acceptance         | v2             |       1,572 |   166 |        718 |
+| Exact source through 71, with partial visual acceptance         | v2             |       1,554 |   165 |        718 |
+| Exact source through 73, with partial visual acceptance         | v2             |       1,542 |   165 |        718 |
+| Exact source through 78, with partial visual acceptance         | v2             |       1,507 |   163 |        718 |
+| Exact source through 81, with partial visual acceptance         | v2             |       1,489 |   163 |        724 |
+| Exact source through 84, with partial visual acceptance         | v2             |       1,474 |   163 |        726 |
+| Exact source through 88, with partial visual acceptance         | v2             |       1,451 |   159 |        726 |
+| Exact source through 93, with partial visual acceptance         | v2             |       1,445 |   157 |        725 |
+| Exact source through 95, with partial visual acceptance         | v2             |       1,430 |   157 |        725 |
+| Exact source through 99, with partial visual acceptance         | v2             |       1,424 |   157 |        725 |
+| Exact product source through 120, including final Search118     | v2             |       1,414 |   157 |        726 |
+| Qualified product source through 128, excluding later131/130    | v2             |       1,404 |   157 |        725 |
+| Exact fixed core at132, includes130/131 and excludes133/134     | v2             |       1,399 |   157 |        726 |
+| Observed source-only through145; not full-regression qualified  | v2             |       1,380 |   156 |        727 |
+| Qualified core146; stable full-suite and actual renderer source | v2             |       1,379 |   156 |        727 |
+
+The through145 source-only snapshot rechecks all790 canonical paths twice before
+scanning: components946/140/634, legacy UI429/14/93, routes5/2/0. It is a new
+source inventory, not a replacement for the fixed132 full-suite/renderer boundary.
+Its19-occurrence decrease matches the accepted later core removals; it does not
+close any partial visual scope. Helper143 separately records329/8/21 from30 files.
+The same source-only cut also snapshots all1,396 product src files except stories:
+1,389 occurrences/158 used files/731 unresolved; all790 overlapping hashes agree.
+Its nine outside-root occurrences and four unresolved expressions remain separate
+from the three-root count, with no new scanner-method credit.
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain

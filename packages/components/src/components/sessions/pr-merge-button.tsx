@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { Menu } from '@/ui/menu';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -18,6 +19,12 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  fullMainGap: {
+    [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
+  },
+  fullTriggerPadding: {
+    [buttonTokens.paddingXSmall]: 'calc(var(--spacing) * 1.5)',
+  },
   root: {
     display: 'flex',
     flexShrink: 0,
@@ -186,7 +193,8 @@ export function PrMergeButton({
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
           className={cn(
-            'gap-1 rounded-r-none',
+            stylex.props(styles.fullMainGap).className,
+            'rounded-r-none',
             buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
             readyGreen && greenClasses
           )}
@@ -215,7 +223,8 @@ export function PrMergeButton({
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
                 className={cn(
-                  'rounded-l-none border-l border-black/10 px-1.5',
+                  stylex.props(styles.fullTriggerPadding).className,
+                  'rounded-l-none border-l border-black/10',
                   readyGreen && cn(greenClasses, 'border-l-white/25')
                 )}
               >

@@ -7,7 +7,6 @@ import { X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
 import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
@@ -160,7 +159,8 @@ export function StuckConnectionBanner({
             icon
             height="calc(var(--spacing) * 6)"
             width="calc(var(--spacing) * 6)"
-            className={clsx(stylex.props(styles.dismissSpacing).className, 'text-muted-foreground')}
+            labelColor="hsl(var(--muted-foreground) / 1)"
+            className={stylex.props(styles.dismissSpacing).className}
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >

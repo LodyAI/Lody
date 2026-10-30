@@ -67,6 +67,7 @@ const styles = stylex.create({
   actionSpacing: {
     [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
   },
+  dangerConfirmLabel: { [button.primaryLabel]: 'hsl(var(--destructive-foreground) / 1)' },
   pendingNameInk: { color: 'hsl(var(--muted-foreground) / 1)' },
   pendingActionSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   pendingAccountDeletionSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
@@ -1016,7 +1017,8 @@ export function MobileAccountSettings({
                     <Button
                       variant="secondary"
                       size="small"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      labelColor="hsl(var(--destructive) / 1)"
+                      className="border-destructive/40 hover:bg-destructive/10"
                       onClick={() => setCliApiKeyToRevoke(apiKey)}
                       disabled={revokingCliApiKeyId === apiKey.id}
                     >
@@ -1050,7 +1052,8 @@ export function MobileAccountSettings({
               <Button
                 variant="secondary"
                 size="small"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                labelColor="hsl(var(--destructive) / 1)"
+                className="border-destructive/40 hover:bg-destructive/10"
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {t('workspace.danger.leaveWorkspace.button')}
@@ -1066,7 +1069,8 @@ export function MobileAccountSettings({
               <Button
                 variant="secondary"
                 size="small"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                labelColor="hsl(var(--destructive) / 1)"
+                className="border-destructive/40 hover:bg-destructive/10"
                 onClick={() => {
                   // A live subscription blocks deletion; explain instead of
                   // letting the backend reject the delete.
@@ -1215,7 +1219,10 @@ export function MobileAccountSettings({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                className={[
+                  'bg-destructive hover:bg-destructive/90',
+                  stylex.props(styles.dangerConfirmLabel).className,
+                ].join(' ')}
               >
                 {revokingCliApiKeyId ? (
                   <Spinner
@@ -1264,7 +1271,10 @@ export function MobileAccountSettings({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={[
+                'bg-destructive hover:bg-destructive/90',
+                stylex.props(styles.dangerConfirmLabel).className,
+              ].join(' ')}
             >
               {t('common.remove')}
             </AlertDialog.Action>
@@ -1301,7 +1311,10 @@ export function MobileAccountSettings({
                 })();
               }}
               disabled={isLeaving}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={[
+                'bg-destructive hover:bg-destructive/90',
+                stylex.props(styles.dangerConfirmLabel).className,
+              ].join(' ')}
             >
               {isLeaving ? (
                 <>

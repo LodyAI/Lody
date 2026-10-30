@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ComponentProps, ReactNode } from 'react';
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Check, X } from 'lucide-react';
 
 import { Button } from '../ui/button';
@@ -196,3 +203,114 @@ export const ToggleSlot: Story = {
     </Scope>
   ),
 };
+
+const fieldCases = {
+  explicit: {
+    width: 'calc(var(--spacing) * 8)',
+    height: 'calc(var(--spacing) * 7)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  zero: { width: 0, height: 0, color: 'rgb(20, 110, 160)' },
+  initial: { width: 'initial', height: 'initial', color: 'initial' },
+  inherit: { width: 'inherit', height: 'inherit', color: 'inherit' },
+  unset: { width: 'unset', height: 'unset', color: 'unset' },
+  revert: { width: 'revert', height: 'revert', color: 'revert' },
+  revertLayer: { width: 'revert-layer', height: 'revert-layer', color: 'revert-layer' },
+  fallback: {
+    width: 'var(--missing-button-width, inherit)',
+    height: 'var(--missing-button-height, initial)',
+    color: 'var(--missing-button-ink, inherit)',
+  },
+  omitted: {},
+} satisfies Record<string, CSSProperties>;
+
+function PhysicalFields() {
+  const [mode, setMode] = useState<keyof typeof fieldCases>('explicit');
+  const [calls, setCalls] = useState({ native: 0, parent: 0, child: 0 });
+  const nativeRef = useRef<HTMLButtonElement>(null);
+  const slotRef = useRef<HTMLButtonElement>(null);
+  const [refs, setRefs] = useState('');
+  useLayoutEffect(() => setRefs(`${nativeRef.current?.tagName}/${slotRef.current?.tagName}`), []);
+  const fields: CSSProperties = fieldCases[mode];
+  const caller: CSSProperties = { width: 43, height: 37, color: 'rgb(190, 80, 35)' };
+  return (
+    <Scope>
+      <div data-field-controls style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {Object.keys(fieldCases).map((key) => (
+          <button
+            key={key}
+            data-set-fields={key}
+            onClick={() => setMode(key as keyof typeof fieldCases)}
+          >
+            {key}
+          </button>
+        ))}
+      </div>
+      <section data-physical-field-fixture data-mode={mode} style={{ display: 'grid', gap: 8 }}>
+        <div style={{ width: 190, height: 70, color: 'rgb(37, 130, 180)' }}>
+          <Button
+            ref={nativeRef}
+            data-field-case="native"
+            size="icon"
+            width={fields.width}
+            height={fields.height}
+            labelColor={fields.color}
+            onClick={() => setCalls((x) => ({ ...x, native: x.native + 1 }))}
+          >
+            <Check className="size-3.5" />
+          </Button>
+        </div>
+        <div style={{ width: 190, height: 70, color: 'rgb(37, 130, 180)' }}>
+          <Button
+            data-field-case="caller-style"
+            width={fields.width}
+            height={fields.height}
+            labelColor={fields.color}
+            style={caller}
+          >
+            Caller
+          </Button>
+        </div>
+        <div style={{ width: 190, height: 70, color: 'rgb(37, 130, 180)' }}>
+          <Button
+            ref={slotRef}
+            asChild
+            data-field-case="slot"
+            width={fields.width}
+            height={fields.height}
+            labelColor={fields.color}
+            onClick={() => setCalls((x) => ({ ...x, parent: x.parent + 1 }))}
+          >
+            <a
+              href="#physical-slot"
+              style={{ width: 61, height: 41, color: 'rgb(130, 70, 160)' }}
+              onClick={(event) => {
+                event.preventDefault();
+                setCalls((x) => ({ ...x, child: x.child + 1 }));
+              }}
+            >
+              Child
+            </a>
+          </Button>
+        </div>
+        <Button
+          data-field-case="disabled"
+          disabled
+          width={fields.width}
+          height={fields.height}
+          labelColor={fields.color}
+        >
+          Disabled
+        </Button>
+        <Button data-field-case="omitted" style={{ width: 57, height: 39 }}>
+          Omitted
+        </Button>
+        <output data-field-calls>
+          {calls.native}/{calls.parent}/{calls.child}
+        </output>
+        <output data-field-refs>{refs}</output>
+      </section>
+    </Scope>
+  );
+}
+export const ButtonPhysicalFields: Story = { render: () => <PhysicalFields /> };

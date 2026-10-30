@@ -868,16 +868,30 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `leaves135-acceptance.html`     | Zero migration;one retained p-0 compatibility class                                           | Eight DOM diagnostics,including four legal zero-ancestor counterexamples;not a built After migration                               |
 | `leaves136-acceptance.html`     | 13 native tree controls;36 formal/35 exact and34 native/15 exact;file10 exact                 | 20 target OPENs197raw;navigation OPEN11423raw/157threshold;bounded sidebar diagnostic does not close it                            |
 | `leaves137-acceptance.html`     | Three private summary/Spinner colors;30 positive target/context pairs exact                   | Four direct-token negatives;sharing is an existing capability fixture,not OSS cloud coverage                                       |
+| `leaves138-acceptance.html`     | Nine native helper utilities; formal48/47 exact                                               | Group-hover candidates restored; native/file raster OPENs retained                                                                 |
+| `leaves139-acceptance.html`     | Three fixed primary label utilities;180 completed positive pairs exact                        | Secondary six restored after coarse-hover background failure; normal cleanup incomplete                                            |
+| `leaves140-acceptance.html`     | Two private merge-button spacing utilities;60 exact positive pairs                            | Static background/ink compatibility retained;self-dark counterexample and held-touch gaps                                          |
+| `leaves141-acceptance.html`     | Six secondary ink utilities;284 pairs282 exact,216 API After-only frames                      | Default-owner two OPENs347raw/82threshold;360 inline carriers explicitly differ                                                    |
+| `leaves142-acceptance.html`     | Eight helper utilities;55 formal exact,134 total108 exact                                     | Exact fractional-rem predicate required;26 OPENs262raw/52threshold;cleanup separate                                                |
+| `leaves143-acceptance.html`     | Thirteen helper Button caller utilities;210 pairs204 exact                                    | Six OPENs387raw/143threshold;raw selector and Slot contract separate;invalid prior menu captures retained                          |
+| `leaves144-acceptance.html`     | One private Drawer gap;24 positive cells/24 target+24 context views/580 full records exact    | Real safe-area and vertical-writing failures retain three compatibility classes;body portal scope                                  |
+| `leaves145-acceptance.html`     | Two source ink utilities/five runtime uses;144 pairs143 exact                                 | One SVG OPEN4raw;rejected touch captures and persistence gaps remain                                                               |
+| `leaves146-acceptance.html`     | One real Electron navigation ink;24 positive cells/336 captured records                       | Three target and three context raster OPENs;576 boot-variable raw differences;original wide build gate FAIL retained               |
 
-Root independently reopens original compressed records and decodes PNG RGBA;
-128/131 comparisons exclude only the two named intentional carrier values, keeping
-all other token/physical/geometry/state fields in the comparison. Their raw full
-objects are not claimed equal. The stable root regression at132 passes620 files /
-6,209 tests with3,154 inputs unchanged; modern UI remains25/313 with114 stable
-inputs. These include130/131, exclude133/134, and add no visual pairs. The same
-renderer source first hit the default4GB Node heap limit, then built with8GB;
-retain both attempts. All335 main/CLI/lock artifacts remain unchanged. Four new
-real Electron pages are After-only evidence. The root check still fails at the
+Root independently reopens original compressed records and decodes PNG RGBA.
+Named carrier exceptions retain both raw values; they never establish whole-object
+equality. The fixed146 regression passes620 files/6,209 tests with3,200 recorded
+inputs unchanged. Its790 scanner source hashes match the actual renderer and yield
+1,379/156/727; visual OPENs remain separate. The original wide build gate stays FAIL
+because the guide changed between builds. The qualified product gate excludes only
+that proven unconsumed Markdown file; emitted external and inline CSS equality is
+measured directly. New UI owner141 independently passes25 files/313 tests and types
+with its four owner files hash-locked, without a fresh whole-UI-graph stability claim.
+
+Earlier132 renderer inputs first hit the default4GB heap limit and then built
+successfully with8GB; retain both attempts. Its four real Electron pages are
+After-only, separate from the actual124/146 paired target captures. All335 verified
+main/CLI/lock artifacts remain unchanged. The root check remains blocked at the
 existing ACP SDK prerequisite; no backend/submodule workaround is included.
 
 ## Real desktop smoke

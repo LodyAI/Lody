@@ -81,6 +81,18 @@ relative-unit and class-priority behavior rather than relying on ordinary-size
 screenshots. Existing direct `style` and Base UI `render` merging are separate
 contracts; do not silently change either while migrating a consumer.
 
+A constant Button ink override uses its explicit `labelColor` field, which writes
+physical inline `color` without changing the variant's fill computation. A label
+token can also feed secondary hover backgrounds; verify its complete reader graph
+before writing it. This API intentionally has inline priority: preserve an existing
+utility where a real unlayered self-theme rule must continue to win. Fixed private
+callers with no such path do not establish arbitrary class/render compatibility.
+
+Keep breakpoint predicates exact in the compiled CSS. The locked compiler lowers
+`<64rem` to `<=63.99rem`, which differs in the fractional interval. Preserve the
+original `not all and (width >= 64rem)` when that is the original contract, and
+verify actual initial font-size changes as well as JS viewport mount decisions.
+
 ResizableHandle's `appearance="edge"` composes the base and session edge inside
 the primitive owner. Its actual horizontal consumer no longer competes through
 external pseudo-element classes. Default handles retain their contract; default

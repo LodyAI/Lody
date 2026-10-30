@@ -14,7 +14,6 @@ import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import { themeSpace } from '../../style/theme-scale.stylex';
-import { cn } from '@/lib/utils';
 import { WINDOW_CAPTION_CLEAR_TOP } from '@/ui/window-drag-region';
 
 /**
@@ -98,11 +97,11 @@ function measureTouchGesture(
  * phone screen, where the shared size is under the 44px touch-target floor
  * (iOS HIG / WCAG 2.5.5) that this whole fix is about.
  *
- * The primitive's dimension props own the box; padding and ink compatibility
- * classes stay separate. Reset zoom keeps automatic width above its minimum.
+ * The primitive's dimension and labelColor props own the box and ink; padding
+ * compatibility classes stay separate. Reset zoom keeps automatic width above its minimum.
  */
 const CONTROL_SIZE = 'calc(var(--spacing) * 11)';
-const CONTROL_CLASS_NAME = 'text-muted-foreground';
+const CONTROL_LABEL_COLOR = 'hsl(var(--muted-foreground) / 1)';
 
 /**
  * Inline rather than a utility class because an inline `padding-left` would
@@ -709,7 +708,7 @@ function OpenMermaidDiagramViewer({
           icon
           height={CONTROL_SIZE}
           width={CONTROL_SIZE}
-          className={CONTROL_CLASS_NAME}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={() => zoomBy(1 / MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom <= MERMAID_DIAGRAM_MIN_ZOOM}
           title={zoomOutLabel}
@@ -725,7 +724,8 @@ function OpenMermaidDiagramViewer({
           width="auto"
           fontSize="var(--text-xs)"
           lineHeight="var(--tw-leading, var(--text-xs--line-height))"
-          className={cn(CONTROL_CLASS_NAME, 'min-w-11 px-2 font-mono tabular-nums')}
+          labelColor={CONTROL_LABEL_COLOR}
+          className="min-w-11 px-2 font-mono tabular-nums"
           onClick={resetZoom}
           title={resetZoomLabel}
           aria-label={resetZoomLabel}
@@ -738,7 +738,7 @@ function OpenMermaidDiagramViewer({
           icon
           height={CONTROL_SIZE}
           width={CONTROL_SIZE}
-          className={CONTROL_CLASS_NAME}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={() => zoomBy(MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom >= MERMAID_DIAGRAM_MAX_ZOOM}
           title={zoomInLabel}
@@ -754,7 +754,7 @@ function OpenMermaidDiagramViewer({
           data-testid="mermaid-diagram-viewer-close"
           height={CONTROL_SIZE}
           width={CONTROL_SIZE}
-          className={CONTROL_CLASS_NAME}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={onClose}
           title={closeLabel}
           aria-label={closeLabel}

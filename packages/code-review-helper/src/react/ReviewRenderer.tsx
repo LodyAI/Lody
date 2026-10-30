@@ -181,7 +181,19 @@ export interface ReviewRendererProps {
   readonly onDiffStyleChange?: (diffStyle: ReviewDiffStyle) => void;
 }
 
+const privateButtonStyles = stylex.create({
+  mutedInk: {
+    '--crh-muted-button-label': {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+});
+
 const rootLayoutStyles = stylex.create({
+  resizerVisibility: {
+    display: { default: null, '@media not all and (width >= 64rem)': 'none' },
+  },
   shell: {
     position: 'relative',
     display: 'grid',
@@ -1393,9 +1405,9 @@ export function ReviewRenderer({
                     <button
                       type="button"
                       aria-current={isActive ? 'true' : undefined}
-                      className={cn(
-                        'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-                        stylex.props(rootLayoutStyles.groupButton).className
+                      {...stylex.props(
+                        rootLayoutStyles.groupButton,
+                        treeCommitStyles.commitControlFocus
                       )}
                       onClick={() => navigateToGroup(group.id)}
                     >
@@ -1435,14 +1447,12 @@ export function ReviewRenderer({
                         aria-label={
                           descriptionExpanded ? 'Hide group description' : 'Show group description'
                         }
-                        className={cn(
-                          'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-                          stylex.props(
-                            rootLayoutStyles.descriptionButton,
-                            isActive
-                              ? rootLayoutStyles.descriptionActive
-                              : rootLayoutStyles.descriptionInactive
-                          ).className
+                        {...stylex.props(
+                          rootLayoutStyles.descriptionButton,
+                          isActive
+                            ? rootLayoutStyles.descriptionActive
+                            : rootLayoutStyles.descriptionInactive,
+                          treeCommitStyles.commitControlFocus
                         )}
                         onClick={() => toggleDescription(group.id)}
                       >
@@ -1483,7 +1493,9 @@ export function ReviewRenderer({
               type="button"
               size="icon"
               variant={sidebarVisible ? 'secondary' : 'ghost'}
-              className="size-8 shrink-0"
+              width="calc(var(--spacing) * 8)"
+              height="calc(var(--spacing) * 8)"
+              className="shrink-0"
               onClick={() => setSidebarVisible((v) => !v)}
               aria-pressed={sidebarVisible}
               title={sidebarVisible ? 'Hide review map' : 'Show review map'}
@@ -1520,7 +1532,9 @@ export function ReviewRenderer({
                 type="button"
                 size="icon"
                 variant={panelVisible ? 'secondary' : 'ghost'}
-                className="size-8 shrink-0"
+                width="calc(var(--spacing) * 8)"
+                height="calc(var(--spacing) * 8)"
+                className="shrink-0"
                 onClick={() => setPanelVisible((v) => !v)}
                 aria-pressed={panelVisible}
                 title={panelVisible ? 'Hide review thread' : 'Show review thread'}
@@ -2641,7 +2655,10 @@ function GroupMenu({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-7 text-muted-foreground hover:text-foreground"
+          width="calc(var(--spacing) * 7)"
+          height="calc(var(--spacing) * 7)"
+          labelColor="var(--crh-muted-button-label)"
+          className={stylex.props(privateButtonStyles.mutedInk).className}
           aria-label="Group actions"
         >
           <MoreHorizontal className="size-4" />
@@ -2697,7 +2714,8 @@ function ColumnResizer({
       tabIndex={0}
       style={side === 'left' ? { left: `${offset}px` } : { right: `${offset}px` }}
       className={cn(
-        'crh-resizer max-lg:hidden',
+        'crh-resizer',
+        stylex.props(rootLayoutStyles.resizerVisibility).className,
         side === 'left' ? 'crh-resizer-left' : 'crh-resizer-right',
         active && 'crh-resizer-active'
       )}
@@ -3988,7 +4006,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
         // sticky header carries its own complete border and never doubles with the
         // block frame while pinned. overflow-hidden is only applied while collapsed
         // (header is then the lone child and nothing scrolls).
-        'crh-block bg-card',
+        'crh-block',
         stylex.props(
           diffBlockStyles.block,
           collapsed && diffBlockStyles.collapsed,
@@ -4008,8 +4026,8 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           <button
             type="button"
             className={cn(
-              'group outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-              stylex.props(diffBlockStyles.toggle).className
+              'group',
+              stylex.props(diffBlockStyles.toggle, treeCommitStyles.commitControlFocus).className
             )}
             aria-expanded={!collapsed}
             aria-controls={bodyId}
@@ -4045,7 +4063,10 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
               type="button"
               variant="ghost"
               size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
+              width="calc(var(--spacing) * 6)"
+              height="calc(var(--spacing) * 6)"
+              labelColor="var(--crh-muted-button-label)"
+              className={stylex.props(privateButtonStyles.mutedInk).className}
               onClick={() => onStartDraft(block.path, commentAnchor.side, commentAnchor.line)}
               aria-label={`Add a review comment to ${block.path}`}
               title="Add a review comment"
@@ -4830,8 +4851,9 @@ function CommentPanel({
               <button
                 type="button"
                 className={cn(
-                  'group outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-                  stylex.props(commentStyles.pathButton).className
+                  'group',
+                  stylex.props(commentStyles.pathButton, treeCommitStyles.commitControlFocus)
+                    .className
                 )}
                 onClick={() => onNavigate(thread.path)}
                 title={`Jump to ${thread.path}`}
@@ -4926,12 +4948,13 @@ function PanelComposer({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 text-muted-foreground"
+          height="calc(var(--spacing) * 7)"
+          className="text-muted-foreground"
           onClick={onCancel}
         >
           Cancel
         </Button>
-        <Button type="button" size="sm" className="h-7" onClick={onSave}>
+        <Button type="button" size="sm" height="calc(var(--spacing) * 7)" onClick={onSave}>
           Save comment
         </Button>
       </div>
@@ -4956,8 +4979,7 @@ function ThreadCard({
     <article
       data-anchor={item.anchor}
       className={cn(
-        'transition-colors',
-        stylex.props(commentStyles.threadCard).className,
+        stylex.props(commentStyles.threadCard, treeCommitStyles.commitTransitionColors).className,
         focused && 'crh-thread-focused'
       )}
     >
@@ -4967,8 +4989,7 @@ function ThreadCard({
           onClick={() => onFocus(item.anchor, item.path)}
           title="Jump to this line in the diff"
           className={cn(
-            'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-            stylex.props(commentStyles.threadJump).className
+            stylex.props(commentStyles.threadJump, treeCommitStyles.commitControlFocus).className
           )}
         >
           {severity === 'p0' && <CircleAlert {...stylex.props(commentStyles.dangerGlyph)} />}
@@ -4992,7 +5013,10 @@ function ThreadCard({
             type="button"
             variant="ghost"
             size="icon"
-            className="-mr-1 size-6 text-muted-foreground hover:text-foreground"
+            width="calc(var(--spacing) * 6)"
+            height="calc(var(--spacing) * 6)"
+            labelColor="var(--crh-muted-button-label)"
+            className={cn('-mr-1', stylex.props(privateButtonStyles.mutedInk).className)}
             onClick={() => onDelete(item.id)}
             aria-label="Delete comment"
             title="Delete comment"

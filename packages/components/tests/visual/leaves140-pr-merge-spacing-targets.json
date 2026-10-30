@@ -1,0 +1,41 @@
+{
+  "scope": "Final140 noncompact main gap and trigger smallpadding only; all original text/background classes retained.",
+  "prefix": "migration-ownedmergecontrol--",
+  "themes": ["light", "dark"],
+  "pointers": ["fine", "coarse"],
+  "readyStates": ["rest", "hover-or-tap", "focus", "pressed", "menu-open", "select-and-merge"],
+  "otherTones": ["full-conflict", "full-neutral"],
+  "otherToneStates": ["rest", "focus"],
+  "disabledStories": ["full-disabled", "full-merging", "full-missing-handlers"],
+  "compactControls": ["ready", "merging"],
+  "variableControls": [
+    "parent-tokens",
+    "root-spacing5",
+    "element-spacing7",
+    "legacy-white-background",
+    "opposite-scope",
+    "self-dark",
+    "physical-inline"
+  ],
+  "negativeModes": ["direct-target-tokens"],
+  "positiveCells": 60,
+  "negativeCells": 4,
+  "viewportHeight": 760,
+  "fineWidth": 1280,
+  "coarseWidth": 390,
+  "deviceScaleFactor": 1,
+  "darkPredicate": ":where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))",
+  "targetTokenPolicy": "Only existing gap in main subtree and smallpadding in trigger subtree intentionally change raw UI values; all semantic primaryLabel/background tokens remain strictly unchanged. New private conditional label variable is separate namespace and API inlinecolor carrier is reported separately.",
+  "callbacks": "Actual Menu RadioItem selection\u2192squash updates method and counter; actualMerge callback receives selectedmethod. Disabled main/merging/missing callbacks stay inert. Real coarse tap hover, real mouse/touch held pressed, keyboard focus; no synthetic pseudo classes.",
+  "retainedReaderBoundary": "OriginalPrimary default/hoverBG reader coupling documented by real coarse touch calibration; staticsuccess BG and guarded hover90 remain TW, no newvariant/API/specificity patch.",
+  "privateLabelVariable": "--lody-pr-merge-label",
+  "coarsePressedWorkflow": "NOT_ACCEPTED: bounded real touch pressure did not establish active. Do not count either held-coarse cell as accepted.",
+  "initial9Boundary": "Nine canonical original healthy cells have original full render records but no separately collected inline carriers; metadata is not invented. Later55 +final64 do record carriers.",
+  "notAccepted": [
+    "light-coarse-full-ready-pressed-default",
+    "dark-coarse-full-ready-pressed-default"
+  ],
+  "capturedArtifactProfile": "leaves140-profile.json",
+  "capturedArtifactProfileSHA256": "1e2fd2684096dad057237cb99cc2fc2a3bfe55eb84a045cd746c16a58ab23c79",
+  "profileBoundary": "Captured artifact profile still names earlier four-utility plan. Cell setup stays identical; final source path is verified by after-final buildinputs. This review profile accurately maps final2 scope without rewriting the actual capture profile or old proofs."
+}

@@ -1788,17 +1788,65 @@ helper136 复用已验focus／transition role迁移FileTreeRow原生控件13处�
 两种视图覆盖同一变化像素不相加。sharing使用既有合成cloud-capability fixture，不代表
 OSS cloud composition覆盖。全部公开编译CSS规则相同，新增description writer仅局部生效。
 
-最新132固定实际根源码边界包含130／131，components 620文件／6,209测试通过，3,154份
-输入全程不变。790份生产扫描源码逐hash匹配稳定测试图与成功OSS renderer构建；共享UI
-最近独立回归仍为25文件／313测试、114份稳定输入。renderer-only首轮耗尽Node4GB堆，
-保留失败证据，所有输入与335份main／CLI／锁文件均不变。同源以8GB堆重试成功，没有
-源码或配置补丁。真实Electron onboarding／setup／Explore／local-chat四图在隔离数据中
-通过且正常关闭，仅为After-only；124另有上述实际目标Before／After。这些检查排除
-133／134，不接受已拒helper候选、不关闭raster OPEN，也不解除既有根ACP前置失败。
+固定146整合边界通过components620文件／6,209测试，3,200份记录输入全程不变。
+790份扫描源码hash同时对应这次稳定测试与实际OSS renderer输入图，三根下界为
+1,379／156／727；视觉资格单独记录。新UI owner141独立通过25文件／313测试及类型，
+四份owner文件hash固定。146两个renderer构建实际exit0，335份main／CLI／锁文件均未改。
+原宽After门禁仍FAIL：两build之间除了consumer，本指南也变化。独立qualified比较只排除
+确证未消费的这一Markdown文件，其余3,834份观察输入仅consumer不同，全部产物CSS
+字节相同，不改写原完整门禁。此前132默认4GB堆失败、同源8GB成功及四张真实After-only
+Electron smoke图继续单列，不是整App原Tailwind baseline。既有根ACP前置失败和旧像素
+OPEN均未解除。
 
 helper截至129的精确库存为392处／8个使用文件／21个未解析表达式，30份生产源码逐项
 对应实际成功构建293份输入。相对407减少15处，其中14是迁移、1是冗余清理；不含
 stories、测试及后续候选。下述主产品库存仍与浏览器覆盖独立。
+
+### 独立字色字段与精确编译条件
+
+控件label Token也可能参与背景计算。139被拒的secondary候选真实改变粗指针hover填色，
+四例共9,568原始／3,699阈值像素；六个兼容类已恢复。因此Button141只沿既有字体字段路径
+增加可选物理`labelColor`，不新增Token组、variant，不改背景或缺省行为。CSS-wide关键字
+到达实际字段，省略值仍使用原style分支；Base UI render元素的style优先级另行验证。
+显式inline API不承诺任意DOM／class注入仍保持原优先级：140同元素`.dark`诊断命中真实
+Konsta unlayered规则并失败。固定Account调用没有这种class／style／render端口，真实规则
+匹配与调用图审计仅支持这个有限范围，不构成公开层叠保证。
+
+96份默认owner完整raw对象全同，94对PNG相同，两对OPEN共347原始／82阈值像素。
+152对Account及36对回调的PNG／渲染字段全同，仅360个精确inline-color属性载体不同。
+Root独立重读284对原压缩记录并解码PNG，保留两处OPEN。216帧CSS关键字／reference
+API检查仅为After-only，不是成对截图。新owner通过UI25文件／313测试及类型检查，四份
+owner文件有hash锁；不宣称对整个UI图重新建立了稳定输入门禁。
+
+| 单元                   | 迁移源码utility | 验证边界与遗留限制                                                                                                         |
+| ---------------------- | --------------: | -------------------------------------------------------------------------------------------------------------------------- |
+| helper原生138          |               9 | 正式48对47相同，native58对40，file14对12；编译特异性提高的两处group-hover颜色恢复，像素OPEN保留。                          |
+| Account139／141        |            3 +6 | 保留139 primary，141 secondary采用独立字色；背景耦合失败及139正常动效cleanup缺口保留。                                     |
+| PR merge140            |               2 | 60正向对全同；静态hover背景和两字色类保留，两held-touch状态仍NOT_ACCEPTED。                                                |
+| helper142              |               8 | 正式55全同，完整134对108相同；分数rem与真实20px初始字体保留原精确条件，26处像素OPEN；另一个清理不计迁移。                  |
+| helper143              |              13 | 本地Button可选宽高／字色保留原raw selector和Slot合并，210对204相同；六OPEN共387原始／143阈值像素，错误菜单状态采集仍拒绝。 |
+| 私有paste144           |               1 | 24正向target／context对及580完整记录全同；真实34px安全区与vertical-rl圆角反例使padding／radius兼容类保留。                 |
+| 固定Mermaid／Banner145 |               2 | 源码2处／运行时5次，144对143相同；一个SVG OPEN4原始／零阈值像素；触摸采集失败和记录缺口仍未验收。                          |
+
+helper的新字段由独立控件拥有，不导入主产品primitive；原raw variant factory和Slot子元素
+优先级保持。`<64rem`被编译为`<=63.99rem`会留下真实分数区间差异，142最终保留原
+`not all and (width >= 64rem)`精确条件。实际20px初始字体用例区分React1024px挂载
+判断与CSS64rem可见阈值；不能凭默认16px截图删除hidden。
+
+paste144保留`calc(var(--spacing) * 0)`及局部initial／inherit语义。直接gap-token负控使
+计算gap0→19px，但单内容子元素使PNG相同，属于有效非视觉负控。实际安全区模拟中移除
+`p-0`使padding0→34px、高816→850px，竖排模式移除圆角类改变逻辑corner映射。
+生产legacy sibling portal host只有源码图证据；fixture验收真实body portal，不冒称运行了
+未挂载的nested Composer。这些有界验证不关闭旧Sidebar、像素、portal、原生输入或cleanup失败。
+
+Navigation146迁移真实Electron固定导航按钮一个字色源码出现次数。24正向状态的普通／
+伪元素字段、几何、flags和custom值相同，除576个明确继承的`--lody-boot-elapsed`值；
+完整raw对象不相同。该变量确实用于boot-shell动画，不称作无reader的诊断数据；目标
+观测也不证明整页计算字段相同。21个target及21个context视图相同，三target OPEN共
+45原始／14阈值像素，三context OPEN共5,676／261，分别计数。视图覆盖相同状态且有
+重叠，不当作独立状态对。两个同元素dark DOM负控不属于固定调用图；点击／Enter／
+Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，不重采成功帧，也不虚构
+像素原因。
 
 ## 后续工作
 
@@ -1833,6 +1881,16 @@ stories、测试及后续候选。下述主产品库存仍与浏览器覆盖独�
 | 精确截至 120 产品源码，含最终 Search118     | v2       |    1,414 |  157 |    726 |
 | 截至128的合格产品源码，排除后续131／130     | v2       |    1,404 |  157 |    725 |
 | 132实际固定主产品，含130／131且排除133／134 | v2       |    1,399 |  157 |    726 |
+| 截至145观察源码，未获全套回归资格           | v2       |    1,380 |  156 |    727 |
+| 146合格主产品；稳定全套与实际renderer源码   | v2       |    1,379 |  156 |    727 |
+
+截至145的source-only快照在扫描前两次核对790个相同canonical路径：components946／140／634，
+legacy UI429／14／93，routes5／2／0。这是新源码库存，不替代固定132全套测试／renderer
+边界；19处净减对应后续已接受主组件源码删除，不关闭任何部分视觉范围。helper143另为
+329／8／21，覆盖30份生产源码。
+同一source-only边界还冻结全部1,396份非story产品src：1,389处／158个使用文件／731未解析，
+重叠790份hash全部相同。三根外九处出现次数和四个未解析表达式独立记录，不产生新的
+扫描方法迁移credit。
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，

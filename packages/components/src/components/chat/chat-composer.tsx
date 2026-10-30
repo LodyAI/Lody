@@ -544,6 +544,9 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     paddingRight: themeSpace[2],
   },
+  pastedDrawerContent: {
+    [dialogTokens.gap]: 'calc(var(--spacing) * 0)',
+  },
   pastedDialogContent: {
     display: 'flex',
     height: '85vh',
@@ -1756,7 +1759,14 @@ export function ChatComposer({
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Drawer.Content side="bottom" closeButton={false} className="gap-0 rounded-t-2xl p-0">
+              <Drawer.Content
+                side="bottom"
+                closeButton={false}
+                className={cn(
+                  stylex.props(styles.pastedDrawerContent).className,
+                  'rounded-t-2xl p-0'
+                )}
+              >
                 {previewPastedTextDraft ? (
                   // Base UI wraps the children in a block box, so the column
                   // that lets the editor fill the sheet has to be ours, with a

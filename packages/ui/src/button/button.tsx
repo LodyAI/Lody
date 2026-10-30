@@ -30,6 +30,8 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   /** Outer label typography. Font-size numbers are px; line-height numbers are unitless. */
   fontSize?: CSSProperties['fontSize'];
   lineHeight?: CSSProperties['lineHeight'];
+  /** Constant label and currentColor glyph ink, independent of the variant's fills. */
+  labelColor?: CSSProperties['color'];
   className?: string;
 }
 
@@ -323,6 +325,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     height,
     fontSize,
     lineHeight,
+    labelColor,
     className,
     children,
     ...rest
@@ -348,12 +351,13 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
   // CSS-wide keywords, including var() fallbacks, must reach the actual field:
   // routing them through a custom property changes their inheritance semantics.
   const labelStyle =
-    fontSize == null && lineHeight == null
+    fontSize == null && lineHeight == null && labelColor == null
       ? sx.style
       : {
           ...sx.style,
           ...(fontSize != null && { fontSize }),
           ...(lineHeight != null && { lineHeight }),
+          ...(labelColor != null && { color: labelColor }),
         };
   const glyph = stylex.props(styles.glyph);
   return (

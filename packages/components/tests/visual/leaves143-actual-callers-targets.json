@@ -1,0 +1,398 @@
+{
+  "viewports": [
+    {
+      "name": "390",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "1024",
+      "width": 1024,
+      "height": 1000
+    },
+    {
+      "name": "1280",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "no-preference",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--with-existing-comments",
+    "code-review-helper-reviewrenderer--grouped-refactor"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ],
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "name": "composer-empty-placeholder",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-long-multiline",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic migration comment.\n\u4e2d\u6587\u8fb9\u754c\u4e0e RTL \u0645\u0631\u062d\u0628\u0627.\nlong-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!((e.scrollTop=0,e.value.includes(\"\u4e2d\u6587\u8fb9\u754c\"))))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "Escape-cancel",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(!document.querySelector(\".crh-panel textarea\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-reopened-empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "saved-comment-CtrlEnter",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic saved migration comment."
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Control+Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::1\\\"]\");if(!e||!(e.textContent.includes(\"Synthetic saved migration comment.\")&&!document.querySelector(\".crh-panel textarea\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "deleted-saved-comment",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::1\"] button[aria-label=\"Delete comment\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(!document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::1\\\"]\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "split-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "radio",
+            "name": "Split diff"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[aria-label=\"Split diff\"]').dataset.state==='on'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "role": "radio",
+            "name": "Split diff",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('aria-label')?.startsWith('Copy ')===true"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "group-actions-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[aria-label=\"Group actions\"] >> nth=0"
+          }
+        ]
+      },
+      {
+        "name": "group-actions-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[aria-label=\"Group actions\"] >> nth=0"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('[role=\"menu\"]')].some(e => e.getBoundingClientRect().height > 0)"
+          }
+        ]
+      },
+      {
+        "name": "group-actions-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=\"menu\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => ![...document.querySelectorAll('[role=\"menu\"]')].some(e => e.getBoundingClientRect().height > 0)"
+          }
+        ]
+      }
+    ]
+  }
+}

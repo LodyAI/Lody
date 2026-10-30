@@ -113,11 +113,28 @@ const ownedButtonVariants = createButtonVariants(false);
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  width?: React.CSSProperties['width'];
+  height?: React.CSSProperties['height'];
+  labelColor?: React.CSSProperties['color'];
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  (
+    { className, variant, size, asChild = false, width, height, labelColor, style, ...props },
+    ref
+  ) => {
     const Comp = asChild ? Slot : 'button';
+    // Keep CSS-wide keywords on the physical field. Existing caller and Slot child
+    // inline styles retain their original priority over the opt-in declarations.
+    const fieldStyle =
+      width == null && height == null && labelColor == null
+        ? style
+        : {
+            ...(width != null && { width }),
+            ...(height != null && { height }),
+            ...(labelColor != null && { color: labelColor }),
+            ...style,
+          };
     return (
       <Comp
         className={cn(
@@ -125,6 +142,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         ref={ref}
         {...props}
+        style={fieldStyle}
       />
     );
   }

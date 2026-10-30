@@ -7117,7 +7117,8 @@ function WorkspaceChatLanding({
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               width="calc(var(--spacing) * 7)"
               height="calc(var(--spacing) * 7)"
-              className="shrink-0 text-muted-foreground"
+              labelColor="hsl(var(--muted-foreground) / 1)"
+              className="shrink-0"
             >
               <PanelLeft {...stylex.props(landingStyles.glyph16)} />
             </Button>

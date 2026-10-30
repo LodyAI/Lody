@@ -17,11 +17,13 @@ const styles = stylex.create({
 
 function MergeFixture({
   tone = 'ready',
+  compact = true,
   disabled = false,
   isMerging = false,
   missingHandlers = false,
 }: {
   tone?: 'ready' | 'conflict' | 'neutral';
+  compact?: boolean;
   disabled?: boolean;
   isMerging?: boolean;
   missingHandlers?: boolean;
@@ -34,13 +36,14 @@ function MergeFixture({
     <div
       {...stylex.props(styles.frame)}
       data-owned-merge-fixture
+      data-owned-merge-compact={compact}
       data-owned-merge-count={mergeCount}
       data-owned-merge-selected-count={selectedCount}
       data-owned-merge-last-method={lastMerge}
       data-owned-merge-method={method}
     >
       <PrMergeButton
-        compact
+        compact={compact}
         method={method}
         tone={tone}
         disabled={disabled}
@@ -84,3 +87,10 @@ export const Neutral: Story = { args: { tone: 'neutral' } };
 export const Disabled: Story = { args: { disabled: true } };
 export const Merging: Story = { args: { isMerging: true } };
 export const MissingHandlers: Story = { args: { missingHandlers: true } };
+
+export const FullReady: Story = { args: { compact: false } };
+export const FullConflict: Story = { args: { compact: false, tone: 'conflict' } };
+export const FullNeutral: Story = { args: { compact: false, tone: 'neutral' } };
+export const FullDisabled: Story = { args: { compact: false, disabled: true } };
+export const FullMerging: Story = { args: { compact: false, isMerging: true } };
+export const FullMissingHandlers: Story = { args: { compact: false, missingHandlers: true } };
