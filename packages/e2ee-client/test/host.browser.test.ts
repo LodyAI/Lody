@@ -315,7 +315,9 @@ it.each(['chromium', 'webkit'] as const)(
       await page.goto(pathToFileURL(file).href);
       await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot('open-existing'));
       expect(await call(page, 'candidate')).toEqual(candidate);
-      expect((await call(page, 'openCandidate')).ok).toBe(true);
+      expect((await call(page, 'offline')).ok).toBe(true);
+      const offlineOpen = await call(page, 'openCandidate');
+      expect(offlineOpen.ok, JSON.stringify(offlineOpen)).toBe(true);
       expect((await call(page, 'openBody')).value).toEqual([72, 105]);
       expect((await call(page, 'prepare')).reason).toBe('conflict');
       await page.evaluate(() => (globalThis as HostGlobal).HostFixture.stop());

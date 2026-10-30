@@ -24,7 +24,6 @@ import {
   decode,
   writeRow,
   equal,
-  type ClientDatabase,
 } from './client-database';
 import { failure, type Transaction } from './database';
 
@@ -154,7 +153,6 @@ const outbox = (v: unknown) =>
     return r;
   });
 function cells<V extends object>(
-  db: ClientDatabase,
   b: ReturnType<typeof bindingRaw>,
   namespace: string,
   parse: (v: unknown) => V
@@ -286,12 +284,12 @@ export const indexedDbClientKeyStores = (input: IndexedDbClientKeyStoreOptions) 
         workspaceId: b.workspaceId,
       });
       if (!sameScope(b, db.bound)) return yield* failure('ClientKeyStores', 'corrupt');
-      const i = cells(db, b, 'installed', installed),
-        r = cells(db, b, 'receive', rx),
-        p = cells(db, b, 'repair', repair),
-        d = cells(db, b, 'distribution', distribution),
-        o = cells(db, b, 'outbox', outbox),
-        c = cells(db, b, 'candidate', candidate);
+      const i = cells(b, 'installed', installed),
+        r = cells(b, 'receive', rx),
+        p = cells(b, 'repair', repair),
+        d = cells(b, 'distribution', distribution),
+        o = cells(b, 'outbox', outbox),
+        c = cells(b, 'candidate', candidate);
       const run = <A>(
         name: string,
         mode: IDBTransactionMode,

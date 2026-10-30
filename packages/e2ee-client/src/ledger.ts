@@ -132,15 +132,21 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         }
         return yield* new LedgerFeedError({ code: 'read-too-large' });
       });
-      if (approval.kind === 'history') {
-        const current = yield* refresh();
-        yield* Effect.fromResult(requireLedgerContinuation(approval.view, current.view));
-      }
       const current = Effect.fnUntraced(function* () {
         const state = yield* feed.current();
         yield* Effect.fromResult(requireLedgerContinuation(approval.view, state.view));
         return state;
       });
+      if (approval.kind === 'history') {
+        const local = yield* feed.current();
+        if (local.view.length < approval.view.length) {
+          // A missing suffix requires I/O; a conflicting local prefix never does.
+          yield* Effect.fromResult(requireLedgerContinuation(local.view, approval.view));
+          yield* refresh();
+        }
+        // Re-verified persisted state can satisfy an already installed approval offline.
+        yield* current();
+      }
       return Context.make(LedgerSync, { current, refresh }).pipe(
         Context.add(LedgerPinStore, pins),
         Context.add(SubmissionJournal, submissions),

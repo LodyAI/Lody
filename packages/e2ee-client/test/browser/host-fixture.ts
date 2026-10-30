@@ -82,6 +82,7 @@ import {
 } from '../../src';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
 let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
 let runtime: E2eeWorkspaceRuntime;
@@ -309,7 +310,9 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
               );
               const source = Layer.succeed(LedgerFeedSource, {
                 readAfter: (offset: string) =>
-                  Effect.sync(() => {
+                  Effect.gen(function* () {
+                    if (localStorage.getItem('synthetic-offline'))
+                      return yield* new LedgerFeedError({ code: 'native-unavailable' });
                     const start = offset === '-1' ? 0 : Number(offset.split('/')[1]);
                     return {
                       requestOffset: offset,
@@ -636,6 +639,9 @@ export async function invoke(action: string) {
             return pendingWork ? Exit.isFailure(yield* Fiber.await(pendingWork)) : false;
           case 'closeSession':
             yield* session!.close();
+            return true;
+          case 'offline':
+            localStorage.setItem('synthetic-offline', '1');
             return true;
           case 'prepare':
             return yield* host.prepare(offer);

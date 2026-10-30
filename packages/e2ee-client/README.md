@@ -135,7 +135,10 @@ approval pages and their checksums remain evidence to replay, never authority.
 injected `LedgerFeedStore`, `LedgerPinStore`, `SubmissionJournal`, `LedgerLog`,
 `LedgerFeedSource` and `WorkspaceScope`. Keep the feed/pins in a stable database;
 use a separate submission slot per incarnation. Refresh is bounded and verifies
-every suffix before persisting its position. No corrupt row is reset or rebased.
+every suffix before persisting its position. An installed full-history approval can
+reopen offline when the locally re-verified feed already contains its checkpoint.
+A valid older prefix must refresh; a conflicting prefix is rejected. No corrupt row
+is reset or rebased.
 
 Explicit `prepare(offer, true)` prepares a wrapped replacement candidate while the
 old pointer remains current. A second unresolved candidate is refused. Replacement
