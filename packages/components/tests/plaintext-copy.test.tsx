@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Blob as NodeBlob } from 'node:buffer';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 import { buildConversationMarkdown, type WorkspaceId, type SessionMeta } from '@lody/shared';
 import { PlatformContext } from '@lody/platform/react';
 import {
@@ -23,6 +28,8 @@ import { initI18n } from '../src/i18n';
 import { ChatShareImageDialog } from '../src/components/sessions/chat-share-image-dialog';
 import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
+import { conversationCopyRange } from '../src/lib/conversation-copy-range';
+import { readConversationCopySource } from '../src/lib/conversation-copy-source';
 
 const png = vi.hoisted(() => ({
   captured: [] as string[],
@@ -141,6 +148,134 @@ function setup(host = runtime(), local = false) {
   };
   return { store, render };
 }
+
+/** Execute the shipped callback without importing the entire composer render graph. */
+function productionMarkdownCopy(bindings: Record<string, unknown>): () => Promise<void> {
+  const path = resolve(process.cwd(), 'src/components/sessions/session-chat-interface.tsx');
+  const source = ts.createSourceFile(
+    path,
+    readFileSync(path, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  let callback: ts.Expression | undefined;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'handleCopyConversationHistory' &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer)
+    )
+      callback = node.initializer.arguments[0];
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!callback) throw new Error('Missing conversation copy callback');
+  const javascript = ts.transpileModule(`(${callback.getText(source)})`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+  return runInNewContext(javascript, bindings) as () => Promise<void>;
+}
+
+it.each(['unchanged', 'account', 'logout', 'selection'] as const)(
+  'fences the production Markdown clipboard entry after final admission: %s',
+  async (change) => {
+    const host = runtime();
+    const { store, render } = setup(host);
+    let gateCalls = 0;
+    let sourceCurrent = true;
+    const switchScope = () => {
+      sourceCurrent = false;
+      if (change === 'account')
+        platformSession.set({ status: 'authenticated', user: { id: 'other' } });
+      else if (change === 'logout') platformSession.set({ status: 'unauthenticated' });
+      else if (change === 'selection') flushSync(() => render('replacement-selection'));
+    };
+    host.waitForContentAdmission = async () => {
+      if (++gateCalls === 2 && change !== 'unchanged') {
+        // Independent account-update continuation after the final gate's own
+        // assertion, before the outer callback resumes. No timers or sleeps.
+        const afterReturns = (remaining: number) =>
+          queueMicrotask(() => {
+            if (remaining) afterReturns(remaining - 1);
+            else switchScope();
+          });
+        afterReturns(3);
+      }
+    };
+    const view = { turnCount: 1, readAll: async () => selected };
+    host.withSessionStore = async (_id, read) => read({ history: view } as never);
+    await act(async () => render());
+    const settled = Promise.withResolvers<void>();
+    const writes: { text: string; sourceCurrent: boolean }[] = [];
+    const successes: string[] = [];
+    const copy = productionMarkdownCopy({
+      conversationView: view,
+      runtime: host,
+      session: { id: 'selected', title: 'Selected conversation' },
+      workspaceId: host.workspaceId,
+      conversationCopySource: undefined,
+      conversationCopyParticipants: {},
+      conversationCopyRange,
+      readConversationCopySource,
+      buildConversationMarkdown,
+      runPlaintextCopy: (
+        operation: (guard: () => void, admit: () => Promise<void>) => Promise<unknown>
+      ) =>
+        run(async (guard, admit) => {
+          try {
+            return await operation(guard, admit);
+          } finally {
+            settled.resolve();
+          }
+        }),
+      navigator: {
+        clipboard: {
+          writeText: async (text: string) => {
+            writes.push({ text, sourceCurrent });
+          },
+        },
+      },
+      captureSessionEvent: () => {},
+      capturePostHogEvent: () => {},
+      postHog: null,
+      toast: {
+        error: () => {},
+        success: (text: string) => {
+          successes.push(text);
+        },
+      },
+      t: (_key: string, fallback: string) => fallback,
+      describeCopiedConversation: () => 'Copied',
+      console: { error: () => {} },
+      Error,
+    });
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = copy();
+    });
+    await answer('Create decrypted copy');
+    await act(async () => {
+      await pending;
+      await settled.promise;
+    });
+    expect(gateCalls).toBe(2);
+    expect(store.get(runtimeAtom)).toBe(host);
+    expect(store.get(userAtom)?.id).toBe('owner');
+    if (change === 'unchanged') {
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({ sourceCurrent: true });
+      expect(writes[0]!.text).toContain('selected-copy-sentinel');
+      expect(successes).toEqual(['Copied']);
+    } else {
+      expect(writes).toEqual([]);
+      expect(successes).toEqual([]);
+      expect(selected[0]!.items[0]!.text).toBe('selected-copy-sentinel');
+    }
+  }
+);
 async function copyText(assertCurrent: () => void) {
   const { markdown } = buildConversationMarkdown({
     history: selected,

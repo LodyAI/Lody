@@ -4157,6 +4157,7 @@ export const SessionChatInterface = memo(
                   : undefined,
             });
             await admitOutput();
+            assertCurrent();
             await navigator.clipboard.writeText(markdown);
             assertCurrent();
             captureSessionEvent('session/history_copy_succeeded', {

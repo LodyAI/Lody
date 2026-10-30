@@ -78,6 +78,72 @@ afterEach(() => {
 });
 
 describe('share image export', () => {
+  it.each(['download', 'native', 'desktop-save', 'desktop-copy', 'web-copy'] as const)(
+    'rechecks scope synchronously at the final %s handoff',
+    async (destination) => {
+      const received: unknown[] = [];
+      mocks.native.mockReturnValue(destination === 'native');
+      mocks.toBlob.mockResolvedValue({
+        type: 'image/png',
+        size: 4,
+        arrayBuffer: async () => Uint8Array.of(137, 80, 78, 71).buffer,
+      } as Blob);
+      if (destination.startsWith('desktop'))
+        mocks.bridge.mockReturnValue({
+          saveAs: async (value: unknown) => {
+            received.push(value);
+            return { saved: true };
+          },
+          copyToClipboard: async (value: unknown) => {
+            received.push(value);
+            return { copied: true };
+          },
+        });
+      class TestClipboardItem {
+        constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+      }
+      vi.stubGlobal('ClipboardItem', TestClipboardItem);
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          write: async (items: TestClipboardItem[]) => {
+            received.push(await items[0]!.items['image/png']!);
+          },
+        },
+      });
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL(blob: Blob) {
+            received.push(blob);
+            return 'blob:copy';
+          }
+          static revokeObjectURL() {}
+        }
+      );
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      let current = true;
+      let admitted = false;
+      const guard = () => {
+        if (!current) throw new DOMException('Copy source changed', 'AbortError');
+      };
+      const admitOutput = async () => {
+        admitted = true;
+        await Promise.resolve();
+        current = false;
+      };
+      const element = document.createElement('div');
+      const output = destination.endsWith('copy')
+        ? copyShareImage(element, guard, admitOutput)
+        : exportShareImage(element, 'Selected', 'conversation', guard, admitOutput);
+      await expect(output).rejects.toThrow('Copy source changed');
+      expect(admitted).toBe(true);
+      expect(received).toEqual([]);
+      expect(mocks.shared).toEqual([]);
+      expect([...mocks.files]).toEqual([]);
+    }
+  );
+
   it.each([false, true])(
     'rejects a late capture after its source changes (native: %s)',
     async (native) => {
