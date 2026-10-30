@@ -2,6 +2,7 @@
 
 Status: implemented
 Type: architecture
+PR: [#2100](https://github.com/LodyAI/Lody/pull/2100)
 Translation: current
 
 [中文](2026-10-30-desktop-schema-initialization.zh.md)
