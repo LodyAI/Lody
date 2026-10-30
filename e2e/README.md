@@ -84,6 +84,11 @@ round, then covered by its checksummed manifest.
 Scout operation, classification, and triage are specified in
 [the Scout contract](./SCOUT.md).
 
+The [message schema memory decision](../.agents/notes/implemented/architecture/2026-10-30-desktop-schema-initialization.md)
+records isolated startup/conversation measurements and the bounded sharing of
+message string rules. The broader temporary experiments are separate from the
+production change and do not establish regression thresholds.
+
 The load lane first creates synthetic persisted Sessions through the real
 Electron/CLI/ACP path, then closes and relaunches the same isolated profile.
 The warm launch proves that the expected Session count, a representative

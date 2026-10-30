@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   MessageContentSchema,
@@ -8,6 +9,8 @@ import {
   LocalProjectControlResponseSchema,
   LocalSessionControlResponseSchema,
   BuiltinRuntimeOverridesSchema,
+  CustomAcpLaunchSpecSchema,
+  WorktreeSetupScriptConfigSchema,
   CliTypeSchema,
   MachineAcpAuthenticateRequestSchema,
   MachineAcpAuthenticateResponseSchema,
@@ -31,6 +34,42 @@ import {
 import { ACP_CAPABILITY_CACHE_VERSION, type SessionImagePayload } from '../src/ai';
 import { ACP_AUTHENTICATION_FORM_MAX_BYTES } from '../src/acp-authentication-limits';
 import type { SessionId } from '../src/ids';
+
+describe('message primitive isolation', () => {
+  it('preserves nullable image normalization without accepting null in runtime paths', () => {
+    const image = SessionImagePayloadSchema.parse({
+      imageId: 'image-1',
+      mimeType: 'image/png',
+      sizeBytes: 1,
+      fileName: null,
+    });
+    expect(image.fileName).toBeUndefined();
+    expect(BuiltinRuntimeOverridesSchema.parse({ codexPath: '  ' })).toEqual({ codexPath: '  ' });
+    expect(BuiltinRuntimeOverridesSchema.safeParse({ codexPath: null }).success).toBe(false);
+  });
+
+  it('trims required commands while preserving plain arguments and script text', () => {
+    expect(CustomAcpLaunchSpecSchema.parse({ command: '  python  ', args: ['  '] })).toEqual({
+      command: 'python',
+      args: ['  '],
+    });
+    const rejected = CustomAcpLaunchSpecSchema.safeParse({ command: '  ', args: ['kept'] });
+    expect(rejected.success).toBe(false);
+    if (!rejected.success) expect(rejected.error.issues.map((issue) => issue.path)).toEqual([['command']]);
+    expect(WorktreeSetupScriptConfigSchema.parse({ scripts: { bash: '  ', powershell: '' } })).toEqual({
+      scripts: { bash: '  ', powershell: '' },
+    });
+  });
+
+  it('keeps repeated string fields inline in the published JSON schema', () => {
+    const schema = z.toJSONSchema(WorktreeSetupScriptConfigSchema, { target: 'draft-7', io: 'input' });
+    expect(schema.properties?.scripts).toEqual({
+      type: 'object',
+      properties: { bash: { type: 'string' }, powershell: { type: 'string' } },
+      additionalProperties: false,
+    });
+  });
+});
 
 describe('branded id schemas', () => {
   it('preserves the SessionId domain type through parsing', () => {
