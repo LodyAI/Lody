@@ -29,6 +29,7 @@ import {
   cleanupRemovedDesktopWorkspace
 } from '../../services/e2ee-account-runtime'
 import { assertProductWindowSender } from '../assert-sender'
+import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
 import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
@@ -921,7 +922,9 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async refresh(workspaceId: string, options?: { installKeys?: boolean }) {
-    return this.refreshLedger(workspaceId, options)
+    return observeClientLossOperation('refresh', workspaceId, sender(), () =>
+      this.refreshLedger(workspaceId, options)
+    )
   }
   private async refreshLedger(workspaceId: string, options?: { installKeys?: boolean }) {
     if (
@@ -1416,6 +1419,17 @@ export class E2eeIpc extends IpcService {
     rpcOnly?: true
   ) {
     const id = sender()
+    return observeClientLossOperation('token', workspaceId, id, () =>
+      this.contentStreamsTokenFor(id, workspaceId, rejectedToken, requestSnapshotFor, rpcOnly)
+    )
+  }
+  private async contentStreamsTokenFor(
+    id: number,
+    workspaceId: string,
+    rejectedToken?: string,
+    requestSnapshotFor?: string,
+    rpcOnly?: true
+  ) {
     const access = await withDesktopE2eeAccount(
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
@@ -1451,13 +1465,15 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async seal(workspaceId: string, input: Parameters<E2eeWorkspaceRuntime['seal']>[1]) {
     const id = sender()
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.seal(workspaceId, input)
-          : Effect.fail(new Error('e2ee_not_open')),
-      workspaceId,
-      false
+    return observeClientLossOperation('seal', workspaceId, id, () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.seal(workspaceId, input)
+            : Effect.fail(new Error('e2ee_not_open')),
+        workspaceId,
+        false
+      )
     )
   }
   @IpcMethod()
@@ -1466,13 +1482,15 @@ export class E2eeIpc extends IpcService {
     input: Parameters<E2eeWorkspaceRuntime['openContent']>[1]
   ) {
     const id = sender()
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.openContent(workspaceId, input)
-          : Effect.fail(new Error('e2ee_not_open')),
-      workspaceId,
-      false
+    return observeClientLossOperation('read', workspaceId, id, () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.openContent(workspaceId, input)
+            : Effect.fail(new Error('e2ee_not_open')),
+        workspaceId,
+        false
+      )
     )
   }
   /** Passive process-bound evidence; no reader open, cloud access or cache renewal. */
@@ -1587,25 +1605,27 @@ export class E2eeIpc extends IpcService {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) {
     const id = sender()
-    const cloud = await desktopE2eeCloudClient()
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? Effect.succeed({
-              accountId: owner.accountId,
-              work: owner.host.prepareDispatch(
-                workspaceId,
-                targetMachineId,
-                input,
-                cloud.client.machineSharing(),
-                (request) => cloud.client.history(request)
-              )
-            })
-          : Effect.fail(new Error('e2ee_not_open')),
-      workspaceId,
-      false
-    )
-    return runDesktopE2eeOperation(access.accountId, access.work)
+    return observeClientLossOperation('prepareDispatch', workspaceId, id, async () => {
+      const cloud = await desktopE2eeCloudClient()
+      const access = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? Effect.succeed({
+                accountId: owner.accountId,
+                work: owner.host.prepareDispatch(
+                  workspaceId,
+                  targetMachineId,
+                  input,
+                  cloud.client.machineSharing(),
+                  (request) => cloud.client.history(request)
+                )
+              })
+            : Effect.fail(new Error('e2ee_not_open')),
+        workspaceId,
+        false
+      )
+      return runDesktopE2eeOperation(access.accountId, access.work)
+    })
   }
   @IpcMethod()
   async acceptDispatchResponse(
@@ -1615,13 +1635,15 @@ export class E2eeIpc extends IpcService {
     frameHex: string
   ) {
     const id = sender()
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.acceptDispatchResponse(workspaceId, targetMachineId, input, frameHex)
-          : Effect.fail(new Error('e2ee_not_open')),
-      workspaceId,
-      false
+    return observeClientLossOperation('dispatchResponse', workspaceId, id, () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.acceptDispatchResponse(workspaceId, targetMachineId, input, frameHex)
+            : Effect.fail(new Error('e2ee_not_open')),
+        workspaceId,
+        false
+      )
     )
   }
   @IpcMethod()
@@ -1692,6 +1714,16 @@ export class E2eeIpc extends IpcService {
     expectedAccountId?: string
   ) {
     const id = sender()
+    return observeClientLossOperation('open', workspaceId, id, () =>
+      this.openFor(id, workspaceId, observed, expectedAccountId)
+    )
+  }
+  private async openFor(
+    id: number,
+    workspaceId: string,
+    observed?: Parameters<E2eeWorkspaceRuntime['open']>[1],
+    expectedAccountId?: string
+  ) {
     const identity =
       expectedAccountId === undefined
         ? undefined
@@ -1779,6 +1811,16 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async close(workspaceId: string, expectedAccountId?: string, readerOwner?: string) {
     const id = sender()
+    return observeClientLossOperation('close', workspaceId, id, () =>
+      this.closeFor(id, workspaceId, expectedAccountId, readerOwner)
+    )
+  }
+  private async closeFor(
+    id: number,
+    workspaceId: string,
+    expectedAccountId?: string,
+    readerOwner?: string
+  ) {
     if (
       expectedAccountId !== undefined &&
       getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== expectedAccountId

@@ -1,4 +1,5 @@
 import { e2eeAccessLoss, type E2eeAccessLoss } from '../lib/e2ee-member-removal';
+import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } from '@lody/shared';
@@ -57,6 +58,8 @@ export function createE2eeContent(input: {
     }
     return true;
   };
+  // E2E-only: absent outside an automation window whose main registered the probe.
+  const effects = clientLossEffects(input.workspaceId);
   const recovering = new Set<string>();
   const requested = new Map<string, number>();
   const recovery = (stream: string, pending: boolean) => {
@@ -145,15 +148,20 @@ export function createE2eeContent(input: {
               if (lost) return Promise.reject(new Error(lost));
               const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
               const additionalData = request.additionalData(header);
-              return input.runtime.seal(input.workspaceId, {
-                epoch,
-                room,
-                context: request.context,
-                plaintext: request.plaintext,
-                additionalData,
-              });
+              const seal = () =>
+                input.runtime.seal(input.workspaceId, {
+                  epoch,
+                  room,
+                  context: request.context,
+                  plaintext: request.plaintext,
+                  additionalData,
+                });
+              return effects ? effects.track('write', seal) : seal();
             },
-            open: (request) => input.runtime.openContent(input.workspaceId, { room, ...request }),
+            open: (request) => {
+              const open = () => input.runtime.openContent(input.workspaceId, { room, ...request });
+              return effects ? effects.track('read', open) : open();
+            },
           }) satisfies PayloadProtectionProvider
       )
     ),

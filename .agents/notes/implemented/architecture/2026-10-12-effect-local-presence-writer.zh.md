@@ -64,7 +64,9 @@ presence Spec 复核，没有创建替代 Spec。根 roadmap ledger 记录此下
 
 `makeLocalLoroWriterLegacy` 是唯一 writer runtime executor。CLI doc 创建从全进程
 singleton 注入 `LocalLoroWriterNodeTurn`；Node socket 断开／停止和 manager cleanup
-等待 release receipt。应用 owner 原生注入后删除 executor。Engine 组装／room hook
+等待 release receipt。socket 停止只释放自身连接。各工作区引擎共用这个进程 writer，
+因此 Fleet 在所有工作区 runtime 和连接 owner 都经它释放后才关闭它；保留下来的失败 owner
+会让 writer 一直开着，直到 `recoverShutdown` 释放。应用 owner 原生注入后删除 executor。Engine 组装／room hook
 及 Fleet 更广泛的 Promise cleanup（含既有失败日志策略）未迁移；socket／应用 writer
 注册表在此 Legacy 策略下仍保留失败的下层 owner。本单元不完成完整 P7、Session／
 Turn 或整个 Loro stack。

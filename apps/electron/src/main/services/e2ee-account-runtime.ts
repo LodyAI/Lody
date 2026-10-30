@@ -276,6 +276,17 @@ export function inspectDesktopE2eeCachedState(
   })
 }
 
+/** E2E evidence only: one renderer's registered reader acquisitions. Synchronous,
+ * so it never waits on or takes the account lock, opens an owner or touches custody. */
+export function countDesktopE2eeReaders(
+  accountId: string,
+  workspaceId: string,
+  senderId: number
+): number {
+  const owner = owners.get(identityDirectory(accountId, workspaceId))
+  return owner?.accountId === accountId ? (owner.readers.get(workspaceId)?.get(senderId) ?? 0) : 0
+}
+
 /** Quit/logout await actual in-flight native operations before releasing stores. */
 export function closeDesktopE2eeAccount(options?: {
   quit?: boolean
