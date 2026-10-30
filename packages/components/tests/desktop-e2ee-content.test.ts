@@ -92,7 +92,8 @@ describe('desktop E2EE content epoch safety', () => {
     let successor: typeof first | undefined;
     try {
       expect(await first.getToken()).toBe('epoch-token-1');
-      expect(entries.size).toBeGreaterThan(0);
+      // A stale row can still exist from an older client that persisted tokens.
+      entries.set('stale-epoch-row', 'epoch-token-1');
       access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
       await access.transition({
         // Even a cache row that could not be removed cannot select the next token.
@@ -105,6 +106,51 @@ describe('desktop E2EE content epoch safety', () => {
       await first.close();
       await successor?.close();
       await access.close();
+      vi.unstubAllGlobals();
+    }
+  });
+  it('mints a fresh content token for a recreated runtime instead of hydrating storage', async () => {
+    const entries = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
+    });
+    let issued = 0;
+    const runtime = {
+      contentStreamsToken: async () => ({
+        token: `content-token-${++issued}`,
+        bucketId: 'encrypted-content',
+        gatewayBaseUrl: 'https://streams.example.com',
+        expiresIn: 480,
+        expiresAt: 1_900_000_000_000,
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const open = () =>
+      createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'recreated-runtime-workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+    const first = open();
+    const firstProvider = first.e2ee.createTokenProvider(new AbortController().signal);
+    expect(await firstProvider.getToken()).toBe('content-token-1');
+    await firstProvider.close();
+    await first.close();
+    // RuntimeProvider recreates the workspace runtime with the same epoch. The
+    // successor's transports read its bucket before any request, so the token must
+    // come from the native host, which also re-checks admission, not from storage.
+    const second = open();
+    const secondProvider = second.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await secondProvider.getToken()).toBe('content-token-2');
+      expect(second.e2ee.bucketId()).toBe('encrypted-content');
+      expect(entries.size).toBe(0);
+    } finally {
+      await secondProvider.close();
+      await second.close();
       vi.unstubAllGlobals();
     }
   });

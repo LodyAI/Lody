@@ -87,7 +87,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   transports before recording an encrypted or contradictory verdict.
 - Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
   leases. No plaintext bypass. Keep retained-epoch sends; select confirmed keys per
-  operation. Forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
+  operation. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
   Drain before deleting that instance; retain exact receipts.
   [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
   [transport](../../../../specs/workspace-streams-content.md).

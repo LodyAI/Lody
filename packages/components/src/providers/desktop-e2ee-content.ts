@@ -10,6 +10,12 @@ import {
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 
+const NO_TOKEN_STORAGE = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
 /** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
 export function createE2eeContent(input: {
   runtime: E2eeWorkspaceRuntime;
@@ -158,6 +164,9 @@ export function createE2eeContent(input: {
       endpoint: `https://e2ee.invalid/${rpcOnly ? 'rpc-token' : 'content-token'}/${transition.epoch()}`,
       workspaceId: input.workspaceId,
       authToken: input.authToken,
+      // Never hydrate a stored token: each provider must obtain its bucket from
+      // the host, and every mint re-checks the host's current admission.
+      storage: NO_TOKEN_STORAGE,
       fetchImpl: async (_url, init) => {
         // No native combined-signal API is needed: this adapter only checks
         // cancellation before/after the owned host call, rather than passing it on.
