@@ -88,10 +88,8 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
   transfer limits; stage isolated cache files and clean up after handoff, failure, or
   cancellation. Report cancellation separately; retain the preview and selection.
-- Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
-  repeat runtime admission and its source guard before output. Unknown cloud mode cannot authorize a
-  copy; encrypted copies require a fresh explicit choice. Cancellation retains
-  selection and cannot remove a user destination. [Ownership](../hooks/README.md#explicit-plaintext-copies).
+- Before changing conversation Markdown/PNG exports, read the
+  [conversation export rules](../AGENTS.md#conversation-exports).
 
 ## File identity, caching, and errors
 
