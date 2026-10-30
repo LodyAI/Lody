@@ -1,0 +1,150 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebarbutton--natural",
+    "migration-ownedlegacysidebarbutton--scoped"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebarbutton--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "click",
+        "selector": "[data-sidebar-button-toggle]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='true'&&!!document.querySelector('[data-mobile=true] [data-case=default]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "click",
+        "selector": "[data-sidebar-button-toggle]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='true'&&!!document.querySelector('[data-mobile=true] [data-case=default]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebarbutton--natural": [
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-mobile=true] [data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-mobile=true] [data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-mobile=true] [data-case=default]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--scoped": [
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-mobile=true] [data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-mobile=true] [data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-mobile=true] [data-case=default]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-state]')?.dataset.sidebarButtonOpen==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1577,9 +1577,15 @@ After-only 图明确仅作冒烟。合组报告已通过真实桌面／手机浏
 
 ### 私有评论与局部控件兼容路径
 
-评论／finding 续迁将 114 处私有 Renderer utility 迁入 StyleX。字面量 `font-sans` 保留：
+评论／finding 续迁将 114 处私有 Renderer utility 迁入 StyleX。103 批保留字面量 `font-sans`：
 被拒绝的 115 处候选即使 112 对 PNG 相同仍改变字体回退列表，三十五对记录不等的候选
-继续标为拒绝。`leaves103-105-acceptance.html` 包含 156 对正式帧，其中 153 对 PNG 字节
+继续标为拒绝。后续版本匹配探针定位到 unplugin 的 Lightning CSS1.33 后处理：默认
+Browserslist 包含 Android144，触发 system-ui 兼容扩栈；Tailwind4.3 固定目标不含 Android。
+[版本化字体实现](https://raw.githubusercontent.com/parcel-bundler/lightningcss/v1.33.0/src/properties/font.rs)
+与独立分阶段／分目标控制一致。同 textarea 上的固定私有变量候选保留原 literal，不读根
+字体别名、不加 fallback 或改全局目标；隔离副本两次完整构建与十四对真实正向帧相同，
+两对直接写新私有名的负控仍为差异。独立 live 单元实施并验证前迁移计数为零，不宣称
+任意 DOM 注入等价，也不关闭原 115 候选差异。`leaves103-105-acceptance.html` 包含 156 对正式帧，其中 153 对 PNG 字节
 相同、73,555 条标准记录相同；三对正式 OPEN 共十七原始／零阈值像素，一对 native OPEN
 另有十七原始／一阈值像素。实际导航、composer 缩放、键盘保存与八对离线文件已覆盖，
 原截图工具 caret 和就绪失败仍单列保留。
@@ -1654,6 +1660,30 @@ Node 进程，两者继续标记 `closedNormally=false`，帧相同不代表清�
 七十八处均为迁移，Separator 六处运行路径映射不删除源码字面量；ReviewRenderer 仍有
 441 处。主产品库存仍独立为截至 99 的 1,424／157／725，不含后续 110／111 与未访问的
 helper 状态。
+
+### 默认 legacy Sidebar 控件
+
+legacy Sidebar 虽然仓库中只被迁移 stories 使用，仍通过公开出口提供，不能按闲置删除
+303 处源码。110 批把 SidebarMenuButton 十一处普通布局映射迁入 StyleX；`asChild` 与非空
+直接 `className` 调用者保留全部原 utility，一个 CVA 声明提供两条路径。size 的默认／
+null／未知值与私有 writer、state／group／important／SVG 原规则顺序不变。有界分流真实
+复验此前 27 批 wildcard、外层 icon／offcanvas 和 opaque 调用反例，不抹去或宣称普遍
+解决这些更广合同。八十八对 PNG／完整记录相同：六十四对正式帧／3,836 条标准记录、
+二十四对 native／600 节点，覆盖局部 spacing／radius／RTL、直接 opaque／utility／inline、
+实际 Slot 与祖先定向规则。真实组件输出门禁覆盖 240 输入：180 个 legacy 字节相同、
+60 个 normal 分支／属性情境。原两个 hover 失败来自真实 action 遮挡目标；改用无 action
+兄弟并验证实际 `:hover`，原失败图仍保留。十一处映射的源码删除计数为零。
+
+用于浏览器的 Sidebar 快照保留用户既有 Tooltip JSX 空格；Git 候选只把任务 hunk 应用到
+HEAD，用户 hunk 不进暂存。主 Agent 验证两快照仅该精确空白序列不同，并独立核对每张
+原 PNG、完整记录与解码像素。隔离视觉树另有二十五份未触及的既有用户文件与根工作区
+不同，记录在 `leaves110-build-root-boundary-audit.json`；证据只建立该模块差量，不代表
+再次运行当前完整根应用。
+
+新的精确根快照核对三扫描根全部 790 份生产文件，较截至 99 仅 Sidebar 改变。下界仍为
+1,424 处／157 使用文件，未解析表达式为 726：静态扫描把新增已知 StyleX class map 别名
+视作另一属性查询，不是新增 Tailwind utility。四十八文件的 legacy UI 子扫描仍为 429 处／
+十四使用文件／九十四未解析表达式；helper 库存保持独立。
 
 ## 后续工作
 

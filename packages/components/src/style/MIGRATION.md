@@ -33,6 +33,19 @@ caller utility. The old attribute selector may have beaten a plain caller
 class within the utilities layer. Preserve that variant until caller precedence
 is verified, including public adapter callers beyond the current app.
 
+Default native branches of a legacy public primitive can migrate independently
+when compatibility callers retain the complete original cascade. SidebarMenuButton
+uses one CVA declaration for two static selectors: ordinary elements with no direct
+caller class use StyleX for the verified layout fields; `asChild` and nonempty
+`className` keep the original utilities. Keep state/group/important, font and SVG
+reader rules shared and unchanged. Verify ancestor wildcards, targeted selectors,
+opaque caller classes, Slot children and outer collapse states before accepting
+that split. A guard alone does not prove these contracts. Preserved literals earn
+zero source-removal credit even when the normal runtime route is genuinely StyleX;
+inspect the actual matching rules so the new styles are not masked by retained
+normal-path utilities. The independent helper controls apply their own verified
+ordinary/Slot split without importing product primitives or palette aliases.
+
 Verify an override in every control state. The archive button becomes
 `position: relative` while confirming; its caller retains `absolute z-20` so
 the confirmation still overlays the end slot. Removing that compatibility can

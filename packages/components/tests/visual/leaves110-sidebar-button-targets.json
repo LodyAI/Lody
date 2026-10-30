@@ -1,0 +1,417 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebarbutton--natural",
+    "migration-ownedlegacysidebarbutton--wildcard",
+    "migration-ownedlegacysidebarbutton--targeted",
+    "migration-ownedlegacysidebarbutton--scoped"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebarbutton--natural": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-sidebar=menu-button]').length===13"
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--wildcard": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-sidebar=menu-button]').length===13"
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--targeted": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-sidebar=menu-button]').length===13"
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('[data-sidebar=menu-button]').length===13"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebarbutton--natural": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=sm]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-case=sm]').matches(':hover')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 900
+          },
+          {
+            "action": "focus",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=icon]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=offcanvas]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='collapsed'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=none]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--wildcard": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=sm]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-case=sm]').matches(':hover')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 900
+          },
+          {
+            "action": "focus",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=icon]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=offcanvas]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='collapsed'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=none]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--targeted": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=sm]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-case=sm]').matches(':hover')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 900
+          },
+          {
+            "action": "focus",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=icon]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=offcanvas]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='collapsed'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=none]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebarbutton--scoped": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-case=sm]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-case=sm]').matches(':hover')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1100,
+            "y": 900
+          },
+          {
+            "action": "focus",
+            "selector": "[data-case=default]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-case=default]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-button-event]').textContent==='default'"
+          }
+        ]
+      },
+      {
+        "name": "external-icon",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=icon]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "own-icon-outer-offcanvas",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=offcanvas]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='collapsed'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-external=none]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-button-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-sidebar-button-state]');return !!p&&p.dataset.sidebarButtonState==='expanded'&&p.dataset.sidebarButtonMobile==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

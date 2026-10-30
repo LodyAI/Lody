@@ -128,3 +128,8 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   Chromium cannot validate the Mozilla selectors. The track fill is a
   `--lody-slider-fill` percentage set inline, because a pseudo-element cannot
   take a style attribute.
+
+## Legacy Sidebar
+
+- Keep Slot and nonempty caller classes on the original utility cascade; only
+  verified default native branches use StyleX. See [migration](../style/MIGRATION.md).

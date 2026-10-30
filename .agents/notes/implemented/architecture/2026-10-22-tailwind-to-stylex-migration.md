@@ -2219,9 +2219,19 @@ stories, tests, active later work and the core component timeline are excluded.
 ### Private comments and compatible local controls
 
 The comment/finding continuation migrates 114 private Renderer utilities. The
-literal `font-sans` remains: a rejected 115-utility candidate changed its fallback
+literal `font-sans` was retained in103: a rejected 115-utility candidate changed its fallback
 family list despite 112 matching PNGs. Thirty-five record-different candidate
-pairs stay rejected. `leaves103-105-acceptance.html` contains 156 formal pairs,
+pairs stay rejected. Later version-matched probes identify the cause in unplugin's
+Lightning CSS1.33 postprocessing: default Browserslist includes Android144, which
+triggers its system-ui compatibility expansion; Tailwind4.3 uses fixed targets
+without Android. The [versioned font implementation](https://raw.githubusercontent.com/parcel-bundler/lightningcss/v1.33.0/src/properties/font.rs)
+and independent per-stage/per-target probes agree. A fixed private variable on the
+textarea preserves the original literal without a root-font alias, fallback or
+compiler-target change. In an ignored copy, two complete builds and fourteen real
+positive pairs match; two direct writes to the new private name remain negative.
+This candidate has zero product migration credit until its separate live unit is
+implemented and verified. It neither accepts arbitrary DOM injection nor closes
+any original115-candidate difference. `leaves103-105-acceptance.html` contains 156 formal pairs,
 153 byte-exact PNGs and 73,555 equal standard records; three formal OPENs total
 17 raw/zero threshold pixels and one native OPEN adds 17 raw/one threshold pixel.
 Actual navigation, composer resize, keyboard save and eight offline file pairs
@@ -2327,6 +2337,39 @@ helper CSS: **620 occurrences/eight used files/18 unresolved expressions**. Its
 delete no source literals. ReviewRenderer retains 441 occurrences. The core product
 inventory remains 1,424/157/725 through 99; later 110/111 work and unvisited helper
 states are excluded.
+
+### Default legacy Sidebar controls
+
+The legacy Sidebar remains publicly exported even though repository consumers are
+migration stories. Its303 source occurrences cannot be deleted as unused. Batch110
+moves eleven ordinary SidebarMenuButton layout mappings to StyleX while retaining
+every utility literal for `asChild` and nonempty direct `className` callers. A single
+CVA declaration supplies both paths; size defaults/null/unknown behavior and the
+remaining private/state/group/important/SVG rules keep their original order.
+This bounded split is verified against the earlier27 wildcard, outer icon/offcanvas
+and opaque-callsite counterexamples; it does not erase or universally solve those
+broader contracts. Eighty-eight paired PNGs/full records match:64formal/3,836 standard
+records and24native/600 complete nodes, including local spacing/radius/RTL, direct
+opaque/utility/inline callers, actual Slot and ancestor-targeted rules. The real
+component output gate checks240 inputs:180 legacy byte-exact and60 normal branch/
+attribute cases. Two original hover failures were caused by a real action covering
+the intended target; the corrected no-action sibling uses actual `:hover`, while
+the original failure images remain. The11 mappings earn zero source-removal credit.
+
+The compiled Sidebar snapshot preserves the user's existing Tooltip JSX whitespace.
+The proposed Git blob applies only owned task hunks to HEAD and leaves that user
+hunk unstaged. Root verifies the two snapshots differ only at that exact whitespace
+sequence and independently checks every original PNG/full record and decoded pixel.
+The isolated visual tree differs from the root at25 untouched pre-existing user
+paths; those are recorded in `leaves110-build-root-boundary-audit.json`. The evidence
+establishes this module delta, not a new whole-root application run.
+
+A fresh exact-root snapshot validates all790 production files in the three scanner
+roots. Only Sidebar changes from the through99 snapshot. It remains1,424 occurrences/
+157used files; unresolved expressions become726 because the static scanner treats
+the new known StyleX class-map alias as another property lookup, not because a new
+Tailwind utility was added. Its48-file legacy UI subscan remains429 occurrences/
+14used files, with94 unresolved expressions. Helper counts remain independent.
 
 ## Remaining work
 

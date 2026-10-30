@@ -665,6 +665,8 @@ ordering belong to [the helper build guide](../../../code-review-helper/standalo
 
 | `artifacts/visual/leaves108-109-acceptance.html` | 78 private diff/context utilities; six normal Separator mappings/source removal0, legal Slot retained | 84/128 formal PNG pairs exact; 40,078 standard records equal; 204 pairs total/158exact | 46 OPENs/347raw/135 informational threshold; nativeAfter and file109 finalization unknown. Four transition gates and six selector failures retained; Sidebar context images are After-only |
 
+| `artifacts/visual/leaves110-acceptance.html` | Eleven normal SidebarMenuButton layout mappings; source303 retained for legal Slot/nonempty className callers, single CVA graph | 64/64 formal PNG pairs /3,836 records and24/24 native /600 nodes exact;240 actual component-output cases | Two original hover-occlusion failures retained; task-only Git blob excludes the protected Tooltip whitespace. Isolated visual module evidence does not validate the25 unrelated user paths omitted from that tree |
+
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
 flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
@@ -679,7 +681,12 @@ The current scanner-v2 three-root timeline covers
 UI and five route occurrences. The source snapshot and method are recorded in
 `inventory-source-through99-proof.json`. Through 95 remains frozen at
 1,430/157/725; batches 97 and 99 account for the six source utilities removed
-within these roots.
+within these roots. The exact-root through110 snapshot differs only at Sidebar:
+1,424 occurrences/157used files/726 unresolved expressions. Its extra unresolved
+entry is a known StyleX class-map alias lookup. The isolated visual tree's25
+pre-existing user-file differences are listed in
+`leaves110-build-root-boundary-audit.json`; see
+`inventory-source-through110-proof.json` for the separate static-root boundary.
 Batches 94–95 remove fifteen source utilities. Through 93 remains frozen at
 1,445/157/725: that group removes eight source utilities while exposing two existing
 margin literals inside runtime helper calls, a net decrease of six. Its six
@@ -721,7 +728,7 @@ from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
 same-element token-input negatives are separate. An original Gallery gate failure
 and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
 verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 51 frozen reports, including the separately scoped helper
+keyboard/pointer zoom and 1280/390px layouts. The index now links 52 frozen reports, including the separately scoped helper
 continuations through 109. Those later reports preserve every earlier OPEN rather than closing
 issues through a new successful subset.
 
