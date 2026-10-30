@@ -1,0 +1,362 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "no-preference",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--grouped-refactor"],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "click",
+        "selector": "nav[aria-label=\"Review group navigation\"] > div:first-child button:first-child",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "directory-collapsed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Collapse adaptors/src\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(!e.querySelector('input[aria-label=\"Mark index.ts reviewed\"]')))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "directory-expanded",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Expand adaptors/src\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(!!e.querySelector('input[aria-label=\"Mark index.ts reviewed\"]')))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "leaf-checked-parent-indeterminate",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "input[aria-label=\"Mark index.ts reviewed\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(e.querySelector(\"input[aria-label=\\\"Mark adaptors/src reviewed\\\"]\").indeterminate&&e.querySelector(\"input[aria-label=\\\"Mark index.ts reviewed\\\"]\").checked))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "folder-all-checked",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "input[aria-label=\"Mark adaptors/src reviewed\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(e.querySelector(\"input[aria-label=\\\"Mark adaptors/src reviewed\\\"]\").checked&&!e.querySelector(\"input[aria-label=\\\"Mark adaptors/src reviewed\\\"]\").indeterminate))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "folder-unchecked",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "input[aria-label=\"Mark adaptors/src reviewed\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"]\"));if(!e||!(!e.querySelector(\"input[aria-label=\\\"Mark adaptors/src reviewed\\\"]\").checked&&!e.querySelector(\"input[aria-label=\\\"Mark adaptors/src reviewed\\\"]\").indeterminate))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "leaf-row-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "hover",
+            "selector": "nav[aria-label=\"Changed files\"] button[title=\"packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"] button[title=\\\"packages/adaptors/src/index.ts\\\"]\"));if(!e||!(e.matches(\":hover\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "leaf-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "nav[aria-label=\"Changed files\"] button[title=\"packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"nav[aria-label=\\\"Changed files\\\"] button[title=\\\"packages/adaptors/src/index.ts\\\"]\"));if(!e||!(document.activeElement===e))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "leaf-keyboard-jump",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "press",
+            "selector": "nav[aria-label=\"Changed files\"] button[title=\"packages/adaptors/src/index.ts\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"] .crh-block-header button[aria-expanded]\"));if(!e||!(!!document.querySelector('nav[aria-label=\"Review group navigation\"] > div:first-child button[aria-current=\"true\"]')))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "scope": "Only ChatComposer pasted summary Dialog/Drawer muted color2 and MobileLocalProjectSettings actual sharing-pending Spinner muted color1.",
+  "themes": ["light", "dark"],
+  "pasteStory": "chat-chatcomposer--landing-with-pasted-text",
+  "sharingStory": "migration-ownedmobileprojectcontainerspinner--local-sharing",
+  "pasteFormalSurfaces": [
+    { "device": "desktop", "width": 1280 },
+    { "device": "desktop", "width": 390 },
+    { "device": "phone", "width": 390 }
+  ],
+  "pasteStates": ["opened", "edited"],
+  "sharingWidths": [390, 767],
+  "sharingDirections": ["on", "off"],
+  "pasteControls": ["parent-token-pressure", "element-muted", "physical-inline"],
+  "sharingControls": ["element-muted", "physical-inline"],
+  "negativeSurfaces": [
+    { "device": "desktop", "width": 1280 },
+    { "device": "phone", "width": 390 }
+  ],
+  "height": 960,
+  "editedValue": "Synthetic edited draft line one.\nLine two.\nLine three.",
+  "positiveCells": 30,
+  "negativeCells": 4,
+  "rawTokenException": "Only existing dialog.description color token inside actual pure text paste summary normal/before/after. No custom exception for Spinner or any ancestor/other control. All physical/pseudo/state/geometry fields compared.",
+  "animation": "Actual spinner clock advances, then real animation pauses400ms; no style or mock image replacement.",
+  "callback": "Actual highlighter coordinates route original textarea hit→pasted preview. Original controlled edit and Escape/reopen persistence. Actual sharing Switch→held existingfixture callback→Complete synthetic sharing, including both directions."
+}

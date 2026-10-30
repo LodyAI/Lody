@@ -32,6 +32,7 @@ import { mobileSurface } from './surface';
 const styles = stylex.create({
   /** The share toggle's box: the switch, and its spinner when it works. */
   shareControl: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  pendingSpinner: { color: 'hsl(var(--muted-foreground) / 1)' },
   identityTileInk: {
     backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
     color: 'hsl(var(--primary))',
@@ -180,7 +181,10 @@ export function MobileLocalProjectSettings({
           <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
             <div {...stylex.props(styles.shareControl)}>
               {row.isUpdating ? (
-                <Spinner diameter="calc(var(--spacing) * 4)" className="text-muted-foreground" />
+                <Spinner
+                  diameter="calc(var(--spacing) * 4)"
+                  className={stylex.props(styles.pendingSpinner).className}
+                />
               ) : null}
               <Switch
                 checked={row.sharedWithTeam}

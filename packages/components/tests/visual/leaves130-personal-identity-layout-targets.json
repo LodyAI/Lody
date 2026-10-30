@@ -1,0 +1,25 @@
+{
+  "scope": "Only GitHubPersonalIdentitySettingsCard private Authorize Button: gap-1, self-start and sm:self-auto; original two BG classes retained.",
+  "title": "Migration/GitHubPersonalIdentitySpinner",
+  "prefix": "migration-githubpersonalidentityspinner--",
+  "themes": ["light", "dark"],
+  "viewportHeight": 600,
+  "primaryWidths": [390, 639, 640, 641],
+  "primaryStates": ["rest", "hover", "focus", "clicked-authorizing"],
+  "secondaryStories": ["expired", "workspace-not-ready", "already-authorizing"],
+  "secondaryWidths": [390, 640],
+  "legacyScopedWidths": [639, 640],
+  "localSpacing": "7px",
+  "parentTokenPressure": {
+    "height": "44px",
+    "padding": "23px",
+    "radius": "13px",
+    "color": "#8a2be2",
+    "gap": "15px"
+  },
+  "browserDefaultFont20Widths": [799, 800],
+  "positiveCells": 66,
+  "directSameElementGapNegativeCells": 2,
+  "animationPolicy": "Observe actual infinite spinner clock progression; pause the real animation at400ms for matched captures. No stylesheet/DOM replacement.",
+  "contract": "Full raw ordinary/custom CSS plus both pseudos. Allow only the actual Button.gap custom-property value to change inside the button subtree; all ancestors, other card nodes and all other custom properties stay equal. Direct same-element token injection is a separate negative, not a public Card style API."
+}

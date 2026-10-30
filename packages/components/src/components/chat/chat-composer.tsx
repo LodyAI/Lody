@@ -52,6 +52,7 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Drawer } from '@lody/ui/drawer';
 import type { TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
@@ -533,7 +534,10 @@ const styles = stylex.create({
     flexShrink: 1,
     flexBasis: '0%',
   },
-  pastedSummary: { fontVariantNumeric: 'tabular-nums' },
+  pastedSummary: {
+    fontVariantNumeric: 'tabular-nums',
+    [dialogTokens.description]: 'hsl(var(--muted-foreground) / 1)',
+  },
   pastedDrawerSummary: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -1789,10 +1793,9 @@ export function ChatComposer({
                         </Drawer.Close>
                       </div>
                       <Drawer.Description
-                        className={cn(
-                          stylex.props(styles.pastedSummary, styles.pastedDrawerSummary).className,
-                          'text-muted-foreground'
-                        )}
+                        className={
+                          stylex.props(styles.pastedSummary, styles.pastedDrawerSummary).className
+                        }
                       >
                         {summaryText}
                       </Drawer.Description>
@@ -1827,12 +1830,7 @@ export function ChatComposer({
                       {pastedTextDialogTitle}
                     </Dialog.Title>
                     <div {...stylex.props(styles.pastedDialogTitleRow)}>
-                      <Dialog.Description
-                        className={cn(
-                          stylex.props(styles.pastedSummary).className,
-                          'text-muted-foreground'
-                        )}
-                      >
+                      <Dialog.Description className={stylex.props(styles.pastedSummary).className}>
                         {summaryText}
                       </Dialog.Description>
                       <Dialog.Close

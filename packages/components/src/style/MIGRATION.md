@@ -252,6 +252,13 @@ emitted application CSS rather than assuming either spelling's output.
 
 ### Focus, ring and shadow
 
+A private color/shadow carrier may serialize comma whitespace differently after
+minification while every parsed physical field stays equal. Preserve both raw
+strings and the exact diff; prove all actual CSS readers and compare complete
+rendered fields. Only a named, demonstrated lexical difference may be classified
+as equivalent. Never strip whole custom-property maps or ignore geometry, portal
+state or attributes to manufacture equality.
+
 The app has a base-layer inset focus indicator, but it also resets Tailwind's
 focus ring variables and outlines with `!important`. A focused element with a
 Tailwind `focus-visible:ring-*` utility therefore may have no visible ring: its

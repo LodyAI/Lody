@@ -52,13 +52,21 @@ function Probe() {
   );
 }
 
-function Fixture({ opaque = false }: { opaque?: boolean }) {
+function Fixture({
+  opaque = false,
+  ancestorClassName,
+}: {
+  opaque?: boolean;
+  ancestorClassName?: string;
+}) {
   const [external, setExternal] = useState('none');
   const [event, setEvent] = useState('Ready');
   const opaqueClass = opaque ? stylex.props(styles.opaqueButton).className : undefined;
   return (
     <div
-      className={['group', stylex.props(styles.outer).className].filter(Boolean).join(' ')}
+      className={['group', stylex.props(styles.outer).className, ancestorClassName]
+        .filter(Boolean)
+        .join(' ')}
       data-external-sidebar-group
       data-collapsible={external === 'icon' || external === 'offcanvas' ? external : undefined}
       data-variant={external === 'floating' ? 'floating' : undefined}
@@ -195,3 +203,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Default: Story = { render: () => <Fixture /> };
 export const OpaqueCallers: Story = { render: () => <Fixture opaque /> };
+
+// These legal zero-specificity callers must not overturn the parts' own utilities.
+export const ZeroSpecificityHeaderGap: Story = {
+  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=header])]:gap-12" />,
+};
+export const ZeroSpecificityMenuWidth: Story = {
+  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=menu-button])]:w-7" />,
+};
+export const ZeroSpecificityLabelHeight: Story = {
+  render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=group-label])]:h-12" />,
+};

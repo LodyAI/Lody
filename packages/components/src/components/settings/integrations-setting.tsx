@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { AlertCircle, CheckCircle2, Github } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -86,6 +87,10 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     color: colors.secondaryLabel,
+  },
+  authorizeButton: {
+    [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
+    alignSelf: { default: 'flex-start', '@media (min-width: 40rem)': 'auto' },
   },
   authorizeIcon: { width: '14px', height: '14px' },
 });
@@ -177,7 +182,7 @@ export function GitHubPersonalIdentitySettingsCard({
         <Button
           size="small"
           variant="ghost"
-          className="gap-1 bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
+          className={`${stylex.props(styles.authorizeButton).className} bg-foreground/[0.06] hover:bg-foreground/[0.1]`}
           onClick={onAuthorize}
           disabled={!workspaceReady || authorizing}
         >

@@ -7,6 +7,7 @@ import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Dialog } from '@/ui/dialog';
 import { Field as UiField } from '@lody/ui/field';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
@@ -41,6 +42,11 @@ const styles = stylex.create({
     [dialog.titleSize]: 'var(--text-base)',
     [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
   },
+  descriptionLeading: {
+    [dialog.descriptionLeading]: 'calc(var(--spacing) * 5)',
+    '--tw-leading': 'calc(var(--spacing) * 5)',
+  },
+  qrLabelInk: { [fieldTokens.label]: 'hsl(var(--muted-foreground) / 1)' },
   header: {
     borderBottomWidth: '1px',
     borderBottomStyle: 'var(--tw-border-style)',
@@ -388,7 +394,7 @@ export function UsageShareImageDialog({
           <Dialog.Title className={stylex.props(styles.titleTypography).className}>
             {t('workspace.usage.shareImage.dialogTitle')}
           </Dialog.Title>
-          <Dialog.Description className="leading-5">
+          <Dialog.Description className={stylex.props(styles.descriptionLeading).className}>
             {t('workspace.usage.shareImage.dialogDescription')}
           </Dialog.Description>
         </Dialog.Header>
@@ -632,7 +638,7 @@ export function UsageShareImageDialog({
               <div {...stylex.props(styles.qrRow)}>
                 <UiField.Label
                   htmlFor="usage-share-qr"
-                  className="font-normal text-muted-foreground"
+                  className={`font-normal ${stylex.props(styles.qrLabelInk).className}`}
                 >
                   {t('workspace.usage.shareImage.showQr')}
                 </UiField.Label>

@@ -3069,6 +3069,45 @@ const treeCommitStyles = stylex.create({
       },
     },
   },
+  commitControlFocus: {
+    '--tw-outline-style': 'none',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    '--tw-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor)',
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':focus-visible': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 45%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+  },
+  commitControlInset: {
+    '--tw-ring-inset': { default: null, ':focus-visible': 'inset' },
+  },
+  commitTransitionColors: {
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration,var(--default-transition-duration))',
+  },
+  commitTransitionTransform: {
+    transitionProperty: 'transform,translate,scale,rotate',
+    transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration,var(--default-transition-duration))',
+  },
   copiedGlyph: {
     width: 'calc(var(--spacing) * 3.5)',
     height: 'calc(var(--spacing) * 3.5)',
@@ -3175,22 +3214,28 @@ function FileTreeRow({
       <div {...stylex.props(treeCommitStyles.dirContainer)}>
         <div
           style={{ paddingLeft: `${indent + 8}px` }}
-          className={cn('transition-colors', stylex.props(treeCommitStyles.treeRow).className)}
+          className={
+            stylex.props(treeCommitStyles.treeRow, treeCommitStyles.commitTransitionColors)
+              .className
+          }
         >
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
             aria-expanded={open}
             aria-label={`${open ? 'Collapse' : 'Expand'} ${node.name}`}
-            className={cn(
-              'outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
-              stylex.props(treeCommitStyles.dirToggle).className
+            {...stylex.props(
+              treeCommitStyles.dirToggle,
+              treeCommitStyles.commitControlFocus,
+              treeCommitStyles.commitTransitionColors
             )}
           >
             <ChevronDown
               className={cn(
-                'transition-transform',
-                stylex.props(treeCommitStyles.treeChevron).className,
+                stylex.props(
+                  treeCommitStyles.treeChevron,
+                  treeCommitStyles.commitTransitionTransform
+                ).className,
                 !open && '-rotate-90'
               )}
             />
@@ -3203,10 +3248,7 @@ function FileTreeRow({
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
-            className={cn(
-              'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-              stylex.props(treeCommitStyles.folderButton).className
-            )}
+            {...stylex.props(treeCommitStyles.folderButton, treeCommitStyles.commitControlFocus)}
           >
             <Folder {...stylex.props(treeCommitStyles.folderGlyph)} />
             <span {...stylex.props(treeCommitStyles.folderLabel)}>{node.name}</span>
@@ -3233,7 +3275,9 @@ function FileTreeRow({
   return (
     <div
       style={{ paddingLeft: `${indent + 8}px` }}
-      className={cn('transition-colors', stylex.props(treeCommitStyles.treeRow).className)}
+      className={
+        stylex.props(treeCommitStyles.treeRow, treeCommitStyles.commitTransitionColors).className
+      }
     >
       <span aria-hidden {...stylex.props(treeCommitStyles.leafSpacer)} />
       <Checkbox
@@ -3245,10 +3289,7 @@ function FileTreeRow({
         type="button"
         onClick={() => onNavigate(node.path)}
         title={node.path}
-        className={cn(
-          'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-          stylex.props(treeCommitStyles.fileButton).className
-        )}
+        {...stylex.props(treeCommitStyles.fileButton, treeCommitStyles.commitControlFocus)}
       >
         <FileIcon filePath={node.path} className="size-4 shrink-0" />
         <span
@@ -3301,14 +3342,20 @@ function GroupCommits({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'font-semibold tracking-[0.1em] outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
-          stylex.props(treeCommitStyles.commitsToggle).className
+          'font-semibold tracking-[0.1em]',
+          stylex.props(
+            treeCommitStyles.commitsToggle,
+            treeCommitStyles.commitControlFocus,
+            treeCommitStyles.commitTransitionColors
+          ).className
         )}
       >
         <ChevronDown
           className={cn(
-            'transition-transform',
-            stylex.props(treeCommitStyles.commitsChevron).className,
+            stylex.props(
+              treeCommitStyles.commitsChevron,
+              treeCommitStyles.commitTransitionTransform
+            ).className,
             !open && '-rotate-90'
           )}
         />
@@ -3325,8 +3372,13 @@ function GroupCommits({
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 className={cn(
-                  'font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45',
-                  stylex.props(treeCommitStyles.showMore).className
+                  'font-medium',
+                  stylex.props(
+                    treeCommitStyles.showMore,
+                    treeCommitStyles.commitControlFocus,
+                    treeCommitStyles.commitControlInset,
+                    treeCommitStyles.commitTransitionColors
+                  ).className
                 )}
               >
                 {expanded
@@ -3390,7 +3442,7 @@ function CommitRow({
 
   return (
     <div {...stylex.props(treeCommitStyles.commitFrame)}>
-      <div className={cn('transition-colors', stylex.props(treeCommitStyles.commitRow).className)}>
+      <div {...stylex.props(treeCommitStyles.commitRow, treeCommitStyles.commitTransitionColors)}>
         <Tooltip>
           <TooltipTrigger asChild>
             {hasBody ? (
@@ -3398,15 +3450,17 @@ function CommitRow({
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 aria-expanded={expanded}
-                className={cn(
-                  'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
-                  stylex.props(treeCommitStyles.summaryButton).className
+                {...stylex.props(
+                  treeCommitStyles.summaryButton,
+                  treeCommitStyles.commitControlFocus
                 )}
               >
                 <ChevronDown
                   className={cn(
-                    'transition-transform',
-                    stylex.props(treeCommitStyles.commitChevron).className,
+                    stylex.props(
+                      treeCommitStyles.commitChevron,
+                      treeCommitStyles.commitTransitionTransform
+                    ).className,
                     !expanded && '-rotate-90'
                   )}
                 />
@@ -3457,8 +3511,12 @@ function CommitRow({
           aria-label={`Copy commit id ${shortSha}`}
           title="Copy commit id"
           className={cn(
-            'tabular-nums outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
-            stylex.props(treeCommitStyles.copyButton).className
+            'tabular-nums',
+            stylex.props(
+              treeCommitStyles.copyButton,
+              treeCommitStyles.commitControlFocus,
+              treeCommitStyles.commitTransitionColors
+            ).className
           )}
         >
           {shortSha}

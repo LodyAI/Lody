@@ -2395,6 +2395,16 @@ their historical raster OPENs are closed. The task-only Git blob excludes the
 user's Tooltip whitespace; its browser source differs only at that exact byte.
 The isolated Storybook tree's 25 untouched user-file differences remain explicit.
 
+Permanent browser regression132 adds three actual compiler-generated ancestor
+callers to the existing fixture. Six theme/scenario tests compare real Default and
+caller PNGs, explicit geometry and twelve click paths. All twelve positive image
+comparisons match; the same suite rejects all six historical unsafe cases after
+actually checking their CSS rules, taking screenshots and exercising clicks.
+The197,133 raw/195,115 threshold full-frame pixels and six unequal crop dimensions
+are negative evidence, not extra migrations. It is a narrow regression canary,
+not an exhaustive computed-CSS or public compatibility audit. Missing locked
+browser startup and installer recovery failures remain separate setup evidence.
+
 ### Closed consumer controls and integration evidence
 
 SessionSearchBar118 moves ten fixed Input/Tooltip utilities through existing owner
@@ -2428,6 +2438,15 @@ buttons. Its 48 formal, 16 legacy-variable and four normal-motion pairs match;
 primitive-token negatives remain separate. These fixed glyph-only consumers do
 not authorize the same token override on an arbitrary public primitive.
 
+Personal identity130 migrates the private Authorize button's gap and responsive
+self-alignment through the existing gap token and local StyleX. Both background
+compatibility classes remain because the owner exposes no equivalent resting/hover
+fill contract. Sixty-six positive complete physical/non-target records match across
+1,312 nodes and ancestors; 65 target PNGs match, while one crop retains ten raw
+pixels. All 66 context views match but cannot close that crop OPEN. Two direct gap
+token-write negatives change geometry and remain excluded; unequal-sized target
+images are not assigned a fabricated raw pixel count.
+
 Long-user131 replaces two ink utilities on the fixed plain-text Show more/less
 control. Its 48 formal, 12 actual-stream and 16 ancestor/element-local legacy
 variable pairs are PNG-exact with equal rendered fields and 51 non-target tokens.
@@ -2448,14 +2467,79 @@ offscreen checkbox colors and inherited typography/scroll geometry fail complete
 contracts even where screenshots or default records match. No compiler, layer,
 specificity or production lifecycle patch hides those failures.
 
-A stable actual-root regression through this corrected product cut passes 620
-component files/6,209 tests with 3,149 recorded inputs unchanged. This cut includes
-128, but excludes later131 and130. Shared UI's latest
-run passes 25 files/313 tests with 114 inputs unchanged. The earlier root renderer
-rebuild and four real Electron onboarding/setup/Explore/local-chat screenshots are
-After-only; the later124 consumer has its own real Before/After above. These checks
-neither accept helper119/123/126 candidates nor clear the known root ACP prerequisite
-failure. The source inventory below is independent of browser coverage.
+Usage-share133 migrates Description line-height and the fixed QR label's ink.
+The original utility writes both line-height and `--tw-leading`, not font-size;
+both reader and writer semantics are retained through the existing owner token.
+Thirty-two positive cells have64 exact target views and32 exact context views,
+992 complete CSS records and17,752 dialog geometry records. Only the two intended
+local token carriers differ; original `--tw-leading` stays strictly equal. Four
+direct-token negatives remain separate. The unavailable Field.Label font-weight
+contract keeps its physical `font-normal` class instead of adding an API.
+
+Helper134 moves19 private commit-control outline, focus-ring and transition
+utilities while retaining every font/rotation/class selector outside that unit.
+Its44 formal pairs have43 exact PNGs and24,438 equal standard records. All40
+original native own records match after explicitly accounting for comma whitespace
+in two private color/shadow carriers; their raw objects are not called equal.
+Eight original whole-page geometry cases still fail, and the subsequent eight
+prewarmed screenshots differ because actual Tooltip visibility was not matched.
+Both cohorts remain unaccepted. A final bounded eight pairs explicitly close real
+Tooltip portals with Escape, retain actual keyboard focus and match PNG, full
+records, geometry and state. Those closed-portal controls and eight matching
+single-file supplements do not replace the failed cohorts or verify open Tooltips.
+Three original raster OPENs total26 raw pixels. No product patch or broad field
+normalization hides them. Exact helper inventory through134 is373/8/21 from30
+production files checked against the successful293-input build; the19 decrease
+from392 is migration, not cleanup. Later136 remains outside this boundary.
+
+Bub135 deliberately keeps its last `p-0` utility. In a real legal zero-specificity
+ancestor fixture, removing only that class changes all four padding edges0→12px
+and height16→40px. Default screenshots alone had suggested it was redundant.
+The link variant fixes inline padding but the block reset belongs to preflight;
+no equivalent existing Button padding API covers this contract. Eight diagnostic
+cells retain the actual compiler rule and screenshots; they earn zero source or
+runtime migration credit. Unequal-sized crops have no invented raw-pixel count.
+
+Helper136 removes13 FileTreeRow native control utilities by reusing the verified
+focus/transition roles without changing their definitions or callbacks. Its36
+formal pairs have35 exact PNGs and18,864 equal standard records;34 native pairs
+have15 exact PNGs with2,556 matching physical/state/geometry records, allowing only
+the already explicit comma-space carrier differences. Ten standalone pairs match.
+Twenty original target OPENs total197 raw pixels. A separate natural-navigation
+pair retains11,423 raw/157 threshold pixels in the desktop sidebar; its original
+three captured records did not cover that sidebar. One independent bounded audit
+observes156 finite150ms sidebar transitions still running when the old main-only
+gate passes. After actual sidebar stabilization,155 complete nodes match in
+ordinary/pseudo fields, with only explicit class/token/origin carriers different;
+one new raw pixel remains. The original frame lacks those fields, so this does
+not prove its cause or close it. No CSS or callback patch was added.
+
+Private muted137 moves two plain summary colors through the shared modern
+Dialog/Drawer description token and one Spinner wrapper color through local HSL.
+All30 positive target/context views match,434 full records and1,114 geometry
+records match with the single intended description-token carrier explicit.
+Four direct-token negatives remain separate; their two image views cover the same
+changed pixels and are not summed. The sharing state is an existing synthetic
+cloud-capability fixture, not evidence of OSS cloud composition. Every public
+compiled CSS rule remains equal; the added description writer is locally scoped.
+
+The latest fixed actual-root cut at132 includes130/131 and passes620 component
+files/6,209 tests with3,154 inputs unchanged. Its790 production scanner sources
+match both the stable test graph and the successful OSS renderer build. Shared UI's
+latest independent run remains25 files/313 tests with114 stable inputs. The
+renderer-only build first exhausted Node's4GB heap; the retained failed attempt
+changed no inputs or335 main/CLI/lock artifacts. The same inputs build successfully
+with an8GB heap, without a source/configuration patch. Four real Electron
+onboarding/setup/Explore/local-chat images pass in isolated data and close cleanly;
+they are After-only, while124 has its separate actual target Before/After above.
+These checks exclude133/134, do not accept rejected helper candidates, do not close
+raster OPENs and do not clear the known root ACP prerequisite failure.
+
+The helper's exact through129 inventory has392 occurrences/eight used files/21
+unresolved expressions across30 production sources, each checked against its
+successful293-input build. Its decrease from407 separates14 migrations from one
+redundant cleanup. Stories, tests and later candidates are excluded. The core
+inventory below remains independent of browser coverage.
 
 ## Remaining work
 
@@ -2490,6 +2574,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 99, with partial visual acceptance      | v2             |       1,424 |   157 |        725 |
 | Exact product source through 120, including final Search118  | v2             |       1,414 |   157 |        726 |
 | Qualified product source through 128, excluding later131/130 | v2             |       1,404 |   157 |        725 |
+| Exact fixed core at132, includes130/131 and excludes133/134  | v2             |       1,399 |   157 |        726 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain

@@ -1,0 +1,22 @@
+{
+  "scope": "UsageShareImageDialog Description line-height utility (not font-size) plus QR Label muted color; retain font-normal physical/private writer.",
+  "prefix": "settings-usageshareimagedialog--",
+  "themes": ["light", "dark"],
+  "primaryWidths": [390, 1280],
+  "height": 960,
+  "primaryStates": ["rest", "qr-off", "qr-focus", "copy-pending", "copy-error"],
+  "additionalStories": ["single-contributor", "timeline-pending"],
+  "positiveModes": [
+    "parent-token-pressure",
+    "element-spacing7",
+    "same-element-leading-writer",
+    "physical-inline"
+  ],
+  "negativeModes": ["direct-description-token", "direct-label-token"],
+  "tokenPolicy": "Only original targeted dialog.descriptionLeading and field.label raw token values may change inside their respective pure text target elements/pseudos. Original --tw-leading must remain equal; all other raw variables and all physical/pseudo/geometry/state fields compared exactly.",
+  "statePolicy": "Clipboard API isolated with an explicit pending Promise after the actual ClipboardItem image PNG resolves; real production Copy run/fieldset disabled/spinner/error state. No style/DOM replacement, actual image pipeline runs. Clicks never invoke network or save downloads.",
+  "positiveCells": 32,
+  "negativeCells": 4,
+  "noNewProvider": true,
+  "noStoryEdits": true
+}

@@ -1,0 +1,434 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "no-preference",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--commit-overflow-coverage"],
+  "ready": {
+    "code-review-helper-reviewrenderer--commit-overflow-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--commit-overflow-coverage": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "hover",
+            "selector": "[data-group-id=\"group-1\"] button[aria-expanded][data-state]:has(svg.lucide-chevron-down)",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement);if(!e||!(e.matches(\":hover\")))return false;const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "commit-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-group-id=\"group-1\"] button[aria-expanded][data-state]:has(svg.lucide-chevron-down)",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement);if(!e||!(e.contains(document.activeElement)))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "commit-body-expanded",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button[aria-expanded][data-state]:has(svg.lucide-chevron-down)",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(e.textContent.includes(\"Remove createLegacyAdapter\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "commit-body-collapsed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button[aria-expanded][data-state]:has(svg.lucide-chevron-down)",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(!e.textContent.includes(\"Remove createLegacyAdapter\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "six-refs-expanded",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:text-is(\"Show 2 more commits\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(e.querySelectorAll('button[aria-label^=\"Copy commit id\"]').length===6))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "cjk-author-expanded",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:has-text(\"Synthetic commit 2:\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(e.textContent.includes(\"A second paragraph\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "cjk-author-collapsed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:has-text(\"Synthetic commit 2:\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(!e.textContent.includes(\"A second paragraph\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "show-fewer-four",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:text-is(\"Show fewer commits\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(e.querySelectorAll('button[aria-label^=\"Copy commit id\"]').length===4))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "commits-collapsed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:has-text(\"6 commits\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=([...document.querySelectorAll(\"[data-group-id=\\\"group-1\\\"] button[aria-expanded]\")].find(n=>n.textContent.trim().toLowerCase()===\"6 commits\"));if(!e||!(e.getAttribute(\"aria-expanded\")===\"false\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "commits-reopened",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "click",
+            "selector": "[data-group-id=\"group-1\"] button:has-text(\"6 commits\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=(document.querySelector(\"[data-group-id=\\\"group-1\\\"] button[aria-label=\\\"Copy commit id a11b22c\\\"]\").parentElement.parentElement.parentElement);if(!e||!(e.querySelectorAll('button[aria-label^=\"Copy commit id\"]').length===4))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const b=e.getBoundingClientRect(),signature=JSON.stringify([b.x,b.y,b.width,b.height,...[...document.querySelectorAll('nav[aria-label=\"Review group navigation\"] [aria-current]')].map(n=>n.textContent)]),old=window.__treeCommitReady??{signature:\"\",n:0};old.n=old.signature===signature?old.n+1:0;old.signature=signature;window.__treeCommitReady=old;return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-shell :hover\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ]
+  }
+}
