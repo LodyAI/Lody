@@ -761,6 +761,65 @@ it('cancels an invocation without waiting for an unrelated capacity adapter', as
   );
 });
 
+it.each([
+  [
+    'superseded',
+    { value: 'no', reason: 'workflow_superseded', terminalState: 'superseded' },
+    'superseded',
+    false,
+  ],
+  [
+    'failed',
+    { value: 'no', reason: 'target_unavailable', terminalState: 'failed' },
+    'failed',
+    false,
+  ],
+  ['temporarily unavailable', { value: 'unknown', reason: 'source_unavailable' }, 'blocked', false],
+  ['revoked guard', { value: 'no', reason: 'expired' }, 'superseded', true],
+] as const)(
+  'persists %s immediately when admission changes during preparation',
+  async (_name, after, state, guard) => {
+    const { ledger } = fixture();
+    ledger.publish(event);
+    const delivery = required(ledger.deliveries()[0]);
+    const receipt = ledger.accept(
+      delivery,
+      { ...intent, ...(guard ? { guard: { kind: 'test.guard', parameters: {} } } : {}) },
+      100
+    );
+    ledger.finishDelivery(delivery);
+    let prepared = false;
+    const host = Layer.succeed(AutomationHost, {
+      authorize: () =>
+        Effect.succeed(prepared && !guard ? after : { value: 'yes' as const, reason: 'current' }),
+      condition: () =>
+        Effect.succeed(prepared && guard ? after : { value: 'yes' as const, reason: 'current' }),
+      prepare: () =>
+        Effect.sync(() => {
+          prepared = true;
+          return { state: 'resolved' as const, prepared: {} };
+        }),
+      submit: () => Effect.succeed({ state: 'queued' }),
+      reconcile: () => Effect.succeed({ state: 'queued' }),
+      cancel: () => Effect.succeed({ state: 'cancelled' }),
+      report: () => Effect.void,
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.pass;
+          expect(ledger.receipt(receipt.id)).toMatchObject({
+            state,
+            reason: guard ? `guard:${after.reason}` : after.reason,
+            attempts: 0,
+          });
+        }).pipe(Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))))
+      )
+    );
+  }
+);
+
 it('keeps private prepared inputs and binding fingerprints out of tool-visible activity', () => {
   const { ledger } = fixture();
   ledger.publish(event);

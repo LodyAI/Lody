@@ -1,6 +1,4 @@
 import { useState, type ReactNode } from 'react';
-import { createStore, Provider } from 'jotai';
-import { developerModeEnabledAtom, sessionContinuationBetaEnabledAtom } from '@/atoms/settings';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import {
@@ -10,27 +8,19 @@ import {
 } from '@/components/sessions/session-continuation-tweaks';
 
 function Card({ children }: { children: ReactNode }) {
-  const [store] = useState(() => {
-    const next = createStore();
-    next.set(developerModeEnabledAtom, true);
-    next.set(sessionContinuationBetaEnabledAtom, true);
-    return next;
-  });
   return (
-    <Provider store={store}>
-      <div
-        style={{
-          width: 340,
-          padding: 14,
-          borderRadius: 12,
-          background: 'var(--popover)',
-          color: 'var(--popover-foreground)',
-          boxShadow: 'var(--shadow-popover)',
-        }}
-      >
-        {children}
-      </div>
-    </Provider>
+    <div
+      style={{
+        width: 340,
+        padding: 14,
+        borderRadius: 12,
+        background: 'var(--popover)',
+        color: 'var(--popover-foreground)',
+        boxShadow: 'var(--shadow-popover)',
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

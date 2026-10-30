@@ -2980,8 +2980,6 @@
   "settings.about.restartOnboardingAction": "Restart",
   "settings.about.restartOnboardingError": "Onboarding could not be restarted.",
   "settings.beta.title": "Beta features",
-  "settings.beta.sessionContinuation": "Session continuation",
-  "settings.beta.sessionContinuationHelper": "Developer preview. Available for Sessions on this machine.",
   "settings.beta.inbox": "Inbox",
   "settings.beta.inboxHelper": "Show the unfinished mobile Inbox tab. In development — expect rough edges.",
   "settings.about.website": "Website",

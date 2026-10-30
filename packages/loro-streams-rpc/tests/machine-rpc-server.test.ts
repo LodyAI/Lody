@@ -1,5 +1,10 @@
 import { IosSimulatorRemoteResponseSchema } from '@lody/shared';
-import { createRpcSecretRecipient, getIosSimulatorViewerSecretContext } from '../src/rpc-secret';
+import { remoteAutomationEncryptedResponseSchema } from '@lody/shared/automations';
+import {
+  createRpcSecretRecipient,
+  getAutomationResponseSecretContext,
+  getIosSimulatorViewerSecretContext,
+} from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   AgentConfigId,
@@ -771,6 +776,94 @@ describe('LoroStreamsMachineRpcServer', () => {
       }
     }
   );
+
+  it('routes scoped automation control through the owner envelope and rejects a different owner', async () => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const wire: unknown[] = [];
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_streamId: string, value: unknown) => {
+        wire.push(value);
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    const machineId = 'machine-1' as MachineId;
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId,
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      getAutomationControl: async () => ({
+        type: 'machine/automation-control_response',
+        machineId,
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      }),
+      controlAutomation: async (params) => ({
+        type: 'session/automation-control_response',
+        sessionId: params.sessionId,
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      }),
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId,
+      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+    });
+    await server.start();
+    try {
+      expect(await client.requestAutomationControlHandshake()).toMatchObject({
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      });
+      const request = {
+        sessionId: 'session-1',
+        ownerSessionId: 'session-1',
+        requesterUserId: 'user-1',
+        operation: { type: 'settings' as const },
+        proof: previewProof,
+        responseRecipient: await createRpcSecretRecipient(),
+      };
+      expect(await client.requestSessionAutomationControl(request)).toEqual({
+        type: 'session/automation-control_response',
+        sessionId: 'session-1',
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const reply = wire.at(-1) as { result: CodeCollabV2RpcContentEnvelope };
+      const protectedResult = remoteAutomationEncryptedResponseSchema.parse(
+        await decryptCodeCollabV2RpcPayload(reply.result, request.sessionId)
+      );
+      const context = getAutomationResponseSecretContext({
+        workspaceId: 'workspace-1',
+        machineId,
+        sessionId: request.sessionId,
+        requestId: request.proof.requestId,
+      });
+      expect(
+        JSON.parse(await request.responseRecipient.decrypt(protectedResult.payload, context))
+      ).toMatchObject({
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const otherRecipient = await createRpcSecretRecipient();
+      await expect(otherRecipient.decrypt(protectedResult.payload, context)).rejects.toThrow();
+      expect(JSON.stringify(wire)).not.toContain('synthetic-preview-proof');
+      expect(
+        await client.requestSessionAutomationControl({
+          ...request,
+          ownerSessionId: 'other-session',
+        })
+      ).toMatchObject({ success: false });
+    } finally {
+      client.stop();
+      server.stop();
+    }
+  });
 
   it.each([
     'session/preview-create',

@@ -21,9 +21,8 @@ Host; cross-device and Web access need a separate authorization contract.
 
 - One note, not a panel. No new right-side tab, no new navigation item and no
   feature-level status vocabulary. The conversation is the surface.
-- The note and tweaks require Developer mode and the default-off Session continuation
-  beta switch. This is a UI gate, not automation authorization; switching Developer
-  mode off hides the UI without clearing opt-in.
+- The note and tweaks are available in supported local Sessions without a developer
+  or beta switch. Existing Session authorization and workspace capability still apply.
 - The note is the Agent's own sentence plus a countdown and one action. Inspection
   details live in a popover; check counts, program source and evidence are not
   primary UI. The popover uses the shared spacing scale and a common icon/text

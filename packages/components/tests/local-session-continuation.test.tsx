@@ -4,10 +4,6 @@ import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { describeSessionContinuation } from '../src/components/sessions/session-continuation';
-import {
-  developerModeEnabledAtom,
-  sessionContinuationBetaEnabledAtom,
-} from '../src/atoms/settings';
 import { useLocalSessionContinuation } from '../src/components/sessions/use-local-session-continuation';
 
 const automation = vi.fn();
@@ -32,9 +28,54 @@ describe('local Session continuation', () => {
     act(() => root.unmount());
     automation.mockReset();
   });
+  it('does not access the owner when no supported local Session is selected', async () => {
+    function View() {
+      const data = useLocalSessionContinuation(null, true);
+      return <output>{JSON.stringify(data.views)}</output>;
+    }
+    await act(async () => root.render(<View />));
+    expect(container.textContent).toBe('[]');
+    expect(automation).not.toHaveBeenCalled();
+  });
+  it('reads and changes a remote Session through its machine owner', async () => {
+    const calls: string[] = [];
+    const runtime = {
+      requestSessionAutomationControl: async (
+        machineId: string,
+        sessionId: string,
+        userId: string,
+        command: { type: string }
+      ) => {
+        calls.push(`${machineId}:${sessionId}:${userId}:${command.type}`);
+        return command.type === 'list'
+          ? {
+              type: 'list',
+              waits: [{ id: 'remote-wait', sessionId, state: 'waiting', nextCheckAt: 1 }],
+            }
+          : command.type === 'settings'
+            ? { type: 'settings', settings: { recoverCapacity: false } }
+            : { type: 'cancel' };
+      },
+    } as unknown as import('../src/atoms/runtime').WorkspaceRuntime;
+    function View() {
+      const data = useLocalSessionContinuation(
+        { ...target, remote: { runtime, requesterUserId: 'user' } },
+        true
+      );
+      return (
+        <>
+          <output>{JSON.stringify(data.views)}</output>
+          <button onClick={() => data.cancel('remote-wait')}>Cancel</button>
+        </>
+      );
+    }
+    await act(async () => root.render(<View />));
+    expect(container.textContent).toContain('remote-wait');
+    await act(async () => container.querySelector('button')?.click());
+    expect(calls).toContain('machine:session:user:cancel');
+    expect(automation).not.toHaveBeenCalled();
+  });
   it('exposes Resume only for a stopped continuation and refreshes the delivery after restore', async () => {
-    store.set(developerModeEnabledAtom, true);
-    store.set(sessionContinuationBetaEnabledAtom, true);
     let stopped = true;
     automation.mockImplementation(async ({ command }) =>
       command.type === 'list'
@@ -99,9 +140,7 @@ describe('local Session continuation', () => {
     expect(container.querySelector('[data-id="stopped"]')?.textContent).toBe('queued');
     expect(container.querySelector('button')).toBeNull();
   });
-  it('loads waits and settings, sends scoped changes, and stops when the flag is off', async () => {
-    store.set(developerModeEnabledAtom, true);
-    store.set(sessionContinuationBetaEnabledAtom, true);
+  it('loads waits and settings and sends scoped changes without developer mode', async () => {
     let settingsUnavailable = true;
     automation.mockImplementation(async ({ command }) => {
       if (command.type === 'list')
@@ -156,10 +195,7 @@ describe('local Session continuation', () => {
       ...target,
       command: { type: 'configure', settings: { archiveAfterMerge: true } },
     });
-    await act(async () => {
-      store.set(sessionContinuationBetaEnabledAtom, false);
-    });
-    expect(container.querySelector('output')!.textContent).toBe('[]');
+    expect(container.querySelector('output')!.textContent).toContain('"continuation":"unknown"');
     expect(container.querySelector('span')!.textContent).toBe('true');
   });
 });

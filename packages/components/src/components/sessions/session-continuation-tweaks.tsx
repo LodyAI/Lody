@@ -1,6 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue } from 'jotai';
-import { sessionContinuationFeatureEnabledAtom } from '@/atoms/settings';
 import { useTranslation } from 'react-i18next';
 import { Archive, BatteryCharging, Layers, Sparkles, type LucideIcon } from 'lucide-react';
 import { Separator } from '@lody/ui/separator';
@@ -158,10 +156,7 @@ export function SessionContinuationTweaks({
   className,
 }: SessionContinuationTweaksProps) {
   const { t } = useTranslation();
-  const enabled = useAtomValue(sessionContinuationFeatureEnabledAtom);
   const rootSx = stylex.props(styles.root);
-
-  if (!enabled) return null;
 
   return (
     <div {...rootSx} className={cn(rootSx.className, className)}>

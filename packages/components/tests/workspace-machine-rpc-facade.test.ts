@@ -8,6 +8,7 @@ import {
 } from '@lody/shared';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 
 vi.mock('../src/lib/preview-control-api', () => ({ mintPreviewControlProof: vi.fn() }));
 
@@ -22,6 +23,131 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('retrieves every remote wait page using a separately authorized cursor', async () => {
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent) => {
+        claims.push(intent.operation);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'user-token',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({
+            success: true,
+            runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
+          requestSessionAutomationControl: async ({
+            operation,
+          }: {
+            operation: { after?: string };
+          }) => ({
+            type: 'session/automation-control_response',
+            sessionId,
+            success: true,
+            result: operation.after
+              ? { type: 'list', waits: [{ id: 'second' }] }
+              : { type: 'list', waits: [{ id: 'first' }], next: 'first' },
+          }),
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'list',
+        })
+      ).toEqual({ type: 'list', waits: [{ id: 'first' }, { id: 'second' }] });
+      expect(claims).toEqual([{ type: 'list' }, { type: 'list', after: 'first' }]);
+    } finally {
+      uninstall();
+    }
+  });
+  it('sends the exact authenticated remote automation operation to the owning machine', async () => {
+    const nonce = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent, token) => {
+        expect(token).toBe('signed-in-user');
+        claims.push(intent);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'synthetic-proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'signed-in-user',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({ success: true, runtimeNonce: nonce }),
+          requestSessionAutomationControl: async (request: {
+            sessionId: string;
+            ownerSessionId: string;
+            requesterUserId: string;
+            operation: unknown;
+            proof: { requestId: string };
+            responseRecipient: { publicKey: unknown };
+          }) => {
+            expect(request).toMatchObject({
+              sessionId,
+              ownerSessionId: sessionId,
+              requesterUserId: 'user',
+              operation: { type: 'configure', settings: { recoverCapacity: true } },
+            });
+            expect(claims[0]).toMatchObject({
+              workspaceId,
+              machineId: remoteMachineId,
+              sessionId,
+              requesterUserId: 'user',
+              operation: request.operation,
+              runtimeNonce: nonce,
+              requestId: request.proof.requestId,
+              responseKey: request.responseRecipient.publicKey,
+            });
+            return {
+              type: 'session/automation-control_response',
+              sessionId,
+              success: true,
+              result: { type: 'settings', settings: { recoverCapacity: true } },
+            };
+          },
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'configure',
+          settings: { recoverCapacity: true },
+        })
+      ).toEqual({ type: 'settings', settings: { recoverCapacity: true } });
+    } finally {
+      uninstall();
+    }
+  });
+
   it('requires fileDownload capability before requesting paid download bytes', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -841,20 +967,38 @@ describe('createWorkspaceMachineRpcFacade', () => {
     let delivered: unknown;
     const invoke = async (_channel: string, request: unknown) => {
       delivered = request;
-      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
+      return bridgeAvailable
+        ? { ok: true, result: { type: 'session/cancel_response', sessionId, success: true } }
+        : undefined;
     };
-    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
     let networkUsed = false;
     const facade = createWorkspaceMachineRpcFacade({
-      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
-      isLocalControlMachine: machine => machine === localMachineId,
-      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      isLocalControlMachine: (machine) => machine === localMachineId,
+      getMachineRpcClient: async () => {
+        networkUsed = true;
+        throw new Error('cloud RPC unavailable');
+      },
     });
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
-    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
-    bridgeAvailable=false;
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
+      success: true,
+    });
+    expect(delivered).toMatchObject({
+      workspaceId,
+      machineId: localMachineId,
+      method: 'session/cancel',
+    });
+    bridgeAvailable = false;
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
+      success: false,
+      error: 'Local machine RPC is unavailable.',
+    });
     expect(networkUsed).toBe(false);
   });
   it('uses the cloud Machine RPC client for a remote machine', async () => {

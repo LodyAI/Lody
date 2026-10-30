@@ -7,7 +7,6 @@ import {
   inboxBetaEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
-  sessionContinuationBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
@@ -35,25 +34,11 @@ export function BetaFeaturesSection() {
     semanticShortcutsBetaEnabledAtom
   );
   const [roostHistoryEnabled, setRoostHistoryEnabled] = useAtom(roostHistoryExperimentEnabledAtom);
-  const [continuationEnabled, setContinuationEnabled] = useAtom(sessionContinuationBetaEnabledAtom);
 
   if (!developerModeEnabled) return null;
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
-      <CompactRow
-        label={t('settings.beta.sessionContinuation', 'Session continuation')}
-        helper={t(
-          'settings.beta.sessionContinuationHelper',
-          'Developer preview. Available for Sessions on this machine.'
-        )}
-      >
-        <Switch
-          checked={continuationEnabled}
-          onCheckedChange={setContinuationEnabled}
-          aria-label={t('settings.beta.sessionContinuation', 'Session continuation')}
-        />
-      </CompactRow>
       <CompactRow
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
         helper={t(

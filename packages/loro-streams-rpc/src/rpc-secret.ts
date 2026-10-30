@@ -7,6 +7,7 @@ import {
   type RpcSecretEnvelope,
   type RpcSecretPublicKey,
 } from '@lody/shared';
+import type { z } from 'zod';
 
 const RPC_SECRET_AAD_LABEL = 'lody-machine-rpc-secret-v1';
 
@@ -106,7 +107,11 @@ export const getMachineAcpAuthenticationInputSecretContext = (options: {
 
 export type RpcSecretRecipient = {
   readonly publicKey: RpcSecretPublicKey;
-  decrypt(envelope: RpcSecretEnvelope, context: string): Promise<string>;
+  decrypt(
+    envelope: RpcSecretEnvelope,
+    context: string,
+    schema?: z.ZodType<RpcSecretEnvelope>
+  ): Promise<string>;
 };
 
 export const createRpcSecretRecipient = async (): Promise<RpcSecretRecipient> => {
@@ -122,8 +127,8 @@ export const createRpcSecretRecipient = async (): Promise<RpcSecretRecipient> =>
 
   return {
     publicKey,
-    async decrypt(envelope, context) {
-      const parsed = RpcSecretEnvelopeSchema.parse(envelope);
+    async decrypt(envelope, context, schema = RpcSecretEnvelopeSchema) {
+      const parsed = schema.parse(envelope);
       if (parsed.keyId !== publicKey.keyId) {
         throw new Error('Machine RPC secret recipient key mismatch.');
       }
@@ -148,7 +153,8 @@ export const createRpcSecretRecipient = async (): Promise<RpcSecretRecipient> =>
 export const encryptRpcSecret = async (
   recipientPublicKey: RpcSecretPublicKey,
   plaintext: string,
-  context: string
+  context: string,
+  schema: z.ZodType<RpcSecretEnvelope> = RpcSecretEnvelopeSchema
 ): Promise<RpcSecretEnvelope> => {
   const recipient = RpcSecretPublicKeySchema.parse(recipientPublicKey);
   const senderPair = await createKeyPair();
@@ -167,7 +173,7 @@ export const encryptRpcSecret = async (
     sharedKey,
     copyToArrayBuffer(new TextEncoder().encode(plaintext))
   );
-  return RpcSecretEnvelopeSchema.parse({
+  return schema.parse({
     type: 'rpc-secret-envelope-v1',
     algorithm: RPC_SECRET_ALGORITHM,
     keyId: recipient.keyId,
@@ -185,6 +191,20 @@ export const getIosSimulatorViewerSecretContext = (options: {
 }): string =>
   JSON.stringify([
     'ios-simulator/control',
+    options.workspaceId,
+    options.machineId,
+    options.sessionId,
+    options.requestId,
+  ]);
+
+export const getAutomationResponseSecretContext = (options: {
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  requestId: string;
+}): string =>
+  JSON.stringify([
+    'session/automation-control',
     options.workspaceId,
     options.machineId,
     options.sessionId,

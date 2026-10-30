@@ -52,8 +52,8 @@ Managed sessions supply `LODY_SESSION_ID` and `LODY_WORKSPACE_ID`. Outside a Ses
 pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` accepts
 `{command: {type: "register", program: "async ({ctx}) => ..."}}` and binds the
 current Session automatically. Its caller cannot redirect the result to another
-Session. CLI and MCP share the same local control endpoint. The developer-gated
-Electron Session UI uses that endpoint for local-machine waits and settings;
+Session. CLI and MCP share the same local control endpoint. The Electron Session
+UI uses that endpoint for local-machine waits and settings;
 remote machines and Web do not have an Automation control bridge yet.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and

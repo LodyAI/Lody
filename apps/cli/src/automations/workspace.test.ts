@@ -9,9 +9,14 @@ import type { Logger } from '@/utils/logger';
 import { SessionDocument } from '@/lib/loro/doc';
 import { composeTestSessionDoc } from '../../tests/session-doc-fixture';
 import { createSessionBackend } from '@/session/session-backend';
-import type { SessionId } from '@lody/shared';
+import { getSessionRoomId, type SessionId } from '@lody/shared';
+import {
+  remoteAutomationSecretEnvelopeSchema,
+  type RemoteAutomationIntent,
+} from '@lody/shared/automations';
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
+import { createRpcSecretRecipient, encryptRpcSecret } from '@lody/loro-streams-rpc';
 import {
   createAutomationWorkspaceLegacy,
   type AutomationWorkspaceHandle,
@@ -34,7 +39,11 @@ async function workspaceFixture(
     cliType?: string;
     agentType?: string;
   } = { id: 'session-a', machineId: 'machine', userId: 'user', collaborationStopped: false },
-  existingRoot?: string
+  existingRoot?: string,
+  verifyRemoteControl?: (input: {
+    intent: RemoteAutomationIntent;
+    requestToken: string;
+  }) => Promise<{ requesterUserId: string; expiresAt: number }>
 ) {
   const root = existingRoot ?? mkdtempSync(path.join(os.tmpdir(), 'lody-automation-owner-'));
   if (!existingRoot) roots.push(root);
@@ -71,11 +80,16 @@ async function workspaceFixture(
     },
     inputDisposition: () => 'unsubmitted',
   };
-  const repo = { getDocMeta: async () => ({ meta }), flush: async () => {} };
+  const repo = {
+    getDocMeta: async (room: string) =>
+      room === getSessionRoomId(meta.id as SessionId) ? { meta } : undefined,
+    flush: async () => {},
+  };
   const doc = new SessionDocument(repo as never, meta.id as SessionId, async () => {}, logger);
   composeTestSessionDoc(doc);
   const handle = await createAutomationWorkspaceLegacy({
     hasUncertainLegacyQuota: () => false,
+    verifyRemoteControl,
     lody: {
       documentManager: { repo, getOrCreateSessionDoc: async () => doc },
       hasAutomationSessionWork: () => false,
@@ -97,6 +111,221 @@ async function workspaceFixture(
   return Object.assign(handle, { testRoot: root, testDocument: doc });
 }
 describe('Automation control authority', () => {
+  it('returns every remote wait in encrypted pages even with long reasons', async () => {
+    const host = await workspaceFixture(undefined, undefined, async () => ({
+      requesterUserId: 'user',
+      expiresAt: Date.now() + 60_000,
+    }));
+    if (!host.remoteControlNonce) throw new Error('missing remote nonce');
+    const ids = new Set<string>();
+    for (let index = 0; index < 15; index++) {
+      ids.add(
+        host.ledger.registerWait(
+          { program: `() => ${index} === -1`, intervalMs: 1000, reason: '\u0000'.repeat(2000) },
+          'session-a',
+          'user',
+          index
+        ).id
+      );
+    }
+    const recipient = await createRpcSecretRecipient();
+    const received: string[] = [];
+    let after: string | undefined;
+    let pages = 0;
+    do {
+      const result = await host.remoteControl({
+        sessionId: 'session-a',
+        requesterUserId: 'user',
+        responseKey: recipient.publicKey,
+        operation: { type: 'list', ...(after ? { after } : {}) },
+        proof: {
+          runtimeNonce: host.remoteControlNonce,
+          requestId: crypto.randomUUID(),
+          requestToken: 'valid',
+        },
+      });
+      if (result.type !== 'list') throw new Error('unexpected result');
+      const ciphertext = await encryptRpcSecret(
+        recipient.publicKey,
+        JSON.stringify(result),
+        'test',
+        remoteAutomationSecretEnvelopeSchema
+      );
+      expect(
+        JSON.parse(
+          await recipient.decrypt(ciphertext, 'test', remoteAutomationSecretEnvelopeSchema)
+        )
+      ).toEqual(result);
+      received.push(...result.waits.map((wait) => wait.id));
+      after = result.next;
+      pages++;
+    } while (after);
+    expect(pages).toBeGreaterThan(1);
+    expect(new Set(received)).toEqual(ids);
+    expect(received).toHaveLength(ids.size);
+  });
+  it('authorizes an exact remote Session operation and rejects replay or foreign cancellation', async () => {
+    const claims: RemoteAutomationIntent[] = [];
+    const host = await workspaceFixture(undefined, undefined, async ({ intent, requestToken }) => {
+      if (requestToken !== 'valid') throw new Error('invalid proof');
+      claims.push(intent);
+      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+    });
+    if (!host.remoteControlNonce) throw new Error('missing remote nonce');
+    const proof = {
+      runtimeNonce: host.remoteControlNonce,
+      requestId: '91c6cc18-1685-4d18-965e-3e8f4769d068',
+      requestToken: 'valid',
+    };
+    const input = {
+      sessionId: 'session-a',
+      requesterUserId: 'user',
+      responseKey: (await createRpcSecretRecipient()).publicKey,
+      operation: { type: 'configure' as const, settings: { recoverCapacity: true } },
+      proof,
+    };
+    expect(await host.remoteControl(input)).toMatchObject({
+      type: 'settings',
+      settings: { recoverCapacity: true },
+    });
+    expect(claims[0]).toMatchObject({
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      sessionId: 'session-a',
+      requesterUserId: 'user',
+      operation: input.operation,
+    });
+    await expect(host.remoteControl(input)).rejects.toThrow('AUTOMATION_REQUEST_USED');
+    const foreign = host.ledger.registerWait(
+      { program: '() => false', intervalMs: 1000 },
+      'other-session',
+      'user',
+      1
+    );
+    await expect(
+      host.remoteControl({
+        ...input,
+        operation: { type: 'cancel', id: foreign.id },
+        proof: { ...proof, requestId: 'ebc3e567-5b01-4fe8-a88c-7a669dbfcd13' },
+      })
+    ).rejects.toThrow('AUTOMATION_NOT_FOUND');
+    expect(host.ledger.wait(foreign.id)?.state).toBe('waiting');
+    await expect(
+      host.remoteControl({
+        ...input,
+        requesterUserId: 'other',
+        proof: { ...proof, requestId: 'f81d700c-ac52-4f3e-87fd-f88ebf59f1d8' },
+      })
+    ).rejects.toThrow('AUTOMATION_PERMISSION_DENIED');
+  });
+  it('fails closed without a verifier', async () => {
+    const unavailable = await workspaceFixture();
+    expect(unavailable.remoteControlNonce).toBeUndefined();
+    await expect(
+      unavailable.remoteControl({
+        sessionId: 'session-a',
+        requesterUserId: 'user',
+        responseKey: (await createRpcSecretRecipient()).publicKey,
+        operation: { type: 'list' },
+        proof: {
+          runtimeNonce: 'f6a77337-2a71-410f-b5c1-0f3fe503481b',
+          requestId: 'f81d700c-ac52-4f3e-87fd-f88ebf59f1d8',
+          requestToken: 'valid',
+        },
+      })
+    ).rejects.toThrow('AUTOMATION_REMOTE_AUTH_UNAVAILABLE');
+  });
+  it('rechecks Session ownership after verification and admits a proof at most once', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta, undefined, async () => {
+      entered.resolve();
+      await release.promise;
+      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+    });
+    if (!host.remoteControlNonce) throw new Error('missing remote nonce');
+    const input = {
+      sessionId: 'session-a',
+      requesterUserId: 'user',
+      responseKey: (await createRpcSecretRecipient()).publicKey,
+      operation: { type: 'configure' as const, settings: { recoverCapacity: true } },
+      proof: {
+        runtimeNonce: host.remoteControlNonce,
+        requestId: 'c31fd4a3-b930-4920-865e-f6eebbd5ee8a',
+        requestToken: 'valid',
+      },
+    };
+    const first = host.remoteControl(input);
+    const duplicate = host.remoteControl(input);
+    await entered.promise;
+    meta.userId = 'other';
+    release.resolve();
+    const results = await Promise.allSettled([first, duplicate]);
+    expect(results.every((item) => item.status === 'rejected')).toBe(true);
+    expect(host.ledger.rules().filter((rule) => rule.name === 'recover-capacity')).toEqual([]);
+  });
+  it('allows only one simultaneous use of a verified remote proof', async () => {
+    const ready = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let count = 0;
+    const host = await workspaceFixture(undefined, undefined, async () => {
+      count += 1;
+      if (count === 2) ready.resolve();
+      await release.promise;
+      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+    });
+    if (!host.remoteControlNonce) throw new Error('missing remote nonce');
+    const input = {
+      sessionId: 'session-a',
+      requesterUserId: 'user',
+      responseKey: (await createRpcSecretRecipient()).publicKey,
+      operation: { type: 'configure' as const, settings: { recoverCapacity: true } },
+      proof: {
+        runtimeNonce: host.remoteControlNonce,
+        requestId: '15fb0a07-8fc5-471f-a7f2-66f6044ee419',
+        requestToken: 'valid',
+      },
+    };
+    const results = Promise.allSettled([host.remoteControl(input), host.remoteControl(input)]);
+    await ready.promise;
+    release.resolve();
+    expect((await results).map((result) => result.status).sort()).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    expect(await host.command({ type: 'settings', sessionId: 'session-a' })).toMatchObject({
+      recoverCapacity: true,
+    });
+  });
+  it('rejects a proof when the response recipient is substituted', async () => {
+    const original = (await createRpcSecretRecipient()).publicKey;
+    const replacement = (await createRpcSecretRecipient()).publicKey;
+    const host = await workspaceFixture(undefined, undefined, async ({ intent }) => {
+      if (JSON.stringify(intent.responseKey) !== JSON.stringify(original))
+        throw new Error('invalid proof');
+      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+    });
+    if (!host.remoteControlNonce) throw new Error('missing remote nonce');
+    await expect(
+      host.remoteControl({
+        sessionId: 'session-a',
+        requesterUserId: 'user',
+        responseKey: replacement,
+        operation: { type: 'list' },
+        proof: {
+          runtimeNonce: host.remoteControlNonce,
+          requestId: '15fb0a07-8fc5-471f-a7f2-66f6044ee419',
+          requestToken: 'valid',
+        },
+      })
+    ).rejects.toThrow('invalid proof');
+  });
   it('delivers the persisted match after its event leaves the window and the owner restarts', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);

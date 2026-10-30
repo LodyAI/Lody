@@ -41,8 +41,12 @@ export class SessionControlIpc extends IpcService {
     const cli = getIpcServiceDeps().cliService
     if (machineId !== (await cli.getLocalMachineId()))
       throw new Error('automation_machine_unavailable')
-    const send = async (command: import('@lody/shared/automations').AutomationCommand) => {
-      const response = await cli.sendLocalAutomationControl({ workspaceId, machineId, command })
+    const send = async (operation: import('@lody/shared/automations').AutomationCommand) => {
+      const response = await cli.sendLocalAutomationControl({
+        workspaceId,
+        machineId,
+        command: operation
+      })
       if (!response.ok) throw new Error(response.error)
       return response.result
     }

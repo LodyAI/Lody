@@ -187,6 +187,12 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */

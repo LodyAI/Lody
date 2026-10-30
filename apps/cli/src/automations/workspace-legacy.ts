@@ -3,9 +3,13 @@ import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
 import { Clock, Effect, Layer, ManagedRuntime } from 'effect';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   automationCommandSchema,
+  remoteAutomationOperationSchema,
+  remoteAutomationIntentSchema,
+  remoteAutomationProofSchema,
   type AutomationCommand,
   type AutomationCondition,
   type AutomationEvent,
@@ -13,6 +17,9 @@ import {
   type AutomationWait,
   type AutomationProgramContext,
   type ConditionObservation,
+  type RemoteAutomationIntent,
+  type RemoteAutomationProof,
+  type RemoteAutomationOperation,
 } from '@lody/shared/automations';
 import {
   getSessionRoomId,
@@ -55,6 +62,10 @@ export async function createAutomationWorkspaceLegacy(options: {
   auth: AuthContext;
   workspace: WorkspaceSummary;
   logger: Logger;
+  verifyRemoteControl?: (input: {
+    intent: RemoteAutomationIntent;
+    requestToken: string;
+  }) => Promise<{ requesterUserId: string; expiresAt: number }>;
 }) {
   const { lody, auth, workspace, logger } = options;
   const ledger = new AutomationLedger(
@@ -76,6 +87,8 @@ export async function createAutomationWorkspaceLegacy(options: {
     throw error;
   }
   const authority = lody.getAutomationSessionAuthority();
+  const remoteNonce = randomUUID();
+  const consumedRemoteRequests = new Map<string, number>();
   let closing = false;
   const observationWork = new Set<Promise<unknown>>();
   const ownedCall = <A>(body: () => Promise<A>): Promise<A> => {
@@ -391,7 +404,7 @@ export async function createAutomationWorkspaceLegacy(options: {
           : {}),
       };
     };
-    return {
+    const handle = {
       ledger,
       dispatchQuotaSchedule: (
         run: ScheduleRun<PreparedSessionInput>,
@@ -560,6 +573,88 @@ export async function createAutomationWorkspaceLegacy(options: {
               failed.map((item) => item.reason)
             );
         })()),
+    };
+    return {
+      ...handle,
+      remoteControlNonce: options.verifyRemoteControl ? remoteNonce : undefined,
+      remoteControl: (input: {
+        sessionId: string;
+        requesterUserId: string;
+        operation: RemoteAutomationOperation;
+        proof: RemoteAutomationProof;
+        responseKey: import('@lody/shared').RpcSecretPublicKey;
+      }) =>
+        ownedCall(async () => {
+          const verify = options.verifyRemoteControl;
+          if (!verify) throw new Error('AUTOMATION_REMOTE_AUTH_UNAVAILABLE');
+          const operation = remoteAutomationOperationSchema.parse(input.operation);
+          const proof = remoteAutomationProofSchema.parse(input.proof);
+          if (input.requesterUserId !== auth.userId)
+            throw new Error('AUTOMATION_PERMISSION_DENIED');
+          if (proof.runtimeNonce !== remoteNonce) throw new Error('AUTOMATION_RUNTIME_CHANGED');
+          for (const [id, expiresAt] of consumedRemoteRequests)
+            if (expiresAt <= Date.now()) consumedRemoteRequests.delete(id);
+          if (consumedRemoteRequests.has(proof.requestId))
+            throw new Error('AUTOMATION_REQUEST_USED');
+          await sessionContext(input.sessionId);
+          const verified = await verify({
+            intent: remoteAutomationIntentSchema.parse({
+              workspaceId: workspace.id,
+              machineId: auth.machineId,
+              sessionId: input.sessionId,
+              requesterUserId: input.requesterUserId,
+              runtimeNonce: remoteNonce,
+              requestId: proof.requestId,
+              responseKey: input.responseKey,
+              operation,
+            }),
+            requestToken: proof.requestToken,
+          });
+          if (verified.requesterUserId !== auth.userId || verified.expiresAt <= Date.now())
+            throw new Error('AUTOMATION_PERMISSION_DENIED');
+          if (consumedRemoteRequests.has(proof.requestId))
+            throw new Error('AUTOMATION_REQUEST_USED');
+          consumedRemoteRequests.set(proof.requestId, verified.expiresAt);
+          await sessionContext(input.sessionId);
+          if (operation.type === 'cancel') {
+            const wait = ledger.wait(operation.id);
+            if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
+            assertReadable(wait, input.sessionId);
+            await handle.command({ type: 'cancel', id: operation.id });
+            return { type: 'cancel' as const };
+          }
+          if (operation.type === 'list') {
+            const all = ledger.waits(auth.userId, input.sessionId);
+            const start = operation.after
+              ? all.findIndex((wait) => wait.id === operation.after) + 1
+              : 0;
+            if (operation.after && start === 0) throw new Error('AUTOMATION_CURSOR_INVALID');
+            const waits = [];
+            let size = 0;
+            for (const wait of all.slice(start)) {
+              const receipt = wait.invocationId && ledger.receipt(wait.invocationId);
+              const item = {
+                id: wait.id,
+                sessionId: wait.sessionId,
+                reason: wait.reason,
+                state: wait.state,
+                nextCheckAt: wait.nextCheckAt,
+                expiresAt: wait.expiresAt,
+                ...(receipt
+                  ? { continuation: { state: receipt.state, reason: receipt.reason } }
+                  : {}),
+              };
+              const bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength;
+              if (waits.length && size + bytes > 24_000) break;
+              waits.push(item);
+              size += bytes;
+            }
+            const next = start + waits.length < all.length ? waits.at(-1)?.id : undefined;
+            return { type: 'list' as const, waits, ...(next ? { next } : {}) };
+          }
+          const settings = await handle.command({ ...operation, sessionId: input.sessionId });
+          return { type: 'settings' as const, settings };
+        }),
     };
   } catch (cause) {
     await runtime.dispose();

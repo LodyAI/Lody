@@ -1,6 +1,4 @@
-import { useState, type ReactNode } from 'react';
-import { createStore, Provider } from 'jotai';
-import { developerModeEnabledAtom, sessionContinuationBetaEnabledAtom } from '@/atoms/settings';
+import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import {
@@ -20,26 +18,18 @@ const waiting: SessionContinuationView = {
 };
 
 function Stage({ children, width = 680 }: { children: ReactNode; width?: number }) {
-  const [store] = useState(() => {
-    const next = createStore();
-    next.set(developerModeEnabledAtom, true);
-    next.set(sessionContinuationBetaEnabledAtom, true);
-    return next;
-  });
   return (
-    <Provider store={store}>
-      <div
-        style={{
-          width,
-          minHeight: 220,
-          padding: 28,
-          background: 'var(--background)',
-          color: 'var(--foreground)',
-        }}
-      >
-        <div style={{ maxWidth: width - 56 }}>{children}</div>
-      </div>
-    </Provider>
+    <div
+      style={{
+        width,
+        minHeight: 220,
+        padding: 28,
+        background: 'var(--background)',
+        color: 'var(--foreground)',
+      }}
+    >
+      <div style={{ maxWidth: width - 56 }}>{children}</div>
+    </div>
   );
 }
 

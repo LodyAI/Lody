@@ -603,6 +603,16 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   encryptedWorkspace?: boolean;
   token: string;
   workspaceId: WorkspaceId;
@@ -3289,6 +3299,8 @@ export class MessageHandler {
           success: true,
           runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
         }),
+        getAutomationControl: config.remoteAutomation?.handshake,
+        controlAutomation: config.remoteAutomation?.control,
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3733,7 +3745,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
@@ -6095,7 +6110,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],

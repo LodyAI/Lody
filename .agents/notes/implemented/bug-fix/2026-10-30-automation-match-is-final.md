@@ -12,7 +12,7 @@ An already matched automation could remain blocked forever when reevaluation no 
 
 ## Boundary
 
-The workspace owner evaluates the program only while its Wait is checking. The ledger atomically commits the result, evidence and continuation identity; after restart the same receipt drives delivery without executing the program again. Cancellation still revokes the Wait and receipt, Stop blocks admission until restoration, and existing PR association, HEAD and workflow evidence checks can supersede or defer delivery. A newly desired condition needs a new Wait; no implicit continuous JavaScript guard is introduced.
+The workspace owner evaluates the program only while its Wait is checking. The ledger atomically commits the result, evidence and continuation identity; after restart the same receipt drives delivery without executing the program again. Cancellation still revokes the Wait and receipt, Stop blocks admission until restoration, and existing PR association, HEAD and workflow evidence checks can supersede or defer delivery. Admission before and after preparation records the same terminal or retryable outcome immediately. A newly desired condition needs a new Wait; no implicit continuous JavaScript guard is introduced.
 
 The existing Session and Inbox owners retain acceptance, cancellation and reconciliation of uncertain submissions. The Effect runtime still owns evaluation and its cancellation; the Promise bridge owns and joins Session reads. No storage migration is needed because previously matched Waits already contain the durable result and receipt identity. This corrects the earlier predicate recheck described by the [Stop decision](2026-10-30-automation-pending-observations-and-stop.md).
 

@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAtomValue } from 'jotai';
-import { sessionContinuationFeatureEnabledAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { SessionContinuationView } from './session-continuation';
 import type { SessionContinuationTweaksValue } from './session-continuation-tweaks';
 import type { AutomationSettings } from '@lody/shared/automations';
+import type { WorkspaceRuntime } from '@/atoms/runtime';
+import type { MachineId, SessionId } from '@lody/shared';
+import type { RemoteAutomationOperation } from '@lody/shared/automations';
 
-type Target = { workspaceId: string; machineId: string; sessionId: string };
+type Target = {
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  remote?: { runtime: WorkspaceRuntime; requesterUserId: string };
+};
 type Wait = {
   id: string;
   reason?: string;
@@ -55,8 +61,9 @@ type Snapshot = {
   settings: AutomationSettings | null;
 };
 export function useLocalSessionContinuation(target: Target | null, visible: boolean) {
-  const enabled = useAtomValue(sessionContinuationFeatureEnabledAtom);
-  const key = target ? `${target.workspaceId}:${target.machineId}:${target.sessionId}` : '';
+  const key = target
+    ? `${target.workspaceId}:${target.machineId}:${target.sessionId}:${target.remote?.requesterUserId ?? ''}`
+    : '';
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -65,21 +72,39 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
   const workspaceId = target?.workspaceId;
   const machineId = target?.machineId;
   const sessionId = target?.sessionId;
+  const remoteRuntime = target?.remote?.runtime;
+  const requesterUserId = target?.remote?.requesterUserId;
+
+  const execute = useCallback(
+    async (command: RemoteAutomationOperation) => {
+      if (!workspaceId || !machineId || !sessionId)
+        throw new Error('Automation target unavailable');
+      if (remoteRuntime && requesterUserId) {
+        if (!remoteRuntime.requestSessionAutomationControl)
+          throw new Error('Remote automation unavailable');
+        return remoteRuntime.requestSessionAutomationControl(
+          machineId as MachineId,
+          sessionId as SessionId,
+          requesterUserId,
+          command
+        );
+      }
+      const service = getIpcServices()?.sessionControl;
+      if (!service) throw new Error('Local automation unavailable');
+      return service.automation({ workspaceId, machineId, sessionId, command });
+    },
+    [workspaceId, machineId, sessionId, remoteRuntime, requesterUserId]
+  );
 
   useEffect(() => {
-    if (!visible || !workspaceId || !machineId || !sessionId) return;
-    const service = getIpcServices()?.sessionControl;
-    if (!service) return;
+    if (!visible || !workspaceId || !machineId || !sessionId) return undefined;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    const identity = { workspaceId, machineId, sessionId };
     const read = async () => {
       try {
         const [waits, settings] = await Promise.allSettled([
-          enabled
-            ? service.automation({ ...identity, command: { type: 'list' } })
-            : Promise.resolve({ type: 'list' as const, waits: [] }),
-          service.automation({ ...identity, command: { type: 'settings' } }),
+          execute({ type: 'list' }),
+          execute({ type: 'settings' }),
         ]);
         if (waits.status !== 'fulfilled' || waits.value.type !== 'list')
           throw new Error('invalid response');
@@ -97,7 +122,7 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
       } catch {
         if (active) setErrorKey(key);
       } finally {
-        if (active) timer = setTimeout(read, 15_000);
+        if (active) timer = setTimeout(() => void read(), 15_000);
       }
     };
     void read();
@@ -105,22 +130,17 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
       active = false;
       clearTimeout(timer);
     };
-  }, [enabled, visible, workspaceId, machineId, sessionId, key, revision]);
+  }, [visible, workspaceId, machineId, sessionId, key, revision, execute]);
 
   const current = target && snapshot?.key === key ? snapshot : null;
   const send = useCallback(
     async (
       command: { type: 'cancel'; id: string } | { type: 'configure'; settings: AutomationSettings }
     ) => {
-      if (!enabled || !target || busy) return;
-      const service = getIpcServices()?.sessionControl;
-      if (!service) {
-        setErrorKey(key);
-        return;
-      }
+      if (!target || busy) return;
       setBusy(true);
       try {
-        await service.automation({ ...target, command });
+        await execute(command);
         setErrorKey(null);
         refresh();
       } catch {
@@ -129,16 +149,15 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
         setBusy(false);
       }
     },
-    [enabled, target, busy, refresh, key]
+    [target, busy, refresh, key, execute]
   );
-  const value: SessionContinuationTweaksValue | null =
-    enabled && current?.settings
-      ? {
-          recoverCapacity: current.settings.recoverCapacity === true,
-          archiveAfterMerge: current.settings.archiveAfterMerge === true,
-          compactWhenIdle: typeof current.settings.compactWhenIdle === 'object',
-        }
-      : null;
+  const value: SessionContinuationTweaksValue | null = current?.settings
+    ? {
+        recoverCapacity: current.settings.recoverCapacity === true,
+        archiveAfterMerge: current.settings.archiveAfterMerge === true,
+        compactWhenIdle: typeof current.settings.compactWhenIdle === 'object',
+      }
+    : null;
   const setTweak = useCallback(
     (name: keyof SessionContinuationTweaksValue, checked: boolean) => {
       const compact = current?.settings?.compactWhenIdle;
@@ -153,10 +172,10 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     [current, send]
   );
   return {
-    views: enabled ? (current?.views ?? []) : [],
+    views: current?.views ?? [],
     value,
     recoveryEnabled: current?.settings ? current.settings.recoverCapacity === true : null,
-    error: enabled && !!target && errorKey === key,
+    error: !!target && errorKey === key,
     busy,
     refresh,
     setTweak,

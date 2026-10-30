@@ -12,7 +12,7 @@ Translation: current
 
 ## 边界
 
-Workspace owner 只在 Wait 检查期间执行程序。账本以事务提交结果、证据和 continuation 身份；重启后同一 receipt 负责交付，不再执行程序。取消仍撤销 Wait 和 receipt，Stop 仍阻塞接纳直到恢复；既有 PR 关联、HEAD 与 workflow 证据检查仍可取代或延迟交付。需要等待新条件时应创建新的 Wait；这里不引入隐式持续 JavaScript guard。
+Workspace owner 只在 Wait 检查期间执行程序。账本以事务提交结果、证据和 continuation 身份；重启后同一 receipt 负责交付，不再执行程序。取消仍撤销 Wait 和 receipt，Stop 仍阻塞接纳直到恢复；既有 PR 关联、HEAD 与 workflow 证据检查仍可取代或延迟交付。准备前后的接纳检查立即记录一致的终态或可重试结果。需要等待新条件时应创建新的 Wait；这里不引入隐式持续 JavaScript guard。
 
 Session 和 Inbox owner 继续负责接纳、取消和不确定提交的核对。Effect runtime 继续负责求值与取消，Promise 桥负责持有并等待 Session 读取。旧的已匹配 Wait 已保存结果和 receipt 身份，因此不需要存储迁移。本决定修正 [Stop 决策](2026-10-30-automation-pending-observations-and-stop.zh.md)中之前的谓词复查行为。
 

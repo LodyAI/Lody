@@ -5,6 +5,8 @@ import { SessionContinuationTweaks } from './session-continuation-tweaks';
 import { useStableNow } from '@/hooks/use-stable-now';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
@@ -2566,9 +2568,26 @@ export const SessionChatInterface = memo(
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
+    const automationSupported =
+      !!runtime &&
+      workspaceSupports(
+        { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'automations'
+      );
     const continuation = useLocalSessionContinuation(
-      isLocalSession && workspaceId && session.machineId
-        ? { workspaceId, machineId: session.machineId, sessionId: session.id }
+      automationSupported &&
+        workspaceId &&
+        session.machineId &&
+        (isLocalSession ||
+          (!!localMachineId && !!getAutomationProofIssuer() && currentUser?.id === session.userId))
+        ? {
+            workspaceId,
+            machineId: session.machineId,
+            sessionId: session.id,
+            ...(!isLocalSession && runtime && currentUser?.id
+              ? { remote: { runtime, requesterUserId: currentUser.id } }
+              : {}),
+          }
         : null,
       isVisible
     );
@@ -4903,7 +4922,8 @@ export const SessionChatInterface = memo(
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionHistory,
-      hostRecoveryEnabled: isLocalSession && continuation.recoveryEnabled !== false,
+      hostRecoveryEnabled:
+        isLocalSession && automationSupported && continuation.recoveryEnabled !== false,
       canRetry:
         !continuation.recoveryEnabled &&
         sessionDocReady &&

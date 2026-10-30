@@ -1,6 +1,4 @@
 import { useMemo, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import { sessionContinuationFeatureEnabledAtom } from '@/atoms/settings';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
@@ -338,11 +336,10 @@ export function SessionContinuationNote({
 }: SessionContinuationNoteProps) {
   const { t, i18n } = useTranslation();
   const noteRef = useRef<HTMLDivElement>(null);
-  const enabled = useAtomValue(sessionContinuationFeatureEnabledAtom);
   const locale = toIntlLocaleOrEn(i18n.language);
   const descriptor = useMemo(() => describeSessionContinuation(view, now), [view, now]);
 
-  if (!enabled || !descriptor.visible) return null;
+  if (!descriptor.visible) return null;
 
   const title = descriptor.title ?? t('sessions.continuation.fallbackTitle', '会话自动继续');
   const detail = t(DETAIL_COPY[descriptor.detail].key, DETAIL_COPY[descriptor.detail].fallback);

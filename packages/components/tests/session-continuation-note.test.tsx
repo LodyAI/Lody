@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 
 import { act } from 'react';
-import { getDefaultStore } from 'jotai';
-import {
-  developerModeEnabledAtom,
-  sessionContinuationBetaEnabledAtom,
-} from '../src/atoms/settings';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContinuationNote } from '../src/components/sessions/session-continuation-note';
@@ -39,8 +34,6 @@ describe('SessionContinuationNote', () => {
   let root: Root;
 
   beforeEach(() => {
-    getDefaultStore().set(developerModeEnabledAtom, true);
-    getDefaultStore().set(sessionContinuationBetaEnabledAtom, true);
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -48,22 +41,7 @@ describe('SessionContinuationNote', () => {
 
   afterEach(() => {
     act(() => root.unmount());
-    getDefaultStore().set(developerModeEnabledAtom, false);
-    getDefaultStore().set(sessionContinuationBetaEnabledAtom, false);
     container.remove();
-  });
-
-  it('requires both developer mode and the continuation opt-in', () => {
-    act(() => {
-      getDefaultStore().set(sessionContinuationBetaEnabledAtom, false);
-      root.render(<SessionContinuationNote view={view()} now={NOW} onCancel={() => {}} />);
-    });
-    expect(container.textContent).toBe('');
-    act(() => getDefaultStore().set(sessionContinuationBetaEnabledAtom, true));
-    expect(container.textContent).toContain('等 CI 通过后继续');
-    act(() => getDefaultStore().set(developerModeEnabledAtom, false));
-    expect(container.textContent).toBe('');
-    expect(getDefaultStore().get(sessionContinuationBetaEnabledAtom)).toBe(true);
   });
 
   it('renders the Agent sentence and the countdown as one quiet line', () => {
@@ -88,7 +66,9 @@ describe('SessionContinuationNote', () => {
       (button) => button.textContent === '取消等待'
     );
     expect(cancel).toBeDefined();
-    act(() => cancel?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => {
+      cancel?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     expect(onCancel).toHaveBeenCalledWith('wait-1');
   });
 
@@ -111,7 +91,9 @@ describe('SessionContinuationNote', () => {
       (button) => button.textContent === '恢复会话'
     );
     expect(resume).toBeDefined();
-    act(() => resume?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => {
+      resume?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     expect(onResume).toHaveBeenCalledWith('wait-1');
   });
 
@@ -133,7 +115,9 @@ describe('SessionContinuationNote', () => {
       button.textContent?.includes('请 Agent 检查')
     );
     expect(ask).toBeDefined();
-    act(() => ask?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => {
+      ask?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     expect(onAskAgent).toHaveBeenCalledTimes(1);
   });
 

@@ -171,7 +171,17 @@ export class Automations extends Context.Service<
             return;
           }
           yield* Effect.try(() => ledger.recordDeadline(receipt, now));
-          const observation = yield* check(receipt);
+          let observation = yield* check(receipt);
+          if (observation.value === 'yes') {
+            if (!receipt.prepared) {
+              const prepared = yield* host.prepare(receipt);
+              const resolved = yield* persist(receipt, { retryAt: now + 15_000, ...prepared });
+              if (!resolved || resolved.state !== 'resolved') return;
+              receipt = resolved;
+            }
+            // Preparation may yield to a user command, grant edit or a new source observation.
+            observation = yield* check(receipt);
+          }
           if (observation.value !== 'yes') {
             yield* persist(receipt, {
               state:
@@ -184,22 +194,6 @@ export class Automations extends Context.Service<
                     : 'blocked',
               reason: observation.reason,
               retryAt: observation.retryAt ?? now + 15_000,
-            });
-            return;
-          }
-          if (!receipt.prepared) {
-            const prepared = yield* host.prepare(receipt);
-            const resolved = yield* persist(receipt, { retryAt: now + 15_000, ...prepared });
-            if (!resolved || resolved.state !== 'resolved') return;
-            receipt = resolved;
-          }
-          // Preparation may yield to a user command, grant edit or a new source observation.
-          const rechecked = yield* check(receipt);
-          if (rechecked.value !== 'yes') {
-            yield* persist(receipt, {
-              state: 'blocked',
-              reason: rechecked.reason,
-              retryAt: rechecked.retryAt ?? now + 15_000,
             });
             return;
           }

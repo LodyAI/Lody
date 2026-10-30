@@ -4,6 +4,8 @@
 
 - Keep the ledger machine-local and private. Freeze rule revision, authenticated
   author, scope, grants and event at acceptance; intersect current grants at dispatch.
+- Remote controls require verified, operation-bound proof and exact Session/daemon
+  ownership. Do not advertise control until the verifier exists. [Decision](../../../../.agents/notes/proposed/architecture/2026-10-30-remote-session-automation-control.md).
 - Observe facts through existing owners. A clock wake never proves capacity;
   missing windows, native identity, release or tool boundaries remain unknown.
 - Persist a stable action/Session/Turn mapping before effects. Reconcile uncertain

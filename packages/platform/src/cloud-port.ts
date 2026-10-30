@@ -1,4 +1,11 @@
-import type { E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage, E2eeContentTokenRequest, E2eeContentToken, E2eeMailboxRequests, E2eeMailboxReplies } from '@lody/cloud-api';
+import type {
+  E2eeWorkspaceHistoryRequest,
+  E2eeWorkspaceHistoryPage,
+  E2eeContentTokenRequest,
+  E2eeContentToken,
+  E2eeMailboxRequests,
+  E2eeMailboxReplies,
+} from '@lody/cloud-api';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { Effect, Scope } from 'effect';
 export type { LoroStreamsTokenProvider } from '@lody/shared';
@@ -47,13 +54,32 @@ export interface CloudSessionSharingPort {
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
   /** CLI-only native kernel assembled by its optional cloud composition. */
-  createContentTokenProvider?(input: { workspaceId: string; credential: string }): Effect.Effect<LoroStreamsTokenProvider & { getBucketId(): string | undefined }, never, Scope.Scope>;
+  createContentTokenProvider?(input: {
+    workspaceId: string;
+    credential: string;
+  }): Effect.Effect<
+    LoroStreamsTokenProvider & { getBucketId(): string | undefined },
+    never,
+    Scope.Scope
+  >;
 
-  getHistory(input: Omit<E2eeWorkspaceHistoryRequest, 'cliToken'> & { credential: string }): Promise<E2eeWorkspaceHistoryPage>;
+  getHistory(
+    input: Omit<E2eeWorkspaceHistoryRequest, 'cliToken'> & { credential: string }
+  ): Promise<E2eeWorkspaceHistoryPage>;
   getContentToken(input: Omit<E2eeContentTokenRequest, 'cliToken'>): Promise<E2eeContentToken>;
-  mailboxCall<K extends keyof E2eeMailboxRequests>(method: K, input: Omit<E2eeMailboxRequests[K], 'cliToken'>): Promise<E2eeMailboxReplies[K]>;
+  mailboxCall<K extends keyof E2eeMailboxRequests>(
+    method: K,
+    input: Omit<E2eeMailboxRequests[K], 'cliToken'>
+  ): Promise<E2eeMailboxReplies[K]>;
 }
 export interface CloudPort {
+  /** Absent until the cloud can issue and verify scoped remote Automation proofs. */
+  remoteAutomation?: {
+    verifyControl(input: {
+      intent: import('@lody/shared/automations').RemoteAutomationIntent;
+      requestToken: string;
+    }): Promise<{ requesterUserId: string; expiresAt: number }>;
+  };
   /** Absent in ordinary/local composition; does not own local key material. */
   e2ee?: CloudE2eePort | null;
   readonly kind: PlatformKind;

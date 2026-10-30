@@ -932,6 +932,48 @@ export class LodyFleet {
           builtinAgentConfigCliTypes: this.builtinAgentConfigCliTypes,
           supportRegistryAgentTypes: this.supportRegistryAgentTypes,
           workspaceId: workspace.id as WorkspaceId,
+          remoteAutomation: {
+            handshake: async () => {
+              const nonce = this.runtimes.get(workspace.id)?.automations?.remoteControlNonce;
+              return nonce
+                ? {
+                    type: 'machine/automation-control_response',
+                    machineId: this.machineId,
+                    success: true,
+                    runtimeNonce: nonce,
+                  }
+                : {
+                    type: 'machine/automation-control_response',
+                    machineId: this.machineId,
+                    success: false,
+                    error: 'AUTOMATION_REMOTE_AUTH_UNAVAILABLE',
+                  };
+            },
+            control: async (input) => {
+              try {
+                const automation = this.runtimes.get(workspace.id)?.automations;
+                if (!automation) throw new Error('AUTOMATION_OWNER_UNAVAILABLE');
+                const result = await automation.remoteControl(input);
+                const { remoteAutomationResultSchema } = await import('@lody/shared/automations');
+                return {
+                  type: 'session/automation-control_response',
+                  sessionId: input.sessionId,
+                  success: true,
+                  result: remoteAutomationResultSchema.parse(result),
+                };
+              } catch (error) {
+                const message = error instanceof Error ? error.message : '';
+                return {
+                  type: 'session/automation-control_response',
+                  sessionId: input.sessionId,
+                  success: false,
+                  error: /^AUTOMATION_[A-Z_]+$/.test(message)
+                    ? message
+                    : 'AUTOMATION_CONTROL_FAILED',
+                };
+              }
+            },
+          },
           contentMode: workspace.contentMode,
           genesisHash: workspace.genesisHash,
           workspaceSlug: workspace.slug ?? undefined,
@@ -1043,6 +1085,7 @@ export class LodyFleet {
               hasUncertainLegacyQuota: schedules.hasUncertainLegacyQuota,
               workspace,
               logger: workspaceLogger,
+              verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
               auth: {
                 token: this.cliToken,
                 userId: this.userId,
@@ -1207,6 +1250,7 @@ export class LodyFleet {
       hasUncertainLegacyQuota: state.schedules.hasUncertainLegacyQuota,
       workspace: state.workspace,
       logger: this.logger,
+      verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
       auth: {
         token: this.cliToken,
         userId: this.userId,

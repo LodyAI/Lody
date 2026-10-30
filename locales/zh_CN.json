@@ -2980,8 +2980,6 @@
   "settings.about.restartOnboardingAction": "重新开始",
   "settings.about.restartOnboardingError": "无法重新开始引导。",
   "settings.beta.title": "Beta 功能",
-  "settings.beta.sessionContinuation": "会话自动继续",
-  "settings.beta.sessionContinuationHelper": "开发者预览，适用于此机器上的会话。",
   "settings.beta.inbox": "收件箱",
   "settings.beta.inboxHelper": "显示尚未完成的移动端收件箱入口。开发中，可能有粗糙的地方。",
   "settings.about.website": "官网",
