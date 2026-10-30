@@ -105,38 +105,6 @@ export async function readMagpieModels(
   return models;
 }
 
-export function buildMagpieCodexCatalog(models: readonly MagpieModel[]) {
-  return {
-    models: models.map((m, i) => ({
-      slug: m.id,
-      display_name: m.display_name ?? m.id,
-      description: `${m.display_name ?? m.id} via Magpie`,
-      base_instructions:
-        'You are a coding assistant. Help the user complete their software development tasks accurately and safely.',
-      default_reasoning_level:
-        m.supported_reasoning_levels?.find((l) => l.effort === 'medium')?.effort ??
-        m.supported_reasoning_levels?.[0]?.effort ??
-        null,
-      supported_reasoning_levels: (m.supported_reasoning_levels ?? []).map((l) => ({
-        ...l,
-        description: l.effort,
-      })),
-      shell_type: 'unified_exec',
-      visibility: 'list',
-      supported_in_api: true,
-      priority: i,
-      support_verbosity: false,
-      default_verbosity: null,
-      apply_patch_tool_type: 'freeform',
-      truncation_policy: { mode: 'tokens', limit: 10000 },
-      experimental_supported_tools: [],
-      input_modalities: acceptsImageInput(m) ? ['text', 'image'] : ['text'],
-      context_window: m.context_window ?? 128000,
-      supports_parallel_tool_calls: true,
-    })),
-  };
-}
-
 export function buildMagpiePiCatalog(gateway: string, models: readonly MagpieModel[]) {
   return {
     providers: {
@@ -312,21 +280,18 @@ export async function prepareMagpieRuntime(
       env: { PI_CODING_AGENT_DIR: directory },
     };
   }
-  // Content-addressed catalogs keep concurrent launches on their exact snapshot.
-  const catalog = buildMagpieCodexCatalog(models);
-  const catalogPath = join(
-    directory,
-    `models-${createHash('sha256').update(JSON.stringify(catalog)).digest('hex').slice(0, 24)}.json`
-  );
-  await writeAtomic(catalogPath, catalog);
+  // Codex reads the catalog Magpie serves in Codex's own shape, so capability
+  // metadata is mapped once, on the side that knows the vendor's answer, the
+  // user's per-model override and Codex's field vocabulary. `agent=lody` keeps
+  // the models picked for Lody in Magpie rather than Codex's own picks.
   const config = JSON.stringify({
     model_provider: 'magpie',
     model: first.id,
-    model_catalog_json: catalogPath,
     model_providers: {
       magpie: {
         name: 'Magpie',
         base_url: `${base}/v1`,
+        model_catalog_url: `${base}/v1/codex/models?agent=lody`,
         env_key: 'OPENAI_API_KEY',
         wire_api: 'responses',
         requires_openai_auth: false,
