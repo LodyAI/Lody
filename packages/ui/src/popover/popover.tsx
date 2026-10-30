@@ -19,6 +19,17 @@ type DescriptionBaseProps = ComponentProps<typeof BasePopover.Description>;
 const layout = stylex.create({
   noPadding: { padding: 0 },
   noGap: { gap: 0 },
+  visuallyHidden: {
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+    width: 1,
+    height: 1,
+    margin: -1,
+    padding: 0,
+    position: 'absolute',
+    overflow: 'hidden',
+  },
 });
 
 const dimensions = stylex.create({
@@ -61,6 +72,8 @@ export interface PopoverContentProps extends Omit<
 export type PopoverTriggerProps = TriggerBaseProps;
 
 export interface PopoverTitleProps extends Omit<TitleBaseProps, 'className'> {
+  /** Clip the painted heading while keeping it as the popup's accessible name. */
+  visuallyHidden?: boolean;
   className?: string;
 }
 export interface PopoverDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
@@ -173,10 +186,10 @@ export function PopoverHeader({ children, className }: PopoverHeaderProps) {
  * that has one announces it rather than reading its whole body out.
  */
 export const PopoverTitle = forwardRef<HTMLHeadingElement, PopoverTitleProps>(function PopoverTitle(
-  { className, ...rest },
+  { className, visuallyHidden = false, ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.panelTitle);
+  const sx = stylex.props(surface.panelTitle, visuallyHidden && layout.visuallyHidden);
   return (
     <BasePopover.Title
       ref={ref}

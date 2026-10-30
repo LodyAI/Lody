@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { card } from '@lody/ui/card/card.tokens.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -8,6 +9,10 @@ import {
 } from '../../style/theme-scale.stylex';
 
 export const pageSurface = stylex.create({
+  authTitle: {
+    [card.titleSize]: 'var(--text-2xl)',
+    [card.titleLeading]: 'var(--tw-leading, var(--text-2xl--line-height))',
+  },
   page: {
     display: 'flex',
     minHeight: '100vh',

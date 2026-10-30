@@ -69,6 +69,50 @@ describe('Popover', () => {
     );
   });
 
+  test('a clipped rendered title keeps its ref, identity and accessible name when restored', async () => {
+    const titleRef = createRef<HTMLHeadingElement>();
+    function Subject() {
+      const [visuallyHidden, setVisuallyHidden] = useState<boolean | undefined>();
+      return (
+        <Popover.Root defaultOpen>
+          <Popover.Trigger>Filter</Popover.Trigger>
+          <Popover.Content>
+            <Popover.Title
+              ref={titleRef}
+              render={<h3 data-rendered-title />}
+              visuallyHidden={visuallyHidden}
+            >
+              Filter sessions
+            </Popover.Title>
+            <Button onClick={() => setVisuallyHidden((value) => (value ? undefined : true))}>
+              {visuallyHidden ? 'Show title' : 'Clip title'}
+            </Button>
+          </Popover.Content>
+        </Popover.Root>
+      );
+    }
+    mounted = await mount(<Subject />);
+    const title = titleRef.current;
+    expect(title?.tagName).toBe('H3');
+    const id = title?.id;
+    const assertNamed = () => {
+      expect(titleRef.current).toBe(title);
+      expect(title?.id).toBe(id);
+      expect(panel().getAttribute('aria-labelledby')).toBe(id);
+      expect(document.getElementById(id ?? '')?.textContent).toBe('Filter sessions');
+      expect(title?.hasAttribute('hidden')).toBe(false);
+      expect(title?.hasAttribute('aria-hidden')).toBe(false);
+      expect(title?.hasAttribute('visuallyhidden')).toBe(false);
+    };
+    assertNamed();
+    await click(all('button').find((node) => node.textContent === 'Clip title') as HTMLElement);
+    assertNamed();
+    await click(all('button').find((node) => node.textContent === 'Show title') as HTMLElement);
+    assertNamed();
+    await press('Escape');
+    expect(trigger().getAttribute('aria-expanded')).toBe('false');
+  });
+
   test('Escape closes it and the trigger says so again', async () => {
     mounted = await mount(
       <Popover.Root>

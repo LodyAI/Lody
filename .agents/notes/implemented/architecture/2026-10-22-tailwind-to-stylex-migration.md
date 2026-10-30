@@ -1957,7 +1957,7 @@ negatives and real portal-gate calibration failures. Earlier OPENs stay unchange
 
 ### Control ownership and capture boundaries
 
-Batches74–84 move owned Tooltip, resize-edge, label, context and filled-action
+Batches74–88 move owned Tooltip, resize-edge, label, context and filled-action
 styles through existing primitives, preserving their actual caller contracts.
 The product adds no token group or dependency. Button gains CSS-typed `fontSize`
 and `lineHeight`, plus an explicit flat `solid` variant; ResizableHandle gains
@@ -1973,6 +1973,20 @@ render-element merging recorded separately. Fixed-text Field labels instead writ
 existing size/leading tokens: inputs are siblings and there are no descendant
 readers. Login retains full size/leading, while mobile labels change only size.
 Weight, tracking and private leading writers stay compatible.
+
+Fixed Card titles also use existing size/leading atoms, preserving weight and
+tracking. Textareas use existing resize/min-height/background contracts and their
+existing physical `style` fields for size/leading, retaining placeholder, controlled
+value, pending and cancel behavior. These do not introduce a generic style API.
+
+Accessible names remain mounted. Opt-in `visuallyHidden` composes the compiler's
+nine invariant fields inside the actual Dialog and Vaul Title/Description owners,
+and Popover Title, without changing contexts, DOM or ARIA attributes. The physical
+1px/-1px and `inset(50%)` values do not follow theme spacing. Dialog Title also
+clears its existing logical-end padding in the same owner composition. Default
+parts retain their old fields, IDs, refs and render-element merging. Gallery
+images are After-only. The stack's original dangling `aria-describedby` remains
+an equal missing reference on both sources, not a claim that all ARIA is valid.
 
 `solid` owns only fill, label, fine-hover 90% alpha and the existing focus ring.
 It reads existing primary inks and ignores destructive tone like primary, adding
@@ -2027,6 +2041,7 @@ old timeout's exact cause.
 | `leaves74-78-acceptance.html` |                                310 / 305 / 30,303 | Five formal 13 / 0; two sidebar supplements 882 / 829. |
 | `leaves79-81-acceptance.html` |                                296 / 292 / 14,056 | Four formal 1,075 / 0; one native supplement 22 / 0.   |
 | `leaves82-84-acceptance.html` |                                306 / 305 / 12,854 | One disabled-button corner 10 / 7.                     |
+| `leaves85-88-acceptance.html` |                                284 / 284 / 12,554 | No new formal OPEN; all historical OPEN retained.      |
 
 The final group includes 36 actual stack pairs and 24 separately identified
 existing-API controls; controls add no utility count. Later matching controls
@@ -2081,6 +2096,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 78, with partial visual acceptance    | v2             |       1,507 |   163 |        718 |
 | Exact source through 81, with partial visual acceptance    | v2             |       1,489 |   163 |        724 |
 | Exact source through 84, with partial visual acceptance    | v2             |       1,474 |   163 |        726 |
+| Exact source through 88, with partial visual acceptance    | v2             |       1,451 |   159 |        726 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2100,13 +2116,24 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 84 v2 split is components: 1,039 occurrences/147 files/633
-unresolved, legacy UI: 430/14/93 and routes: 5/2/0. The three roots contain 790
-recorded files: four through81 files update and a new zero-Tailwind theme module
-joins them. Shared UI Button/Gallery sources and export metadata are frozen
-separately, outside the count. Later batches are excluded. The six through81
-Field.Label templates and two through84 action-theme templates are known StyleX
-expressions within the unresolved count, not eight new unknown utilities.
+The published through88 v2 split is components: 1,016 occurrences/143 files/633
+unresolved, legacy UI: 430/14/93 and routes: 5/2/0, from 790 recorded source files.
+Shared UI source and export metadata are frozen outside that three-root count.
+The six Field.Label and two action-theme templates remain known StyleX unresolved
+expressions. Later batches are excluded.
+
+The same unchanged scanner on the full product `src`, excluding stories, records
+1,460 occurrences/161 files/730 unresolved across 1,396 frozen JS/TS files. The
+nine occurrences beyond the three roots belong to `conversation-layout.ts` and
+`use-keyboard-aware-scroll-into-view.ts`; four additional unresolved expressions
+are recorded separately. A manual compiler audit also identifies sixteen latent
+skip-link factory literals, three shared touch-helper literals and six call-site
+margin arguments omitted by v2. The skip-link factory has no in-repository caller;
+installing a new link would not prove a migrated existing UI. These known parser
+gaps remain separate from published lower bounds, with zero migration credit for
+the audit; historical inventories are not rewritten. Existing touch callers need
+the actual Button sizing API and their own visual evidence, not an opaque caller
+class that competes with the primitive.
 The through 67 transition below explains its
 unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub

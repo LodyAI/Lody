@@ -1,0 +1,81 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-chatfaileddetaildialog--upstream-api-error",
+    "components-chatfaileddetaildialog--with-suggested-action"
+  ],
+  "ready": {
+    "components-chatfaileddetaildialog--upstream-api-error": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const d=document.querySelector('[role=dialog]');if(!d)return false;const c=getComputedStyle(d),r=d.getBoundingClientRect(),ids=(d.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean);return ids.length>0&&ids.every(id=>!!document.getElementById(id))&&d.textContent.includes('Copy error')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===new URL(location.href).searchParams.get('globals')?.includes('theme:dark')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--with-suggested-action": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const d=document.querySelector('[role=dialog]');if(!d)return false;const c=getComputedStyle(d),r=d.getBoundingClientRect(),ids=(d.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean);return ids.length>0&&ids.every(id=>!!document.getElementById(id))&&d.textContent.includes('Copy error')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===new URL(location.href).searchParams.get('globals')?.includes('theme:dark')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-chatfaileddetaildialog--upstream-api-error": [
+      {
+        "name": "copy-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--with-suggested-action": [
+      {
+        "name": "copy-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "components-chatfaileddetaildialog--upstream-api-error",
+    "components-chatfaileddetaildialog--with-suggested-action"
+  ]
+}

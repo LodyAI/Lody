@@ -71,6 +71,17 @@ const styles = stylex.create({
     marginTop: themeSpace[2],
     width: '100%',
   },
+  visuallyHidden: {
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+    width: 1,
+    height: 1,
+    margin: -1,
+    padding: 0,
+    position: 'absolute',
+    overflow: 'hidden',
+  },
   noMachineHint: {
     marginTop: themeSpace[2],
   },
@@ -108,9 +119,9 @@ export function MobileChatLandingScreen({
             onClick={onOpenMobileDrawer}
           >
             <PanelLeft className={stylex.props(styles.menuIcon).className} />
-            <span className="sr-only">Open sidebar</span>
+            <span {...stylex.props(styles.visuallyHidden)}>Open sidebar</span>
           </Button>
-          <span className="sr-only">{title}</span>
+          <span {...stylex.props(styles.visuallyHidden)}>{title}</span>
         </div>
 
         <div {...stylex.props(styles.scroll)}>

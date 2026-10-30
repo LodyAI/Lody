@@ -1788,8 +1788,8 @@ function AddProjectActionSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="pb-[max(1.25rem,var(--safe-area-bottom,0px))]">
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">{title}</DrawerDescription>
+        <DrawerTitle visuallyHidden>{title}</DrawerTitle>
+        <DrawerDescription visuallyHidden>{title}</DrawerDescription>
         <div {...stylex.props(styles.sheetStack)}>
           {options.map((opt) => (
             <button

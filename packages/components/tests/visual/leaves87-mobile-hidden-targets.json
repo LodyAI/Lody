@@ -1,0 +1,135 @@
+{
+  "viewports": [
+    {
+      "name": "phone320",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    },
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "below-md767",
+      "width": 767,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "mobile-mobilechatlandingscreen--default",
+    "mobile-mobilechatlandingscreen--with-hints",
+    "mobile-mobilechatlandingscreen--rtl-local-font"
+  ],
+  "ready": {
+    "mobile-mobilechatlandingscreen--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const b=document.querySelector('button:has(svg.lucide-panel-left)'),r=document.querySelector('[data-sidebar-opens]'),hidden=b?.querySelector('svg')?.nextElementSibling,title=b?.parentElement.lastElementChild;return !!b&&r?.dataset.sidebarOpens==='0'&&hidden?.tagName==='SPAN'&&title?.tagName==='SPAN'&&hidden.textContent==='Open sidebar'&&title.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&r.querySelector('h1')?.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&document.fonts.status==='loaded'&&getComputedStyle(b).display!=='none';}"
+      }
+    ],
+    "mobile-mobilechatlandingscreen--with-hints": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const b=document.querySelector('button:has(svg.lucide-panel-left)'),r=document.querySelector('[data-sidebar-opens]'),hidden=b?.querySelector('svg')?.nextElementSibling,title=b?.parentElement.lastElementChild;return !!b&&r?.dataset.sidebarOpens==='0'&&hidden?.tagName==='SPAN'&&title?.tagName==='SPAN'&&hidden.textContent==='Open sidebar'&&title.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&r.querySelector('h1')?.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&document.fonts.status==='loaded'&&getComputedStyle(b).display!=='none';}"
+      }
+    ],
+    "mobile-mobilechatlandingscreen--rtl-local-font": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const b=document.querySelector('button:has(svg.lucide-panel-left)'),r=document.querySelector('[data-sidebar-opens]'),hidden=b?.querySelector('svg')?.nextElementSibling,title=b?.parentElement.lastElementChild;return !!b&&r?.dataset.sidebarOpens==='0'&&hidden?.tagName==='SPAN'&&title?.tagName==='SPAN'&&hidden.textContent==='Open sidebar'&&title.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&r.querySelector('h1')?.textContent==='\u5f00\u59cb\u5bf9\u8bdd'&&document.fonts.status==='loaded'&&getComputedStyle(b).display!=='none';}"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobilechatlandingscreen--default": [
+      {
+        "name": "sidebar-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.activeElement===document.querySelector('button:has(svg.lucide-panel-left)')&&document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='0'"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-click-callback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='1'"
+          }
+        ]
+      }
+    ],
+    "mobile-mobilechatlandingscreen--with-hints": [
+      {
+        "name": "sidebar-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.activeElement===document.querySelector('button:has(svg.lucide-panel-left)')&&document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='0'"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-click-callback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='1'"
+          }
+        ]
+      }
+    ],
+    "mobile-mobilechatlandingscreen--rtl-local-font": [
+      {
+        "name": "sidebar-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.activeElement===document.querySelector('button:has(svg.lucide-panel-left)')&&document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='0'"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-click-callback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has(svg.lucide-panel-left)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-sidebar-opens]').dataset.sidebarOpens==='1'"
+          }
+        ]
+      }
+    ]
+  }
+}

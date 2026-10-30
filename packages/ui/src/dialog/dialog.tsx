@@ -86,9 +86,13 @@ export interface DialogContentProps extends ModalContentProps {
 }
 
 export interface DialogTitleProps extends Omit<TitleBaseProps, 'className'> {
+  /** Keeps the name mounted for accessibility while removing its visual footprint. */
+  visuallyHidden?: boolean;
   className?: string;
 }
 export interface DialogDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
+  /** Keeps the accessible description mounted while removing its visual footprint. */
+  visuallyHidden?: boolean;
   className?: string;
 }
 export interface DialogBackdropProps extends Omit<BackdropBaseProps, 'className'> {
@@ -230,10 +234,14 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
 
 /** The heading. Base UI wires it to the panel's accessible name. */
 export const DialogTitle = forwardRef<HTMLHeadingElement, DialogTitleProps>(function DialogTitle(
-  { className, ...rest },
+  { className, visuallyHidden = false, ...rest },
   ref
 ) {
-  const sx = stylex.props(modal.title);
+  const sx = stylex.props(
+    modal.title,
+    visuallyHidden && modal.srOnly,
+    visuallyHidden && modal.hiddenTitleInset
+  );
   return (
     <BaseDialog.Title
       ref={ref}
@@ -246,8 +254,8 @@ export const DialogTitle = forwardRef<HTMLHeadingElement, DialogTitleProps>(func
 
 /** What the heading is about; Base UI wires it to the accessible description. */
 export const DialogDescription = forwardRef<HTMLParagraphElement, DialogDescriptionProps>(
-  function DialogDescription({ className, ...rest }, ref) {
-    const sx = stylex.props(modal.description);
+  function DialogDescription({ className, visuallyHidden = false, ...rest }, ref) {
+    const sx = stylex.props(modal.description, visuallyHidden && modal.srOnly);
     return (
       <BaseDialog.Description
         ref={ref}

@@ -23,6 +23,59 @@ const buttonNamed = (label: string) => {
 };
 
 describe('Dialog', () => {
+  test('hidden names retain their nodes, refs, ids and accessible relationships when shown again', async () => {
+    const title = { current: null as HTMLHeadingElement | null };
+    const description = { current: null as HTMLParagraphElement | null };
+    const view = (visuallyHidden?: boolean) => (
+      <Dialog.Root defaultOpen>
+        <Dialog.Content data-hidden-name-panel>
+          <Dialog.Title
+            ref={title}
+            render={<h3 style={{ color: 'rebeccapurple' }} />}
+            className="retained-title-class"
+            style={{ color: 'orange' }}
+            visuallyHidden={visuallyHidden}
+            data-hidden-name-title
+          >
+            The retained name
+          </Dialog.Title>
+          <Dialog.Description ref={description} visuallyHidden={visuallyHidden}>
+            The retained description
+          </Dialog.Description>
+          <input aria-label="Retained input" defaultValue="Original value" />
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    mounted = await mount(view(true));
+    const popup = one('[data-hidden-name-panel]');
+    const originalTitle = title.current!;
+    const originalDescription = description.current!;
+    const input = one('input') as HTMLInputElement;
+    const titleId = originalTitle.id;
+    const descriptionId = originalDescription.id;
+    await step(() => input.focus());
+    input.value = 'Edited value';
+    for (const hidden of [false, undefined, true]) {
+      await step(() => mounted!.root.render(view(hidden)));
+      expect(title.current).toBe(originalTitle);
+      expect(description.current).toBe(originalDescription);
+      expect(originalTitle.tagName).toBe('H3');
+      expect(originalTitle.classList.contains('retained-title-class')).toBe(true);
+      expect(originalTitle.style.color).toBe('rebeccapurple');
+      expect(originalTitle.id).toBe(titleId);
+      expect(originalDescription.id).toBe(descriptionId);
+      expect(popup.getAttribute('aria-labelledby')).toBe(titleId);
+      expect(popup.getAttribute('aria-describedby')).toBe(descriptionId);
+      expect(originalTitle.textContent).toBe('The retained name');
+      expect(originalDescription.textContent).toBe('The retained description');
+      expect(originalTitle.hasAttribute('visuallyHidden')).toBe(false);
+      expect(originalTitle.hasAttribute('aria-hidden')).toBe(false);
+      expect(originalDescription.hasAttribute('aria-hidden')).toBe(false);
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe('Edited value');
+    }
+  });
+
   for (const [name, Modal] of [
     ['Dialog', Dialog],
     ['AlertDialog', AlertDialog],

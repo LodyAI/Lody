@@ -231,6 +231,11 @@ It applies the same predicate after view changes on both immutable builds.
 | `owned-login-targets.json`                                                                                                                                                               | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary.                                                                                                                          |
 | `mobile-project-settings-targets.json`                                                                                                                                                   | Production project settings with multiple machines, long labels, local editors, loading and read-only states.                                                                                                                |
 | `mobile-account-settings-targets.json`                                                                                                                                                   | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables.                                                                                                               |
+| `leaves85-*-targets.json`                                                                                                                                                                | Actual Dialog/Vaul hidden names; original portal gates and strict replacements retain distinct origins.                                                                                                                      |
+| `leaves86-card-title-targets.json`                                                                                                                                                       | Fixed auth/workspace Card titles with real theme/paint/focus/password-reveal gates.                                                                                                                                          |
+| `leaves87-mobile-*-targets.json`                                                                                                                                                         | Native landing labels, keyboard focus and sidebar callback at 320/390/767/768px, with RTL/local font.                                                                                                                        |
+| `leaves87-preview-title-targets.json`, `leaves87-popover-default-controls-targets.json`                                                                                                  | Actual BaseUI Popover hidden title open/Escape/reopen and default-owner controls.                                                                                                                                            |
+| `leaves88-*-targets.json`                                                                                                                                                                | Actual standalone/managed annotation Textarea input, pending/cancel, theme and size gates.                                                                                                                                   |
 | `mobile-workspace-sheets-targets.json`                                                                                                                                                   | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts.                                                                                                                     |
 | `file-image-targets.json`                                                                                                                                                                | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close.                                                                                                                              |
 | `markdown-links-targets.json`                                                                                                                                                            | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety.                                                                                                                 |
@@ -635,6 +640,7 @@ artifacts out of commits.
 | `artifacts/visual/leaves74-78-acceptance.html` | 35 utilities in 16 sources plus the Button typography API owner: Tooltip values, edge handles and DiffNotice header          | 305/310 PNG pairs exact; 30,303 full standard records equal                                   | Five formal OPENs/13 raw pixels, two supplemental sidebar OPENs/882 raw pixels, rejected CSS-wide semantics, original failures and four Electron After-only images retained               |
 | `artifacts/visual/leaves79-81-acceptance.html` | 18 utilities in five sources: composer resize/hint, private DiffViewer header and fixed Field labels                         | 292/296 PNG pairs exact; 14,056 full standard records equal                                   | Four formal OPENs/1,075 raw pixels, one native OPEN/22 raw pixels, same-element negatives, unpainted calibration and unknown final native process closure retained                        |
 | `artifacts/visual/leaves82-84-acceptance.html` | 15 utilities in seven sources: opt-in solid Button, fixed tab/menu typography and actual Stack Drawer width                  | 305/306 PNG pairs exact; 12,854 full standard records equal                                   | One original formal OPEN/10 raw/7 threshold pixels, inline-token/width negatives, wrong-theme and keyboard failures, partial native recovery and four Electron After-only images retained |
+| `artifacts/visual/leaves85-88-acceptance.html` | 23 utilities in 19 sources: actual hidden-name owners, fixed Card title type and annotation Textareas                        | 284/284 PNG pairs exact; 12,554 full standard records equal                                   | 76 supplemental pairs including 16 known token negatives; 87 retained unpaired images; original Stack missing-description relation remains OPEN; 89 audit earns zero migration credit     |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -644,16 +650,20 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 84 inventory is 1,474 occurrences/163 files/726 unresolved
-expressions across components, legacy UI and routes only. All 790 three-root files
-are frozen from through 81 plus four verified updates and one zero-Tailwind theme
-producer; shared UI Button/Gallery and the package export are separately hashed.
-Two additional unresolved expressions are known batch 82 StyleX theme templates,
-not new unknown Tailwind rules. Batches 85+ are excluded. Through 81 remains frozen
-at 1,489/163/724, through 78 at 1,507/163/718, and through 73 at 1,542/165/718.
-Earlier inventories remain frozen. A separate lib/hooks audit identifies
-nine more occurrences in two files outside those roots; do not merge scopes or call
-that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and
+The normalized through 88 inventory is 1,451 occurrences/159 files/726 unresolved
+expressions across components, legacy UI and routes. The 790-file snapshot includes
+fifteen verified root-source updates; four shared UI sources and the Card export
+are separately identified. Batches 90+ are excluded. Through 84 remains frozen at
+1,474/163/726, through 81 at 1,489/163/724, and through 78 at 1,507/163/718.
+The read-only 89 audit uses the same scanner over product src excluding stories:
+1,460 occurrences/161 files/730 unresolved, including nine additional lib/hooks
+occurrences and four unresolved expressions. A manual helper audit separately
+records sixteen unconsumed public skip-link tokens, three touch-helper tokens and
+six opaque caller arguments. It changes neither scanner method nor canonical
+counts and earns no migration credit. No new skip-link UI is installed to invent
+an existing production baseline. The actual touch consumers and public layout/
+keyboard contracts need their own compatibility matrices.
+Earlier inventories remain frozen. Later source-locked through 63 components (620 files / 6,207 tests) and
 UI (25 / 307) test results are supplemental regression, not exact-through59 visual proof.
 Previous OPENs remain in their frozen reports. Batch 60's failed candidate does not block
 all public classes permanently: migrate complete owners with their real caller
@@ -726,6 +736,19 @@ The source-stable through 84 components/UI suites, desktop build and four real
 Electron After-only images are in
 `artifacts/visual/leaves84-stable-full-regression-verification.json`; they do not
 supply an original Tailwind full-app baseline or prove agent/backend dispatch.
+
+The 85–88 report separates hidden-name ownership from context and accessibility
+validity. UIDialog, actual Vaul and Popover retain their original contexts; the
+Dialog title clears its logical close-control inset as well as physical padding.
+The Stack's pre-existing dangling description relation remains open on both sides.
+Card titles use existing local size/leading tokens at fixed plain-text sites;
+Textarea fonts use the existing physical style fields. Actual local values,
+placeholder fields and same-element token negatives stay separate. Original
+portal-root/span/global-heading gates, native screenshot caret effects and the
+rejected import-shadow source remain reviewable without fabricated images.
+The earlier native Textarea matrix lacks placeholder fields and contributes only
+its sixteen actual Before-only PNGs. Gallery samples are After-only. Through84's
+full suite/Electron evidence is historical, not a through88 full-regression claim.
 
 ## Real desktop smoke
 

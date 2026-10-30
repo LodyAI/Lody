@@ -6,7 +6,7 @@ import { Menu } from '@lody/ui/menu';
 import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '../src/ui/drawer';
 import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
@@ -75,6 +75,58 @@ function resize(layoutHeight: number, visualHeight: number, eventTarget: EventTa
 }
 
 describe('native side-drawer keyboard layout', () => {
+  it('retains Vaul name nodes, refs, ids and inline styles when hidden names are shown', () => {
+    const title = { current: null as HTMLHeadingElement | null };
+    const description = { current: null as HTMLParagraphElement | null };
+    const view = (visuallyHidden?: boolean) => (
+      <Drawer direction="right" open modal={false}>
+        <DrawerContent>
+          <DrawerTitle
+            ref={title}
+            visuallyHidden={visuallyHidden}
+            asChild
+            className="retained-vaul-name"
+            style={{ marginRight: 7 }}
+          >
+            <h3>Retained Vaul name</h3>
+          </DrawerTitle>
+          <DrawerDescription ref={description} visuallyHidden={visuallyHidden}>
+            Retained Vaul description
+          </DrawerDescription>
+          <input aria-label="Retained drawer input" defaultValue="Original value" />
+        </DrawerContent>
+      </Drawer>
+    );
+    act(() => root.render(view(true)));
+    const panel = document.querySelector('[role="dialog"]')!;
+    const titleNode = title.current!;
+    const descriptionNode = description.current!;
+    const titleId = titleNode.id;
+    const descriptionId = descriptionNode.id;
+    const input = panel.querySelector('input')!;
+    act(() => input.focus());
+    input.value = 'Edited value';
+    for (const hidden of [false, undefined, true]) {
+      act(() => root.render(view(hidden)));
+      expect(title.current).toBe(titleNode);
+      expect(description.current).toBe(descriptionNode);
+      expect(titleNode.tagName).toBe('H3');
+      expect(titleNode.classList.contains('retained-vaul-name')).toBe(true);
+      expect(titleNode.id).toBe(titleId);
+      expect(descriptionNode.id).toBe(descriptionId);
+      expect(panel.getAttribute('aria-labelledby')).toBe(titleId);
+      expect(panel.getAttribute('aria-describedby')).toBe(descriptionId);
+      expect(titleNode.textContent).toBe('Retained Vaul name');
+      expect(descriptionNode.textContent).toBe('Retained Vaul description');
+      expect(titleNode.hasAttribute('visuallyHidden')).toBe(false);
+      expect(titleNode.hasAttribute('aria-hidden')).toBe(false);
+      expect(descriptionNode.hasAttribute('aria-hidden')).toBe(false);
+      expect(titleNode.style.marginRight).toBe('7px');
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe('Edited value');
+    }
+  });
+
   it('restores CSS sizing after a resizing keyboard hides with the input still focused', () => {
     const drawer = renderDrawer();
     resize(480, 480);

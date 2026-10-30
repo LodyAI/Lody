@@ -2030,10 +2030,12 @@ function LayoutPopover({
   padding,
   gap,
   sized = false,
+  hiddenTitle = false,
 }: {
   padding: 'default' | 'none';
   gap: 'default' | 'none';
   sized?: boolean;
+  hiddenTitle?: boolean;
 }) {
   const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
   const [readout, setReadout] = useState('Open to measure');
@@ -2051,7 +2053,11 @@ function LayoutPopover({
     <div>
       <Popover.Root>
         <Popover.Trigger render={<Button variant="secondary" size="small" />}>
-          {sized ? 'Sized popover' : `padding ${padding} · gap ${gap}`}
+          {hiddenTitle
+            ? 'Popover with accessible title'
+            : sized
+              ? 'Sized popover'
+              : `padding ${padding} · gap ${gap}`}
         </Popover.Trigger>
         <Popover.Content
           ref={setPositioner}
@@ -2062,12 +2068,51 @@ function LayoutPopover({
           maxWidth={sized ? 280 : undefined}
           maxHeight={sized ? 160 : undefined}
         >
-          <Popover.Title>Embedded content</Popover.Title>
+          <Popover.Title visuallyHidden={hiddenTitle || undefined}>Embedded content</Popover.Title>
           <span>First content block</span>
           <span>Second content block</span>
           <Popover.Close render={<Button size="small" />}>Close</Popover.Close>
         </Popover.Content>
       </Popover.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
+function HiddenDialogNames() {
+  const [hidden, setHidden] = useState(true);
+  const title = useRef<HTMLHeadingElement>(null);
+  const description = useRef<HTMLParagraphElement>(null);
+  const [readout, setReadout] = useState('Open to inspect the accessible name');
+  return (
+    <div>
+      <Dialog.Root>
+        <Dialog.Trigger render={<Button variant="secondary" size="small" />}>
+          Dialog with accessible title
+        </Dialog.Trigger>
+        <Dialog.Content>
+          <Dialog.Title ref={title} data-hidden-dialog-title visuallyHidden={hidden || undefined}>
+            Accessible dialog title
+          </Dialog.Title>
+          <Dialog.Description
+            ref={description}
+            data-hidden-dialog-description
+            visuallyHidden={hidden || undefined}
+          >
+            Accessible dialog description
+          </Dialog.Description>
+          <p>The title and description stay available to assistive technology.</p>
+          <Button
+            size="small"
+            onClick={() => {
+              setHidden((value) => !value);
+              setReadout(`Title ${title.current?.id}; description ${description.current?.id}`);
+            }}
+          >
+            {hidden ? 'Show title and description' : 'Hide title and description'}
+          </Button>
+        </Dialog.Content>
+      </Dialog.Root>
       <span {...stylex.props(styles.readout)}>{readout}</span>
     </div>
   );
@@ -4739,6 +4784,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 <LayoutPopover padding="default" gap="none" />
                 <LayoutPopover padding="none" gap="none" />
                 <LayoutPopover padding="default" gap="default" sized />
+                <LayoutPopover padding="default" gap="default" hiddenTitle />
               </Cluster>
             </Row>
             <Row>
@@ -4759,6 +4805,12 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         <PaletteSplit palettes={palettes}>
           <Rows>
             <ModalTriggers />
+            <Row>
+              <LegendKey>accessible name</LegendKey>
+              <Cluster>
+                <HiddenDialogNames />
+              </Cluster>
+            </Row>
             <DialogReplica />
             <ModalDimensions />
             <Row>

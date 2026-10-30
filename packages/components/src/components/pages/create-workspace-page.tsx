@@ -105,7 +105,7 @@ export function CreateWorkspacePage({
             <div {...stylex.props(styles.hero)}>
               <Building2 {...stylex.props(surface.heroIcon)} />
             </div>
-            <Card.Title className="text-2xl">
+            <Card.Title {...stylex.props(surface.authTitle)}>
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
                 : t('organization.welcomeTitle', 'Welcome to Lody Agent')}

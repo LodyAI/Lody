@@ -1,0 +1,146 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-owneddialogconsumerlayout--quick-open-default",
+    "migration-owneddialogconsumerlayout--quick-open-hosted",
+    "localprojects-addlocalprojectdialog--desktop"
+  ],
+  "ready": {
+    "migration-owneddialogconsumerlayout--quick-open-default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return !!p.querySelector('input');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-hosted": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return !!p.querySelector('input');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "localprojects-addlocalprojectdialog--desktop": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const d=document.querySelector('[role=dialog]');return !!d&&getComputedStyle(d).opacity==='1'&&!d.hasAttribute('data-starting-style')&&!d.hasAttribute('data-ending-style')&&!!document.getElementById(d.getAttribute('aria-labelledby'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-owneddialogconsumerlayout--quick-open-default": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] input",
+            "value": "file-077"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');return p&&p.querySelector('input')?.value==='file-077'&&p.querySelectorAll('[cmdk-item]').length===1&&p.textContent.includes('file-077.tsx');}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] input",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Opened file\"]')?.textContent.endsWith('file-077.tsx')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return !!p.querySelector('input');}"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-hosted": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] input",
+            "value": "file-077"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');return p&&p.querySelector('input')?.value==='file-077'&&p.querySelectorAll('[cmdk-item]').length===1&&p.textContent.includes('file-077.tsx');}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] input",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Opened file\"]')?.textContent.endsWith('file-077.tsx')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return !!p.querySelector('input');}"
+          }
+        ]
+      }
+    ]
+  }
+}

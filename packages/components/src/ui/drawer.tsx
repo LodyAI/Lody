@@ -53,6 +53,17 @@ const styles = stylex.create({
     gap: themeSpace[2],
     padding: themeSpace[4],
   },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   title: { color: themeColors.foreground, fontWeight: themeFontWeight.semibold },
   description: {
     color: themeColors.mutedForeground,
@@ -239,11 +250,18 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function DrawerTitle({ className, ...props }: React.ComponentProps<typeof DrawerPrimitive.Title>) {
+function DrawerTitle({
+  className,
+  visuallyHidden = false,
+  ...props
+}: React.ComponentProps<typeof DrawerPrimitive.Title> & { visuallyHidden?: boolean }) {
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
-      className={cn(stylex.props(styles.title).className, className)}
+      className={cn(
+        stylex.props(styles.title, visuallyHidden && styles.srOnly).className,
+        className
+      )}
       {...props}
     />
   );
@@ -251,12 +269,16 @@ function DrawerTitle({ className, ...props }: React.ComponentProps<typeof Drawer
 
 function DrawerDescription({
   className,
+  visuallyHidden = false,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Description>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Description> & { visuallyHidden?: boolean }) {
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
-      className={cn(stylex.props(styles.description).className, className)}
+      className={cn(
+        stylex.props(styles.description, visuallyHidden && styles.srOnly).className,
+        className
+      )}
       {...props}
     />
   );

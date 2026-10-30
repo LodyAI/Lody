@@ -1,0 +1,234 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "components-forgotpasswordpage--default",
+    "components-forgotpasswordpage--submitting",
+    "components-forgotpasswordpage--sent",
+    "components-forgotpasswordpage--error",
+    "components-resetpasswordpage--default",
+    "components-resetpasswordpage--submitting",
+    "components-resetpasswordpage--missing-token",
+    "components-resetpasswordpage--error",
+    "pages-completeemailpage--empty",
+    "pages-completeemailpage--saving",
+    "pages-completeemailpage--submit-error",
+    "pages-createworkspacepage--ready",
+    "pages-createworkspacepage--creating",
+    "pages-createworkspacepage--plus-required",
+    "pages-createworkspacepage--slug-error"
+  ],
+  "ready": {
+    "components-forgotpasswordpage--default": [
+      {
+        "action": "visible",
+        "selector": "#forgot-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#forgot-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-forgotpasswordpage--submitting": [
+      {
+        "action": "visible",
+        "selector": "#forgot-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#forgot-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-forgotpasswordpage--sent": [
+      {
+        "action": "visible",
+        "selector": "#forgot-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#forgot-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-forgotpasswordpage--error": [
+      {
+        "action": "visible",
+        "selector": "#forgot-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#forgot-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-resetpasswordpage--default": [
+      {
+        "action": "visible",
+        "selector": "#reset-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#reset-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-resetpasswordpage--submitting": [
+      {
+        "action": "visible",
+        "selector": "#reset-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#reset-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-resetpasswordpage--missing-token": [
+      {
+        "action": "visible",
+        "selector": "#reset-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#reset-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "components-resetpasswordpage--error": [
+      {
+        "action": "visible",
+        "selector": "#reset-password-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#reset-password-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-completeemailpage--empty": [
+      {
+        "action": "visible",
+        "selector": "#complete-email-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#complete-email-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-completeemailpage--saving": [
+      {
+        "action": "visible",
+        "selector": "#complete-email-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#complete-email-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-completeemailpage--submit-error": [
+      {
+        "action": "visible",
+        "selector": "#complete-email-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#complete-email-title\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-createworkspacepage--ready": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h3"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#storybook-root h3\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-createworkspacepage--creating": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h3"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#storybook-root h3\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-createworkspacepage--plus-required": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h3"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#storybook-root h3\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ],
+    "pages-createworkspacepage--slug-error": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h3"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"#storybook-root h3\"),g=new URL(location.href).searchParams.get('globals')||'',dark=/theme:dark(?:;|$)/.test(g),c=e&&getComputedStyle(e),r=e?.getBoundingClientRect();if(!e||e.children.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!== (dark?'dark':'light')||c.fontSize!=='24px'||c.lineHeight!=='32px'||!r.width||!r.height||r.x<0||r.y<0||r.right>innerWidth||r.bottom>innerHeight||Number(c.opacity)!==1)return false;let p=e;while(p){const s=getComputedStyle(p),m=s.backgroundColor.match(/^rgba?\\(([\\d.]+)[ ,]+([\\d.]+)[ ,]+([\\d.]+)(?:[ ,/]+([\\d.]+))?\\)$/);if(m&&(!m[4]||Number(m[4])>0)){const l=(Number(m[1])+Number(m[2])+Number(m[3]))/3;return dark?l<128:l>=128;}p=p.parentElement;}return false;}"
+      }
+    ]
+  },
+  "states": {
+    "components-forgotpasswordpage--default": [
+      {
+        "name": "email-input-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#forgot-password-email"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.id === \"forgot-password-email\""
+          }
+        ]
+      }
+    ],
+    "components-resetpasswordpage--default": [
+      {
+        "name": "password-visibility-toggle",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Show password\"]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"#reset-password-new\")?.type === \"text\""
+          }
+        ]
+      }
+    ],
+    "pages-completeemailpage--empty": [
+      {
+        "name": "email-input-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#email"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.id === \"email\""
+          }
+        ]
+      }
+    ]
+  }
+}

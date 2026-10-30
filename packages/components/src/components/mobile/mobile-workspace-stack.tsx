@@ -161,7 +161,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
           className="safe-areas inset-0 border-0 border-l-0! rounded-none"
           data-sidebar-swipe-open-disabled
         >
-          <DrawerTitle className="sr-only">
+          <DrawerTitle visuallyHidden>
             {t('sessions.prTab.conversation', 'Conversation')}
           </DrawerTitle>
           {/* Edge-only interactive back: Vaul drives the drag but only from the

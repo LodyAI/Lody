@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 
 export type VisualAnnotationDraftComposerProps = {
   targetLabel: string;
@@ -71,7 +72,12 @@ export function VisualAnnotationDraftComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t('sessions.preview.annotation.placeholder', 'Describe the change...')}
-        className="min-h-20 resize-none bg-background text-xs"
+        {...stylex.props(styles.annotationTextarea)}
+        resize="none"
+        style={{
+          fontSize: 'var(--text-xs)',
+          lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+        }}
         autoFocus={autoFocus}
       />
       <div {...stylex.props(styles.footer)}>
@@ -94,6 +100,10 @@ export function VisualAnnotationDraftComposer({
 }
 
 const styles = stylex.create({
+  annotationTextarea: {
+    [fieldTokens.textareaMinHeight]: 'calc(var(--spacing) * 20)',
+    [fieldTokens.background]: 'hsl(var(--background) / 1)',
+  },
   root: {
     pointerEvents: 'auto',
     width: '280px',

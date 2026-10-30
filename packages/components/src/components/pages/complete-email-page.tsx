@@ -73,7 +73,7 @@ export function CompleteEmailPage({
             <Card.Title
               id="complete-email-title"
               as="h1"
-              className={`text-2xl font-bold ${stylex.props(surface.stack1).className}`}
+              className={`font-bold ${stylex.props(surface.stack1, surface.authTitle).className}`}
             >
               {t('completeEmail.title', 'Add your email')}
             </Card.Title>

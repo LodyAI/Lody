@@ -1,0 +1,27 @@
+{
+  "viewports": [
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "desktop1280",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": ["migration-ownedpopoverlayout--default-panel"],
+  "ready": {
+    "migration-ownedpopoverlayout--default-panel": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const p=document.querySelector('[role=dialog]'),h=p&&document.getElementById(p.getAttribute('aria-labelledby')),s=p&&getComputedStyle(p);return h?.textContent==='Layout panel'&&s.opacity==='1'&&document.fonts.status==='loaded';}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1000
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "preview-visualannotationdraftcomposer--empty",
+    "preview-visualannotationdraftcomposer--ready",
+    "preview-visualannotationdraftcomposer--submitting"
+  ],
+  "ready": {
+    "preview-visualannotationdraftcomposer--empty": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('textarea'),d=e?.closest('[data-lody-visual-comment-draft]'),s=e&&getComputedStyle(e),r=e?.getBoundingClientRect(); if(!e||!s||!r||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||s.fontSize!=='12px'||s.lineHeight!=='16px'||s.resize!=='none'||s.minHeight!=='80px')return false; const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark'), c=s.backgroundColor.match(/[\\d.]+/g)?.map(Number); if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light')||!c||(dark?Math.max(...c.slice(0,3))>65:Math.min(...c.slice(0,3))<220))return false; for(let x=e;x;x=x.parentElement){const z=getComputedStyle(x);if(z.display==='none'||z.visibility==='hidden'||Number(z.opacity)===0)return false;} return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "preview-visualannotationdraftcomposer--ready": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('textarea'),d=e?.closest('[data-lody-visual-comment-draft]'),s=e&&getComputedStyle(e),r=e?.getBoundingClientRect(); if(!e||!s||!r||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||s.fontSize!=='12px'||s.lineHeight!=='16px'||s.resize!=='none'||s.minHeight!=='80px')return false; const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark'), c=s.backgroundColor.match(/[\\d.]+/g)?.map(Number); if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light')||!c||(dark?Math.max(...c.slice(0,3))>65:Math.min(...c.slice(0,3))<220))return false; for(let x=e;x;x=x.parentElement){const z=getComputedStyle(x);if(z.display==='none'||z.visibility==='hidden'||Number(z.opacity)===0)return false;} return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "preview-visualannotationdraftcomposer--submitting": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('textarea'),d=e?.closest('[data-lody-visual-comment-draft]'),s=e&&getComputedStyle(e),r=e?.getBoundingClientRect(); if(!e||!s||!r||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||s.fontSize!=='12px'||s.lineHeight!=='16px'||s.resize!=='none'||s.minHeight!=='80px')return false; const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark'), c=s.backgroundColor.match(/[\\d.]+/g)?.map(Number); if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light')||!c||(dark?Math.max(...c.slice(0,3))>65:Math.min(...c.slice(0,3))<220))return false; for(let x=e;x;x=x.parentElement){const z=getComputedStyle(x);if(z.display==='none'||z.visibility==='hidden'||Number(z.opacity)===0)return false;} return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ]
+  },
+  "states": {
+    "preview-visualannotationdraftcomposer--empty": [
+      {
+        "name": "textarea-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "textarea"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('textarea') && document.querySelector('textarea').value===''"
+          }
+        ]
+      },
+      {
+        "name": "multiline-filled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "First line.\nSecond line keeps the annotation target aligned."
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('textarea') && document.querySelector('textarea').value.includes('\\nSecond line')"
+          }
+        ]
+      },
+      {
+        "name": "whitespace-disabled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "   "
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Send"
+          }
+        ]
+      }
+    ]
+  }
+}

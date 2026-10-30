@@ -1024,8 +1024,8 @@ export function AddLocalProjectDialog({
           // Add), confirm lifts its action with `mb-[--native-keyboard-height]`.
           className="h-[92dvh] max-h-[92dvh]"
         >
-          <DrawerTitle className="sr-only">{a11yTitle}</DrawerTitle>
-          <DrawerDescription className="sr-only">{a11yDescription}</DrawerDescription>
+          <DrawerTitle visuallyHidden>{a11yTitle}</DrawerTitle>
+          <DrawerDescription visuallyHidden>{a11yDescription}</DrawerDescription>
           <MobileAddLocalProjectFlow
             machines={machines}
             machinesLoading={machinesLoading}

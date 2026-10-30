@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { fn } from 'storybook/test';
+import { useState, type CSSProperties } from 'react';
 import { ArrowUp } from 'lucide-react';
 
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
@@ -43,9 +43,13 @@ function MockContextSwitch() {
 }
 
 function ChatLandingStoryShell({ withHints }: { withHints?: boolean }) {
+  const [sidebarOpens, setSidebarOpens] = useState(0);
   return (
     <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+      <div
+        data-sidebar-opens={sidebarOpens}
+        className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]"
+      >
         <MobileChatLandingScreen
           title="开始对话"
           contextSwitch={<MockContextSwitch />}
@@ -64,7 +68,7 @@ function ChatLandingStoryShell({ withHints }: { withHints?: boolean }) {
               </div>
             ) : undefined
           }
-          onOpenMobileDrawer={fn()}
+          onOpenMobileDrawer={() => setSidebarOpens((count) => count + 1)}
         />
       </div>
     </div>
@@ -85,4 +89,12 @@ export const Default: Story = {};
 
 export const WithHints: Story = {
   args: { withHints: true },
+};
+
+export const RtlLocalFont: Story = {
+  render: () => (
+    <div dir="rtl" style={{ fontFamily: 'monospace', '--ui-font-size': '19px' } as CSSProperties}>
+      <ChatLandingStoryShell withHints />
+    </div>
+  ),
 };

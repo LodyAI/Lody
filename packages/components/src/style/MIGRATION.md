@@ -111,6 +111,13 @@ live in its `surface.ts`. Import tokens using relative `.stylex` paths. The shar
 desktop renderer. The StyleX compiler evaluates `stylex.create` statically;
 ordinary imported runtime constants are not compile-time token values.
 
+Use the actual primitive's `visuallyHidden` option where it exists; retain
+compatibility classes on other parts until their owner supports it. Dialog, Vaul
+and Popover keep their own contexts; do not substitute one family to obtain the prop. The owner merges invariant 1px/-1px,
+clip-path and zero padding with its base, clearing logical title inset where it
+exists. Keep names mounted, without `aria-hidden` or `display: none`; verify ID
+references and default/ref/render behavior as well as an unchanged screenshot.
+
 ## Compose props before rendering
 
 ```tsx
@@ -289,7 +296,10 @@ and focus as well as the component's own hover and focus.
    and relevant computed palette: story-level globals can override URL globals,
    leaving a requested light frame dark.
    Prefer a fixed Storybook
-   build. Include its important states, both themes, narrow/desktop widths and
+   build. Give every candidate a unique output directory and log; only the actual
+   build process exit zero plus matching final input hashes authorizes capture.
+   Old completion text, early index files or a live server alone are insufficient.
+   Include its important states, both themes, narrow/desktop widths and
    exact breakpoint boundaries. New stories render production components with
    synthetic data, never recreated approximations of the UI.
 3. Migrate one owned unit, then run its behavior suites, component typecheck,
@@ -298,6 +308,10 @@ and focus as well as the component's own hover and focus.
 4. Capture after with the same targets and Chromium. The harness waits for
    Storybook completion, fonts, finite animations and stable geometry. Capture
    rendering failures and fail the command instead of silently omitting them.
+   Scope readiness selectors to the actual fixture; Storybook has hidden global
+   headings, and a portal-only story can legitimately leave its canvas empty.
+   Gate its real visible dialog, with an explicit allow-blank exception, rather
+   than weakening painted-content checks for every story.
    Input selection and mirror state can commit separately: await selected-chip
    removal and matching scroll positions as well as the native caret. A Framer
    Motion panel can keep stable geometry at initial opacity zero; require its
@@ -312,8 +326,8 @@ and focus as well as the component's own hover and focus.
 From `packages/components`:
 
 ```sh
-pnpm exec storybook build --output-dir /tmp/lody-stylex-before
-node tests/visual/serve.mjs --root /tmp/lody-stylex-before --port 6017
+pnpm exec storybook build --output-dir artifacts/visual/build-before
+node tests/visual/serve.mjs --root artifacts/visual/build-before --port 6017
 node tests/visual/visual-regression.mjs capture --phase before \
   --storybook http://127.0.0.1:6017 --targets tests/visual/continuation-targets.json
 # Serve the final build on a separate port, then capture the same target file.

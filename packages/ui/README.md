@@ -37,6 +37,8 @@ The existing modal and floating-surface token groups are available at
 Tooltip chips use `@lody/ui/tooltip/tooltip.tokens.stylex` for their own geometry.
 Tabs, Accordion and Collapsible share the existing group exported at
 `@lody/ui/disclosure/disclosure.tokens.stylex`.
+Card's existing surface and title tokens are available at
+`@lody/ui/card/card.tokens.stylex`.
 For a verified layout outside the named props, a surface can write the specific
 public token through a computed key in `stylex.create`; the other tokens keep
 inheriting. Keep those overrides local to the owned part and verify portals,
@@ -293,6 +295,11 @@ restores the default. Its forwarded ref, `style`, event handlers and positioning
 props still belong to the outer positioner. Keep nonzero layout needs explicit rather than
 competing with the primitive through another StyleX class.
 
+`Popover.Title visuallyHidden` keeps its accessible name while applying the popup
+owner's clipped 1px box. It defaults to false and preserves Base UI naming, refs
+and `render`; it does not use `aria-hidden` or `display: none`. This is separate
+from modal Dialog titles and the application's Vaul drawer wrapper.
+
 ```tsx
 <Popover.Root>
   <Popover.Trigger render={<Button variant="secondary" />}>Filter</Popover.Trigger>
@@ -341,6 +348,14 @@ part of the panel's layout. Existing inline `style` objects and popup-state
 callbacks keep their precedence, so an explicit caller padding or gap still
 applies. These props address the actual panel and are consumed there; Drawer
 continues to own its separate safe-area spacing.
+
+`Dialog.Title` and `Dialog.Description` accept `visuallyHidden` (default false).
+The same owner composes the clipped 1px box with its normal styles, including
+clearing the title's logical close-control inset. Text, IDs, refs and Base UI
+labeling remain present; changing the option preserves the existing node.
+`AlertDialog` and the package's Base UI `Drawer` do not expose this option. The
+application's Vaul-backed `ui/drawer` provides its own opt-in on `DrawerTitle` and
+`DrawerDescription`, retaining the Vaul/Radix labeling context and inline styles.
 
 ```tsx
 <Dialog.Root>

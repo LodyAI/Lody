@@ -45,7 +45,7 @@ export function ForgotPasswordPage({
             <Card.Title
               id="forgot-password-title"
               as="h1"
-              className={`text-2xl font-semibold tracking-tight ${stylex.props(surface.stack1).className}`}
+              className={`font-semibold tracking-tight ${stylex.props(surface.stack1, surface.authTitle).className}`}
             >
               {t('forgotPassword.title', 'Reset your password')}
             </Card.Title>

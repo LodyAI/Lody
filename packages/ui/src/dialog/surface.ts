@@ -16,6 +16,20 @@ import { dialog } from './dialog.tokens.stylex';
  * than merely sit behind something.
  */
 export const modal = stylex.create({
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  // The title reserves logical end space for the close control. A hidden
+  // title must clear that owner key as well as srOnly's physical padding.
+  hiddenTitleInset: { paddingInlineEnd: 0 },
   noPadding: { padding: 0 },
   noGap: { gap: 0 },
   /**

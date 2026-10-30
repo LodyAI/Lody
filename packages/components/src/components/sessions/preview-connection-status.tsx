@@ -447,7 +447,7 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
         </Tooltip.Root>
       </Tooltip.Provider>
       <Popover.Content align="end" sideOffset={6} width="calc(var(--spacing) * 72)">
-        <Popover.Title className="sr-only">{accessibleName}</Popover.Title>
+        <Popover.Title visuallyHidden>{accessibleName}</Popover.Title>
         <PreviewStatusContent presentation={presentation} />
       </Popover.Content>
     </Popover.Root>

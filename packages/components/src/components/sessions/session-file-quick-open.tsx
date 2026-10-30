@@ -238,10 +238,10 @@ export function SessionFileQuickOpen({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content width="42rem" padding="none" className="overflow-hidden">
-        <Dialog.Title className="sr-only">
+        <Dialog.Title visuallyHidden>
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
         </Dialog.Title>
-        <Dialog.Description className="sr-only">
+        <Dialog.Description visuallyHidden>
           {t('sessions.fileQuickOpen.description', 'Search indexed files and open one.')}
         </Dialog.Description>
         <Command shouldFilter={false}>

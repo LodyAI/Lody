@@ -1,0 +1,184 @@
+{
+  "viewports": [
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 1000,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "mobile-maximum",
+      "width": 767,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "localprojects-addlocalprojectdialog--mobile",
+    "migration-ownedmobileworkspacestack--loading-session",
+    "projects-localprojectremovalux--mobile-project-waiting-for-device"
+  ],
+  "ready": {
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "MacBook Pro",
+        "exact": false
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Documents"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmobileworkspacestack--loading-session": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=drawer-content]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-mobile-stack-fixture]'),c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),loading=c?.querySelector('[data-loading-placeholder-scope=viewport]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!root&&root.dataset.fixturePath==='/lody/sessions/visual-loading-session'&&!!loading&&c.textContent.includes('Loading session')&&r.x===0&&r.y===0&&r.width===innerWidth&&r.height===innerHeight&&s.opacity==='1'&&s.visibility==='visible'&&(!s.transform||s.transform==='none'||s.transform==='matrix(1, 0, 0, 1, 0, 0)')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "projects-localprojectremovalux--mobile-project-waiting-for-device": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "\u6dfb\u52a0\u9879\u76ee"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const d=document.querySelector('[role=dialog]');return !!d&&d.textContent.includes('GitHub')&&!!document.getElementById(d.getAttribute('aria-labelledby'))&&getComputedStyle(d).opacity==='1';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "name": "add-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Add"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(document.activeElement===b);}"
+          }
+        ]
+      },
+      {
+        "name": "folder-navigation",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Code"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "lody"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileworkspacestack--loading-session": [
+      {
+        "name": "escape-to-chat",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=drawer-content]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-mobile-stack-fixture]');return r?.dataset.fixturePath==='/lody/chat'&&!document.querySelector('[data-slot=drawer-content]')&&!!document.querySelector('[data-reopen-stack]')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "reopened-loading-session",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-reopen-stack]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-mobile-stack-fixture]'),c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),loading=c?.querySelector('[data-loading-placeholder-scope=viewport]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!root&&root.dataset.fixturePath==='/lody/sessions/visual-loading-session'&&!!loading&&c.textContent.includes('Loading session')&&r.x===0&&r.y===0&&r.width===innerWidth&&r.height===innerHeight&&s.opacity==='1'&&s.visibility==='visible'&&(!s.transform||s.transform==='none'||s.transform==='matrix(1, 0, 0, 1, 0, 0)')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "projects-localprojectremovalux--mobile-project-waiting-for-device": [
+      {
+        "name": "option-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "\u6dfb\u52a0\u6587\u4ef6\u5939",
+            "exact": false
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "\u6dfb\u52a0\u9879\u76ee"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===expected&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

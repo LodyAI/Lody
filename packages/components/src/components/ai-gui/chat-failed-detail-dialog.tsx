@@ -168,7 +168,7 @@ export function ChatFailedDetailDialog({
           ) : (
             // Radix always wires `aria-describedby`; without a description node
             // the dialog points at a missing id.
-            <Dialog.Description className="sr-only">
+            <Dialog.Description visuallyHidden>
               {t(
                 'sessions.systemNotices.chatFailed.detailsDescription',
                 'Full agent error details'

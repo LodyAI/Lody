@@ -16,6 +16,7 @@
     "./button": "./src/button/button.tsx",
     "./button/button.tokens.stylex": "./src/button/button.tokens.stylex.ts",
     "./card": "./src/card/card.tsx",
+    "./card/card.tokens.stylex": "./src/card/card.tokens.stylex.ts",
     "./checkbox": "./src/field/checkbox.tsx",
     "./collapsible": "./src/disclosure/collapsible.tsx",
     "./combobox": "./src/field/combobox.tsx",

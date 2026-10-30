@@ -1393,7 +1393,7 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 
 ### 控件归属与采集边界
 
-第 74–84 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
+第 74–88 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
 保留实际调用方合同，不新增 Token 组或依赖。Button 新增 CSS 类型的 `fontSize`、
 `lineHeight` 与平实 `solid` variant，ResizableHandle 新增显式 edge 外观；原默认不变。
 
@@ -1403,6 +1403,17 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 语义用例与 24 个 class 优先级用例；直接 caller style 和 Base UI render 元素合并另列。
 固定文本 Field 标签则写既有字号／leading Token：输入为兄弟节点，标签无后代读取者。
 Login 保留完整字号／leading，移动标签仅改字号；字重、tracking、私有 leading writer 保留。
+
+固定 Card 标题也写既有字号／leading Token，保留字重与 tracking。Textarea 使用既有
+resize／min-height／background 合同及已有 `style` 的实际字号／leading 字段，保留
+placeholder、受控值、pending 和取消行为，没有新增通用样式逃生 API。
+
+无障碍名称继续挂载：显式 `visuallyHidden` 在实际 Dialog／Vaul Title／Description 及
+Popover Title 的归属层组合编译器原九字段，不更换上下文、DOM 或 ARIA 属性。
+1px／-1px、`inset(50%)` 是固定物理值，不随主题 spacing。Dialog Title 在同次归属层组合
+清除原 logical-end padding；默认 parts 的旧字段、ID、ref、render 元素合并不变。
+Gallery 图仅为 After。Stack 原 dangling `aria-describedby` 两侧同样缺失，不能称所有
+ARIA 均有效。
 
 `solid` 仅拥有填充、文字、精细 hover 90% alpha 与已有 focus ring，读取既有 primary 颜色，
 如 primary 一样忽略 destructive tone，不引入 sheen、edge 或按压 transform。私有 Session
@@ -1441,6 +1452,7 @@ SessionDetail loading 分支，没有替换子组件或 runtime。已有全宽 A
 | `leaves74-78-acceptance.html` |                 310／305／30,303 | 正式五对 13／0；侧栏补充两对 882／829。    |
 | `leaves79-81-acceptance.html` |                 296／292／14,056 | 正式四对 1,075／0；native 补充一对 22／0。 |
 | `leaves82-84-acceptance.html` |                 306／305／12,854 | disabled Button 边角一对 10／7。           |
+| `leaves85-88-acceptance.html` |                 284／284／12,554 | 无新增正式 OPEN；所有历史 OPEN 保留。      |
 
 最后一组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
 后继匹配控制不关闭原未知栅格差异。实际主题门禁拒绝 light URL 错标的固定 dark 场景；
@@ -1486,6 +1498,7 @@ label-click／cleanup 仍 UNKNOWN，不称正常关闭或末行为通过。
 | 精确截至 78 的源码，视觉部分验收 | v2       |    1,507 |  163 |    718 |
 | 精确截至 81 的源码，视觉部分验收 | v2       |    1,489 |  163 |    724 |
 | 精确截至 84 的源码，视觉部分验收 | v2       |    1,474 |  163 |    726 |
+| 精确截至 88 的源码，视觉部分验收 | v2       |    1,451 |  159 |    726 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1498,11 +1511,18 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 84 的 v2 分项为 components 1,039 处／147 文件／633 未解析，旧 UI 430／14／93，
-routes 五处／两文件／零。三根共记录 790 份文件：更新四份截至 81 文件，新增一个没有
-Tailwind 的主题模块。共享 UI Button／Gallery 源码与导出元数据位于计数范围之外，单独冻结，
-不含后续批次。未解析中包括截至 81 的六个已知 Field.Label StyleX 模板，以及截至 84 的
-两个已知 action-theme 模板，不代表八个新增未知 utility。
+已发布截至 88 的 v2 分项为 components 1,016 处／143 文件／633 未解析，旧 UI 430／14／93，
+routes 五处／两文件／零，来自三根 790 份冻结源码。共享 UI 源码与导出元数据位于该计数
+范围外单独冻结。六个 Field.Label 与两个 action-theme 模板仍是已知 StyleX 未解析表达式，
+不含后续批次。
+
+同一未改扫描器审计完整产品 `src`、排除 stories，1,396 份冻结 JS／TS 得到 1,460 处／
+161 文件／730 未解析。三根外九处属于 `conversation-layout.ts` 与
+`use-keyboard-aware-scroll-into-view.ts`，另四个未解析单列。手工锁定编译器审计还发现 v2
+漏计十六个潜在 skip-link 工厂字面量、三个共享 touch-helper 字面量及六个调用方 margin
+参数。skip-link 工厂仓内没有调用，安装新 link 不能证明迁移了原 UI。已知解析缺口与已发布
+下界分开，审计不给迁移 credit，也不重写历史统计。真实 touch 调用需要已有 Button 尺寸
+API 和各自视觉证据，不能用 opaque caller class 与 primitive 争优先级。
 此前截至 67 时，五个 Usage 模板表达式和一个 Archive
 类查找消失，新增两个 FileError／Bub
 StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一次 helper 审查在 lib／hooks 两个文件中发现另外九处，位于三根范围之外；
