@@ -72,7 +72,10 @@ Spec; no replacement Spec was created. The root roadmap ledger records this lowe
 
 `makeLocalLoroWriterLegacy` is the sole writer runtime executor. CLI doc construction
 uses its process singleton with `LocalLoroWriterNodeTurn`; Node socket close/stop and
-manager cleanup await release receipts. Remove the executor after those application
+manager cleanup await release receipts. Socket stop releases only its connections. Fleet
+closes the process writer after every workspace runtime and connection owner has released
+through it, because workspace engines share that writer. A retained failed owner keeps the
+writer open until `recoverShutdown` releases it. Remove the executor after those application
 owners provide the native service. Engine assembly/room hooks and Fleet's wider Promise
 cleanup (including its existing failure logging) remain outside this migration. The
 socket/application writer registry retains failed lower owners despite that wider Legacy

@@ -104,6 +104,7 @@ import {
   type ScheduleWorkspaceHandle,
 } from './schedules/schedule-workspace';
 import { workspaceCleanupOwnerLegacy } from './workspace-cleanup-legacy';
+import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
@@ -632,6 +633,8 @@ export class LodyFleet {
         await this.retryWorkspaceCleanup(id);
       // Workspace recovery cannot prove release of a failed global service owner.
       if (this.localServiceReleaseFailure) throw this.localServiceReleaseFailure;
+      // A failed close retains the same writer owner; a released one is a no-op.
+      await closeProcessLocalLoroWriterLegacy();
       await this.finishGlobalShutdown();
     })();
     this.shutdownRecovery = attempt;
@@ -693,6 +696,14 @@ export class LodyFleet {
         'Local service release remains unproven'
       );
       failures.push(this.localServiceReleaseFailure);
+    }
+    // Retained workspace and connection owners still release through this writer.
+    if (!failures.length) {
+      try {
+        await closeProcessLocalLoroWriterLegacy();
+      } catch (cause) {
+        failures.push(cause);
+      }
     }
     if (failures.length)
       throw new AggregateError(failures, 'Fleet shutdown retains unresolved workspace resources');
