@@ -2229,8 +2229,13 @@ and independent per-stage/per-target probes agree. A fixed private variable on t
 textarea preserves the original literal without a root-font alias, fallback or
 compiler-target change. In an ignored copy, two complete builds and fourteen real
 positive pairs match; two direct writes to the new private name remain negative.
-This candidate has zero product migration credit until its separate live unit is
-implemented and verified. It neither accepts arbitrary DOM injection nor closes
+Batch112 implements that private element-local variable. Twenty-two positive font,
+placeholder, legacy-variable and interaction pairs plus two whole-renderer pairs
+preserve existing fields and PNGs; the new private declaration is checked separately.
+Two direct writes to its new private name remain negative. Generated StyleX layer
+names shift by one, but 710 common rules in each host preserve selectors,
+declarations, conditions and relative order; no handwritten layer reference binds
+those generated names. This neither accepts arbitrary DOM injection nor closes
 any original115-candidate difference. `leaves103-105-acceptance.html` contains 156 formal pairs,
 153 byte-exact PNGs and 73,555 equal standard records; three formal OPENs total
 17 raw/zero threshold pixels and one native OPEN adds 17 raw/one threshold pixel.
@@ -2330,13 +2335,32 @@ Root independently verifies all 204 pairs across both units, including full raw
 record arrays, original SHA values and decoded pixels, and observes the real
 context/composer UI at desktop and phone sizes. Historical OPENs remain untouched.
 
-The exact successful-build inventory through 109 includes all thirty production
-source hashes, the accepted Separator and diff/context changes, and the actual
-helper CSS: **620 occurrences/eight used files/18 unresolved expressions**. Its
-78-occurrence decrease from 698 is migration only; Separator's six runtime mappings
-delete no source literals. ReviewRenderer retains 441 occurrences. The core product
-inventory remains 1,424/157/725 through 99; later 110/111 work and unvisited helper
-states are excluded.
+The private shell/navigation continuation111 removes163 utilities without changing
+refs, observers, callbacks or inline column geometry. Its133 formal pairs retain
+44,522 equal standard records and118 exact PNGs; native20 and offline20 pairs match.
+One normal-motion OPEN plus15 formal OPENs total119 raw/24 informational threshold
+pixels. These16 OPENs remain unclosed; the original native finalization is UNKNOWN.
+Batch112's font evidence stays a separate positive/negative contract above.
+
+Markdown/diagnostics115 removes27 utilities:22 recognized by v2 plus five in a
+fixed default codeClassName parameter that v2 omits. Removing the last space-y
+utilities also pruned the original reverse property's registration and fallback.
+That candidate remains rejected: all six full records differ and four PNGs differ
+by326,910 raw/312,705 threshold pixels. The final stylesheet preserves the exact
+original properties-layer registration and compatibility fallback; the unlayered
+code-block margin remains its owner, with no ineffective StyleX margin replacement.
+The94 current pairs preserve all full records;85 PNGs match and nine OPENs total185
+raw/zero threshold pixels. Original candidates and old raster variants remain
+separate. Root independently checks original records, hashes and decoded pixels.
+
+The exact successful-build inventory through115 freezes thirty production source
+hashes and the actual final helper CSS: **434 occurrences/eight used files/21
+unresolved expressions**, including255 in ReviewRenderer. Through112 remains
+456/8/18;115 removes22 scanner occurrences and five separately audited defaults.
+Three new unresolved entries are private StyleX blockClassName references, not new
+Tailwind. Through109 remains historical620/8/18; cleanup/runtime mappings are not
+migration credit. The core source inventory remains separate at1,424/157/726 through 110. Later116–121 sources and unvisited states are excluded. Full components remain
+verified through99, Electron through93; the root ACP prerequisite failure remains.
 
 ### Default legacy Sidebar controls
 

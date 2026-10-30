@@ -1584,8 +1584,11 @@ Browserslist 包含 Android144，触发 system-ui 兼容扩栈；Tailwind4.3 固
 [版本化字体实现](https://raw.githubusercontent.com/parcel-bundler/lightningcss/v1.33.0/src/properties/font.rs)
 与独立分阶段／分目标控制一致。同 textarea 上的固定私有变量候选保留原 literal，不读根
 字体别名、不加 fallback 或改全局目标；隔离副本两次完整构建与十四对真实正向帧相同，
-两对直接写新私有名的负控仍为差异。独立 live 单元实施并验证前迁移计数为零，不宣称
-任意 DOM 注入等价，也不关闭原 115 候选差异。`leaves103-105-acceptance.html` 包含 156 对正式帧，其中 153 对 PNG 字节
+两对直接写新私有名的负控仍为差异。112 批已实施同元素私有变量，二十二对正向字体、
+placeholder、旧变量和交互帧，加两对完整 Renderer 帧，既有字段与 PNG 均相同；新私有
+声明另验。生成的 StyleX 层名递增一位，但两个宿主各七百一十条公共规则的选择器、声明、
+条件与相对顺序不变，没有手写引用绑定这些生成名。不宣称任意 DOM 注入等价，也不关闭
+原 115 候选差异。`leaves103-105-acceptance.html` 包含 156 对正式帧，其中 153 对 PNG 字节
 相同、73,555 条标准记录相同；三对正式 OPEN 共十七原始／零阈值像素，一对 native OPEN
 另有十七原始／一阈值像素。实际导航、composer 缩放、键盘保存与八对离线文件已覆盖，
 原截图工具 caret 和就绪失败仍单列保留。
@@ -1655,11 +1658,26 @@ Node 进程，两者继续标记 `closedNormally=false`，帧相同不代表清�
 核对两单元共 204 对全部原始记录、PNG SHA 与解码像素，并实际观察桌面／手机的 context
 和 composer；全部历史 OPEN 状态保留。
 
-截至 109 的成功构建库存核对三十份生产源码哈希，包含已验收 Separator 与 diff／context，
-使用 helper 真实 CSS，得 **620 处／八个使用文件／十八个未解析表达式**。较 698 减少的
-七十八处均为迁移，Separator 六处运行路径映射不删除源码字面量；ReviewRenderer 仍有
-441 处。主产品库存仍独立为截至 99 的 1,424／157／725，不含后续 110／111 与未访问的
-helper 状态。
+私有 shell／导航 111 批移除 163 处 utility，ref、observer、callback 和 inline 列几何不变。
+一百三十三对正式帧保留 44,522 条相同标准记录，其中 118 对 PNG 相同；native 二十对和
+离线二十对相同。一对正常动效与十五对正式 OPEN 共 119 原始／24 参考阈值像素，这十六
+对继续未关闭；原 native 最终关闭仍为 UNKNOWN。112 批字体证据按上述正向／负控合同
+单列。
+
+Markdown／诊断 115 批移除二十七处：v2 识别二十二处，另五处位于固定 codeClassName
+默认参数，v2 漏计。删除最后两个 space-y 后，原 reverse 属性注册与 fallback 也被裁掉；
+该候选继续拒绝，六对完整记录均不等，四对 PNG 共差 326,910 原始／312,705 阈值像素。
+最终样式表保留原 properties 层注册和兼容 fallback；未分层 code-block margin 仍由原
+规则拥有，不加无效 StyleX margin 替代。当前九十四对完整记录相同，八十五对 PNG 相同，
+九对 OPEN 共 185 原始／零阈值像素；原候选和旧栅格变体单列。主 Agent 独立核对原始
+记录、哈希与解码像素。
+
+截至 115 的真实成功构建库存冻结三十份生产源码与最终 helper CSS：**434 处／八个使用
+文件／二十一个未解析表达式**，ReviewRenderer 为 255。截至 112 仍为 456／8／18；115
+减少二十二处扫描出现次数及五处单列默认参数。新增三个未解析项均为私有 StyleX
+blockClassName 引用，没有新增 Tailwind。109 的 620／8／18 保持历史，清理与运行路径
+映射不算迁移。主产品源码库存仍独立为截至 110 的 1,424／157／726，不含后续 116–121
+与未访问状态。components 全套仍截至 99，Electron 截至 93，根 ACP 前置失败未解除。
 
 ### 默认 legacy Sidebar 控件
 

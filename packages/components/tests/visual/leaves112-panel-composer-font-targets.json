@@ -1,0 +1,45 @@
+{
+  "scope": "112 actual production PanelComposer fixed font literal. Seven positive writer controls and one explicit new-private-name DOM-injection negative at each width; real input/edit/save/cancel interaction pairs exercise real controlled updates, CtrlEnter save, Escape cancellation, Cancel and Save buttons; no backend/runtime. Fixed Vesper; no global light/other OS font painting claim.",
+  "widths": [390, 1280],
+  "cases": [
+    {
+      "key": "default",
+      "expected": "equal"
+    },
+    {
+      "key": "root-font-sans",
+      "expected": "equal"
+    },
+    {
+      "key": "ancestor-font-sans",
+      "expected": "equal"
+    },
+    {
+      "key": "element-font-sans",
+      "expected": "equal"
+    },
+    {
+      "key": "element-default-font",
+      "expected": "equal"
+    },
+    {
+      "key": "ancestor-private-variable",
+      "expected": "equal"
+    },
+    {
+      "key": "element-leading",
+      "expected": "equal"
+    },
+    {
+      "key": "element-private-negative",
+      "expected": "different"
+    }
+  ],
+  "newPrivateWriterBoundary": "The new fixed private variable can be overridden by a direct same-element DOM write, unlike the original literal utility. This is an explicit diagnostic negative, not an existing public style API. PanelComposer exposes no class/style/font variable input and has no styled element children.",
+  "interactionStates": [
+    "flow-CtrlEnter-save",
+    "flow-Escape-cancel",
+    "flow-button-cancel",
+    "flow-button-save"
+  ]
+}

@@ -181,6 +181,281 @@ export interface ReviewRendererProps {
   readonly onDiffStyleChange?: (diffStyle: ReviewDiffStyle) => void;
 }
 
+const rootLayoutStyles = stylex.create({
+  shell: {
+    position: 'relative',
+    display: 'grid',
+    maxWidth: '100vw',
+    overflowX: 'hidden',
+    overflowY: { default: null, '@media (width >= 64rem)': 'hidden' },
+    backgroundColor: 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+  },
+  columnsBoth: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': '232px minmax(0,1fr) 300px',
+      '@media (width >= 80rem)': '264px minmax(0,1fr) minmax(336px,388px)',
+    },
+  },
+  columnsSidebar: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': '232px minmax(0,1fr)',
+      '@media (width >= 80rem)': '264px minmax(0,1fr)',
+    },
+  },
+  columnsPanel: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': 'minmax(0,1fr) 300px',
+      '@media (width >= 80rem)': 'minmax(0,1fr) minmax(336px,388px)',
+    },
+  },
+  columnsMain: {
+    gridTemplateColumns: { default: null, '@media (width >= 64rem)': 'minmax(0,1fr)' },
+  },
+  sidebar: {
+    zIndex: 10,
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    borderRightStyle: 'var(--tw-border-style)',
+    borderRightWidth: { default: '1px', '@media (width < 64rem)': '0px' },
+    borderBottomStyle: { default: null, '@media (width < 64rem)': 'var(--tw-border-style)' },
+    borderBottomWidth: { default: null, '@media (width < 64rem)': '1px' },
+    borderColor: 'hsl(var(--sidebar-border))',
+    backgroundColor: 'hsl(var(--sidebar))',
+    padding: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--sidebar-foreground))',
+    position: { default: 'relative', '@media (width >= 64rem)': 'sticky' },
+    height: { default: 'auto', '@media (width >= 64rem)': '100vh' },
+    top: { default: null, '@media (width >= 64rem)': 'calc(var(--spacing) * 0)' },
+  },
+  hidden: { display: 'none' },
+  brand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+  },
+  logo: {
+    width: 'calc(var(--spacing) * 7)',
+    height: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    borderRadius: 'var(--radius)',
+  },
+  brandTitle: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+  },
+  navigation: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  group: { display: 'flex', width: '100%', flexDirection: 'column' },
+  groupRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'padding-left': 'calc(var(--spacing) * 2.5)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  groupActive: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    },
+    color: 'hsl(var(--foreground))',
+  },
+  groupInactive: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--sidebar-foreground))',
+  },
+  groupButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  groupText: { minWidth: 'calc(var(--spacing) * 0)', flex: '1' },
+  groupTitle: { display: 'block', overflowWrap: 'break-word', fontSize: '13px' },
+  groupStats: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  fileCount: { 'margin-left': 'calc(var(--spacing) * 1.5)', color: 'hsl(var(--muted-foreground))' },
+  descriptionButton: {
+    flexShrink: 0,
+    borderRadius: 'calc(var(--radius) - 2px)',
+    padding: 'calc(var(--spacing) * 0.5)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  descriptionActive: { color: 'hsl(var(--foreground))' },
+  descriptionInactive: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+  descriptionIcon: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+  description: {
+    'margin-top': 'calc(var(--spacing) * 1.5)',
+    maxHeight: 'calc(var(--spacing) * 80)',
+    overflowY: 'auto',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '13px',
+  },
+  main: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    overflowX: 'hidden',
+    height: { default: null, '@media (width >= 64rem)': '100vh' },
+  },
+  toolbar: {
+    position: 'sticky',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 3)',
+    rowGap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    backgroundColor: 'hsl(var(--background))',
+    'padding-inline': {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 5)',
+    },
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  totalStats: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  mono: {
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  },
+  content: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    'padding-inline': {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 6)',
+    },
+    'padding-block': 'calc(var(--spacing) * 5)',
+  },
+  empty: {
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    backgroundColor: 'hsl(var(--card))',
+    padding: 'calc(var(--spacing) * 5)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  groups: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    maxWidth: '1100px',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+  summary: { minWidth: 'calc(var(--spacing) * 0)' },
+  titleBlock: {
+    'margin-bottom': 'calc(var(--spacing) * 4)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  title: { fontSize: '22px' },
+  pullRequest: {
+    display: 'inline-flex',
+    width: 'fit-content',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '12px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+    textUnderlineOffset: '4px',
+    textDecorationLine: { default: null, '@media (hover: hover)': { ':hover': 'underline' } },
+  },
+  externalIcon: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+    flexShrink: 0,
+  },
+  pullRequestSeparator: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 50%, transparent)',
+    },
+  },
+  pullRequestTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+    },
+  },
+});
+
 export function ReviewRenderer({
   bundle: bundleInput,
   storageKey,
@@ -1046,15 +1321,17 @@ export function ReviewRenderer({
       <div
         ref={shellRef}
         className={cn(
-          'crh-shell dark relative grid max-w-[100vw] overflow-x-hidden bg-background text-foreground',
-          'lg:overflow-hidden',
-          sidebarVisible && showPanel
-            ? 'lg:grid-cols-[232px_minmax(0,1fr)_300px] xl:grid-cols-[264px_minmax(0,1fr)_minmax(336px,388px)]'
-            : sidebarVisible
-              ? 'lg:grid-cols-[232px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)]'
-              : showPanel
-                ? 'lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_minmax(336px,388px)]'
-                : 'lg:grid-cols-[minmax(0,1fr)]'
+          'crh-shell dark',
+          stylex.props(
+            rootLayoutStyles.shell,
+            sidebarVisible && showPanel
+              ? rootLayoutStyles.columnsBoth
+              : sidebarVisible
+                ? rootLayoutStyles.columnsSidebar
+                : showPanel
+                  ? rootLayoutStyles.columnsPanel
+                  : rootLayoutStyles.columnsMain
+          ).className
         )}
         style={gridTemplateColumns}
       >
@@ -1078,19 +1355,25 @@ export function ReviewRenderer({
         )}
         <aside
           className={cn(
-            'crh-sidebar z-10 flex min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground max-lg:relative max-lg:h-auto max-lg:border-b max-lg:border-r-0 lg:sticky lg:top-0 lg:h-screen',
-            !sidebarVisible && 'hidden'
+            'crh-sidebar',
+            stylex.props(rootLayoutStyles.sidebar, !sidebarVisible && rootLayoutStyles.hidden)
+              .className
           )}
           aria-label="Review groups"
         >
-          <div className="flex items-center gap-2.5 px-1">
-            <img src={lodyIconUrl} alt="Lody" className="size-7 shrink-0 rounded-md" />
-            <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight tracking-tight">
+          <div {...stylex.props(rootLayoutStyles.brand)}>
+            <img src={lodyIconUrl} alt="Lody" {...stylex.props(rootLayoutStyles.logo)} />
+            <h1
+              className={cn(
+                'font-semibold leading-tight tracking-tight',
+                stylex.props(rootLayoutStyles.brandTitle).className
+              )}
+            >
               Lody Review
             </h1>
           </div>
 
-          <nav className="-mx-1 grid gap-0.5" aria-label="Review group navigation">
+          <nav {...stylex.props(rootLayoutStyles.navigation)} aria-label="Review group navigation">
             {bundle.groups.map((group) => {
               const isActive = group.id === highlightedGroupId;
               const stats = groupStatsById.get(group.id);
@@ -1098,30 +1381,49 @@ export function ReviewRenderer({
               const descriptionExpanded = expandedDescriptionIds.has(group.id);
               const description = stripGroupMetadataMarkdown(group.bodyMarkdown);
               return (
-                <div key={group.id} className="flex w-full flex-col">
+                <div key={group.id} {...stylex.props(rootLayoutStyles.group)}>
                   <div
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2 transition-colors',
-                      isActive
-                        ? 'bg-foreground/10 text-foreground'
-                        : 'text-sidebar-foreground hover:bg-foreground/5'
+                      stylex.props(
+                        rootLayoutStyles.groupRow,
+                        isActive ? rootLayoutStyles.groupActive : rootLayoutStyles.groupInactive
+                      ).className
                     )}
                   >
                     <button
                       type="button"
                       aria-current={isActive ? 'true' : undefined}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+                      className={cn(
+                        'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+                        stylex.props(rootLayoutStyles.groupButton).className
+                      )}
                       onClick={() => navigateToGroup(group.id)}
                     >
-                      <span className="min-w-0 flex-1">
-                        <span className="block break-words text-[13px] font-medium leading-snug">
+                      <span {...stylex.props(rootLayoutStyles.groupText)}>
+                        <span
+                          className={cn(
+                            'font-medium leading-snug',
+                            stylex.props(rootLayoutStyles.groupTitle).className
+                          )}
+                        >
                           {group.title}
                         </span>
                         {stats ? (
-                          <span className="mt-0.5 block font-mono text-[11px] tabular-nums">
-                            <span className="text-addition">+{stats.additions}</span>{' '}
-                            <span className="text-deletion">−{stats.deletions}</span>
-                            <span className="ml-1.5 text-muted-foreground">{fileCount} files</span>
+                          <span
+                            className={cn(
+                              'tabular-nums',
+                              stylex.props(rootLayoutStyles.groupStats).className
+                            )}
+                          >
+                            <span {...stylex.props(rootLayoutStyles.additions)}>
+                              +{stats.additions}
+                            </span>{' '}
+                            <span {...stylex.props(rootLayoutStyles.deletions)}>
+                              −{stats.deletions}
+                            </span>
+                            <span {...stylex.props(rootLayoutStyles.fileCount)}>
+                              {fileCount} files
+                            </span>
                           </span>
                         ) : null}
                       </span>
@@ -1134,17 +1436,22 @@ export function ReviewRenderer({
                           descriptionExpanded ? 'Hide group description' : 'Show group description'
                         }
                         className={cn(
-                          'shrink-0 rounded-sm p-0.5 outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45',
-                          isActive ? 'text-foreground' : 'text-muted-foreground'
+                          'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+                          stylex.props(
+                            rootLayoutStyles.descriptionButton,
+                            isActive
+                              ? rootLayoutStyles.descriptionActive
+                              : rootLayoutStyles.descriptionInactive
+                          ).className
                         )}
                         onClick={() => toggleDescription(group.id)}
                       >
-                        <Info className="size-4 shrink-0" />
+                        <Info {...stylex.props(rootLayoutStyles.descriptionIcon)} />
                       </button>
                     )}
                   </div>
                   {descriptionExpanded && description.length > 0 && (
-                    <div className="mt-1.5 max-h-80 overflow-y-auto px-2.5 py-1 text-[13px]">
+                    <div {...stylex.props(rootLayoutStyles.description)}>
                       <SimpleMarkdown markdown={description} compact />
                     </div>
                   )}
@@ -1166,11 +1473,11 @@ export function ReviewRenderer({
 
         <main
           ref={mainRef}
-          className="crh-main flex min-w-0 flex-col overflow-x-hidden lg:h-screen"
+          className={cn('crh-main', stylex.props(rootLayoutStyles.main).className)}
         >
           <div
             ref={toolbarRef}
-            className="crh-toolbar sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background px-4 py-2 sm:px-5"
+            className={cn('crh-toolbar', stylex.props(rootLayoutStyles.toolbar).className)}
           >
             <Button
               type="button"
@@ -1183,10 +1490,13 @@ export function ReviewRenderer({
             >
               <PanelLeft className="size-4" />
             </Button>
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="font-mono tabular-nums" title="Total added / removed lines">
-                <span className="text-addition">+{totalStats.additions}</span>{' '}
-                <span className="text-deletion">−{totalStats.deletions}</span>
+            <div {...stylex.props(rootLayoutStyles.totalStats)}>
+              <span
+                className={cn('tabular-nums', stylex.props(rootLayoutStyles.mono).className)}
+                title="Total added / removed lines"
+              >
+                <span {...stylex.props(rootLayoutStyles.additions)}>+{totalStats.additions}</span>{' '}
+                <span {...stylex.props(rootLayoutStyles.deletions)}>−{totalStats.deletions}</span>
               </span>
             </div>
             <DiffStyleControl diffStyle={activeDiffStyle} onDiffStyleChange={setActiveDiffStyle} />
@@ -1220,20 +1530,23 @@ export function ReviewRenderer({
             )}
           </div>
 
-          <div className="min-w-0 px-4 py-5 sm:px-6">
+          <div {...stylex.props(rootLayoutStyles.content)}>
             {bundle.groups.length === 0 ? (
-              <div className="rounded-md border bg-card p-5 text-sm text-muted-foreground">
-                No review groups found.
-              </div>
+              <div {...stylex.props(rootLayoutStyles.empty)}>No review groups found.</div>
             ) : (
-              <div className="mx-auto flex min-w-0 max-w-[1100px] flex-col gap-6">
+              <div {...stylex.props(rootLayoutStyles.groups)}>
                 {bundle.document.title ||
                 bundle.document.frontmatter.pr ||
                 bundle.document.overview ? (
-                  <section aria-label="Review summary" className="min-w-0">
+                  <section aria-label="Review summary" {...stylex.props(rootLayoutStyles.summary)}>
                     {bundle.document.title ? (
-                      <div className="mb-4 flex flex-col gap-2">
-                        <h1 className="text-[22px] font-bold leading-snug tracking-tight">
+                      <div {...stylex.props(rootLayoutStyles.titleBlock)}>
+                        <h1
+                          className={cn(
+                            'font-bold leading-snug tracking-tight',
+                            stylex.props(rootLayoutStyles.title).className
+                          )}
+                        >
                           {bundle.document.title}
                         </h1>
                         {bundle.document.frontmatter.pr ? (
@@ -1241,17 +1554,19 @@ export function ReviewRenderer({
                             href={bundle.document.frontmatter.pr.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex w-fit items-center gap-1.5 text-[12px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                            {...stylex.props(rootLayoutStyles.pullRequest)}
                           >
-                            <ExternalLink className="size-3 shrink-0" />
+                            <ExternalLink {...stylex.props(rootLayoutStyles.externalIcon)} />
                             <span className="font-medium tabular-nums">
                               PR #{bundle.document.frontmatter.pr.number}
                             </span>
                             {bundle.document.frontmatter.pr.title &&
                             bundle.document.frontmatter.pr.title !== bundle.document.title ? (
                               <>
-                                <span className="text-muted-foreground/50">·</span>
-                                <span className="truncate text-muted-foreground/80">
+                                <span {...stylex.props(rootLayoutStyles.pullRequestSeparator)}>
+                                  ·
+                                </span>
+                                <span {...stylex.props(rootLayoutStyles.pullRequestTitle)}>
                                   {bundle.document.frontmatter.pr.title}
                                 </span>
                               </>
@@ -1743,6 +2058,72 @@ function parseLightMarkdownBlocks(
   return blocks;
 }
 
+const markdownStyles = stylex.create({
+  strong: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground))',
+  },
+  heading: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  compactHeading: {
+    '--tw-leading': 'calc(var(--spacing) * 5)',
+    fontSize: '13px',
+    lineHeight: 'calc(var(--spacing) * 5)',
+  },
+  headingText: {
+    '--tw-leading': 'calc(var(--spacing) * 6)',
+    fontSize: { default: '15px', '@media (min-width: 48rem)': '16px' },
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+  list: { listStyleType: 'disc' },
+  compactList: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 4)',
+  },
+  listInset: { paddingLeft: 'calc(var(--spacing) * 5)' },
+  listSpace: {
+    '--tw-space-y-reverse': 0,
+    'margin-block-start': 'calc(calc(var(--spacing) * 1) * var(--tw-space-y-reverse))',
+    'margin-block-end': 'calc(calc(var(--spacing) * 1) * calc(1 - var(--tw-space-y-reverse)))',
+  },
+  blockSpace: {
+    '--tw-space-y-reverse': 0,
+    'margin-block-start': 'calc(calc(var(--spacing) * 2) * var(--tw-space-y-reverse))',
+    'margin-block-end': 'calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-y-reverse)))',
+  },
+  findingCode: {
+    borderRadius: '0.25rem',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 70%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12px',
+  },
+  body: {
+    '--tw-leading': '1.6',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  foreground: {
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  muted: { color: 'hsl(var(--muted-foreground))' },
+  diagnostics: { display: 'grid', gap: 'calc(var(--spacing) * 2)' },
+  diagnosticTitle: { textTransform: 'capitalize' },
+});
+
 function renderMarkdownInline(
   text: string,
   context: InlineRendererContext,
@@ -1760,7 +2141,7 @@ function renderMarkdownInline(
     }
     if (match[1] !== undefined) {
       parts.push(
-        <strong key={`${keyPrefix}-${key}-b`} className="font-semibold text-foreground">
+        <strong key={`${keyPrefix}-${key}-b`} {...stylex.props(markdownStyles.strong)}>
           {match[1]}
         </strong>
       );
@@ -1797,6 +2178,7 @@ function renderLightMarkdownBlock(
   options: {
     readonly compact?: boolean;
     readonly codeClassName?: string;
+    readonly blockClassName?: string;
   } = {}
 ): ReactNode {
   switch (block.type) {
@@ -1806,8 +2188,11 @@ function renderLightMarkdownBlock(
         <Tag
           key={key}
           className={cn(
-            'font-semibold',
-            options.compact ? 'text-[13px] leading-5' : 'text-[15px] leading-6 md:text-[16px]'
+            options.blockClassName,
+            stylex.props(
+              markdownStyles.heading,
+              options.compact ? markdownStyles.compactHeading : markdownStyles.headingText
+            ).className
           )}
         >
           {renderMarkdownInline(block.text, context, `${key}-h`, {
@@ -1820,10 +2205,21 @@ function renderLightMarkdownBlock(
       return (
         <ul
           key={key}
-          className={cn('list-disc', options.compact ? 'grid gap-1 pl-4' : 'space-y-1 pl-5')}
+          className={cn(
+            options.blockClassName,
+            stylex.props(
+              markdownStyles.list,
+              options.compact ? markdownStyles.compactList : markdownStyles.listInset
+            ).className
+          )}
         >
           {block.items.map((item, itemIndex) => (
-            <li key={itemIndex}>
+            <li
+              key={itemIndex}
+              {...stylex.props(
+                !options.compact && itemIndex < block.items.length - 1 && markdownStyles.listSpace
+              )}
+            >
               {renderMarkdownInline(item, context, `${key}-${itemIndex}`, {
                 className: options.codeClassName,
               })}
@@ -1836,7 +2232,7 @@ function renderLightMarkdownBlock(
     case 'p':
     default:
       return (
-        <p key={key}>
+        <p key={key} className={options.blockClassName}>
           {renderMarkdownInline(block.text, context, key, { className: options.codeClassName })}
         </p>
       );
@@ -1862,7 +2258,7 @@ function FindingBody({
           { finding: { files, onJump } },
           {
             compact: true,
-            codeClassName: 'rounded bg-muted/70 px-1 font-mono text-[12px]',
+            codeClassName: stylex.props(markdownStyles.findingCode).className,
           }
         )
       )}
@@ -4135,6 +4531,9 @@ const commentStyles = stylex.create({
     backgroundColor: 'hsl(var(--card))',
     'padding-inline': 'calc(var(--spacing) * 3)',
     'padding-block': 'calc(var(--spacing) * 2.5)',
+    '--crh-composer-font-literal':
+      'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif',
+    fontFamily: 'var(--crh-composer-font-literal)',
     fontSize: '13px',
     color: {
       default: 'hsl(var(--foreground))',
@@ -4373,10 +4772,7 @@ function PanelComposer({
         value={draft.body}
         placeholder="Leave a comment…"
         aria-label={`Comment on ${fileBaseName(draft.path)} line ${draft.lineNumber}`}
-        className={cn(
-          'font-sans leading-6 outline-hidden',
-          stylex.props(commentStyles.textarea).className
-        )}
+        className={cn('leading-6 outline-hidden', stylex.props(commentStyles.textarea).className)}
         onChange={(event) => onChange(event.currentTarget.value)}
         onInput={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -4483,7 +4879,7 @@ function ThreadCard({
 
 function Diagnostics({ diagnostics }: { readonly diagnostics: readonly ReviewDiagnostic[] }) {
   return (
-    <div className="grid gap-2">
+    <div {...stylex.props(markdownStyles.diagnostics)}>
       {diagnostics.map((diagnostic, index) => {
         const Icon = diagnostic.severity === 'info' ? CircleAlert : AlertTriangle;
         return (
@@ -4498,7 +4894,7 @@ function Diagnostics({ diagnostics }: { readonly diagnostics: readonly ReviewDia
             }
           >
             <Icon className="size-4" />
-            <AlertTitle className="capitalize">
+            <AlertTitle {...stylex.props(markdownStyles.diagnosticTitle)}>
               {diagnostic.severity}
               {diagnostic.code ? `: ${diagnostic.code}` : ''}
             </AlertTitle>
@@ -4524,12 +4920,24 @@ function SimpleMarkdown({
   return (
     <div
       className={cn(
-        'crh-markdown space-y-2 text-[13px] leading-[1.6]',
-        tone === 'foreground' ? 'text-foreground/90' : 'text-muted-foreground'
+        'crh-markdown',
+        stylex.props(
+          markdownStyles.body,
+          tone === 'foreground' ? markdownStyles.foreground : markdownStyles.muted
+        ).className
       )}
     >
       {blocks.map((block, index) =>
-        renderLightMarkdownBlock(block, String(index), {}, { compact })
+        renderLightMarkdownBlock(
+          block,
+          String(index),
+          {},
+          {
+            compact,
+            blockClassName: stylex.props(index < blocks.length - 1 && markdownStyles.blockSpace)
+              .className,
+          }
+        )
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 
 import { ReviewRenderer } from '../react';
 import type { ReviewUserComment } from '../types';
+import { validateParsedReviewDocument } from '../validation';
 import pr124GzUrl from './fixtures/pr-124-v2-format.review.json.gz?url';
 import budgetDiagnosticsReview from './fixtures/budget-diagnostics.review.md?raw';
 import fileStatusesReview from './fixtures/file-statuses.review.md?raw';
@@ -696,5 +697,127 @@ export const ContextBlockCoverage: Story = {
       ],
     }),
     storageKey: 'storybook-context-block-coverage',
+  },
+};
+
+export const EmptyReview: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/empty-review.review.md',
+      markdown: source([
+        '---',
+        'review_version: 1',
+        'merge_base: 1111111111111111111111111111111111111111',
+        'current_commit: 2222222222222222222222222222222222222222',
+        '---',
+        '',
+        '# Empty review',
+      ]),
+      files: [],
+    }),
+    storageKey: 'storybook-empty-review',
+  },
+};
+
+export const OverviewAndNavigationCoverage: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/overview-navigation.review.md',
+      markdown: longGroupDescriptionReview.replace(
+        'base_ref: main',
+        'base_ref: main\npr_number: 1111\npr_url: https://example.test/pull/1111\npr_title: A different synthetic pull request title that exercises the original title truncation and subdued separator'
+      ),
+      files: Object.values(longGroupDescriptionBundle.files),
+      commits: Object.values(longGroupDescriptionBundle.commits ?? {}),
+    }),
+    storageKey: 'storybook-overview-navigation-coverage',
+  },
+};
+
+const markdownDiagnosticsBundle = createReviewFixtureBundle({
+  reviewFilePath: '/storybook/markdown-diagnostics.review.md',
+  markdown: source([
+    '---',
+    'review_version: 1',
+    'merge_base: 1111111111111111111111111111111111111111',
+    'current_commit: 2222222222222222222222222222222222222222',
+    'line_budget: 1',
+    '---',
+    '',
+    '# Markdown typography and genuine diagnostics',
+    '',
+    'Overview with **strong text** and `overviewCode`.',
+    '',
+    '## Review',
+    '',
+    '- P2: **A synthetic finding** keeps `findingCode` separate from `new://src/markdown-sample.ts:L1`.',
+    '',
+    '## Group: Markdown source and range validation',
+    '',
+    'Changed lines: 2',
+    '',
+    '# First heading',
+    '',
+    '## Second heading',
+    '',
+    '### Third heading',
+    '',
+    '#### Fourth heading',
+    '',
+    '##### Fifth heading',
+    '',
+    '###### Sixth heading',
+    '',
+    'Paragraph with **strong content** and `inlineCode`.',
+    '',
+    '- First **strong list item** with `firstCode`.',
+    '- Second list item.',
+    '',
+    '```ts',
+    'const fencedValue = "preserve existing code spacing";',
+    '```',
+    '',
+    'Final paragraph after the fenced code.',
+    '',
+    '`changes://src/markdown-sample.ts?new=L1-L2`',
+    '',
+    '- `new://L9`: INFO: This intentional range boundary produces a genuine validator error.',
+    '',
+    '## Group: Read-only Markdown context',
+    '',
+    'Context has **strong emphasis**, `contextCode` and two list entries.',
+    '',
+    '- Context first item.',
+    '- Context second item.',
+    '',
+    '`context://src/markdown-sample.ts?range=L1-L2`',
+  ]),
+  files: [
+    {
+      path: 'src/markdown-sample.ts',
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      oldText: source(['export const markdownValue = 1;', 'export const stableValue = true;']),
+      newText: source(['export const markdownValue = 2;', 'export const stableValue = true;']),
+    },
+  ],
+});
+const markdownDocumentDiagnostics = validateParsedReviewDocument(
+  markdownDiagnosticsBundle.document
+);
+
+export const MarkdownAndDiagnosticsCoverage: Story = {
+  args: {
+    bundle: {
+      ...markdownDiagnosticsBundle,
+      groups: markdownDiagnosticsBundle.groups.map((group) => ({
+        ...group,
+        diagnostics: markdownDocumentDiagnostics.filter(
+          (diagnostic) => diagnostic.line === group.line
+        ),
+      })),
+    },
+    storageKey: 'storybook-markdown-diagnostics-coverage',
   },
 };

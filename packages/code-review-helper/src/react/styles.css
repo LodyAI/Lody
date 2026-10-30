@@ -3,6 +3,26 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Markdown retains the original non-inheriting spacing writer after its utility
+ * selectors are removed. Keep the fallback in Tailwind's properties layer. */
+@layer properties {
+  @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or
+    ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
+    *,
+    :before,
+    :after,
+    ::backdrop {
+      --tw-space-y-reverse: 0;
+    }
+  }
+}
+
+@property --tw-space-y-reverse {
+  syntax: '*';
+  inherits: false;
+  initial-value: 0;
+}
+
 /* Bundle JetBrains Mono so all monospace text (paths, SHAs, line numbers, the
  * diff) renders in it consistently instead of falling back to the system mono. */
 @import '@fontsource/jetbrains-mono/400.css';

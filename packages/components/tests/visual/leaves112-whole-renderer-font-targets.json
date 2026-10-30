@@ -1,0 +1,50 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--with-existing-comments"],
+  "ready": {
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];const q=window.__111Warm??{i:0};window.__111Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "click",
+        "selector": ".crh-block-header button[aria-label^=\"Add a review comment to \"]",
+        "index": 0
+      },
+      {
+        "action": "fill",
+        "selector": "textarea[aria-label^=\"Comment on\"]",
+        "value": "Font contract: Interface \u754c\u9762 fallback 0123 Ag"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const t=document.querySelector(\"textarea[aria-label^=\\\"Comment on\\\"]\");if(!t||getComputedStyle(t).colorScheme!==\"dark\")return false;const s=JSON.stringify([...document.querySelector(\".crh-shell\").querySelectorAll(\"*\")].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__112WholeStable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__112WholeStable=q;const b=t.getBoundingClientRect();return b.width>0&&b.height>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      }
+    ]
+  }
+}

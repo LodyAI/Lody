@@ -1,0 +1,244 @@
+{
+  "viewports": [
+    {
+      "name": "390",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "767",
+      "width": 767,
+      "height": 1000
+    },
+    {
+      "name": "768",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "1023",
+      "width": 1023,
+      "height": 1000
+    },
+    {
+      "name": "1024",
+      "width": 1024,
+      "height": 1000
+    },
+    {
+      "name": "1280",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--markdown-and-diagnostics-coverage"],
+  "ready": {
+    "code-review-helper-reviewrenderer--markdown-and-diagnostics-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {if(document.querySelectorAll('[role=alert]').length!==3||document.querySelectorAll('.crh-markdown h1,.crh-markdown h2,.crh-markdown h3,.crh-markdown h4,.crh-markdown h5,.crh-markdown h6').length!==6)return false;const a=[...document.querySelectorAll('[data-block-path]')],q=window.__115Warm??{i:0};window.__115Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(!e.querySelector('.crh-diff-placeholder')&&(!h||h.shadowRoot?.querySelector('[data-line]')))q.i++;return false;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[aria-label=\\\"Review summary\\\"]\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--markdown-and-diagnostics-coverage": [
+      {
+        "name": "headings",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-markdown h3\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "list",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-markdown ul\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "fenced-code",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-markdown-code\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "warning",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[role=alert]\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "range-error",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path] [role=alert]\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "context-description",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-main section:last-child .crh-markdown\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "context-info",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-main section:last-child [role=alert]\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "compact-sidebar-description",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "nav button[aria-label=\"Show group description\"]",
+            "index": 0
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"nav .crh-markdown\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "finding-code",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[aria-label=\"Review findings\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});return e.getBoundingClientRect().width>0;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[aria-label=\\\"Review findings\\\"]\");if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__115stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__115stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

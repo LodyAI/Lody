@@ -23,6 +23,25 @@ The renderer, Storybook, standalone bundle and Vitest share
 own element-local CSS variables; this host does not import product UI or palette
 aliases. Its CSS layer order is `theme, base, stylex, components, utilities`.
 
+| Styling contract                 | Owner                                                           | Verification                                                                        |
+| -------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Owned layout and semantic values | Renderer-local StyleX blocks and element-local helper variables | Real Storybook and standalone frames, complete computed records and caller controls |
+| Public Slot cascade              | Original utility path in local controls                         | Native/Slot and raw exported-selector cases                                         |
+| Legacy property registration     | `src/react/styles.css`                                          | Full generated CSS and default/initial/inherit writer states                        |
+
+The literal composer font is stored on its textarea in a private custom property.
+A direct StyleX `system-ui` declaration is expanded by the locked Lightning CSS
+postprocessor for its Android target, unlike the original Tailwind literal. Keep
+this local value independent of the ancestor font variable; changing compiler
+targets would affect unrelated styles. Direct writes to the new private property
+are outside the component API.
+
+When the last consuming utility disappears, Tailwind can prune its `@property`
+registration and compatibility initialization. The stylesheet explicitly retains
+the original `--tw-space-y-reverse` registration and fallback. Compare full computed
+values under default, utility, initial, inherit and vertical-writing states; equal
+normal-state PNGs did not detect the rejected pruning regression.
+
 The standalone config keeps StyleX source transforms in the pre phase, then
 runs that same plugin instance's `generateBundle` hook in a post companion
 immediately before `viteSingleFile()`. Vite emits CSS after pre plugins. Running

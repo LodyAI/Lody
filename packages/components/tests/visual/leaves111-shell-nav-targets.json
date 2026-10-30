@@ -1,0 +1,461 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 1000
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 1000
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 1000
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 1000
+    },
+    {
+      "name": "below-xl",
+      "width": 1279,
+      "height": 1000
+    },
+    {
+      "name": "at-xl",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--grouped-refactor",
+    "code-review-helper-reviewrenderer--overview-and-navigation-coverage",
+    "code-review-helper-reviewrenderer--empty-review"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];const q=window.__111Warm??{i:0};window.__111Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(true))return false;document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});window.scrollTo({left:0,top:0,behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+      }
+    ],
+    "code-review-helper-reviewrenderer--overview-and-navigation-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];const q=window.__111Warm??{i:0};window.__111Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(true))return false;document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});window.scrollTo({left:0,top:0,behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+      }
+    ],
+    "code-review-helper-reviewrenderer--empty-review": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];const q=window.__111Warm??{i:0};window.__111Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(true))return false;document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});window.scrollTo({left:0,top:0,behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "toolbar-and-summary",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(true))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-hidden",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(document.querySelector(\".crh-toolbar button[title*=\\\"review map\\\"]\").getAttribute(\"aria-pressed\")===\"false\"&&getComputedStyle(document.querySelector(\".crh-sidebar\")).display===\"none\"))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-and-panel-hidden",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review thread\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!document.querySelector(\".crh-panel\")&&document.querySelector(\".crh-toolbar button[title*=\\\"review thread\\\"]\").getAttribute(\"aria-pressed\")===\"false\"))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-restored-panel-hidden",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(getComputedStyle(document.querySelector(\".crh-sidebar\")).display===\"flex\"&&!document.querySelector(\".crh-panel\")))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "all-columns-restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review thread\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!!document.querySelector(\".crh-panel\")))return false;document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});window.scrollTo({left:0,top:0,behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-description-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "nav[aria-label=\"Review group navigation\"] button[aria-label=\"Show group description\"]",
+            "index": 0
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!!document.querySelector(\"nav button[aria-label=\\\"Hide group description\\\"]\")))return false;document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"]\").scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-description-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "nav[aria-label=\"Review group navigation\"] button[aria-label=\"Hide group description\"]",
+            "index": 0
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!document.querySelector(\"nav button[aria-label=\\\"Hide group description\\\"]\")))return false;document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"]\").scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "inactive-group-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "nav[aria-label=\"Review group navigation\"] > div:nth-child(2) > div"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"] > div:nth-child(2) > div\").matches(\":hover\")))return false;const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "group-keyboard-selected",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "nav[aria-label=\"Review group navigation\"] > div:nth-child(2) > div > button:first-child"
+          },
+          {
+            "action": "press",
+            "selector": "nav[aria-label=\"Review group navigation\"] > div:nth-child(2) > div > button:first-child",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"] > div:nth-child(2) > div > button:first-child\").getAttribute(\"aria-current\")===\"true\"))return false;const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--overview-and-navigation-coverage": [
+      {
+        "name": "toolbar-and-distinct-pr-title",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!!document.querySelector(\"[aria-label=\\\"Review summary\\\"] a span:last-child\")))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "pr-link-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[aria-label=\"Review summary\"] a"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(document.querySelector(\"[aria-label=\\\"Review summary\\\"] a\").matches(\":hover\")))return false;const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-description-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "nav[aria-label=\"Review group navigation\"] button[aria-label=\"Show group description\"]",
+            "index": 0
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(!!document.querySelector(\"nav button[aria-label=\\\"Hide group description\\\"]\")))return false;document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"]\").scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "description-scroll-bottom",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"nav[aria-label=\\\"Review group navigation\\\"] > div:first-child > div:last-child\");if(!e||e.scrollHeight<=e.clientHeight)return false;e.scrollTop=e.scrollHeight;return e.scrollTop>0&&Math.abs(e.scrollHeight-e.clientHeight-e.scrollTop)<=1;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(true))return false;const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--empty-review": [
+      {
+        "name": "empty-message-visible",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(document.body.textContent.includes(\"No review groups found.\")&&!document.querySelector(\"[data-group-id]\")&&!document.querySelector(\".crh-panel\")&&!document.querySelector(\".crh-toolbar button[title*=\\\"review thread\\\"]\")))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "empty-sidebar-hidden",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(getComputedStyle(document.querySelector(\".crh-sidebar\")).display===\"none\"))return false;const t=document.querySelector(\".crh-toolbar\");document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});t.scrollIntoView({block:\"start\",behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      },
+      {
+        "name": "empty-sidebar-restored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!document.querySelector(\".crh-toolbar\")||!(getComputedStyle(document.querySelector(\".crh-sidebar\")).display===\"flex\"))return false;document.querySelector(\".crh-main\").scrollTo({left:0,top:0,behavior:\"instant\"});window.scrollTo({left:0,top:0,behavior:\"instant\"});const a=[...document.querySelectorAll(\".crh-shell,.crh-sidebar,.crh-toolbar,.crh-toolbar *,nav[aria-label=\\\"Review group navigation\\\"] *,[aria-label=\\\"Review summary\\\"]\")],s=JSON.stringify(a.map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__111Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__111Stable=q;return q.n>=3&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"));}"
+          }
+        ]
+      }
+    ]
+  }
+}
