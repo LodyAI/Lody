@@ -65,3 +65,5 @@ strictly and attaches the scope from the sender and cached account.
   probe.
 - Unit and component tests cover the counters, scoping, bounds, provider, dispatch
   append and runtime close paths. No live Electron journey has been run here.
+
+Implemented in [PR #2120](https://github.com/LodyAI/Lody/pull/2120).

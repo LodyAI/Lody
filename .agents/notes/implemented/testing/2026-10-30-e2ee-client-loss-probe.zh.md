@@ -29,3 +29,5 @@ Translation: current
 - `turnStarts` 统计的是客户端实际追加的 turn 派发，不是 daemon 进程里的 ACP 启动；daemon 侧的执行由 CLI 自行防护和测试。
 - 打包运行（私有 harness 的 `LODY_ACCEPT_CLIENT_LOSS=1`）无法使用该端口。
 - 单元和组件测试覆盖了计数、作用域、上限、provider、派发追加和运行时关闭路径。尚未在真实 Electron 旅程中运行。
+
+实现见 [PR #2120](https://github.com/LodyAI/Lody/pull/2120)。
