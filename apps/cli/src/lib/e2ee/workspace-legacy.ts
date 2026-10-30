@@ -759,8 +759,15 @@ async function openWorkspaceOwned(
     genesis: binding.genesisHash,
     resource: e2eeRpcResource,
     ledger: () => opened.runtime.executionLedger(),
-    // Join an in-flight refresh as is; otherwise start one round without resetting retries.
-    catchUp: () => refresh ?? refreshInBackground(false),
+    catchUp: async () => {
+      // An older round may finish after an independent authority read advances
+      // the ledger. Join it without extending it, then receive the current key
+      // through the same refresh owner if it is still missing. Never reset retries.
+      await (refresh ?? refreshInBackground(false));
+      if (closed) return;
+      const status = await run(opened.runtime.status());
+      if (!closed && !status.hasCurrentKey) await refreshInBackground(false);
+    },
     // Two epoch integers and an outcome only; never the frame or its plaintext.
     observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
   });

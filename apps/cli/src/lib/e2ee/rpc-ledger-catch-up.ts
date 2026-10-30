@@ -1,4 +1,5 @@
 import { Effect, Result } from 'effect';
+import { InstalledKeyError } from '@lody/e2ee-core';
 import {
   Bytes,
   ContentError,
@@ -24,7 +25,7 @@ export type LedgerCatchUpOptions = {
   readonly resource: (machineId: string) => string;
   /** This machine's current verified ledger. */
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
-  /** Joins the workspace refresh owner; it must neither add a round nor reset retries. */
+  /** Uses the workspace refresh owner; never extends an in-flight round or resets retries. */
   readonly catchUp: () => Promise<void>;
   readonly now?: () => number;
   readonly timeoutMs?: number;
@@ -37,11 +38,11 @@ const ledgerState = (view: LedgerView) => `${view.inspectState().epoch.number}:$
 
 /**
  * A requester seals at its newest verified epoch, so a request sent right after a
- * key rotation can name an epoch this machine has not ingested yet. Only a frame
- * signed by a device of the current verified ledger, for this exact genesis,
+ * key rotation can name an epoch this machine has not ingested or installed yet.
+ * Only a frame signed by a device of the current verified ledger, for this exact genesis,
  * resource and declared epoch, may wait for the workspace's existing ledger/key
  * refresh. All such frames share one bounded wait per verified ledger state; a
- * catch-up that does not advance that state cools down before another. The core
+ * rejected reopening at an unchanged state cools down before another attempt. The core
  * open guard still decides every reopened frame.
  */
 export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
@@ -112,9 +113,10 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
       open(machineId, frameHex).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
+            const missingKey = error instanceof InstalledKeyError && error.reason === 'missing-key';
             if (
-              !(error instanceof ContentError) ||
-              error.code !== 'unauthorized' ||
+              (!missingKey &&
+                (!(error instanceof ContentError) || error.code !== 'unauthorized')) ||
               typeof frameHex !== 'string' ||
               !/^(?:[0-9a-f]{2})+$/.test(frameHex)
             )
@@ -128,7 +130,7 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
             const localEpoch = view.success.inspectState().epoch.number;
             const report = (outcome: LedgerCatchUpEvent['outcome']) =>
               observe({ frameEpoch, localEpoch, outcome });
-            if (frameEpoch <= localEpoch) {
+            if (frameEpoch < localEpoch || (frameEpoch === localEpoch && !missingKey)) {
               report('not-newer');
               return yield* Effect.fail(error);
             }
@@ -143,7 +145,13 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
             }
             yield* Effect.promise(() => join(state));
             return yield* open(machineId, frameHex).pipe(
-              Effect.tap(() => Effect.sync(() => report('caught-up'))),
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  // Installing the key can make progress without changing the ledger.
+                  if (exhausted?.state === state) exhausted = undefined;
+                  report('caught-up');
+                })
+              ),
               Effect.tapError(() => Effect.sync(() => report('still-rejected')))
             );
           })

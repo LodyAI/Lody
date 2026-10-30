@@ -99,7 +99,11 @@ import {
   signGenesisRecord,
   signLedgerRecord,
   verifyLedger,
+  sealRpcRequestContent,
 } from '@lody/e2ee-core/protocol';
+import { encodeE2eeRpcRequestBody } from '../../../packages/loro-streams-rpc/src/e2ee-wire';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import * as rpcLedgerCatchUp from '../src/lib/e2ee/rpc-ledger-catch-up';
 import { makeNodeE2eeCustody, type KekWrapper } from '@lody/e2ee-core/adapters/node-custody';
 import { makeCliE2eeCustody } from '../src/lib/e2ee/custody';
 import { makeCliE2eeRuntime } from '../src/lib/e2ee/runtime';
@@ -417,6 +421,192 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
+    'receives the current RPC key through the real workspace with %s',
+    async (mode) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rpc-key-catch-up-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      let oldRefresh: Promise<void> | undefined;
+      const receiveEntered = Promise.withResolvers<void>();
+      const releaseReceive = Promise.withResolvers<void>();
+      const joinedRefresh = Promise.withResolvers<void>();
+      let holdReceive = false;
+      let advanceDuringJoin: (() => Promise<void>) | undefined;
+      const originalCatchUp = rpcLedgerCatchUp.makeLedgerCatchUp;
+      const catchUpSpy =
+        mode === 'joined-refresh'
+          ? vi.spyOn(rpcLedgerCatchUp, 'makeLedgerCatchUp').mockImplementation((options) =>
+              originalCatchUp({
+                ...options,
+                catchUp: async () => {
+                  const result = options.catchUp();
+                  await advanceDuringJoin?.();
+                  joinedRefresh.resolve();
+                  return await result;
+                },
+              })
+            )
+          : undefined;
+      const doc = new LoroDoc();
+      try {
+        const accountId = 'synthetic-rpc-key-account';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          'workspace'
+        );
+        const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+        const stagedGroup = fixture.stagedGroup;
+        if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+        await retainCliE2eeWorkspaceBinding(accountId, {
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+        });
+        const devicePublicKey = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(root, 'custody'),
+              keyring: noKeyring,
+            });
+            return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+          })
+        );
+        await fs.writeFile(
+          join(root, 'activation.json'),
+          JSON.stringify({
+            genesisHash: hex(fixture.genesis.toBytes()),
+            signingPublicKey: devicePublicKey,
+          })
+        );
+        let history = page(fixture.records);
+        const cloud = {
+          getHistory: async () => history,
+          readEpochGroup: async () => encodeEpochStagedGroup(stagedGroup),
+          mailboxCall: async (
+            method: keyof E2eeMailboxRequests,
+            input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+          ) => {
+            if (method === 'fetch') {
+              if (holdReceive) {
+                holdReceive = false;
+                receiveEntered.resolve();
+                await releaseReceive.promise;
+              }
+              return {
+                items:
+                  (input as E2eeMailboxRequests['fetch']).epoch === 0
+                    ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                    : [],
+                next: null,
+              };
+            }
+            if (method === 'status')
+              return {
+                ...(input as E2eeMailboxRequests['status']).slot,
+                revision: 0,
+                status: 'EnvelopeStored',
+              };
+            if (method === 'report') return null;
+            throw new Error('unexpected mailbox operation');
+          },
+        } as CloudE2eePort;
+        host = await openCliE2eeWorkspaceLegacy({
+          accountId,
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          cloud,
+          keyring: noKeyring,
+          onUnavailable: () => {},
+        });
+        const active = host;
+        await host.refresh();
+        expect(await host.status()).toMatchObject({ epoch: 0, hasCurrentKey: true });
+        if (mode === 'joined-refresh') {
+          holdReceive = true;
+          oldRefresh = host.refresh();
+          await receiveEntered.promise;
+        }
+        history = page([...fixture.records, ...fixture.rotationSuffix]);
+        const advanceLedger = async () => {
+          expect(
+            await Effect.runPromise(active.authorizeExecution('workspace', fixture.sender))
+          ).toMatchObject({ _tag: 'Authorized' });
+          expect(await active.status()).toMatchObject({
+            epoch: 1,
+            writeEpoch: 0,
+            hasCurrentKey: false,
+          });
+        };
+        if (mode === 'fresh-ledger') await advanceLedger();
+        if (mode === 'joined-refresh') advanceDuringJoin = advanceLedger;
+        const input = {
+          sessionId: 'synthetic-session',
+          userTurnId: 'synthetic-turn-23',
+          userId: 'display-only',
+          timestamp: new Date(1000).toISOString(),
+          inputConfig: { prompt: 'SYNTHETIC_AFTER_ROTATION' },
+        };
+        const frame = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeNodeE2eeCustody({
+              directory: join(directory, 'owner'),
+              wrapper,
+            });
+            const signer = yield* custody.openDevice(fixture.genesis);
+            return yield* sealRpcRequestContent({
+              scope: {
+                genesis: hex(fixture.genesis.toBytes()),
+                resource: e2eeRpcResource('machine'),
+                epoch: 1,
+              },
+              epochKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72))),
+              signer,
+              plaintext: encodeE2eeRpcRequestBody({
+                requestId: new Uint8Array(16).fill(23),
+                expiresAt: 901000,
+                method: 'session/dispatch-turn',
+                params: new TextEncoder().encode(JSON.stringify(input)),
+              }),
+            });
+          })
+        );
+        doc.getMap('rpcDispatchOriginals').set(input.userTurnId, hex(frame));
+        doc.commit();
+        const original = Effect.runPromise(
+          host.resolveVerifiedExecutionOriginal(
+            {
+              workspaceId: 'workspace',
+              sessionId: input.sessionId,
+              userTurnId: input.userTurnId,
+              inputConfig: input.inputConfig,
+            },
+            doc
+          )
+        );
+        if (mode === 'joined-refresh') {
+          await joinedRefresh.promise;
+          releaseReceive.resolve();
+        }
+        expect(await original).toMatchObject({
+          requesterDevice: fixture.sender,
+          expiresAt: 901000,
+        });
+        expect(await host.status()).toMatchObject({ epoch: 1, writeEpoch: 1, hasCurrentKey: true });
+      } finally {
+        releaseReceive.resolve();
+        await oldRefresh;
+        await host?.close();
+        catchUpSpy?.mockRestore();
+        doc.free();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   effectIt.effect('bounds missing-origin reads, aborts their I/O and allows another attempt', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -55,9 +55,13 @@
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
-  A rejected dispatch or feature request naming a newer epoch, signed by a current ledger device, joins
-  one bounded refresh per verified ledger state, then reopens; the core guard still decides.
-  A refresh that does not advance the ledger cools down. Logs carry only both epochs.
+  A rejected dispatch or feature request naming a newer epoch, or missing its current-epoch key,
+  signed by a current ledger device, joins
+  one bounded catch-up per verified ledger state, then reopens; the core guard still decides.
+  A joined older refresh that leaves the current key missing gets at most one additional
+  round through the same owner and wait budget. An unsuccessful refresh of an unchanged
+  ledger cools down; successful key installation must not cool down the next rotation.
+  Logs carry only both epochs.
   [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
