@@ -17,6 +17,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
   FILENAME next to `import.meta.url`. Keep npm packages external by ABSOLUTE path, keep
   `splitting: true`, and keep the no-hoisting assertion.
+- Split application chunks stay beside `index.js` and the workers in both builds;
+  only dependency chunks may live under `chunks/`. Application modules resolve
+  child entries relative to their own `import.meta.url`.
 - Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
   `name` is `lody` in every composition.
 - Optional desktop provenance comes from the compiled constant in `utils/desktop-build.ts`,
