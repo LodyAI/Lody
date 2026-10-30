@@ -229,7 +229,10 @@ opens the new personal device's workspace with the recovered keys installed.
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
 passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
 current (setup, test, replace, skip) and performs a restore. A recovery device
-admits a new personal device, then that device installs every epoch key. The
+admits a new personal device, then that device installs every epoch key.
+Each private package is canonical CBOR with `formatVersion: 1`; a missing or
+other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
+Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read. The
 scheme is specified in the whitepaper's backup and recovery section and
 [recovery vault](../../../specs/e2ee/recovery-vault.md).
 
