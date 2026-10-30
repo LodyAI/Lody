@@ -4746,6 +4746,7 @@
   "schedules.state.retrying": "Retrying dispatch",
   "schedules.state.blocked": "Needs attention",
   "schedules.errors.PERMISSION_UNAVAILABLE": "Choose a permission mode supported by the Agent, then save again.",
+  "schedules.errors.E2EE_SCHEDULE_NOT_AUTHORIZED": "This schedule’s changes are not authorized. Its owner must review and save it again before it can run.",
   "schedules.errors.OWNER_OR_AGENT_UNAVAILABLE": "Check machine ownership and the Agent configuration, then save again.",
   "schedules.errors.PROJECT_UNAVAILABLE": "Choose an available Project and save again.",
   "schedules.errors.DEFINITION_NOT_COMMITTED": "Waiting for the schedule configuration to finish syncing.",

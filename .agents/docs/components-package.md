@@ -80,6 +80,14 @@ observers in separate Jotai stores. The last release evicts only after a microta
 confirms there was no reattachment. Durable draft text remains in its existing
 storage; the transient saving flag expires with its last observer.
 
+Schedule mutations share the runtime's mode-admission gate before acquiring a
+write store and recheck retirement before invoking the domain write. Provisional
+local reading/input remains available; accepting a plan cannot clear its draft
+into an ordinary namespace that an encrypted verdict would retire. The remote
+machine owns timing and its durable occurrence ledger. An authorization-blocked
+message displays the owner's review/save action instead of promising delivery;
+the original signed-definition and actual-start checks remain in the CLI.
+
 ## Startup frame and handoff
 
 The [startup intent](../../specs/app-startup-landing.md) keeps destination selection

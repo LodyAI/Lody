@@ -4,7 +4,7 @@
 [scheduled tasks note](../../../../../.agents/notes/implemented/feature/2026-09-24-machine-owned-scheduled-tasks.md).
 
 - One shell Registry subscription supplies list/provenance; details acquire/release
-  one WorkspaceRuntime Schedule store. Writes use `withScheduleStore`; full messages
+  one WorkspaceRuntime Schedule store. Writes await mode admission through `withScheduleStore`; full messages
   have their own editor. Listing opens only scheduled-message bodies: local
   first, one-shot sync when missing. No developer/beta gate on navigation,
   commands, Registry, proposals or Agent tools.

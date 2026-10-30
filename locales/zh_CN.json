@@ -4746,6 +4746,7 @@
   "schedules.state.retrying": "正在重试派发",
   "schedules.state.blocked": "需要处理问题",
   "schedules.errors.PERMISSION_UNAVAILABLE": "请选择 Agent 当前支持的权限模式，然后重新保存。",
+  "schedules.errors.E2EE_SCHEDULE_NOT_AUTHORIZED": "这份计划的改动尚未获得授权。需要由计划所有者检查并重新保存，才能执行。",
   "schedules.errors.OWNER_OR_AGENT_UNAVAILABLE": "请检查机器所有权和 Agent 配置，然后重新保存。",
   "schedules.errors.PROJECT_UNAVAILABLE": "项目已不可用，请重新选择项目并保存。",
   "schedules.errors.DEFINITION_NOT_COMMITTED": "正在等待任务配置同步完成。",

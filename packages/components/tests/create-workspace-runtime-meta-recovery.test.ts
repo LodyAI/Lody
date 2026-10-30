@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
+  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
@@ -782,6 +783,90 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       await runtime.dispose();
     }
   });
+
+  it.each(['plaintext', 'encrypted', 'dispose'] as const)(
+    'keeps a scheduled-message draft unaccepted until mode admission: %s',
+    async (outcome) => {
+      const admitted = Promise.withResolvers<void>();
+      const phase = Promise.withResolvers<'waiting' | 'writing'>();
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1',
+        accountId: 'owner',
+        apiBaseUrl: 'https://synthetic.invalid',
+        waitForContentAdmission: (signal) => {
+          phase.resolve('waiting');
+          return waitForWorkspaceContentAdmission(admitted.promise, signal);
+        },
+      });
+      const repository = new ScheduleRepository(repo, 'workspace-1' as WorkspaceId);
+      let draft = 'unclassified scheduled body sentinel';
+      const saving = runtime
+        .withScheduleStore(
+          'mode-reservation',
+          async () => {
+            phase.resolve('writing');
+            return repository.save({
+              scheduleId: 'mode-reservation',
+              actorId: 'owner',
+              now: 0,
+              create: true,
+              activationId: 'activation',
+              activityId: 'created',
+              draft: {
+                title: 'Reserved',
+                prompt: draft,
+                machineId: 'remote-owned-machine',
+                agent: { agentConfigId: 'agent' },
+                destination: { kind: 'existing_session', sessionId: 'chat' },
+                trigger: { kind: 'once', at: '2030-01-01T00:00:00Z' },
+                misfirePolicy: { kind: 'run_once' },
+                overlapPolicy: 'queue_one',
+                retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+                message: { inputBlocks: [{ type: 'text', text: draft }] },
+              },
+            });
+          },
+          { create: true }
+        )
+        .then((saved) => {
+          draft = '';
+          return saved;
+        });
+      void saving.catch(() => {});
+      try {
+        expect(await phase.promise).toBe('waiting');
+        expect(draft).toBe('unclassified scheduled body sentinel');
+        expect(await repository.read('mode-reservation')).toBeNull();
+        expect(await repository.list()).toEqual([]);
+        if (outcome === 'plaintext') {
+          admitted.resolve();
+          await saving;
+          expect(draft).toBe('');
+          expect((await repository.read('mode-reservation'))?.message?.inputBlocks).toEqual([
+            { type: 'text', text: 'unclassified scheduled body sentinel' },
+          ]);
+        } else {
+          if (outcome === 'encrypted') admitted.reject(new Error('workspace became encrypted'));
+          else {
+            await runtime.dispose();
+            admitted.resolve();
+          }
+          await expect(saving).rejects.toThrow();
+          expect(draft).toBe('unclassified scheduled body sentinel');
+        }
+        expect(mocks.authInvocations).toEqual([]);
+      } finally {
+        admitted.resolve();
+        await saving.catch(() => {});
+        await runtime.dispose();
+      }
+    }
+  );
 
   it('returns the local Repo before admission even when cloud startup already has a token', async () => {
     const admitted = Promise.withResolvers<void>();

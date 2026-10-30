@@ -10,8 +10,9 @@ import {
   getScheduleRoomId,
   getScheduleRegistryFlockDocId,
   type WorkspaceId,
+  type ScheduleDocument,
 } from '@lody/shared';
-import { ScheduleEngine } from '../src/lib/schedules/schedule-engine';
+import { ScheduleEngine, type ScheduleEnginePorts } from '../src/lib/schedules/schedule-engine';
 import { ScheduleStore } from '../src/lib/schedules/schedule-store';
 import { LoroRepo } from 'loro-repo';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
@@ -4881,9 +4882,9 @@ describe('machine execution authorization freshness', () => {
       )
   );
 
-  effectIt.effect(
-    'rejects a foreign member schedule before machine preparation despite forged ownership and matching fingerprint',
-    () =>
+  effectIt.effect.each(['owner-resave', 'owner-cancel', 'concurrent-cancel'] as const)(
+    'rejects a foreign member schedule and requires owner review before remote delivery (%s)',
+    (scenario) =>
       Effect.scoped(
         Effect.gen(function* () {
           const directory = yield* Effect.acquireRelease(
@@ -4933,9 +4934,10 @@ describe('machine execution authorization freshness', () => {
           expect(
             yield* authorization.authorizeExecution('workspace', hex(attacker.publicKey.toBytes()))
           ).toEqual({ _tag: 'Denied', reason: 'e2ee_machine_not_shared' });
+          let attackerClosed = false;
           const attackerRepo = yield* Effect.acquireRelease(
             Effect.promise(() => LoroRepo.create({})),
-            (r) => Effect.promise(() => r.destroy())
+            (r) => Effect.promise(() => (attackerClosed ? Promise.resolve() : r.destroy()))
           );
           const ws = 'workspace' as WorkspaceId;
           const attackRepository = new ScheduleRepository(attackerRepo, ws, {
@@ -4958,6 +4960,8 @@ describe('machine execution authorization freshness', () => {
                 title: 'Forged owner',
                 machineId: 'machine',
                 prompt: 'ATTACKER_CHOSEN_PROMPT',
+                message: { inputBlocks: [{ type: 'text', text: 'ATTACKER_CHOSEN_PROMPT' }] },
+                destination: { kind: 'existing_session', sessionId: 'remote-chat' },
                 trigger: { kind: 'once', at: '1970-01-01T00:01:00.000Z' },
                 misfirePolicy: { kind: 'run_once' },
                 overlapPolicy: 'queue_one',
@@ -4972,55 +4976,63 @@ describe('machine execution authorization freshness', () => {
           const targetDoc = yield* Effect.promise(() => repo.openPersistedDoc(docId));
           const sourceRegistry = yield* Effect.promise(() => attackerRepo.openFlockDoc(registryId));
           const targetRegistry = yield* Effect.promise(() => repo.openFlockDoc(registryId));
-          for (const item of [
-            {
-              resource: `doc:${docId}`,
-              model: 'loro' as const,
-              bytes: sourceDoc.doc.export({ mode: 'update' }),
-              apply: (bytes: Uint8Array) => targetDoc.doc.import(bytes),
-            },
-            {
-              resource: `flock:${registryId}`,
-              model: 'flock' as const,
-              bytes: sourceRegistry.flock.exportFile(),
-              apply: (bytes: Uint8Array) => targetRegistry.flock.importFile(bytes),
-            },
-          ]) {
-            const binding = yield* makeStreamsUpdateBinding({
-              genesis: fixture.genesis,
-              resource: item.resource,
-              model: item.model,
-              writeEpoch: 'current',
-              signer: attacker,
-              ledger: () => Effect.succeed(fixture.current),
-              readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
-            });
-            const plaintext = new Uint8Array(4 + item.bytes.length);
-            new DataView(plaintext.buffer).setUint32(0, item.bytes.length, false);
-            plaintext.set(item.bytes, 4);
-            const context = {
-              protocol: 'loro-streams-crdt-payload-protection',
-              version: 2,
-              kind: 'update_batch',
-            } as const;
-            const sealed = yield* binding.seal({
-              context,
-              plaintext,
-              additionalData: (header) => Uint8Array.from([...header, 9]),
-            });
-            const request = {
-              ...sealed,
-              context,
-              additionalData: Uint8Array.from([...sealed.header, 9]),
-            };
-            const opened = yield* binding.openAuthenticated(request);
-            if (item.model === 'loro') {
-              origins.retain(item.resource, request, opened.plaintext);
-              scheduleBinding = binding;
+          const transfer = Effect.fnUntraced(function* (
+            source: LoroDoc,
+            registry: typeof sourceRegistry.flock,
+            signer: Parameters<typeof makeStreamsUpdateBinding>[0]['signer'],
+            from?: ReturnType<LoroDoc['version']>
+          ) {
+            for (const item of [
+              {
+                resource: `doc:${docId}`,
+                model: 'loro' as const,
+                bytes: source.export({ mode: 'update', from }),
+                apply: (bytes: Uint8Array) => targetDoc.doc.import(bytes),
+              },
+              {
+                resource: `flock:${registryId}`,
+                model: 'flock' as const,
+                bytes: registry.exportFile(),
+                apply: (bytes: Uint8Array) => targetRegistry.flock.importFile(bytes),
+              },
+            ]) {
+              const binding = yield* makeStreamsUpdateBinding({
+                genesis: fixture.genesis,
+                resource: item.resource,
+                model: item.model,
+                writeEpoch: 'current',
+                signer,
+                ledger: () => Effect.succeed(fixture.current),
+                readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+              });
+              const plaintext = new Uint8Array(4 + item.bytes.length);
+              new DataView(plaintext.buffer).setUint32(0, item.bytes.length, false);
+              plaintext.set(item.bytes, 4);
+              const context = {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              } as const;
+              const sealed = yield* binding.seal({
+                context,
+                plaintext,
+                additionalData: (header) => Uint8Array.from([...header, 9]),
+              });
+              const request = {
+                ...sealed,
+                context,
+                additionalData: Uint8Array.from([...sealed.header, 9]),
+              };
+              const opened = yield* binding.openAuthenticated(request);
+              if (item.model === 'loro') {
+                origins.retain(item.resource, request, opened.plaintext);
+                scheduleBinding = binding;
+              }
+              item.apply(opened.plaintext.subarray(4));
+              opened.plaintext.fill(0);
             }
-            item.apply(opened.plaintext.subarray(4));
-            opened.plaintext.fill(0);
-          }
+          });
+          yield* transfer(sourceDoc.doc, sourceRegistry.flock, attacker);
           const forged = yield* Effect.promise(() =>
             new ScheduleRepository(repo, ws).read('forged-owner')
           );
@@ -5036,16 +5048,28 @@ describe('machine execution authorization freshness', () => {
             )
           ).toEqual([hex(attacker.publicKey.toBytes())]);
           const machineRepository = new ScheduleRepository(repo, ws);
-          const scheduleStore = new ScheduleStore<{ prompt: string }>(':memory:');
+          type Prepared = {
+            prompt: string;
+            message?: ScheduleDocument['message'];
+            userTurnId: string;
+            sessionId: string;
+          };
+          const scheduleStore = new ScheduleStore<Prepared>(':memory:');
           yield* Effect.addFinalizer(() => Effect.sync(() => scheduleStore.close()));
-          let scheduledPrompt: string | undefined;
-          const engine = new ScheduleEngine({
+          let now = 60000;
+          const delivered = new Map<
+            string,
+            { sessionId: string; message?: ScheduleDocument['message']; prompt: string }
+          >();
+          const handoffs: string[] = [];
+          let reviewClosed = false;
+          const ports = {
             workspaceId: ws,
             machineId: 'machine',
             userId: 'display-owner',
             encrypted: true,
             store: scheduleStore,
-            now: () => 60000,
+            now: () => now,
             disabled: () => false,
             ready: () => true,
             authorize: (request) =>
@@ -5068,22 +5092,153 @@ describe('machine execution authorization freshness', () => {
             list: () => machineRepository.list(),
             read: (id) => machineRepository.read(id),
             validateTarget: async () => {},
-            prepare: async (run) => ({ prompt: run.prompt }),
+            prepare: async (run) => {
+              expect(attackerClosed && reviewClosed).toBe(true);
+              return {
+                prompt: run.prompt,
+                message: run.message,
+                userTurnId: run.userTurnId,
+                sessionId: run.sessionId,
+              };
+            },
             materialize: async () => {},
-            isDispatched: async () => scheduledPrompt !== undefined,
+            isDispatched: async (prepared) => delivered.has(prepared.userTurnId),
             dispatch: async (prepared) => {
-              scheduledPrompt = prepared.prompt;
+              handoffs.push(prepared.userTurnId);
+              delivered.set(prepared.userTurnId, {
+                prompt: prepared.prompt,
+                message: prepared.message,
+                sessionId: prepared.sessionId,
+              });
             },
             isFinished: async () => false,
             publish: async () => {},
             onError: () => {},
-          });
+          } satisfies ScheduleEnginePorts<Prepared>;
+          const engine = new ScheduleEngine(ports);
           yield* Effect.promise(() => engine.evaluate());
-          expect(scheduledPrompt).toBeUndefined();
+          expect([...delivered.values()]).toEqual([]);
           expect(scheduleStore.history(ws, 'forged-owner')[0]).toMatchObject({
             state: 'retry_wait',
             errorCode: 'E2EE_SCHEDULE_NOT_AUTHORIZED',
           });
+          // An owner opens the same verified CRDT state on an independent client,
+          // reviews the payload and explicitly saves a new future activation.
+          const reviewRepo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (r) => Effect.promise(() => (reviewClosed ? Promise.resolve() : r.destroy()))
+          );
+          const reviewDoc = (yield* Effect.promise(() => reviewRepo.openPersistedDoc(docId))).doc;
+          reviewDoc.import(targetDoc.doc.export({ mode: 'update' }));
+          const reviewRegistry = yield* Effect.promise(() => reviewRepo.openFlockDoc(registryId));
+          reviewRegistry.flock.importFile(targetRegistry.flock.exportFile());
+          const reviewFrom = reviewDoc.version();
+          const reviewRepository = new ScheduleRepository(reviewRepo, ws, {
+            protectedContent: true,
+          });
+          const reviewed = yield* Effect.promise(() =>
+            reviewRepository.save({
+              scheduleId: 'forged-owner',
+              actorId: 'display-owner',
+              now: 60001,
+              activationId: 'owner-reviewed',
+              activityId: 'owner-save',
+              create: false,
+              draft: {
+                ...forged.definition,
+                prompt: 'OWNER_REVIEWED_MESSAGE',
+                message: { inputBlocks: [{ type: 'text', text: 'OWNER_REVIEWED_MESSAGE' }] },
+                trigger: { kind: 'once', at: '1970-01-01T00:02:00.000Z' },
+              },
+            })
+          );
+          yield* transfer(reviewDoc, reviewRegistry.flock, fixture.owner, reviewFrom);
+          const ownerBinding = scheduleBinding;
+          if (!ownerBinding) throw new Error('missing owner schedule binding');
+          expect(
+            yield* origins.resolveSchedule(
+              {
+                scheduleId: 'forged-owner',
+                definitionFingerprint: scheduleDefinitionFingerprint(reviewed),
+              },
+              targetDoc.doc,
+              ownerBinding.openAuthenticated
+            )
+          ).toEqual([hex(fixture.owner.publicKey.toBytes())]);
+          if (scenario !== 'owner-resave') {
+            const cancelFrom = reviewDoc.version();
+            if (scenario === 'concurrent-cancel') {
+              sourceDoc.doc.import(reviewDoc.export({ mode: 'update' }));
+              sourceRegistry.flock.importFile(reviewRegistry.flock.exportFile());
+              const editFrom = sourceDoc.doc.version();
+              yield* Effect.promise(() =>
+                attackRepository.save({
+                  scheduleId: 'forged-owner',
+                  actorId: 'display-owner',
+                  now: 60002,
+                  activationId: 'stale-phone-edit',
+                  activityId: 'phone-edit',
+                  create: false,
+                  draft: {
+                    ...reviewed.definition,
+                    prompt: 'CONCURRENT_UNAPPROVED_EDIT',
+                    message: {
+                      inputBlocks: [{ type: 'text', text: 'CONCURRENT_UNAPPROVED_EDIT' }],
+                    },
+                  },
+                })
+              );
+              yield* transfer(sourceDoc.doc, sourceRegistry.flock, attacker, editFrom);
+            }
+            yield* Effect.promise(() =>
+              reviewRepository.setEnabled({
+                scheduleId: 'forged-owner',
+                actorId: 'display-owner',
+                enabled: false,
+                now: 60002,
+                activationId: 'owner-cancel',
+                requestId: 'cancel',
+              })
+            );
+            yield* transfer(reviewDoc, reviewRegistry.flock, fixture.owner, cancelFrom);
+            expect(
+              (yield* Effect.promise(() => machineRepository.read('forged-owner')))?.definition
+                .enabled
+            ).toBe(false);
+          }
+          // Clients stop before the due slot. Only the receiving machine owns
+          // the clock, authorization and persistent occurrence ledger afterward.
+          yield* Effect.promise(() => attackerRepo.destroy());
+          attackerClosed = true;
+          yield* Effect.promise(() => reviewRepo.destroy());
+          reviewClosed = true;
+          now = 119999;
+          yield* Effect.promise(() => engine.evaluate());
+          expect([...delivered.values()]).toEqual([]);
+          now = 120000;
+          yield* Effect.promise(() => Promise.all([engine.evaluate(), engine.evaluate()]));
+          const restarted = new ScheduleEngine(ports);
+          now = 121000;
+          yield* Effect.promise(() => Promise.all([restarted.evaluate(), restarted.evaluate()]));
+          const dispatched = scheduleStore
+            .history(ws, 'forged-owner')
+            .filter((run) => run.state === 'dispatched');
+          if (scenario === 'owner-resave') {
+            expect([...delivered.values()]).toEqual([
+              {
+                prompt: 'OWNER_REVIEWED_MESSAGE',
+                sessionId: 'remote-chat',
+                message: { inputBlocks: [{ type: 'text', text: 'OWNER_REVIEWED_MESSAGE' }] },
+              },
+            ]);
+            expect(dispatched).toHaveLength(1);
+            expect([...delivered.keys()]).toEqual([dispatched[0]?.userTurnId]);
+            expect(handoffs).toEqual([...delivered.keys()]);
+          } else {
+            expect([...delivered.values()]).toEqual([]);
+            expect(dispatched).toEqual([]);
+            expect(handoffs).toEqual([]);
+          }
         })
       )
   );

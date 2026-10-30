@@ -318,6 +318,18 @@ export const WithScheduledMessages: Story = {
     contentForRow,
   },
 };
+export const ProtectedMessageNeedsOwnerSave: Story = {
+  args: {
+    rows: [messageRows[0]!],
+    runtimes: [
+      runtimeFor(messageRows[0]!, {
+        messageState: 'pending',
+        queueState: 'blocked',
+        blockedCode: 'E2EE_SCHEDULE_NOT_AUTHORIZED',
+      }),
+    ],
+  },
+};
 /** One project picked, sorted by name. */
 export const Filtered: Story = {
   args: {
