@@ -626,6 +626,7 @@
   "archive.multiSelect.selected": "{{count}} selected",
   "archive.restore": "Restore session",
   "archive.restoreFailed": "Failed to restore conversation.",
+  "archive.restoreInputCleanupPending": "Messages queued before archiving could not be canceled yet. Try restoring again shortly.",
   "archive.route.loadingDescription": "Preparing archived sessions.",
   "archive.search": "Search archive",
   "archive.searchPlaceholder": "Search archived sessions…",

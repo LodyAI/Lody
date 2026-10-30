@@ -42,6 +42,7 @@ import { archiveScopeAtom } from '@/atoms/sidebar-state';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import {
+  isArchivedInputCleanupPendingError,
   isArchivedLocalProjectRestoreUnavailableError,
   useSessionActions,
 } from '@/hooks/use-session-actions';
@@ -1907,7 +1908,14 @@ export function ArchiveView() {
         return;
       }
       console.error('Failed to restore archived conversation', error);
-      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      toast.error(
+        isArchivedInputCleanupPendingError(error)
+          ? t(
+              'archive.restoreInputCleanupPending',
+              'Messages queued before archiving could not be canceled yet. Try restoring again shortly.'
+            )
+          : t('archive.restoreFailed', 'Failed to restore conversation.')
+      );
     });
   };
 
@@ -2024,15 +2032,28 @@ export function ArchiveView() {
     setBulkActionInFlight('restore');
     try {
       const failedSessionIds: SessionId[] = [];
+      let inputCleanupPending = false;
       // Serialize queue updates to avoid overwriting machine queue entries.
       for (const sessionId of sessionIds) {
         try {
           await restoreSession(sessionId);
-        } catch {
+        } catch (error) {
           failedSessionIds.push(sessionId);
+          if (isArchivedInputCleanupPendingError(error)) {
+            console.error('Failed to restore archived conversation', error);
+            inputCleanupPending = true;
+          }
         }
       }
 
+      if (inputCleanupPending) {
+        toast.error(
+          t(
+            'archive.restoreInputCleanupPending',
+            'Messages queued before archiving could not be canceled yet. Try restoring again shortly.'
+          )
+        );
+      }
       if (failedSessionIds.length > 0) {
         setSelectedIds(new Set(failedSessionIds));
         setIsMultiSelectMode(true);
@@ -2049,6 +2070,7 @@ export function ArchiveView() {
     isBulkActionBusy,
     restoreSession,
     selectedIds,
+    t,
   ]);
 
   const handleBulkDeleteConfirm = useCallback(async () => {

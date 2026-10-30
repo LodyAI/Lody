@@ -800,6 +800,92 @@ describe('locally accepted Roost input', () => {
     expect(h.delivered).toEqual([]);
   });
 
+  it('keeps fencing this window when a cancellation fails before persisting its mark', async () => {
+    // An exclusive session lease, like Web Locks: a drain that never finishes keeps it.
+    let tail = Promise.resolve();
+    let drainLeased: (() => void) | undefined;
+    const lock = async <T>(_sessionId: SessionId, _signal: AbortSignal, work: () => Promise<T>) => {
+      const prior = tail;
+      const done = gate();
+      tail = done.promise;
+      await prior;
+      drainLeased?.();
+      try {
+        return await work();
+      } finally {
+        done.resolve();
+      }
+    };
+    const h = harness({ paused: true, lock });
+    h.owner.enqueue(send());
+    await when(h.owner, () => h.owner.getSnapshot()[0]?.persisted === true);
+    const patch = h.storage.patch;
+    h.storage.patch = async (id, value) => {
+      if (value.canceled) throw new Error('Input storage is closed');
+      return patch(id, value);
+    };
+    await expect(h.owner.cancelSessions(['input-session' as SessionId])).rejects.toThrow(
+      'Input storage is closed'
+    );
+    expect(h.owner.getSnapshot()).toEqual([]);
+    expect((await h.storage.get('input-1'))?.canceled).not.toBe(true);
+
+    // Storage recovers; this window drains the session, skips the input and
+    // releases the lease instead of relisting it forever.
+    h.storage.patch = patch;
+    const leased = new Promise<void>((resolve) => {
+      drainLeased = resolve;
+    });
+    await h.owner.resume();
+    await leased;
+    drainLeased = undefined;
+    await lock('input-session' as SessionId, new AbortController().signal, async () => {});
+    expect(h.accepted.size).toBe(0);
+    expect(h.delivered).toEqual([]);
+
+    // The next cancellation marks and removes it.
+    await h.owner.cancelSessions(['input-session' as SessionId]);
+    expect(await h.storage.list()).toEqual([]);
+  });
+
+  it('refuses a stored input of an archived conversation instead of delivering it', async () => {
+    const fixture = await workspaceHarness({
+      paused: true,
+      accept: async (entry, owner) => {
+        await owner.commands.appendTurn(entry);
+        return { status: 'accepted', turnId: entry.id, active: true };
+      },
+    });
+    const first = fixture.makeRuntime();
+    await acceptSessionUserTurn(first.runtime, fixture.sessionId, fixture.input.entry, {
+      kind: 'dispatch',
+    });
+    await when(first.pending, () =>
+      first.pending.getSnapshot().some((row) => row.id === fixture.input.id && row.persisted)
+    );
+    // Archived before any window delivered it; another window (or a reload) resumes.
+    await fixture.repo.upsertDocMeta(getSessionRoomId(fixture.sessionId), { isArchived: true });
+    const second = fixture.makeRuntime();
+    const storage = createSessionInputStorage('input-account', fixture.input.workspaceId);
+    // The refusal is persisted as a failed row; check it on each published change.
+    const refused = new Promise<void>((resolve) => {
+      const unsubscribe = second.pending.subscribe(() => {
+        void storage.get(fixture.input.id).then((row) => {
+          if (row?.state !== 'failed') return;
+          unsubscribe();
+          resolve();
+        });
+      });
+    });
+    await second.pending.resume();
+    await refused;
+    expect(await fixture.owner.history.count()).toBe(0);
+    expect(fixture.delivered).toEqual([]);
+    expect(
+      (await fixture.repo.getDocMeta(getSessionRoomId(fixture.sessionId)))?.meta?.latestUserMsgId
+    ).toBeUndefined();
+  });
+
   it('cancels shared durable work even when the other window has not received its projection', async () => {
     const factory = new IDBFactory(),
       entered = gate(),
