@@ -16,6 +16,9 @@ Export reads verify that the selected history is the view owned by the captured
 runtime's current Session store. A loading replacement may still display an old
 view, which cannot be relabeled as a source in the replacement workspace. PNG
 snapshots carry the runtime returned by their actual reader through selection.
+Local exports reuse the retained E2EE account selector during uncertain offline
+authentication. Confirmed logout or a different live account still rejects the
+copy. This local identity never authorizes static publication or another cloud API.
 Cancellation or scope changes retire only that export, retain selection and never
 clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
 the existing Blob, Electron or native byte-save path; native staging cleanup and

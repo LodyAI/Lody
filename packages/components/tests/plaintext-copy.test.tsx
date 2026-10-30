@@ -6,6 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Blob as NodeBlob } from 'node:buffer';
 import { buildConversationMarkdown, type WorkspaceId, type SessionMeta } from '@lody/shared';
 import { PlatformContext } from '@lody/platform/react';
+import {
+  createStore as createPlatformStore,
+  type MutableStore,
+  type PlatformSessionState,
+} from '@lody/platform';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { userAtom } from '../src/atoms';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
@@ -49,6 +54,17 @@ vi.mock('../src/lib/image-preview-export', () => ({
 let root: Root;
 let container: HTMLDivElement;
 let run: ReturnType<typeof usePlaintextCopy>['run'];
+let platformSession: MutableStore<PlatformSessionState>;
+const cloudPlatform = {
+  ...TEST_CLOUD_PLATFORM,
+  identity: {
+    ...TEST_CLOUD_PLATFORM.identity,
+    session: {
+      get: () => platformSession.get(),
+      subscribe: (listener: () => void) => platformSession.subscribe(listener),
+    },
+  },
+};
 const artifacts: string[] = [];
 const selected = [
   {
@@ -81,6 +97,10 @@ const mode = (contentMode: 'plaintext' | 'e2ee', genesisHash = 'a'.repeat(64)) =
   }) as WorkspaceContentMode;
 
 beforeEach(async () => {
+  platformSession = createPlatformStore<PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'owner' },
+  });
   await initI18n('en');
   artifacts.length = 0;
   png.captured = [];
@@ -110,7 +130,7 @@ function setup(host = runtime(), local = false) {
   store.set(workspaceContentModeAtom, mode(host.contentMode!) as never);
   const render = (source: unknown = selected, slug = 'alpha') => {
     root.render(
-      <PlatformContext.Provider value={{ ...TEST_CLOUD_PLATFORM, kind: local ? 'local' : 'cloud' }}>
+      <PlatformContext.Provider value={{ ...cloudPlatform, kind: local ? 'local' : 'cloud' }}>
         <Provider store={store}>
           <WorkspaceRouteTargetProvider slug={slug}>
             <Harness host={host} source={source} />
@@ -388,7 +408,7 @@ it('does not save the actual PNG after runtime retirement precedes its UI public
   png.onCapture = () => retired.abort();
   await act(async () =>
     root.render(
-      <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>
+      <PlatformContext.Provider value={cloudPlatform}>
         <Provider store={store}>
           <ChatShareImageDialog
             open
@@ -444,7 +464,7 @@ it.each([false, true])(
     outside.textContent = 'outside-copy-sentinel';
     await act(async () =>
       root.render(
-        <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>
+        <PlatformContext.Provider value={cloudPlatform}>
           <Provider store={store}>
             <ForceMobileLayoutProvider force={mobile}>
               <ChatShareImageDialog
@@ -485,5 +505,48 @@ it.each([false, true])(
     expect(png.saved[0].fileName).toBe('Selected conversation.png');
     expect(png.saved[0].content).toContain('selected-copy-sentinel');
     expect(png.saved[0].content).not.toContain('outside-copy-sentinel');
+  }
+);
+
+it('allows an approved local encrypted copy during uncertain offline authentication', async () => {
+  const { store, render } = setup();
+  platformSession.set({ status: 'unauthenticated', uncertain: true });
+  store.set(userAtom, null);
+  await act(async () => render());
+  let pending!: ReturnType<typeof run>;
+  await act(async () => {
+    pending = run(copyText);
+  });
+  expect(artifacts).toEqual([]);
+  await answer('Create decrypted copy');
+  await pending;
+  expect(artifacts[0]).toContain('selected-copy-sentinel');
+});
+
+it.each(['signed-out', 'different-account'] as const)(
+  'rejects a stale approved runtime after %s before bootstrap atoms change',
+  async (state) => {
+    const host = runtime();
+    const { store, render } = setup(host);
+    await act(async () => render());
+    platformSession.set(
+      state === 'signed-out'
+        ? { status: 'unauthenticated' }
+        : { status: 'authenticated', user: { id: 'other' } }
+    );
+    let pending!: ReturnType<typeof run>;
+    await act(async () => {
+      pending = run(copyText);
+    });
+    if (
+      [...document.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Create decrypted copy'
+      )
+    )
+      await answer('Create decrypted copy');
+    await pending;
+    expect(store.get(runtimeAtom)).toBe(host);
+    expect(store.get(userAtom)?.id).toBe('owner');
+    expect(artifacts).toEqual([]);
   }
 );

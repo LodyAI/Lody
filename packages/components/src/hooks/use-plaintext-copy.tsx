@@ -8,6 +8,7 @@ import { workspaceContentModeAtom } from '../atoms/workspace-content-mode';
 import { AlertDialog } from '../ui/dialog';
 import { Button } from '@lody/ui/button';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
+import { useWorkspaceLocalAccountId } from '../lib/e2ee-account';
 
 /** Cancel only the UI waiter. Capture/native adapters retain their own cleanup through settlement. */
 async function waitForCopy<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -35,7 +36,8 @@ export function usePlaintextCopy(
 ) {
   const store = useStore();
   const platform = usePlatform();
-  const accountId = useAtomValue(userAtom)?.id ?? null;
+  const userId = useAtomValue(userAtom)?.id ?? null;
+  const accountId = useWorkspaceLocalAccountId();
   const routeTarget = useWorkspaceRouteTargetSlug();
   const currentRoute = useRef(routeTarget);
   currentRoute.current = routeTarget;
@@ -55,7 +57,7 @@ export function usePlaintextCopy(
       flight.current?.abort();
       answer(false);
     },
-    [runtime, source, enabled, accountId, routeTarget, answer]
+    [runtime, source, enabled, accountId, userId, routeTarget, answer]
   );
 
   const run = useCallback(
@@ -70,12 +72,16 @@ export function usePlaintextCopy(
       flight.current = controller;
       const assertSource = () => {
         controller.signal.throwIfAborted();
+        const session = platform.identity.session.get();
         if (
           currentSource.current !== source ||
           runtime !== store.get(activeWorkspaceRuntimeAtom) ||
           (currentRoute.current !== null && currentRoute.current !== runtime.workspaceSlug) ||
-          accountId !== (store.get(userAtom)?.id ?? null) ||
-          (platform.kind === 'cloud' && runtime.accountId !== accountId)
+          userId !== (store.get(userAtom)?.id ?? null) ||
+          (platform.kind === 'cloud' &&
+            (runtime.accountId !== accountId ||
+              (session.status === 'unauthenticated' && !session.uncertain) ||
+              (session.status === 'authenticated' && session.user.id !== accountId)))
         )
           throw new DOMException('Copy source changed', 'AbortError');
       };
@@ -154,7 +160,7 @@ export function usePlaintextCopy(
         controller.abort();
       }
     },
-    [accountId, answer, enabled, platform.kind, runtime, source, store]
+    [accountId, userId, answer, enabled, platform, runtime, source, store]
   );
 
   return {
