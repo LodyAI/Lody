@@ -59,6 +59,12 @@ export function protectedFileWriteDeniedMessage(t: TFunction = i18next.t): strin
   return t('e2ee.unavailable.guest-file-write', { defaultValue: message }) || message;
 }
 
+/** Preview controls create/renew/revoke capabilities and require a verified writer. */
+export function protectedPreviewControlDeniedMessage(t: TFunction = i18next.t): string {
+  const message = 'Your workspace role cannot create, renew or revoke remote previews.';
+  return t('e2ee.unavailable.preview-control-write', { defaultValue: message }) || message;
+}
+
 export class WorkspaceFeatureUnavailableError extends Error {
   constructor(readonly feature: WorkspaceRestrictedFeature) {
     super(workspaceFeatureUnavailableMessage(feature));

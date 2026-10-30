@@ -101,6 +101,7 @@ import {
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
 import {
   protectedFileWriteDeniedMessage,
+  protectedPreviewControlDeniedMessage,
   workspaceFeatureUnavailableMessage,
 } from '@/lib/workspace-feature';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
@@ -1058,6 +1059,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const assertProtectedPreviewControl = () => {
+    if (!deps.protectedContent) return;
+    if (!deps.requestEncryptedFeature)
+      throw new Error(workspaceFeatureUnavailableMessage('remote-preview'));
+    if (deps.protectedCodeCollabRole?.() !== 'write')
+      throw new Error(protectedPreviewControlDeniedMessage());
+  };
+
   const previewProof = async (
     machineId: MachineId,
     sessionId: SessionId,
@@ -1117,6 +1126,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewCreateResponse;
       }
+      assertProtectedPreviewControl();
       if (deps.requestEncryptedFeature) {
         const response = await deps.requestEncryptedFeature({
           machineId,
@@ -1288,6 +1298,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewStatusResponse;
       }
+      assertProtectedPreviewControl();
       if (deps.requestEncryptedFeature) {
         const response = await deps.requestEncryptedFeature({
           machineId,
@@ -1424,6 +1435,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewRevokeResponse;
       }
+      assertProtectedPreviewControl();
       if (deps.requestEncryptedFeature) {
         const response = await deps.requestEncryptedFeature({
           machineId,

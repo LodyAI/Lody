@@ -491,6 +491,7 @@ function WorkspaceControlRoute() {
       <E2eeWorkspaceControlPage
         memberManagement={
           current?.nativeStatus?.deviceKind === 'personal' &&
+          current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
           port?.runtime?.removeMember &&
