@@ -395,6 +395,14 @@ it.each(['identity-lost', 'approval-required'] as const)(
   }
 );
 
+it('routes an authenticated revocation of this device to re-pairing guidance', () => {
+  expect(
+    classifyE2eeControlFailure(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked")
+    )
+  ).toEqual({ kind: 'approval-required', code: 'device-revoked' });
+});
+
 it.each(['locked', 'indeterminate', 'unavailable'] as const)(
   'keeps the typed custody %s outcome distinct from a network failure',
   (reason) => {

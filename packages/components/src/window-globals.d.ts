@@ -62,6 +62,8 @@ declare global {
       install_id?: string;
     };
     authenticate?: (options: { token: string }) => Promise<unknown>;
+    /** Electron preload sets this only when main registered the E2E client-loss probe. */
+    __LODY_E2E_CLIENT_LOSS__?: true;
     ipc?: {
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
       on: (channel: string, listener: (payload: unknown) => void) => () => void;
