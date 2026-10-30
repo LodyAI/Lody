@@ -203,6 +203,119 @@ describe('SessionList PR badge', () => {
     expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
     expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
     expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
+
+    // Leading slot contains the PR icon for standalone sessions
+    const leadingPr = rowWithPr?.querySelector('[data-session-leading-pr]');
+    expect(leadingPr).not.toBeNull();
+    expect(leadingPr?.contains(passedPrIcon!)).toBe(true);
+
+    // Trailing slot does not duplicate the PR icon on standalone rows
+    const endSlot = rowWithPr?.querySelector('[data-session-row-end-slot]');
+    expect(endSlot?.querySelector('[data-pr-ci-verdict]')).toBeNull();
+
+    // Subtitle displays PR number and status label
+    const subtitle = rowWithPr?.querySelector('[data-session-row-subtitle]');
+    expect(subtitle).not.toBeNull();
+    expect(subtitle?.textContent).toContain('#42');
+    expect(subtitle?.textContent).toContain('Open');
+  });
+
+  it('renders merged PR status icon and subtitle with correct styling', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [
+            {
+              sessionId: 'session-merged',
+              title: 'Merged Session',
+              repoFullName: 'loro-dev/lody',
+              branchName: 'feat/merged-pr',
+              prUrl: 'https://github.com/loro-dev/lody/pull/99',
+              prStatus: 'merged',
+              latestMessageAt: '2026-04-22T00:00:00.000Z',
+              addedLines: 0,
+              deletedLines: 0,
+              isWorking: false,
+              hasUnreadMessages: false,
+              isOffline: false,
+              isWaitingPermission: false,
+            },
+          ],
+          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+        })
+      );
+    });
+
+    const row = container.querySelector('[data-sidebar-session-id="session-merged"]');
+    const leadingPr = row?.querySelector('[data-session-leading-pr]');
+    expect(leadingPr).not.toBeNull();
+    const mergeIcon = leadingPr?.querySelector('.lucide-git-merge');
+    expect(mergeIcon).not.toBeNull();
+    expect(mergeIcon?.classList.contains('text-pr-merged')).toBe(true);
+
+    const subtitle = row?.querySelector('[data-session-row-subtitle]');
+    expect(subtitle).not.toBeNull();
+    expect(subtitle?.textContent).toContain('#99');
+    expect(subtitle?.textContent).toContain('Merged');
+    const statusText = subtitle?.querySelector('.text-pr-merged');
+    expect(statusText?.textContent).toBe('Merged');
+  });
+
+  it('keeps PR icon in trailing slot for child sessions under an opener', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [
+            {
+              sessionId: 'opener-session',
+              title: 'Opener Session',
+              repoFullName: 'loro-dev/lody',
+              branchName: 'main',
+              latestMessageAt: '2026-04-22T00:00:00.000Z',
+              addedLines: 0,
+              deletedLines: 0,
+              isWorking: false,
+              hasUnreadMessages: false,
+              isOffline: false,
+              isWaitingPermission: false,
+            },
+            {
+              sessionId: 'child-session',
+              openedBySessionId: 'opener-session',
+              title: 'Child with PR',
+              repoFullName: 'loro-dev/lody',
+              branchName: 'feat/child-pr',
+              prUrl: 'https://github.com/loro-dev/lody/pull/101',
+              prStatus: 'open',
+              latestMessageAt: '2026-04-22T00:00:00.000Z',
+              addedLines: 0,
+              deletedLines: 0,
+              isWorking: false,
+              hasUnreadMessages: false,
+              isOffline: false,
+              isWaitingPermission: false,
+            },
+          ],
+          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+        })
+      );
+    });
+
+    const childRow = container.querySelector('[data-sidebar-session-id="child-session"]');
+    // Child leading slot renders tree connectors, not PR icon
+    expect(childRow?.querySelector('[data-session-leading-pr]')).toBeNull();
+    expect(childRow?.querySelector('[data-session-tree-connector="trunk"]')).not.toBeNull();
+    // Trailing slot displays PR icon as fallback
+    const endSlot = childRow?.querySelector('[data-session-row-end-slot]');
+    expect(endSlot?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {

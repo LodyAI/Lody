@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -97,6 +98,7 @@ export function SessionRowLeadingSlot({
   showMenuButton,
   menuLabel,
   openedByTree,
+  prIcon,
   /** Fade the rest state while hovering (e.g. 'group-hover/row:opacity-0' for named groups). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
   /** Disable an opener disclosure while its ⋯ replacement is active. */
@@ -107,6 +109,8 @@ export function SessionRowLeadingSlot({
   showMenuButton?: boolean;
   menuLabel: string;
   openedByTree?: SessionRowOpenedByTreeSlot;
+  /** PR status icon rendered at rest for standalone top-level sessions. */
+  prIcon?: ReactNode;
   fadeClassName?: string;
   restPointerClassName?: string;
   revealClassName?: string;
@@ -181,6 +185,17 @@ export function SessionRowLeadingSlot({
             )}
           />
         </div>
+      ) : prIcon ? (
+        <span
+          data-session-leading-pr=""
+          aria-hidden="true"
+          className={cn(
+            'relative z-20 flex h-3.5 w-3.5 shrink-0 items-center justify-center pointer-events-none',
+            showMenuButton && restClassName
+          )}
+        >
+          {prIcon}
+        </span>
       ) : null}
       {showMenuButton ? (
         <button
