@@ -8,7 +8,9 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
-import { openDispatchAfterLedgerCatchUp } from './rpc-ledger-catch-up';
+import { makeLedgerCatchUp } from './rpc-ledger-catch-up';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import { getLogger } from '../../utils/logger';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -753,15 +755,16 @@ async function openWorkspaceOwned(
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
   // Both the realtime offer and the durable execution origin reopen dispatch frames.
-  const dispatchNative = {
-    ...rpc,
-    openDispatch: openDispatchAfterLedgerCatchUp({
-      open: rpc.openDispatch,
-      currentEpoch: () =>
-        Effect.map(opened.runtime.executionLedger(), (view) => view.inspectState().epoch.number),
-      catchUp: () => refreshInBackground(),
-    }),
-  };
+  const catchUpLedger = makeLedgerCatchUp({
+    genesis: binding.genesisHash,
+    resource: e2eeRpcResource,
+    ledger: () => opened.runtime.executionLedger(),
+    // Join an in-flight refresh as is; otherwise start one round without resetting retries.
+    catchUp: () => refresh ?? refreshInBackground(false),
+    // Two epoch integers and an outcome only; never the frame or its plaintext.
+    observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
+  });
+  const dispatchNative = { ...rpc, openDispatch: catchUpLedger(rpc.openDispatch) };
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();

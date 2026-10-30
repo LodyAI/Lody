@@ -1,77 +1,124 @@
-import { describe, expect, it } from 'vitest';
-import { Effect, Exit } from 'effect';
-import { ContentError } from '@lody/e2ee-core/protocol';
+import { afterEach, describe, expect, it } from 'vitest';
+import { Effect, Exit, Result } from 'effect';
+import { Bytes, ContentError, sealRpcRequestContent } from '@lody/e2ee-core/protocol';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import { copyEpochKeyBytes } from '../../../../../packages/e2ee-core/src/internal/foundation/epoch-key';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
-import { openDispatchAfterLedgerCatchUp } from './rpc-ledger-catch-up';
+import { makeLedgerCatchUp, type LedgerCatchUpEvent } from './rpc-ledger-catch-up';
 
-// The host has verified epoch `local`; the frame was sealed at `sealed`. Opening
-// succeeds only once the host has caught up, exactly like the core epoch guard.
-function host(options: { local: number; sealed: number; catchUpTo?: number }) {
-  let local = options.local;
-  let opens = 0;
+const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
+afterEach(() => {
+  for (const value of fixtures.splice(0)) value.close();
+});
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
+
+// The machine verified epoch 0. `advance` models the refresh reaching epoch 1;
+// the fake open mirrors the core guard: only a caught-up machine opens epoch 1.
+function machine(options: { advance?: boolean } = {}) {
+  const f = encryptedRpcFixture();
+  fixtures.push(f);
+  let caughtUp = false;
   let catchUps = 0;
-  const open = (_machineId: string, _frameHex: string) =>
-    Effect.suspend(() => {
-      opens++;
-      return options.sealed === local
-        ? Effect.succeed({ epoch: local })
-        : Effect.fail(new ContentError({ code: 'unauthorized' }));
-    });
-  const opener = openDispatchAfterLedgerCatchUp({
-    open,
-    currentEpoch: () => Effect.sync(() => local),
+  let clock = 0;
+  const release = Promise.withResolvers<void>();
+  let gate: Promise<void> | undefined;
+  const events: LedgerCatchUpEvent[] = [];
+  const wrap = makeLedgerCatchUp({
+    genesis: hex(f.ledger.context.genesis.toBytes()),
+    resource: e2eeRpcResource,
+    ledger: f.ledger.ledger,
     catchUp: async () => {
       catchUps++;
-      if (options.catchUpTo !== undefined) local = options.catchUpTo;
+      await gate;
+      if (options.advance) caughtUp = true;
     },
-    frameEpoch: () => options.sealed,
+    now: () => clock,
+    cooldownMs: 60_000,
+    observe: (event) => events.push(event),
   });
-  return { opener, opens: () => opens, catchUps: () => catchUps };
+  const open = wrap((_machineId: string, frameHex: string) =>
+    Effect.suspend(() =>
+      caughtUp ? Effect.succeed(frameHex) : Effect.fail(new ContentError({ code: 'unauthorized' }))
+    )
+  );
+  const seal = (epoch: number, signer = f.ledger.owner.signer) =>
+    Effect.runPromise(
+      sealRpcRequestContent({
+        scope: {
+          genesis: hex(f.ledger.context.genesis.toBytes()),
+          resource: e2eeRpcResource(f.machineId),
+          epoch,
+        },
+        epochKey: Result.getOrThrow(Bytes.epochKey(copyEpochKeyBytes(f.ledger.secret))),
+        signer,
+        plaintext: new Uint8Array([1, 2, 3]),
+      })
+    ).then(hex);
+  return {
+    f,
+    open: (frameHex: string) => Effect.runPromiseExit(open(f.machineId, frameHex)),
+    seal,
+    events,
+    catchUps: () => catchUps,
+    hold: () => {
+      gate = release.promise;
+    },
+    release: () => release.resolve(),
+    tick: (ms: number) => {
+      clock += ms;
+    },
+  };
 }
 
 describe('dispatch open after an epoch rotation', () => {
-  it('catches up the verified ledger once and reopens a frame sealed at a newer epoch', async () => {
-    const h = host({ local: 0, sealed: 1, catchUpTo: 1 });
-    expect(await Effect.runPromise(h.opener('machine', 'frame'))).toEqual({ epoch: 1 });
-    expect(h.catchUps()).toBe(1);
-    expect(h.opens()).toBe(2);
-  });
-
-  it('keeps the guard rejection when catch-up does not reach the frame epoch', async () => {
-    const h = host({ local: 0, sealed: 1 });
-    const exit = await Effect.runPromiseExit(h.opener('machine', 'frame'));
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(h.catchUps()).toBe(1);
-    expect(h.opens()).toBe(2);
+  it('catches up once and reopens a frame a ledger device sealed at the newer epoch', async () => {
+    const m = machine({ advance: true });
+    const frame = await m.seal(1);
+    expect(Exit.isSuccess(await m.open(frame))).toBe(true);
+    expect(m.catchUps()).toBe(1);
+    expect(m.events).toEqual([{ frameEpoch: 1, localEpoch: 0, outcome: 'caught-up' }]);
   });
 
   it('never refreshes for a frame at or below the verified epoch', async () => {
-    const h = host({ local: 1, sealed: 0 });
-    const exit = await Effect.runPromiseExit(h.opener('machine', 'frame'));
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(h.catchUps()).toBe(0);
-    expect(h.opens()).toBe(1);
+    const m = machine();
+    expect(Exit.isFailure(await m.open(await m.seal(0)))).toBe(true);
+    expect(m.catchUps()).toBe(0);
+    expect(m.events.map((event) => event.outcome)).toEqual(['not-newer']);
   });
 
-  it('reads the declared epoch from a real sealed dispatch frame', async () => {
-    const f = encryptedRpcFixture();
-    try {
-      const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
-      let catchUps = 0;
-      const opener = openDispatchAfterLedgerCatchUp({
-        open: () => Effect.fail(new ContentError({ code: 'unauthorized' })),
-        currentEpoch: () => Effect.succeed(0),
-        catchUp: async () => {
-          catchUps++;
-        },
-      });
-      // Sealed at the verified epoch 0: an ordinary rejection, no refresh.
-      expect(
-        Exit.isFailure(await Effect.runPromiseExit(opener(f.machineId, original.frameHex)))
-      ).toBe(true);
-      expect(catchUps).toBe(0);
-    } finally {
-      f.close();
+  it('never refreshes for unauthenticated high-epoch frames, however often replayed', async () => {
+    const m = machine();
+    const valid = Buffer.from(await m.seal(0xffffffff), 'hex');
+    const zeroSignature = hex(Buffer.concat([valid.subarray(0, -64), Buffer.alloc(64)]));
+    const outsider = await m.seal(0xffffffff, m.f.ledger.ed(50).signer);
+    for (let replay = 0; replay < 16; replay++) {
+      expect(Exit.isFailure(await m.open(zeroSignature))).toBe(true);
+      expect(Exit.isFailure(await m.open(outsider))).toBe(true);
     }
+    expect(m.catchUps()).toBe(0);
+    expect(new Set(m.events.map((event) => event.outcome))).toEqual(new Set(['unauthenticated']));
+  });
+
+  it('cools down after a catch-up that does not advance the verified ledger', async () => {
+    const m = machine();
+    const frame = await m.seal(7);
+    for (let replay = 0; replay < 16; replay++)
+      expect(Exit.isFailure(await m.open(frame))).toBe(true);
+    expect(m.catchUps()).toBe(1);
+    expect(m.events.filter((event) => event.outcome === 'cooldown')).toHaveLength(15);
+    m.tick(60_000);
+    expect(Exit.isFailure(await m.open(frame))).toBe(true);
+    expect(m.catchUps()).toBe(2);
+  });
+
+  it('shares one wait among concurrent frames instead of one per receive worker', async () => {
+    const m = machine({ advance: true });
+    m.hold();
+    const frames = await Promise.all([1, 1, 1, 1].map((epoch) => m.seal(epoch)));
+    const opened = frames.map((frame) => m.open(frame));
+    await Promise.resolve();
+    m.release();
+    expect((await Promise.all(opened)).every(Exit.isSuccess)).toBe(true);
+    expect(m.catchUps()).toBe(1);
   });
 });
