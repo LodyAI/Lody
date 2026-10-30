@@ -12,6 +12,7 @@ import {
   inheritHistoryStreamText,
   type SessionPlanEntry,
   type SessionHistoryInput,
+  type SessionGoalMessage,
   captureStoredHistory,
   prepareStoredHistoryCopy,
   matchesRollbackReceipt,
@@ -377,8 +378,9 @@ const createNodeServicesForLease = async (
     businessId: primary.businessId,
     segmentId: `state:${bytesHex(primary.turnId)}`,
   });
-  const readState = (primary: HistoryProjectedMessage) => {
+  const readState = (primary: HistoryProjectedMessage, cache = true) => {
     const identity = stateIdentity(primary);
+    if (!cache) return readRecord(identity);
     const key = identityKey(identity);
     let promise = stateCache.get(key);
     if (!promise) {
@@ -391,7 +393,8 @@ const createNodeServicesForLease = async (
   const projectMessages = async (
     messages: readonly HistoryProjectedMessage[],
     decoded: readonly RoostHistorySegment[] = decodeMessages(messages),
-    detach = true
+    detach = true,
+    cache = true
   ): Promise<SessionEntry[]> => {
     const projected = projectRoostSegments(decoded) as SessionEntry[];
     const primaryContent = new Map(
@@ -408,7 +411,7 @@ const createNodeServicesForLease = async (
     // worker round trip at a time for every historical state lookup.
     const project = async (entry: SessionEntry): Promise<SessionEntry> => {
       const primary = primaries.get(entry.id);
-      const state = primary ? await readState(primary) : undefined;
+      const state = primary ? await readState(primary, cache) : undefined;
       let turn =
         state && primary
           ? (projectRoostMessageState(
@@ -422,7 +425,7 @@ const createNodeServicesForLease = async (
       for (const [index, item] of items.entries()) {
         if (item.type !== 'tool_call' || !item.permissionRequest) continue;
         const requestId = item.permissionRequest.requestId;
-        let promise = permissionCache.get(requestId);
+        let promise = cache ? permissionCache.get(requestId) : undefined;
         if (!promise) {
           promise = readRecord({
             kind: 'permission_response',
@@ -433,9 +436,11 @@ const createNodeServicesForLease = async (
               ? (toApplicationJson(response.content) as Record<string, unknown>)
               : undefined
           );
-          permissionCache.set(requestId, promise);
-          while (permissionCache.size > 500)
-            permissionCache.delete(permissionCache.keys().next().value!);
+          if (cache) {
+            permissionCache.set(requestId, promise);
+            while (permissionCache.size > 500)
+              permissionCache.delete(permissionCache.keys().next().value!);
+          }
         }
         const response = await promise;
         if (response?.assistantBusinessId === turn.id) {
@@ -665,12 +670,13 @@ const createNodeServicesForLease = async (
 
   const projectBranchPage = async (
     branch: ActiveBranchPageRead,
-    decoded = decodeMessages(branch.messages)
+    decoded = decodeMessages(branch.messages),
+    cache = true
   ): Promise<SessionEntry[]> => {
     if (!branch.complete) {
       throw new Error(`Roost active branch for ${viewId} is incomplete`);
     }
-    const projected = await projectMessages(branch.messages, decoded);
+    const projected = await projectMessages(branch.messages, decoded, cache, cache);
     const primaryIds = branch.messages
       .filter((message) => message.segmentId === 'primary')
       .map((message) => message.businessId);
@@ -1070,6 +1076,60 @@ const createNodeServicesForLease = async (
       const projected = await projectMessages(full.messages);
       if (generation === readGeneration) fullEntriesCache = projected.map((entry) => clone(entry));
       return projected.map((entry) => clone(entry));
+    });
+  const readLatestGoal = (): Promise<SessionGoalMessage | null> =>
+    readStable(async () => {
+      const source = roostHistory;
+      const host = historyHost;
+      const generation = readGeneration;
+      const cursor = await source.observedEventCursor();
+      // An idle owner's projection is certified only at its freshly observed
+      // cursor. Otherwise read the persisted index, never a writer's staged goal.
+      let latest =
+        operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
+      if (latest === undefined)
+        latest = await readGoalProjection(host, cursor, totalHistoryCount).catch(() => undefined);
+      if (latest === undefined) {
+        let branch = await source.readActiveBranchPage(viewId, {
+          latest: true,
+          limit: branchPageSize,
+        });
+        const revision = branch.state.revision;
+        const count = branch.totalCount;
+        let newerStart = count;
+        for (;;) {
+          if (closing || disposed) throw new Error('Roost session backend is disposed');
+          // Inspection does not retain state/permission bodies. Only the
+          // selected goal is detached on return.
+          const projected = await projectBranchPage(branch, decodeMessages(branch.messages), false);
+          if (branch.state.revision !== revision || branch.totalCount !== count) throw staleRead();
+          if (branch.startPosition + projected.length !== newerStart)
+            throw new Error(`Roost active branch pages for ${viewId} are not contiguous`);
+          latest = projectLatestGoal(projected, branch.startPosition);
+          if (latest || !branch.cursor) break;
+          newerStart = branch.startPosition;
+          branch = await source.readActiveBranchPage(viewId, {
+            before: branch.cursor,
+            limit: branchPageSize,
+          });
+        }
+      }
+      const through = await source.observedEventCursor();
+      await historyGeneration.resolve();
+      if (
+        cursor !== through ||
+        source !== historyGeneration.history ||
+        host !== historyGeneration.host ||
+        generation !== readGeneration
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      if (operationCursor === undefined && cursor === knownCursor) {
+        goalProjection = latest;
+        goalCoveredStart = latest?.position ?? 0;
+      }
+      return latest ? clone(latest.goal) : null;
     });
   const rememberPageEntries = (start: number, projected: readonly SessionEntry[]): void => {
     for (const [offset, turn] of projected.entries()) {
@@ -3070,6 +3130,7 @@ const createNodeServicesForLease = async (
   refreshCommitSubscription();
   return {
     sessionData,
+    readLatestGoal,
     readDispatchHistory: async (ids) => (await readDispatch(ids)).history,
     readDispatchSelection: readDispatch,
     agentWrites,

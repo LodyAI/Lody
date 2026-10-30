@@ -1,0 +1,782 @@
+{
+  "source": "dc44d50a05f8c22842dd5e8ec65703036498b4da",
+  "priorMemoryPRsIncluded": false,
+  "environment": {
+    "platform": "macOS 27.2 arm64",
+    "electron": "44.9.3",
+    "nodeInElectron": "24.22.0",
+    "viewport": "1280x1409, DPR 2, hidden window, background throttling disabled"
+  },
+  "conditions": [
+    "Built OSS Electron main/preload/renderer/IPC and unchanged bundled CLI; isolated profiles/endpoints and synthetic external ACP only",
+    "No Playwright tracing or allocation sampling in paired comparisons; explicit GC at response/frame checkpoints, then vmmap",
+    "Each fresh run warms with 4 KiB code, returns home, receives one 512 KiB code response in 8 KiB chunks (178 fenced TypeScript blocks)",
+    "plain-token-dom retains highlighting hooks/tokens/cache and full text but replaces per-token markup with plain text; colors lost, diagnostic only",
+    "no-monaco removes editor and model-registry modules; diagnostic only, not a compatible lazy-loader implementation",
+    "completed-reopen unmounts via Home then reopens the completed turn; native M labels preserved from vmmap",
+    "class-token-style keeps every token span/content but shares serialized style rules; computed color/font-style/font-weight/text-decoration distributions match for all 72,624 tokens in the tested theme; runtime CSS injection/cache is diagnostic only"
+  ],
+  "paired": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.3192253112793,
+      "rendererRssMiB": 564.609375,
+      "rendererFootprint": "291.8M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 93.29285430908203,
+      "rendererRssMiB": 589.65625,
+      "rendererFootprint": "328.2M",
+      "domNodes": 2589,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.39651107788086,
+      "rendererRssMiB": 685.28125,
+      "rendererFootprint": "543.5M",
+      "domNodes": 156430,
+      "documentElements": 80661,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.8841323852539,
+      "rendererRssMiB": 500.5,
+      "rendererFootprint": "364.5M",
+      "domNodes": 2587,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "no-monaco",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 70.59794235229492,
+      "rendererRssMiB": 538.25,
+      "rendererFootprint": "295.7M",
+      "domNodes": 325,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.04292678833008,
+      "rendererRssMiB": 564.328125,
+      "rendererFootprint": "291.7M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.61960983276367,
+      "rendererRssMiB": 587.84375,
+      "rendererFootprint": "323.6M",
+      "domNodes": 911,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 115.08218002319336,
+      "rendererRssMiB": 672.65625,
+      "rendererFootprint": "401.8M",
+      "domNodes": 9331,
+      "documentElements": 3765,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.8429069519043,
+      "rendererRssMiB": 615.328125,
+      "rendererFootprint": "343.9M",
+      "domNodes": 909,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.17285919189453,
+      "rendererRssMiB": 572.28125,
+      "rendererFootprint": "308.2M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.03229522705078,
+      "rendererRssMiB": 593.296875,
+      "rendererFootprint": "319.7M",
+      "domNodes": 2589,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.31586074829102,
+      "rendererRssMiB": 868.4375,
+      "rendererFootprint": "541.0M",
+      "domNodes": 156430,
+      "documentElements": 80661,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.76139831542969,
+      "rendererRssMiB": 657.9375,
+      "rendererFootprint": "358.6M",
+      "domNodes": 2587,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "no-monaco",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 70.60477066040039,
+      "rendererRssMiB": 543.015625,
+      "rendererFootprint": "287.5M",
+      "domNodes": 325,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.13777542114258,
+      "rendererRssMiB": 568.921875,
+      "rendererFootprint": "299.8M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 92.27003860473633,
+      "rendererRssMiB": 600.65625,
+      "rendererFootprint": "326.0M",
+      "domNodes": 911,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 113.68843841552734,
+      "rendererRssMiB": 657.875,
+      "rendererFootprint": "401.6M",
+      "domNodes": 5054,
+      "documentElements": 3766,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.84368515014648,
+      "rendererRssMiB": 626.8125,
+      "rendererFootprint": "343.4M",
+      "domNodes": 909,
+      "documentElements": 312,
+      "codeBlocks": 0
+    }
+  ],
+  "completedReopenPairs": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.24540710449219,
+      "rendererRssMiB": 579.671875,
+      "rendererFootprint": "317.8M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.14665603637695,
+      "rendererRssMiB": 601.21875,
+      "rendererFootprint": "328.9M",
+      "domNodes": 2589,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.36997985839844,
+      "rendererRssMiB": 897.796875,
+      "rendererFootprint": "575.9M",
+      "domNodes": 156430,
+      "documentElements": 80661,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.87038803100586,
+      "rendererRssMiB": 666.671875,
+      "rendererFootprint": "368.2M",
+      "domNodes": 2587,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 117.60740280151367,
+      "rendererRssMiB": 874.265625,
+      "rendererFootprint": "541.3M",
+      "domNodes": 156423,
+      "documentElements": 80661,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.42524337768555,
+      "rendererRssMiB": 577.890625,
+      "rendererFootprint": "313.0M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.83091735839844,
+      "rendererRssMiB": 598.359375,
+      "rendererFootprint": "325.7M",
+      "domNodes": 911,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 114.79782104492188,
+      "rendererRssMiB": 659.28125,
+      "rendererFootprint": "402.9M",
+      "domNodes": 5054,
+      "documentElements": 3766,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 97.04800033569336,
+      "rendererRssMiB": 627.53125,
+      "rendererFootprint": "347.2M",
+      "domNodes": 909,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 1,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 101.87845993041992,
+      "rendererRssMiB": 642.625,
+      "rendererFootprint": "361.9M",
+      "domNodes": 5403,
+      "documentElements": 3765,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.30342483520508,
+      "rendererRssMiB": 578.0,
+      "rendererFootprint": "315.7M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.0486831665039,
+      "rendererRssMiB": 601.109375,
+      "rendererFootprint": "330.7M",
+      "domNodes": 2532,
+      "documentElements": 271,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.4067497253418,
+      "rendererRssMiB": 940.328125,
+      "rendererFootprint": "597.7M",
+      "domNodes": 156425,
+      "documentElements": 80662,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 97.00592803955078,
+      "rendererRssMiB": 665.796875,
+      "rendererFootprint": "361.0M",
+      "domNodes": 2544,
+      "documentElements": 280,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 118.7480354309082,
+      "rendererRssMiB": 872.5,
+      "rendererFootprint": "538.5M",
+      "domNodes": 156380,
+      "documentElements": 80662,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.38159561157227,
+      "rendererRssMiB": 569.296875,
+      "rendererFootprint": "305.9M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.8055191040039,
+      "rendererRssMiB": 598.015625,
+      "rendererFootprint": "325.6M",
+      "domNodes": 911,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 114.75795364379883,
+      "rendererRssMiB": 657.0625,
+      "rendererFootprint": "400.0M",
+      "domNodes": 5054,
+      "documentElements": 3766,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 97.01337432861328,
+      "rendererRssMiB": 625.78125,
+      "rendererFootprint": "343.0M",
+      "domNodes": 909,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "plain-token-dom",
+      "round": 2,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 101.86552810668945,
+      "rendererRssMiB": 640.546875,
+      "rendererFootprint": "358.9M",
+      "domNodes": 5403,
+      "documentElements": 3765,
+      "codeBlocks": 178
+    }
+  ],
+  "singleSessionSixTurnScout": [
+    { "stage": "configured-empty", "rendererHeapMiB": 82.78849029541016, "domNodes": 1945 },
+    { "stage": "warmup-home", "rendererHeapMiB": 90.61796188354492, "domNodes": 2590 },
+    { "stage": "long-turn-1-active", "rendererHeapMiB": 117.0927619934082, "domNodes": 156256 },
+    { "stage": "long-turn-2-active", "rendererHeapMiB": 120.51998519897461, "domNodes": 156280 },
+    { "stage": "long-turn-3-active", "rendererHeapMiB": 121.75540924072266, "domNodes": 156282 },
+    { "stage": "long-turn-4-active", "rendererHeapMiB": 122.00152206420898, "domNodes": 156284 },
+    { "stage": "long-turn-5-active", "rendererHeapMiB": 121.27071380615234, "domNodes": 156286 },
+    { "stage": "long-turn-6-active", "rendererHeapMiB": 121.46384811401367, "domNodes": 156288 },
+    { "stage": "long-session-home", "rendererHeapMiB": 99.55262756347656, "domNodes": 2588 },
+    { "stage": "reopen-first", "rendererHeapMiB": 120.6855239868164, "domNodes": 156427 },
+    { "stage": "reopen-first-home", "rendererHeapMiB": 99.76358795166016, "domNodes": 2588 }
+  ],
+  "manySessionControl": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.35131454467773,
+      "rendererRssMiB": 567.078125,
+      "rendererFootprint": "308.2M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0,
+      "syntheticAgentProcessCount": 0,
+      "syntheticAgentRssMiBSum": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "session-count-1-home",
+      "rendererHeapMiB": 91.10320663452148,
+      "rendererRssMiB": 587.53125,
+      "rendererFootprint": "325.7M",
+      "domNodes": 1725,
+      "documentElements": 297,
+      "codeBlocks": 0,
+      "syntheticAgentProcessCount": 1,
+      "syntheticAgentRssMiBSum": 98.046875
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "session-count-5-home",
+      "rendererHeapMiB": 94.47174835205078,
+      "rendererRssMiB": 606.125,
+      "rendererFootprint": "339.7M",
+      "domNodes": 1875,
+      "documentElements": 441,
+      "codeBlocks": 0,
+      "syntheticAgentProcessCount": 5,
+      "syntheticAgentRssMiBSum": 494.0625
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "session-count-10-home",
+      "rendererHeapMiB": 97.00272750854492,
+      "rendererRssMiB": 619.390625,
+      "rendererFootprint": "344.7M",
+      "domNodes": 1856,
+      "documentElements": 420,
+      "codeBlocks": 0,
+      "syntheticAgentProcessCount": 10,
+      "syntheticAgentRssMiBSum": 991.03125
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "session-count-20-home",
+      "rendererHeapMiB": 98.7032470703125,
+      "rendererRssMiB": 483.71875,
+      "rendererFootprint": "367.8M",
+      "domNodes": 1863,
+      "documentElements": 429,
+      "codeBlocks": 0,
+      "syntheticAgentProcessCount": 20,
+      "syntheticAgentRssMiBSum": 1949.34375
+    }
+  ],
+  "adjacentStyleCount": {
+    "tokenSpans": 72624,
+    "adjacentIdenticalStyleRuns": 59808,
+    "lines": 4272,
+    "memorySavingMeasured": false
+  },
+  "excludedAllocationScout": {
+    "estimatedTotalMiB": 630.0429763793945,
+    "reason": "Includes Playwright injected text-query allocations; not a product allocation or retained-memory estimate"
+  },
+  "limits": [
+    "Synthetic code-heavy response, not typical production frequency or universal savings",
+    "Existing highlight cache is bounded; no unbounded leak established",
+    "Synthetic agent sizes are not real-provider measurements; existing 20-minute idle policy is unchanged",
+    "No production implementation, packaged/other-OS acceptance, or combined savings with previous PRs"
+  ],
+  "sharedStylePairs": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.12604904174805,
+      "rendererRssMiB": 554.3125,
+      "rendererFootprint": "291.6M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.74344635009766,
+      "rendererRssMiB": 582.421875,
+      "rendererFootprint": "320.5M",
+      "domNodes": 2589,
+      "documentElements": 297,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.2725715637207,
+      "rendererRssMiB": 814.921875,
+      "rendererFootprint": "531.3M",
+      "domNodes": 156430,
+      "documentElements": 80661,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.74089813232422,
+      "rendererRssMiB": 567.96875,
+      "rendererFootprint": "362.6M",
+      "domNodes": 2587,
+      "documentElements": 312,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 1,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 118.32448196411133,
+      "rendererRssMiB": 652.484375,
+      "rendererFootprint": "540.4M",
+      "domNodes": 156431,
+      "documentElements": 80668,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "class-token-style",
+      "round": 1,
+      "stage": "empty",
+      "rendererHeapMiB": 80.3506088256836,
+      "rendererRssMiB": 440.390625,
+      "rendererFootprint": "282.1M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 1,
+      "stage": "warm-home",
+      "rendererHeapMiB": 90.91903305053711,
+      "rendererRssMiB": 428.296875,
+      "rendererFootprint": "318.8M",
+      "domNodes": 2590,
+      "documentElements": 298,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 1,
+      "stage": "code-active",
+      "rendererHeapMiB": 115.55177688598633,
+      "rendererRssMiB": 606.359375,
+      "rendererFootprint": "509.5M",
+      "domNodes": 156431,
+      "documentElements": 80662,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "class-token-style",
+      "round": 1,
+      "stage": "code-home",
+      "rendererHeapMiB": 97.00262451171875,
+      "rendererRssMiB": 444.78125,
+      "rendererFootprint": "352.9M",
+      "domNodes": 2588,
+      "documentElements": 313,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 1,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 117.25543975830078,
+      "rendererRssMiB": 625.328125,
+      "rendererFootprint": "512.3M",
+      "domNodes": 156432,
+      "documentElements": 80662,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.16451263427734,
+      "rendererRssMiB": 461.234375,
+      "rendererFootprint": "295.8M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 90.84150314331055,
+      "rendererRssMiB": 395.109375,
+      "rendererFootprint": "328.1M",
+      "domNodes": 2532,
+      "documentElements": 271,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 117.34790802001953,
+      "rendererRssMiB": 692.875,
+      "rendererFootprint": "572.3M",
+      "domNodes": 156425,
+      "documentElements": 80662,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.81344604492188,
+      "rendererRssMiB": 464.078125,
+      "rendererFootprint": "366.9M",
+      "domNodes": 2544,
+      "documentElements": 280,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 119.63460540771484,
+      "rendererRssMiB": 677.375,
+      "rendererFootprint": "545.1M",
+      "domNodes": 156388,
+      "documentElements": 80669,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "class-token-style",
+      "round": 2,
+      "stage": "empty",
+      "rendererHeapMiB": 80.36225128173828,
+      "rendererRssMiB": 518.90625,
+      "rendererFootprint": "291.3M",
+      "domNodes": 329,
+      "documentElements": 240,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 2,
+      "stage": "warm-home",
+      "rendererHeapMiB": 91.73283004760742,
+      "rendererRssMiB": 484.1875,
+      "rendererFootprint": "330.1M",
+      "domNodes": 2533,
+      "documentElements": 272,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 2,
+      "stage": "code-active",
+      "rendererHeapMiB": 115.49690628051758,
+      "rendererRssMiB": 646.859375,
+      "rendererFootprint": "545.0M",
+      "domNodes": 156426,
+      "documentElements": 80663,
+      "codeBlocks": 178
+    },
+    {
+      "variant": "class-token-style",
+      "round": 2,
+      "stage": "code-home",
+      "rendererHeapMiB": 96.96548080444336,
+      "rendererRssMiB": 453.46875,
+      "rendererFootprint": "365.8M",
+      "domNodes": 2545,
+      "documentElements": 281,
+      "codeBlocks": 0
+    },
+    {
+      "variant": "class-token-style",
+      "round": 2,
+      "stage": "completed-reopen",
+      "rendererHeapMiB": 117.09832000732422,
+      "rendererRssMiB": 629.3125,
+      "rendererFootprint": "525.3M",
+      "domNodes": 156389,
+      "documentElements": 80670,
+      "codeBlocks": 178
+    }
+  ],
+  "sharedStyleChecks": [
+    {
+      "round": 1,
+      "tokenCount": 72624,
+      "computedStylesEqual": true,
+      "styleGroups": 6,
+      "inlineStyleCountBefore": 72624,
+      "inlineStyleCountAfter": 0
+    },
+    {
+      "round": 2,
+      "tokenCount": 72624,
+      "computedStylesEqual": true,
+      "styleGroups": 6,
+      "inlineStyleCountBefore": 72624,
+      "inlineStyleCountAfter": 0
+    }
+  ],
+  "interpretation": {
+    "plainTokenDom": "Visible syntax coloring was removed while token computation/cache remained. The ~180M footprint delta is a feature-removal counterfactual, not a measured compatible optimization or its upper bound.",
+    "sharedStyles": "Only the separate 20–28M shared-style prototype retained the computed token styles in the tested fixture. It is not a completed product fix.",
+    "behaviorPreservingNodeReduction": "Not implemented or measured."
+  }
+}
