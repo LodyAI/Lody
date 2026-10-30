@@ -1,0 +1,384 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--severity-marker-coverage",
+    "code-review-helper-reviewrenderer--grouped-refactor",
+    "code-review-helper-reviewrenderer--with-existing-comments"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('section[aria-label=\"Review findings\"]');if(!e||e.querySelectorAll(\"li.crh-finding\").length!==5)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&getComputedStyle(document.querySelector(\".crh-shell\")).backgroundColor===\"rgb(19, 20, 22)\"; }"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('section[aria-label=\"Review findings\"]');if(!e||e.querySelectorAll(\"li.crh-finding\").length!==3)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&getComputedStyle(document.querySelector(\".crh-shell\")).backgroundColor===\"rgb(19, 20, 22)\"; }"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const e=document.querySelector('section[aria-label=\"Review findings\"]');if(!e||e.querySelectorAll(\"li.crh-finding\").length!==3)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&getComputedStyle(document.querySelector(\".crh-shell\")).backgroundColor===\"rgb(19, 20, 22)\"; }"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "name": "finding-hover-p0",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#crh-severity-p0 > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"#crh-severity-p0 > span\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "finding-hover-p1",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#crh-severity-p1 > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"#crh-severity-p1 > span\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "finding-hover-p2",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#crh-severity-p2 > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"#crh-severity-p2 > span\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "finding-hover-question",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#crh-severity-question > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"#crh-severity-question > span\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "finding-hover-info",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#crh-severity-info > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"#crh-severity-info > span\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "markers-rest",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const block=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]'); if(!block)return false;block.scrollIntoView({block:\"center\",behavior:\"instant\"}); const nodes=[\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::9\\\"]\", \"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::10\\\"]\", \"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::11\\\"]\"].map(s=>document.querySelector(s)); return nodes.every(e=>{if(!e||e.getRootNode()!==document)return false;const r=e.getBoundingClientRect();return r.width>0&&r.top>=0&&r.bottom<=innerHeight;}); }"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          }
+        ]
+      },
+      {
+        "name": "marker-hover-p0",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::9\\\"]\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "marker-hover-p1",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::10\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::10\\\"]\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "marker-hover-info",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::11\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::11\\\"]\").matches(\":hover\")"
+          }
+        ]
+      },
+      {
+        "name": "marker-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::9\\\"]\")"
+          }
+        ]
+      },
+      {
+        "name": "marker-thread-jump",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-anchor=\"packages/adaptors/src/index.ts::new::9\"]'); if(!e)return false;const r=e.getBoundingClientRect();return e.classList.contains(\"crh-thread-focused\")&&r.top>=0&&r.bottom<=innerHeight; }"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "existing-p0-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "li.crh-finding > span",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "naming.ts"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('title')==='Jump to packages/adaptors/src/naming.ts'"
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-jump",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "naming.ts",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.bottom>0&&r.top<innerHeight;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "name": "existing-info-marker-hover",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const block=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]'); if(!block)return false;block.scrollIntoView({block:\"center\",behavior:\"instant\"}); const nodes=[\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::9\\\"]\"].map(s=>document.querySelector(s)); return nodes.every(e=>{if(!e||e.getRootNode()!==document)return false;const r=e.getBoundingClientRect();return r.width>0&&r.top>=0&&r.bottom<=innerHeight;}); }"
+          },
+          {
+            "action": "hover",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]"
+          }
+        ]
+      },
+      {
+        "name": "existing-marker-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"button.crh-anno[data-anno=\\\"packages/adaptors/src/index.ts::new::9\\\"]\")"
+          }
+        ]
+      },
+      {
+        "name": "existing-marker-thread-jump",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button.crh-anno[data-anno=\"packages/adaptors/src/index.ts::new::9\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-anchor=\"packages/adaptors/src/index.ts::new::9\"]'); if(!e)return false;const r=e.getBoundingClientRect();return e.classList.contains(\"crh-thread-focused\")&&r.top>=0&&r.bottom<=innerHeight; }"
+          }
+        ]
+      }
+    ]
+  }
+}

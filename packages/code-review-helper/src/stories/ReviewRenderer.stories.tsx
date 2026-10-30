@@ -467,6 +467,63 @@ export const SplitView: Story = {
   },
 };
 
+const severityMarkerBundle = {
+  ...groupedRefactorBundle,
+  document: {
+    ...groupedRefactorBundle.document,
+    findings: (['p0', 'p1', 'p2', 'question', 'info'] as const).map((severity, index) => ({
+      id: `severity-${severity}`,
+      severity,
+      bodyMarkdown: `Synthetic ${severity} finding.`,
+      refs: [],
+      line: index + 1,
+    })),
+  },
+  groups: groupedRefactorBundle.groups.map((group, groupIndex) =>
+    groupIndex
+      ? group
+      : {
+          ...group,
+          blocks: group.blocks.map((block, blockIndex) =>
+            blockIndex
+              ? block
+              : {
+                  ...block,
+                  notes: [
+                    ...block.notes,
+                    ...(['p0', 'p1'] as const).map((severity, index) => ({
+                      id: `severity-note-${severity}`,
+                      severity,
+                      path: block.path,
+                      blockId: block.id,
+                      side: 'new' as const,
+                      range: { start: 9 + index, end: 9 + index },
+                      line: 9 + index,
+                      body: `Synthetic ${severity} marker note.`,
+                    })),
+                  ],
+                }
+          ),
+        }
+  ),
+};
+
+export const SeverityMarkerCoverage: Story = {
+  args: {
+    bundle: severityMarkerBundle,
+    storageKey: 'storybook-severity-marker-coverage',
+    initialComments: [
+      {
+        ...existingComments[0]!,
+        id: 'severity-info-comment',
+        anchor: { ...existingComments[0]!.anchor, lineNumber: 11 },
+        body: 'Synthetic info marker comment.',
+        lineText: '  node: createNodeAdapter,',
+      },
+    ],
+  },
+};
+
 export const FileStatuses: Story = {
   args: {
     bundle: fileStatusesBundle,

@@ -2132,7 +2132,10 @@ original rendering trigger.
 
 The shared UI-only run through95 additionally passes 25 files / 313 tests, with
 111 source/test/manifest hashes unchanged and the same 78 existing Styleq warnings.
-This does not extend the through93 full components/Electron boundary.
+This does not extend the through93 Electron boundary. A later components-only
+run through99 passes 620 files/6,209 tests while all 2,539 recorded source, test
+and metadata hashes remain unchanged. It includes the existing working-tree
+user changes and does not claim another Electron, helper or root-check run.
 
 ### Independent review-renderer host
 
@@ -2159,7 +2162,23 @@ four native supplements, remain OPEN at 187 raw/zero threshold pixels; bounded
 same-source controls do not establish their cause. The existing helper suite
 passes five files/33 tests, and the public-boundary check passes. These results
 cover the fixed Vesper theme and audited states, not unvisited helper sections or
-the whole monorepo. Core component inventories do not subtract these removals.
+the whole monorepo. Core component inventories do not subtract these removals. The independent
+through100 helper snapshot checks 32 production JS/TS files against the successful
+build hashes, excludes stories/tests, and validates the same v2 AST candidates
+with the helper's actual CSS entry. It records a lower bound of 1,151 occurrences
+across ten files and 26 unresolved expressions, including 891 occurrences in
+ReviewRenderer. This host count is separate from the core product timeline.
+
+The severity continuation moves twenty more tone utilities into one local map,
+using the helper's actual warning/danger variables, exact alpha/fallback rules
+and fine-hover predicate. Both readers remain private: the finding badge and
+light-DOM inline marker. The real fixture renders all five badge tones and the
+three valid inline marker severities; no third-party shadow implementation is
+substituted. `leaves100-acceptance.html` records eighty formal pairs/44,560 standard
+records and six standalone pairs that match. Four original native differences remain OPEN at 130 raw/zero
+threshold pixels, despite equal complete recorded fields. A bounded full-panel
+control, two normal-motion pairs and two coarse-pointer pairs also match;
+none establishes the original raster cause or extends the fixed theme scope.
 
 ## Remaining work
 

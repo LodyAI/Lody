@@ -1516,7 +1516,10 @@ ref 继续拥有 height，并切换 hidden／auto；长值保存／失败且 dra
 边界，不能据此证明原栅格触发原因。
 
 截至 95 的共享 UI 独立全量回归另通过 25 文件／313 测试，111 份源码／测试／manifest
-哈希不变，七十八条既有 Styleq warning 相同。这不扩展截至 93 的完整组件／Electron 边界。
+哈希不变，七十八条既有 Styleq warning 相同。这不扩展截至 93 的 Electron 边界。随后截至
+99 的 components 独立全量回归通过 620 文件／6,209 测试，2,539 份记录的源码、测试与
+元数据哈希始终不变。该运行包含工作区既有用户修改，不代表再次运行 Electron、helper
+或根检查。
 
 ### 独立 Review Renderer 样式宿主
 
@@ -1535,7 +1538,18 @@ helper 在 Vite、Storybook、独立 HTML 和 Vitest 之间共享自己的 Style
 66,536 条完整标准记录相同。包含四对 native 补充帧在内的七个原栅格差异仍 OPEN，共
 187 原始／零阈值像素；有限同源控制不证明原因。已有 helper 测试通过五文件／三十三例，
 公开边界检查通过。这些结果仅覆盖固定 Vesper 主题与已审查状态，不扩展到未访问的
-helper 区域或整个 monorepo，主组件库存不扣除本宿主的移除数量。
+helper 区域或整个 monorepo，主组件库存不扣除本宿主的移除数量。独立截至 100 的 helper
+快照按成功构建哈希核对三十二份生产 JS／TS 文件，排除 stories／测试，使用同一 v2 AST
+规则但以 helper 真实 CSS 入口验证候选。其下界为十个文件／1,151 处／二十六个未解析
+表达式，其中 ReviewRenderer 保留八百九十一处；该宿主不与主产品时间线混算。
+
+严重性标记续迁将二十处颜色 utility 收入一个局部 map，读取 helper 真实 warning／danger
+变量，保留精确 alpha／fallback 和细指针 hover 条件。两个 reader 仍为私有 finding badge
+与 light-DOM inline marker，不替换第三方 shadow 实现。真实夹具覆盖五种 badge 颜色及
+三种有效 inline marker 严重性。`leaves100-acceptance.html` 记录八十对正式帧／44,560 条
+标准记录和六对相同的单文件结果。
+四个原 native 差异即使完整记录字段相同仍 OPEN，共 130 原始／零阈值像素。一次有界完整
+面板控制、两对正常动效与两对粗指针控制也相同，均不证明原栅格原因或扩大固定主题边界。
 
 ## 后续工作
 

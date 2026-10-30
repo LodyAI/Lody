@@ -1531,9 +1531,8 @@ function FindingItem({
     >
       <span
         className={cn(
-          stylex.props(findingsStyles.badge).className,
-          'font-semibold leading-none tracking-wide',
-          SEVERITY_MARKER[finding.severity]
+          stylex.props(findingsStyles.badge, SEVERITY_MARKER[finding.severity]).className,
+          'font-semibold leading-none tracking-wide'
         )}
       >
         {findingSeverityLabel(finding.severity)}
@@ -3104,7 +3103,7 @@ function InlineAnnotation({
           aria-label="View in review thread"
           className={cn(
             'crh-anno inline-flex items-center gap-0.5 rounded border px-1 font-sans text-[10px] font-semibold leading-[1.4] shadow-sm transition-colors',
-            SEVERITY_MARKER[markerSeverity]
+            stylex.props(SEVERITY_MARKER[markerSeverity]).className
           )}
         >
           {markerSeverity === 'info' ? (
@@ -3132,13 +3131,104 @@ function InlineAnnotation({
   );
 }
 
-const SEVERITY_MARKER: Record<ReviewNoteSeverity, string> = {
-  info: 'border-border bg-muted/60 text-muted-foreground hover:text-foreground',
-  question: 'border-primary/35 bg-primary/10 text-primary hover:bg-primary/15',
-  p2: 'border-warning/30 bg-warning/8 text-warning/80 hover:bg-warning/15',
-  p1: 'border-warning/45 bg-warning/12 text-warning hover:bg-warning/20',
-  p0: 'border-danger/45 bg-danger/12 text-danger hover:bg-danger/20',
-};
+const SEVERITY_MARKER = stylex.create({
+  info: {
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+  question: {
+    borderColor: {
+      default: 'hsl(var(--primary))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--primary)) 35%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--primary))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--primary))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--primary))',
+  },
+  p2: {
+    borderColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 30%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-warning))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-warning)) 15%, transparent)',
+        },
+      },
+    },
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 80%, transparent)',
+    },
+  },
+  p1: {
+    borderColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 12%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-warning))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-warning)) 20%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--status-warning))',
+  },
+  p0: {
+    borderColor: {
+      default: 'hsl(var(--status-danger))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-danger)) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-danger))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-danger)) 12%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-danger))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-danger)) 20%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--status-danger))',
+  },
+});
 
 function severityRank(severity: ReviewNoteSeverity): number {
   switch (severity) {
