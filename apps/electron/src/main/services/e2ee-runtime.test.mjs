@@ -856,6 +856,31 @@ void test('binding is immutable, retained reopen asks only for a suffix, and cor
     code: 'ENOENT'
   })
 })
+void test('a remote machine offer reports non-HTTPS endpoints as bad input before signing', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const plain = yield* Effect.result(
+        owner.host.remoteMachineOffer(workspaceId, {
+          accountId: intent.accountId,
+          deploymentUrl: 'http://127.0.0.1:5210',
+          ingressUrl: 'http://127.0.0.1:5211'
+        })
+      )
+      // Previously this surfaced as invalid-ledger and sent users to ledger recovery.
+      assert.equal(plain.failure.code, 'invalid-input')
+      const offer = yield* owner.host.remoteMachineOffer(workspaceId, {
+        accountId: intent.accountId,
+        deploymentUrl: 'https://cloud.synthetic.test',
+        ingressUrl: 'https://edge.synthetic.test'
+      })
+      assert.equal(offer.deploymentUrl, 'https://cloud.synthetic.test')
+    })
+  )
+})
 void test('a failed originals transaction never advances the pin; reopening retains the last accepted view', async (t) => {
   const directory = await fixture(t)
   let saved

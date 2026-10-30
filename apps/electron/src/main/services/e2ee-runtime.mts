@@ -164,6 +164,7 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
         (error as { reason?: string })?.reason
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
           ? 'local-evidence-conflict'
