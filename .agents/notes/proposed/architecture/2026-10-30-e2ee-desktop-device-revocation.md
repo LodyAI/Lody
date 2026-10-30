@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#2122](https://github.com/LodyAI/Lody/pull/2122)
 
 [中文](2026-10-30-e2ee-desktop-device-revocation.zh.md)
 
