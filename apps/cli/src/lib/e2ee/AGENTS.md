@@ -49,9 +49,15 @@
   genesis waits for the first authoritative list outcome (list, rejection, subscription
   error or shutdown), then fails closed; a cached match proceeds offline
   ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
+  After admission, `lody machine pair` treats a missing key as a bounded wait for desktop
+  delivery, never as failure; other activation errors stay terminal
+  ([remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)).
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
+  A rejected dispatch or feature request naming a newer epoch, signed by a current ledger device, joins
+  one bounded refresh per verified ledger state, then reopens; the core guard still decides.
+  A refresh that does not advance the ledger cools down. Logs carry only both epochs.
   [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`

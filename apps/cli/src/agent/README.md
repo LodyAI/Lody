@@ -209,7 +209,9 @@ URLs are normalized by the extension to the Messages `/anthropic` root before pr
 construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named. Existing sessions/query data remain under
-the daemon's previous `DSH_HOME` (or `~/.dsh`). Old settings/profiles are left untouched;
+the daemon's previous `DSH_HOME` (or `~/.dsh`). During read-only history import, missing
+Provider-home images are read from that legacy home's attachment store; new images still
+use the Provider store. Old settings/profiles are left untouched;
 move desired customizations to the YAML path shown in Provider details. See the
 [settings contract](../../../../specs/deepseek-harness-settings.md).
 

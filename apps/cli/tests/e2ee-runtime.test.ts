@@ -4312,6 +4312,155 @@ it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receip
 );
 
 describe('remote machine command', () => {
+  // Admission is visible before the approving desktop has delivered the current key.
+  const admittedBeforeKey = async (directory: string) => {
+    const { makeDesktopRemotePairing } =
+      await import('../../electron/src/main/services/e2ee-remote-pairing.mts');
+    return execute(
+      Effect.gen(function* () {
+        const custody = yield* makeNodeE2eeCustody({
+          directory: join(directory, 'owner'),
+          wrapper,
+        });
+        const prepared = yield* custody.prepareDevice();
+        const signed = yield* signGenesisRecord({
+          signer: prepared,
+          encryptionPublicKey: prepared.enc,
+          initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(21))),
+          userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(31))),
+          membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(11))),
+        });
+        const signer = yield* custody.retainDevice(signed.genesis, prepared);
+        const view = Result.getOrThrow(
+          verifyLedger({
+            anchor: signed.genesis,
+            records: [signed.record],
+            checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+          })
+        );
+        const db = new DatabaseSync(join(directory, 'desktop.sqlite'));
+        yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+        db.exec('CREATE TABLE records(position INTEGER PRIMARY KEY, record BLOB)');
+        db.prepare('INSERT INTO records VALUES(0,?)').run(signed.record);
+        const offer = yield* makeDesktopRemotePairing({
+          db,
+          workspaceId: 'workspace',
+          genesis: signed.genesis,
+          genesisRecord: signed.record,
+          signer,
+          current: () => Effect.succeed(view),
+        }).offer({
+          accountId: 'remote-account',
+          deploymentUrl: 'https://cloud.synthetic.test',
+          ingressUrl: 'https://edge.synthetic.test',
+        });
+        return { offer, encoded: Buffer.from(JSON.stringify(offer)).toString('base64url') };
+      })
+    );
+  };
+
+  it('keeps waiting after admission until the approving desktop delivers the current key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-wait-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+    let keyDelivered = false;
+    const activation = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async () => {
+        if (!keyDelivered) throw new Error('e2ee_waiting_for_key');
+      });
+    const retained = vi
+      .spyOn(legacy, 'retainCliE2eeMachineBootstrapLegacy')
+      .mockResolvedValue(undefined as never);
+    try {
+      const { offer, encoded } = await admittedBeforeKey(directory);
+      const statuses: string[] = [];
+      let polls = 0;
+      const result = await pairRemoteMachineLegacy({
+        encodedOffer: encoded,
+        machineId: 'machine',
+        cloud: {} as CloudE2eePort,
+        signal: new AbortController().signal,
+        keyring: noKeyring,
+        claim: async (body) => {
+          const { material } = JSON.parse(body);
+          return {
+            pairingSessionId: offer.pairingSessionId,
+            status: polls === 0 ? 'claimed' : 'admitted',
+            expiresAt: offer.expiresAt,
+            material,
+            location: null,
+          };
+        },
+        show: (value) => statuses.push(value.status),
+        // Explicit signal: the desktop's refresh delivers the key during the second key wait.
+        wait: async () => {
+          polls += 1;
+          if (statuses.filter((status) => status === 'waiting-for-key').length === 2)
+            keyDelivered = true;
+        },
+        now: () => 0,
+      });
+
+      expect(result).toMatchObject({ workspaceId: 'workspace', machineId: 'machine', ready: true });
+      expect(statuses).toContain('waiting-for-key');
+    } finally {
+      activation.mockRestore();
+      retained.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('stops waiting for the key at its deadline and keeps other activation failures terminal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-deadline-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+    let failure = new Error('e2ee_waiting_for_key');
+    const activation = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async () => {
+        throw failure;
+      });
+    try {
+      const { offer, encoded } = await admittedBeforeKey(directory);
+      let clock = 0;
+      const run = () =>
+        pairRemoteMachineLegacy({
+          encodedOffer: encoded,
+          machineId: 'machine',
+          cloud: {} as CloudE2eePort,
+          signal: new AbortController().signal,
+          keyring: noKeyring,
+          claim: async (body) => ({
+            pairingSessionId: offer.pairingSessionId,
+            status: 'admitted',
+            expiresAt: offer.expiresAt,
+            material: JSON.parse(body).material,
+            location: null,
+          }),
+          show: () => {},
+          wait: async () => {
+            clock += 60_000;
+          },
+          now: () => clock,
+        });
+      await expect(run()).rejects.toThrow('e2ee_waiting_for_key');
+      expect(clock).toBeGreaterThanOrEqual(10 * 60_000);
+
+      clock = 0;
+      failure = new Error('e2ee_binding_conflict');
+      await expect(run()).rejects.toThrow('e2ee_binding_conflict');
+      expect(clock).toBe(0);
+    } finally {
+      activation.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('retains material-bound consent and exact signatures across restart without touching local pairing', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-command-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
