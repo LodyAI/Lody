@@ -37,14 +37,47 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 ## Sheets and session surfaces
 
-- `mobile-new-chat-sheet.tsx` is the full-height new-chat compose sheet: the
-  header holds the unified Chat / project / repository native picker
-  (`mobile-native-select.tsx`), and the resting body is one full-bleed
-  `ChatComposer variant="sheet"` whose footer rail carries run config, machine,
-  branch and worktree. The landing's mobile file input mounts inside that sheet;
-  the no-drag popup container stays within Vaul's interaction boundary.
-- Bottom sheets: `mobile-new-chat-sheet.tsx`,
-  `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
+- `mobile-new-chat-sheet.tsx` hosts the new-chat page: the session-style
+  composer stays at the bottom, with machine and project in that order above it.
+  Local Git worktree and branch share a row; GitHub exposes its branch. Local
+  checked-out and worktree refs both display decoded branch labels with localized
+  local/remote suffixes; launch keeps the exact selector. Run
+  configuration opens the same Sheet as an ongoing conversation. The
+  selection group shares the composer column and sits above it. Its page, frosted header,
+  back button and composer column reuse the session equivalents. The page lifts above the
+  native keyboard through the same composer shell (keyboard margin, safe-area inset and
+  transition) used by ongoing sessions. First send retains this page until navigation
+  reaches the session, then waits for its presentation acknowledgement before
+  dismissing new chat. Pending sends preserve the focused textarea, blocking edits
+  without disabling it. The destination claims an existing new-chat focus in its
+  layout effect before source removal; native iOS also checks the keyboard-height
+  signal so manual dismissal is respected. Accepted sends dismiss the keyboard
+  after the message surface paints; rejection or resumed editing keeps it open.
+  Keyboard inset and safe-area padding share a transition. Entry/completion never
+  open a keyboard.
+  Entrance suppression persists through delayed portal mounts
+  and same-entry URL replacements; later visits and Back retain their animation.
+  The page itself pushes in from the right (`.mobile-drill-in`) and Back slides it
+  out before closing; the host hiding it after first-send presentation removes it
+  without a slide. In the native app a rightward drag starting within
+  `EDGE_ZONE_PX` of the left edge moves the page with the finger over the mounted
+  screen beneath, then commits or snaps back. The drag is bound on the page rather
+  than an overlay strip, so no tap target is covered, and drags starting in the
+  composer shell stay with the composer. The existing
+  project and agent selection handlers retain draft and scope semantics. The
+  project list mixes all sources using the desktop recency/name/id comparator,
+  with a pinned “No project selected” option. Groups and local folders use type icons;
+  GitHub rows and the selected value share the desktop owner avatar, falling back to
+  the GitHub icon while loading or on failure. GitHub rows omit repository descriptions.
+  Search preserves this order. Home opens an empty draft with the last accepted
+  project, saved per workspace/device independently of browsing defaults.
+  Explicit project-page entry and an existing draft keep their selection. A local
+  target restores its machine too; an incompatible Role is cleared through the
+  existing machine handler. Deleted/unavailable targets become no project. Older
+  installs without a saved target use existing available-project usage ranks.
+  Restoration waits for catalogs and is canceled by manual machine/project choice.
+  [Decision and evidence](../../../../../.agents/notes/implemented/feature/2026-10-28-mobile-new-chat-page.md).
+- Bottom sheets: `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,
   `mobile-acp-history-sheet.tsx`, `mobile-project-skills-sheet.tsx` (read-only
   project skills, opened from the Skills row of the local and GitHub project
@@ -80,6 +113,8 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   `permission-mode-face.tsx` (classified by `@lody/shared`
   `classifyPermissionModeFace`), `mobile-inline-picker.tsx`,
   `mobile-settings-picker-trigger.tsx`.
+- Desktop landing keyboard navigation:
+  [chat-landing-keyboard-nav.md](chat-landing-keyboard-nav.md).
 - Provider-defined pickers have a separate coordinator ID namespace, so an ACP
   option named `permission` or `model` cannot open or dismiss a built-in row.
   [Collision fix and builtin audit](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-dimcode-mobile-permission-picker.md).

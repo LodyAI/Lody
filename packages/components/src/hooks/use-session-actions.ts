@@ -1,6 +1,6 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import type {
@@ -242,7 +242,16 @@ export type SessionActions = {
     userTurnId: string,
     options?: { inputConfig?: SessionTurnInputConfig; machineId?: MachineId | null }
   ) => Promise<void>;
-  requestSessionCancel: (sessionId: SessionId, turnId: string) => Promise<void>;
+  /**
+   * Stop by default. `interrupt` only ends the turn so queued input runs next
+   * (interrupt-and-send): it carries no Stop identity, so no daemon pauses the
+   * Inbox or cancels the queued input's eligibility.
+   */
+  requestSessionCancel: (
+    sessionId: SessionId,
+    turnId: string,
+    options?: { interrupt?: boolean }
+  ) => Promise<void>;
   requestSessionSteer: (
     sessionId: SessionId,
     expectedTurnId: string,
@@ -378,7 +387,7 @@ export function useSessionActions(): SessionActions {
   );
   const postHog = usePostHog();
   const { isAuthenticated: isConvexAuthenticated, requestAuthRecovery } = useAuthenticatedConvex();
-  const recordMyWorkspaceDailyActiveUser = useCloudMutation(
+  const recordMyWorkspaceDailyActiveUser = useLegacyWorkspaceMutation(
     cloudOperations.activity.recordMyWorkspaceDailyActiveUser
   );
 
@@ -498,13 +507,14 @@ export function useSessionActions(): SessionActions {
   );
 
   const requestSessionCancel = useCallback(
-    async (sessionId: SessionId, turnId: string) => {
+    async (sessionId: SessionId, turnId: string, options?: { interrupt?: boolean }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      const interrupt = options?.interrupt === true;
       const meta = existing?.meta as SessionMeta | undefined;
       const machineId = meta?.machineId;
       const machine = machineId
@@ -515,13 +525,14 @@ export function useSessionActions(): SessionActions {
         MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
         OPERATION_INBOX_PROTOCOL_VERSION
       );
-      const cancelId = supportsInbox ? crypto.randomUUID() : undefined;
+      const cancelId = supportsInbox && !interrupt ? crypto.randomUUID() : undefined;
       if (machineId) {
         // RPC and the durable control request share an identity, even if either arrives late.
         void runtime
           .requestSessionCancel(machineId, sessionId, turnId, {
             timeoutMs: 2_000,
             ...(cancelId ? { cancelId } : {}),
+            ...(interrupt && supportsInbox ? { pauseInbox: false } : {}),
           })
           .then((response) => {
             if (response && !response.success) {

@@ -1,6 +1,7 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
   hashRecordBytes,
@@ -93,7 +94,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -383,6 +384,16 @@ const failureOf = (run: () => unknown) => {
   throw new Error('expected a failure');
 };
 
+it.each(['identity-lost', 'approval-required'] as const)(
+  'projects the portable %s outcome into desktop approval guidance',
+  (code) => {
+    expect(classifyE2eeControlFailure(new PersonalHostError({ code }))).toEqual({
+      kind: 'approval-required',
+      code,
+    });
+  }
+);
+
 describe('encrypted workspace recovery classification', () => {
   it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {
     const fixture = historyFixture();
@@ -437,6 +448,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {

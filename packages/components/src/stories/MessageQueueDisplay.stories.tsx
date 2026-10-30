@@ -6,6 +6,7 @@ import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 
 const TASKS = [
@@ -106,6 +107,109 @@ export const MobileWidth: Story = {
   parameters: {
     containerWidth: 'w-[320px]',
   },
+};
+
+/** A local wall-clock time `days` from today, so the labels read the same on any day. */
+function at(days: number, hour: number): number {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setHours(hour, 0, 0, 0);
+  return date.getTime();
+}
+
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const scheduledItems = [
+  {
+    scheduleId: 'scheduled-tomorrow',
+    content: 'Review these files tomorrow morning',
+    at: at(1, 9),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-week',
+    content: 'Send the weekly summary to the team channel with the release notes',
+    at: at(3, 17),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-failed',
+    content: 'Re-run the nightly benchmark',
+    at: at(0, 23),
+    timeZone,
+    state: 'failed' as const,
+  },
+];
+
+const scheduledArgs = {
+  onOpenScheduled: () => {},
+  onEditScheduledTime: () => {},
+  onCancelScheduled: () => {},
+};
+
+/** Production mobile: the touch layout, roomy rows and inline footers. */
+const mobileDecorator: NonNullable<Story['decorators']> = [
+  (Story) => (
+    <ForceMobileLayoutProvider force>
+      <Story />
+    </ForceMobileLayoutProvider>
+  ),
+];
+
+export const ScheduledSection: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+  },
+};
+
+/** A full conversation column: actions fit inline at the row's end. */
+export const ScheduledSectionWide: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+  },
+  parameters: { containerWidth: 'w-[720px]' },
+};
+
+export const ScheduledOnly: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: [],
+    scheduledItems: scheduledItems.slice(0, 1),
+  },
+};
+
+export const ScheduledSectionMobile: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+    roomy: true,
+    footerPosition: 'inline',
+  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
+};
+
+export const ScheduledOnlyMobile: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: [],
+    scheduledItems: scheduledItems.slice(0, 1),
+    roomy: true,
+    footerPosition: 'inline',
+  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
 };
 
 export const EditingFirstItem: Story = {

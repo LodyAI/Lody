@@ -21,6 +21,7 @@ import {
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import type { ConversationRowComponent, ConversationScrollerProps } from './types';
+import { compensateConversationScroll } from './scroll-compensation';
 
 const isEditableTarget = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
@@ -200,11 +201,7 @@ export function EngineConversationScroller({
       scrollBy: (delta) => {
         const element = viewport();
         if (!element) return;
-        if (typeof element.scrollBy === 'function') {
-          element.scrollBy({ top: delta, behavior: 'instant' });
-        } else {
-          element.scrollTop += delta;
-        }
+        compensateConversationScroll(element, delta);
       },
       requestCommit: (sync) => {
         if (sync && !inLayoutEffect.current) flushSync(forceCommit);

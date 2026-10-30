@@ -44,7 +44,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   does not stop siblings; application shutdown interrupts and joins the producer.
   `makeApplicationRuntime` joins concurrent disposal and retains recovery owners
   after failed Scope close. Only named Legacy application boundaries execute.
-  Preserve timeout/release failure owners; never cache failure as empty success. Read [the decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md)
+  Retry completed probe failures on the next read after five seconds; retain
+  unconfirmed process-release owners and never cache failure as empty success. Read [the decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md)
   before changing the probe or either cache consumer.
 - `process.ts` stays one module with no relative imports (Electron's
   `node --test` resolves them only via `node-test-ts-resolve.mjs`).
@@ -121,5 +122,5 @@ Keep history requests and receipts aligned in the Zod protocol and both lightwei
 TS/CJS guards. The declared-operation suite must admit each supported operation;
 advertising a capability alone does not prove the local IPC path accepts it.
 
-E2EE pairing (`../e2ee-local-pairing.ts`) stays on the same-user socket; no secrets
-or network listener.
+E2EE: same-user socket only. `e2ee-identity.ts` holds sibling SQLite leases;
+reset drains native owners, archives whole dirs and retains idempotent receipts.

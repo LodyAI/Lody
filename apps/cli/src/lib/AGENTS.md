@@ -28,6 +28,9 @@
   require `LODY_LORO_STREAMS_BASE_URL` as a parallel hidden composition path.
 - `cloud-pr-association.ts`: use `authSiteUrl`, not `authBaseUrl` (internal proxy).
   Six failures/workspace/repo, no eviction; reset on client recreation. Log once.
+- Local control queue cancellation must bypass session main work. Health reads,
+  per-config refreshes and per-agent installs must use independent lanes; restart
+  and upgrade stay serialized together. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 - Local control negotiates NDJSON or legacy buffered JSON, preserving intermediate
   replies. `MachineRuntime` may collect responses but forwards each as sent. Cancel
   parked history watches before shutdown drain; preserve shared writers.
@@ -70,6 +73,7 @@ never pushed to renderers as local room health.
   [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
   native work: never clean `running`, cap background waits. Post-turn output resets
   it only for `sessionActivity` agents.
+  Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen

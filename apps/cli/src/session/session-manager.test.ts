@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   encodeProjectPreparationProgress,
@@ -388,6 +388,24 @@ describe('SessionManager Codex provider binding', () => {
         configId: provider.id,
         profile: provider.codexAuth,
       });
+      const profileFile = path.join(root, readyProfile.profile.profileId, 'profile.json');
+      const original = readFileSync(profileFile, 'utf8');
+      writeFileSync(profileFile, '{broken');
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile({ ...restoredConfig(), codexAuth: undefined })).rejects.toThrow(
+        'This Codex provider account reference is missing'
+      );
+      await expect(
+        freezeProfile({
+          ...restoredConfig(),
+          agentConfigId: 'unrelated' as AgentConfigId,
+          codexAuth: undefined,
+        })
+      ).resolves.toBeUndefined();
+      getProvider.mockResolvedValue(provider);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow('metadata could not be read');
+      writeFileSync(profileFile, original);
+      await expect(freezeProfile(restoredConfig())).resolves.toBeUndefined();
     } finally {
       storeSpy.mockRestore();
       rmSync(root, { recursive: true, force: true });
@@ -396,7 +414,7 @@ describe('SessionManager Codex provider binding', () => {
 });
 
 describe('SessionManager cleanup phases', () => {
-  it('stops session producers before closing the workspace document', async () => {
+  it('finishes independent cleanup after failures and retries failed owners', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(
       createLogger(),
@@ -409,22 +427,40 @@ describe('SessionManager cleanup phases', () => {
         cloudPort: createTestCloudPort(),
       }
     );
-    const cleanupSessionsSpy = vi
-      .spyOn(manager as unknown as { cleanupSessions(): Promise<void> }, 'cleanupSessions')
-      .mockResolvedValue();
-
-    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(1);
-    expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
-
-    await manager.cleanUp();
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(2);
-    expect(workspaceDocument.cleanUp).toHaveBeenCalledTimes(1);
-    expect(cleanupSessionsSpy.mock.invocationCallOrder[1]).toBeLessThan(
-      vi.mocked(workspaceDocument.cleanUp).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    const events: string[] = [];
+    let failing = true;
+    const resource =
+      (name: string, fails = false) =>
+      async () => {
+        events.push(name);
+        if (fails && failing) throw new Error(name);
+      };
+    const sessionId = 'cleanup-failure' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const terminate = session.terminate.bind(session);
+    session.terminate = async () => {
+      await resource('session', true)();
+      await terminate(true);
+    };
+    Object.assign(manager, {
+      mcpAuthentication: { close: resource('mcp', true) },
+      workspaceDocument: { cleanUp: resource('workspace') },
+      gitCredentialBroker: { shutdown: resource('broker', true) },
+      githubTokenManager: { shutdown: resource('token') },
+    });
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
     );
+    expect(events).toEqual(['session']);
+    events.length = 0;
+    await expect(manager.cleanUp()).rejects.toBeInstanceOf(AggregateError);
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker', 'token']);
+    expect(manager.getSession(sessionId)).toBe(session);
+    failing = false;
+    events.length = 0;
+    await manager.cleanUp();
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker']);
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });
 
@@ -1431,6 +1467,10 @@ describe('SessionManager failed agent creation', () => {
     const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
     const reconfigured = await manager.createSession({ ...config, memory });
     expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    manager.detachSession(replacement);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    await replacement.terminate(true);
     expect(manager.getSession(sessionId)).toBe(reconfigured);
     await manager.terminateSession(sessionId, true);
     expect(terminated).toHaveBeenCalledTimes(1);

@@ -31,6 +31,7 @@ import { WorkspaceRouteTargetProvider } from '../providers/workspace-route-targe
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,
+  retryLocalPlatformSnapshot,
 } from '../providers/local-platform-provider';
 
 // Paths that are served by the CF Pages middleware as landing pages.
@@ -124,6 +125,7 @@ function LocalWorkspaceGuardRoute() {
         gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={retryLocalPlatformSnapshot}
       />
     );
   }

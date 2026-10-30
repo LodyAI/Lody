@@ -24,6 +24,7 @@ import {
   rm,
   writeFile,
   readFile,
+  lstat,
   symlink,
   mkdir,
   unlink,
@@ -730,6 +731,121 @@ describe('WorkspaceGitService', () => {
       expect(await missingObjects()).toEqual(before);
     });
   }, 180_000);
+
+  it('borrows complete local objects for unselected descendants and detaches their storage', async () => {
+    await withLocalSubmoduleGroup(
+      false,
+      async ({ directory, web, api, run, meta, options, git }) => {
+        const leaf = join(directory, 'leaf');
+        await mkdir(leaf);
+        await git(leaf, ['init', '-b', 'main']);
+        await writeFile(join(leaf, 'payload'), 'nested objects');
+        await git(leaf, ['add', '.']);
+        await git(leaf, ['commit', '-m', 'leaf']);
+        await git(api, ['submodule', 'add', pathToFileURL(leaf).href, 'nested/leaf']);
+        await git(api, ['commit', '-am', 'nested module']);
+        const source = join(web, 'deps/api');
+        await git(source, ['fetch']);
+        await git(source, ['checkout', (await git(api, ['rev-parse', 'HEAD'])).trim()]);
+        await git(source, ['submodule', 'update', '--init', '--recursive']);
+        await git(source, ['remote', 'set-url', 'origin', 'https://github.com/example/api.git']);
+        await git(web, ['commit', '-am', 'advance gitlink']);
+        await git(web, ['submodule', 'sync']);
+        meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+        const expected = (await git(source, ['rev-parse', 'HEAD'])).trim();
+
+        // Real upload-pack still advertises refs, but cannot transfer an object pack.
+        // Only borrowing the complete local objects can materialize these checkouts.
+        const globalConfig = join(directory, 'gitconfig');
+        await writeFile(globalConfig, '[uploadpack]\n  packObjectsHook = false\n');
+        vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig);
+        const sourceGitfiles = [join(source, 'nested/leaf/.git'), join(api, 'nested/leaf/.git')];
+        const gitfiles = await Promise.all(sourceGitfiles.map((file) => readFile(file)));
+        await Promise.all(sourceGitfiles.map((file) => unlink(file)));
+        await expect(materializeProjectGroup(options)).rejects.toThrow();
+        const checkout = join(projectGroupDirectory(run), 'worktrees', owner, 'web/deps/api');
+        // The parent completed before its descendant failed. A retry must resume
+        // below it without resetting its HEAD or silently leaving the child empty.
+        expect((await git(checkout, ['rev-parse', 'HEAD'])).trim()).toBe(expected);
+        await Promise.all(sourceGitfiles.map((file, index) => writeFile(file, gitfiles[index]!)));
+        const prepared = await materializeProjectGroup(options);
+        expect(join(prepared.workdir, 'web/deps/api')).toBe(checkout);
+        expect((await git(checkout, ['rev-parse', 'HEAD'])).trim()).toBe(expected);
+        expect(await readFile(join(checkout, 'nested/leaf/payload'), 'utf8')).toBe(
+          'nested objects'
+        );
+
+        await rm(source, { recursive: true, force: true });
+        await rm(join(web, '.git/modules'), { recursive: true, force: true });
+        await rm(api, { recursive: true, force: true });
+        await rm(leaf, { recursive: true, force: true });
+        for (const repository of [checkout, join(checkout, 'nested/leaf')]) {
+          const alternates = (
+            await git(repository, ['rev-parse', '--git-path', 'objects/info/alternates'])
+          ).trim();
+          expect(existsSync(resolvePath(repository, alternates))).toBe(false);
+          await git(repository, ['fsck', '--full']);
+        }
+        expect((await git(checkout, ['status', '--porcelain'])).trim()).toBe('');
+      }
+    );
+  }, 180_000);
+
+  it.each(['partial', 'shallow', 'linked', 'alternates', 'wrong-origin', 'symlink', 'missing'])(
+    'does not borrow an unselected %s local source',
+    async (layout) => {
+      await withLocalSubmoduleGroup(false, async ({ web, api, options, git }) => {
+        const source = join(web, 'deps/api');
+        const url = pathToFileURL(api).href;
+        if (layout === 'partial') await git(source, ['config', 'remote.origin.promisor', 'true']);
+        if (layout === 'wrong-origin')
+          await git(source, ['remote', 'set-url', 'origin', 'https://github.com/other/repo']);
+        if (layout === 'alternates') {
+          const objects = (
+            await git(api, ['rev-parse', '--path-format=absolute', '--git-path', 'objects'])
+          ).trim();
+          const alternate = (
+            await git(source, [
+              'rev-parse',
+              '--path-format=absolute',
+              '--git-path',
+              'objects/info/alternates',
+            ])
+          ).trim();
+          await writeFile(alternate, objects + '\n');
+        }
+        if (['shallow', 'linked', 'symlink', 'missing'].includes(layout)) {
+          await rm(source, { recursive: true, force: true });
+          if (layout === 'shallow') await git(web, ['clone', '--depth', '1', url, source]);
+          if (layout === 'linked') await git(api, ['worktree', 'add', '--detach', source]);
+          if (layout === 'symlink') {
+            await symlink(api, source, 'dir');
+            // Git status rejects symlinked gitlinks before reference selection. Ignore
+            // only this source's status so preparation can exercise the fallback;
+            // git submodule update and reference validation still inspect the path.
+            await git(web, ['config', 'submodule.deps/api.ignore', 'all']);
+          }
+        }
+        // The symlink target has a GitHub origin; match it so URL mismatch cannot
+        // accidentally satisfy the symlink rejection assertion.
+        const expectedUrl = layout === 'symlink' ? 'git@github.com:example/api.git' : url;
+        expect(
+          await worktreeGitLegacy.findProjectSubmoduleReference(source, expectedUrl)
+        ).toBeUndefined();
+        const prepared = await materializeProjectGroup(options);
+        const checkout = join(prepared.workdir, 'web/deps/api');
+        expect(await readFile(join(checkout, 'readme'), 'utf8')).toBe('original');
+        await git(checkout, ['fsck', '--full']);
+        if (layout === 'symlink') {
+          expect((await lstat(source)).isSymbolicLink()).toBe(true);
+          expect(await realpath(source)).toBe(api);
+          expect((await lstat(checkout)).isDirectory()).toBe(true);
+          expect((await git(api, ['status', '--porcelain'])).trim()).toBe('');
+        }
+      });
+    },
+    180_000
+  );
 
   it('ignores stale unselected submodule paths while initializing real gitlinks', async () => {
     await withLocalSubmoduleGroup(false, async ({ web, options, git }) => {

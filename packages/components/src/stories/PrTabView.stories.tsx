@@ -12,6 +12,8 @@ import type {
   GitHubUser,
 } from '@lody/shared';
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
+import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
 
@@ -909,6 +911,27 @@ export const MobileWithBackButton: Story = {
       >
         <Story />
       </div>
+    ),
+  ],
+};
+
+/** A native phone's PR drawer owns its keyboard inset outside the workspace root. */
+export const MobileNativeKeyboardDrawer: Story = {
+  args: MobileWithBackButton.args,
+  decorators: [
+    (Story) => (
+      <Drawer direction="right" open repositionInputs>
+        <DrawerContent
+          nativeKeyboardInset
+          className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+          aria-describedby={undefined}
+        >
+          <DrawerTitle className="sr-only">Pull request</DrawerTitle>
+          <VaulDrawerBody topInset="0px">
+            <Story />
+          </VaulDrawerBody>
+        </DrawerContent>
+      </Drawer>
     ),
   ],
 };

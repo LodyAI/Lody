@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { ChatFailedDetailDialog } from '../src/components/ai-gui/chat-failed-detail-dialog';
+import { MessageRowView } from '../src/components/ai-gui/view';
+import type { SessionId } from '@lody/shared';
 import { initI18n } from '../src/i18n';
 
 (
@@ -64,6 +66,37 @@ afterEach(() => {
 });
 
 describe('ChatFailedDetailDialog', () => {
+  it.each([
+    ['sessionCancelFailed', 'Stop request failed', 'Lody will keep trying to end the task.'],
+    ['sessionStopTimedOut', 'Stopping took too long', 'Lody is trying to force it to end.'],
+    ['sessionTerminationFailed', 'Could not stop the task', 'The task may still be running'],
+  ])('keeps %s visible with its raw error and recovery guidance', (source, title, guidance) => {
+    act(() => {
+      root.render(
+        createElement(MessageRowView, {
+          sessionId: 'stop-failure-session' as SessionId,
+          message: {
+            id: 'stop-failure',
+            role: 'system',
+            timestamp: '2026-10-29T00:00:00.000Z',
+            items: [
+              {
+                type: 'system_notice',
+                name: 'agent_warning',
+                meta: { source, message: RAW_MESSAGE },
+              },
+            ],
+          },
+        })
+      );
+    });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(title);
+    expect(alert?.textContent).toContain(guidance);
+    expect(alert?.textContent).toContain(RAW_MESSAGE);
+    expect(alert?.querySelector('dialog, details')).toBeNull();
+  });
+
   it('shows the raw error verbatim instead of a truncated hover string', () => {
     render();
     expect(document.body.textContent).toContain(RAW_MESSAGE);

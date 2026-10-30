@@ -76,11 +76,10 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-// loro-repo >= 0.16.11 resolves create()/initOffline()/destroy() on the real clock
-// (native libuv async), NOT via the timers vitest fakes. Awaiting them while fake
-// timers are installed leaves the resolution to real wall time, which on a loaded CI
-// runner can be starved past the 30s test timeout. So run repo setup/teardown on real
-// timers and only keep the fake clock for the batch-window assertions.
+// Repo setup/teardown crosses native async work, so run it on real timers.
+// Restoring real timers cannot settle yields already queued on a fake clock:
+// persistence can await setTimeout(0). Tests without batch-window assertions
+// should keep real timers for the whole repo lifetime.
 const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers();
@@ -237,6 +236,7 @@ const createRecoveryHarness = async (
     store: SessionTransientStore;
     sessionActivePresence: SessionActivePresenceControllerLegacy;
     machineFlockCommandWatcher: { stop(): void };
+    clearScheduledACPFlush(id: SessionId): void;
     flushACPUpdatesNow(id: SessionId): Promise<void>;
   };
   host.machineFlockCommandWatcher.stop();
@@ -296,6 +296,7 @@ const createRecoveryHarness = async (
     let promptPending = false;
     session.agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       currentModel: undefined,
       get pendingPromptCompletion() {
@@ -797,6 +798,7 @@ describe('MessageHandler ACP batching', () => {
         expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
         expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+        expect(h.doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
       } finally {
         await h.close();
       }
@@ -937,26 +939,66 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it.each<AcpSessionNotification['update']>([
+  const disconnectedPromptUpdates: AcpSessionNotification['update'][] = [
     { sessionUpdate: 'current_mode_update', currentModeId: 'auto' },
     { sessionUpdate: 'plan', entries: [] },
     { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' },
-  ])('never replays a disconnected prompt after $sessionUpdate', async (update) => {
-    const h = await createRecoveryHarness({ updates: [update] });
-    h.finishRetry.resolve();
-    try {
-      await h.service.continueSession(h.message);
-      await h.service.drainInboxExecutions();
-      expect(h.submissions).toEqual(['old']);
-      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
-        { kind: 'unknown', code: 'agent_disconnected' },
-      ]);
-      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
-      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
-    } finally {
-      await h.close();
+  ];
+  it.each(
+    disconnectedPromptUpdates.flatMap((update) =>
+      [false, true].map((flushBeforeDisconnect) => ({
+        update,
+        sessionUpdate: update.sessionUpdate,
+        flushBeforeDisconnect,
+      }))
+    )
+  )(
+    'never replays a disconnected prompt after $sessionUpdate (flushed=$flushBeforeDisconnect)',
+    async ({ update, flushBeforeDisconnect }) => {
+      // This tests event ownership, not time. A repo persistence yield must
+      // remain runnable through close instead of being discarded with fake timers.
+      vi.useRealTimers();
+      const promptStarted = Promise.withResolvers<void>();
+      const disconnect = Promise.withResolvers<void>();
+      const h = await createRecoveryHarness({
+        updates: [update],
+        onPrompt: async () => {
+          // Own the flush boundary so neither branch races the batch timer.
+          h.host.clearScheduledACPFlush(h.sessionId);
+          promptStarted.resolve();
+          await disconnect.promise;
+        },
+      });
+      h.finishRetry.resolve();
+      const running = h.service.continueSession(h.message);
+      try {
+        await Promise.race([
+          promptStarted.promise,
+          running.then(() => {
+            throw new Error('Turn ended before the ACP update');
+          }),
+        ]);
+        expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toHaveLength(1);
+        if (flushBeforeDisconnect) {
+          await h.host.flushACPUpdatesNow(h.sessionId);
+          expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+        }
+        disconnect.resolve();
+        await running;
+        await h.service.drainInboxExecutions();
+        expect(h.submissions).toEqual(['old']);
+        expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+          { kind: 'unknown', code: 'agent_disconnected' },
+        ]);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+      } finally {
+        disconnect.resolve();
+        await running;
+        await h.close();
+      }
     }
-  });
+  );
 
   it.each(['snapshot', 'progress', 'text', 'rich', 'tool'] as const)(
     'subagent content observation distinguishes $0 from lifecycle status',

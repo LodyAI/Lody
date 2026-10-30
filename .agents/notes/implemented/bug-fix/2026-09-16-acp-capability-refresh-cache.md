@@ -128,20 +128,20 @@ move `fetchedAt` — once it is older.
 Half the TTL is chosen because it is the value that yields both guarantees that matter. Writes are
 bounded: an unchanged entry is rewritten at most once per config per 12 hours however often
 sessions start or refreshes are forced. And the free-refresh claim becomes true: an agent that
-starts at least one session per 12 hours has its entry renewed before it can expire, so it never
-needs a probe at all. A threshold equal to the TTL would bound writes the same way but let an
+starts at least one session per 12 hours has its entry renewed before it can expire after an
+initial probe has confirmed the command preview and launch inputs. A threshold equal to the TTL would bound writes the same way but let an
 entry used every 20 hours still lapse; a smaller one only adds writes. Probes after expiry always
 renew, since an expired entry is by definition past half its lifetime.
 
 ### Why the TTL is 24 hours
 
-The source version already covers every input Lody controls, so the TTL only bounds drift Lody
-cannot observe: slash commands, sub-agents, or model entitlements a user changes in the agent's own
-configuration. Two paths converge faster than any TTL — `scheduleCreatedSessionCapabilityUpdate`
-confirms the entry from every real session's `session/new` response (renewing it once it is past
-half its lifetime, see below — the first revision claimed this without it being true), so agents
-people actually use are refreshed without a probe, and Settings offers an explicit forced refresh. What the TTL is left to
-cover is agents nobody launches, where a shorter value buys little: an hour would cost ~144
+The TTL bounds changes in unlaunched agents' own configuration, including command previews and
+model entitlements. `scheduleCreatedSessionCapabilityUpdate` confirms models and options from
+real sessions and renews the entry after half its lifetime. Actual commands are now Session-owned;
+Session renewal preserves the existing probe preview, so that preview can remain older while the
+entry is renewed. Settings explicitly refreshes it. The [command ownership decision](2026-10-29-session-command-catalogs.md)
+partially replaces this note's earlier treatment of commands as Provider-wide capabilities.
+A shorter TTL for agents nobody launches buys little: an hour would cost ~144
 probes/day on this machine, a day costs ~6, and both are far below the measured ~1,700. A
 future-dated `fetchedAt` counts as fresh rather than as a reason to re-probe, because writer and
 reader stamp it from the same server clock, so a negative age means a clock adjustment.
@@ -162,8 +162,9 @@ enumeration, which the review rules class as a secret leak.
 
 Chosen: the answering daemon keeps, per config, a SHA-256 fingerprint of everything the probe was
 launched with — the same serialization the in-flight dedupe already keys on, environment included —
-in a process-memory map. It is set whenever this process writes or confirms an entry, by a probe or
-by a created session, and a cache hit requires it to equal the fingerprint of the current inputs.
+in a process-memory map. Only a probe records that identity; a created Session cannot confirm the
+project-independent command preview. A cache hit requires the identity to match current inputs
+and the entry to contain a confirmed probe list, including an explicit empty list.
 Nothing new is persisted, synced or logged. The hash exists only so the long-lived map does not hold
 another plaintext copy of the environment.
 

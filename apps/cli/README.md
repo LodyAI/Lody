@@ -14,6 +14,83 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Encrypted remote execution authorization
+
+The encrypted workspace host exposes
+`authorizeExecution(workspaceId, requesterDevice, localProjectId?): Effect<ExecutionAuthorization>`.
+The requester is the lowercase hex signing public key from an independently verified
+request. The result is `Authorized`, or `Denied` with `invalid-request`,
+`not-authorized`, `e2ee_machine_not_shared`, `unavailable`, or `closed`. Use it immediately before a new execution;
+request integrity, target binding and the durable journal claim remain separate checks.
+
+The machine reads the ledger with its own device credential and verifies every page
+through the existing runtime. Grants are isolated by workspace host and requesting
+device, kept only in memory for less than 15 minutes from read start, and checked
+against currently known membership on every call. Owner/Admin/Member personal or
+machine devices qualify directly when they share the target machine's verified ledger
+membership. Cross-member execution requires a current owner-signed machine policy
+and, for a local project, its project switch. Missing authorization returns `e2ee_machine_not_shared` (“机器或本地项目未共享，请联系机器所有者”). See the [native policy host](../../packages/e2ee-machine-sharing/README.md).
+Guest, recovery, removed and revoked devices do not qualify.
+Restart requires another authenticated read. A connection or forwarded proof cannot
+renew a grant. Concurrent misses share a refresh, bounded to 30 seconds; failure
+rejects those new execution requests and permits retry without stopping local editing,
+already running work or other workspace hosts. No RPC/agent dispatch is enabled by
+this interface alone.
+
+Execution identity comes from the verified original update's device and ledger
+actor. UI account IDs are display metadata: they neither grant nor deny execution
+and are never compared with crypto user IDs. The host checks the signing device's
+current membership, role, revocation and machine/project authorization before a
+new claim. Ordinary workspace visibility/project-sharing checks remain unchanged.
+
+## Local encrypted execution log recovery
+
+Stop the journal's execution owners, then run:
+
+```sh
+lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
+```
+
+The command works offline and returns `archivePath` and `journalPath`. It renames
+and preserves the old execution log, creates a fresh log, and retains old current-format
+request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+unknown results are not automatically retried. Restart owners after reset. Retrying
+this command completes an interrupted reset using the same archive path.
+
+A clock error asks you to calibrate the system clock. Without trusted reference time,
+a bad observation can still reject new claims in its workspace until explicit reset;
+other workspaces and completed evidence remain available. Empty interrupted first
+creation initializes automatically. An unknown schema is archived and reported,
+then waits for explicit reset. An incomplete current-format store still retires all
+readable request keys before archival; unreadable current request keys refuse reset
+and preserve the original for repair. No legacy data is imported.
+
+This maintenance command is available by its explicit name and hidden from general
+CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers,
+share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
+workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
+reset button. The execution gate resolves the turn's original signed update, checks its verified
+signer, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
+by default. `LodyOptions.authorizeEncryptedExecution` can override this capability
+with the same signature. Missing signer or authorization denies new starts;
+revoking a device cannot borrow another device's authority from the same user.
+Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
+cannot substitute for the original turn signer. Snapshot recovery backfills retained
+signed updates from Streams. Missing originals keep the turn pending and retryable
+until its original window expires; they never grant a start. Each backfill attempt
+has a three-second/eight-page bound; stop cancels the watcher's delayed retry.
+Confirmed whole-member removal or machine-device revocation during backfill is
+terminal: it immediately fences new execution and invalidates cached grants before
+the existing owner drain. Late authorization results cannot claim a journal start.
+Member removal retains its identity-verified receipt/erasure path; single-device
+revocation closes the workspace while retaining local originals. Ordinary transport
+failures continue to leave missing-origin turns pending.
+Ordinary workspaces do not open this log.
+Transport frames keep their own original request/response receipts; execution evidence
+contains intent identities and a settlement marker, never prompt or response plaintext.
+See the
+[recovery decision](../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
+
 ## Development type checking
 
 `tsconfig.json` includes source and tests so editor language servers resolve the
@@ -40,6 +117,12 @@ Vitest reports recovery's test-body duration separately from the file duration,
 which also includes setup. This is a scale regression test, not a network benchmark.
 
 ## Daemon upgrades and autostart
+
+Two V8 OOM exits within thirty minutes pause automatic launches for ten minutes.
+The host and lease stay alive; after cooldown one recovery launch resets the OOM
+window. Another OOM pair starts a fresh cooldown. Explicit start/restart recovers
+immediately; stop cancels recovery. Authentication, protocol and ownership failures
+retain their existing terminal behavior.
 
 Remote upgrades install globally using the daemon's npm environment, resolve the
 installed package's declared CLI entry via `npm root -g`, and verify its version.
@@ -204,3 +287,13 @@ cloud conversations/settings, and disables execution of imported sessions/schedu
 Roost and unsupported formats fail before record uploads. Source data is retained;
 rerunning resumes the frozen snapshot. It does not copy code directories or native
 agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).
+
+## Local export
+
+`lody export` includes encrypted workspaces, including `--all-workspace`. The
+workspace manager reads verified, decrypted session documents through the same
+protected replica used by chat, then writes JSON and Markdown on this device.
+`--offline` reads its retained local cache. Unsupported encrypted schedule rooms
+are omitted; ordinary workspace exports keep their existing schedule data.
+Desktop conversation copy and image export likewise use the local history and
+save/clipboard bridges, without publishing a share.

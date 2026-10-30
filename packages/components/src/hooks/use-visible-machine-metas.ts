@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -22,7 +24,6 @@ import {
   type VisibleMachineIndex,
 } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { MachineVisibilityAccess };
@@ -57,23 +58,29 @@ export function useVisibleMachineMetas(
   const syncMachineFlock = options.syncMachineFlock ?? true;
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const canQuery =
+    enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const currentUserId = useWorkspaceLocalAccountId();
-  const queriedAccessRows = useCloudQuery(
+  const queriedAccessRows = useLegacyWorkspaceQuery(
     cloudOperations.machines.listVisibleMachines,
-    enabled && workspaceId ? { workspaceId } : 'skip'
+    enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
-  const rawAccessRows = enabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
+  const rawAccessRows =
+    enabled && legacyQueriesEnabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
   const isLoading =
     !enabled ||
-    isAuthedWorkspaceQueryLoading({
-      workspaceId,
-      isConvexAuthLoading,
-      canQuery,
-      queryResult: queriedAccessRows,
-    });
+    legacyQueryStatus === 'pending' ||
+    (legacyQueriesEnabled &&
+      isAuthedWorkspaceQueryLoading({
+        workspaceId,
+        isConvexAuthLoading,
+        canQuery,
+        queryResult: queriedAccessRows,
+      }));
 
   const baseVisibleIndex = useMemo(
     () =>

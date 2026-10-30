@@ -1,17 +1,14 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { PanInfo } from 'framer-motion';
 import { Check, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerTitle,
-} from '@/ui/drawer';
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { cn } from '@/lib/utils';
+import { isNativeIOSAppShell } from '@/lib/native-platform';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import type { MultiSelectPill } from './mobile-filter-pill-bar';
 
 /**
@@ -42,6 +39,9 @@ export function MobileFilterDrawer({
   description,
 }: MobileFilterDrawerProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(88, true);
+  const nativeIOS = isNativeIOSAppShell();
   const resolvedTitle = title ?? t('mobile.filterDrawer.title', 'Filters');
   const [activeId, setActiveId] = useState<string | null>(null);
   const activePill = activeId ? (pills.find((p) => p.id === activeId) ?? null) : null;
@@ -54,11 +54,15 @@ export function MobileFilterDrawer({
   }, [open]);
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={nativeIOS ? false : undefined}>
       <DrawerContent
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
         className={cn(
           'mobile-filter-drawer',
-          'h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60'
+          'h-[88dvh]! rounded-t-2xl border-border/60',
+          nativeIOS && keyboard.contentClassName
         )}
       >
         <div className="flex h-full min-h-0 flex-col">
@@ -100,6 +104,7 @@ export function MobileFilterDrawer({
                 <DimensionPage
                   key={`dim-${activePill.id}`}
                   pill={activePill}
+                  scrollRef={keyboard.scrollRef}
                   onBack={() => setActiveId(null)}
                 />
               ) : (
@@ -171,9 +176,7 @@ function SummaryPage({
                  tappable → drill into that dimension's pick list,
                  since the user almost always wants to edit the
                  narrowing they just summarised. */
-              const includedOptions = pill.options.filter((opt) =>
-                pill.selectedIds.has(opt.id)
-              );
+              const includedOptions = pill.options.filter((opt) => pill.selectedIds.has(opt.id));
               const MAX_VISIBLE = 3;
               const visible = includedOptions.slice(0, MAX_VISIBLE);
               const overflowCount = includedOptions.length - visible.length;
@@ -283,7 +286,15 @@ function SummaryPage({
   );
 }
 
-function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => void }) {
+function DimensionPage({
+  pill,
+  onBack,
+  scrollRef,
+}: {
+  pill: MultiSelectPill;
+  onBack: () => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
+}) {
   const { t } = useTranslation();
   /* Fuzzy search kicks in for longer option lists (repo / project
      filters can run into 20+ entries in big workspaces). Threshold
@@ -324,6 +335,7 @@ function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => 
 
   return (
     <motion.div
+      ref={scrollRef}
       className="absolute inset-0 overflow-y-auto bg-background"
       /* Drag-right to dismiss back to summary. `dragDirectionLock` lets
          vertical scroll through unimpeded — motion only captures the
@@ -379,10 +391,7 @@ function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => 
               'focus-within:ring-primary/40'
             )}
           >
-            <Search
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             <input
               type="search"
               value={query}

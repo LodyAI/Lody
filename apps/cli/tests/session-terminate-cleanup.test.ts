@@ -16,6 +16,7 @@ import {
 } from '../src/session/session-sandbox';
 import type { Logger } from '../src/utils/logger';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import type { SessionCredentials } from '../src/session/session-credentials';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -38,7 +39,7 @@ const createTerminalManager = (overrides: Partial<TerminalManager> = {}): Termin
   ...overrides,
 });
 
-const createSession = (sandbox?: SessionSandbox): Session => {
+const createSession = (sandbox?: SessionSandbox, credentials?: SessionCredentials): Session => {
   return new Session(
     {
       workspaceId: 'workspace-1' as WorkspaceId,
@@ -52,9 +53,27 @@ const createSession = (sandbox?: SessionSandbox): Session => {
     },
     createSilentLogger(),
     process.cwd(),
-    sandbox
+    sandbox,
+    credentials
   );
 };
+
+it('closes local MCP access even when releasing another credential fails', async () => {
+  let mcpAccess = true;
+  const session = createSession(undefined, {
+    mode: 'native',
+    release: async () => {
+      throw new Error('synthetic credential release failure');
+    },
+  });
+  Object.assign(session, {
+    releaseExternalMcpServers: async () => {
+      mcpAccess = false;
+    },
+  });
+  await expect(session.terminate(true)).rejects.toThrow('synthetic credential release failure');
+  expect(mcpAccess).toBe(false);
+});
 
 const createProcessTableSandbox = async (table: FakeProcessTable): Promise<SessionSandbox> =>
   await createSessionSandboxFactory({

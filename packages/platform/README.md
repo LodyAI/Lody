@@ -5,6 +5,18 @@ This package contains platform-neutral composition contracts. The optional
 inspection with persistent host custody. It never enables document transports;
 see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
 
+Hosted entries may pass `createE2eeRuntime: E2eeRuntimeFactory` to the shared
+`createRouter`. Its cloud provider borrows the returned `E2eeWorkspaceRuntime`
+without changing optional methods or reader labels. Standalone login without
+an authenticated context skips the factory; local and Electron keep their existing
+owners. The callback is synchronous and pure, receiving only a read-only live
+session store. Acquire the host's Layers outside render or lazily in its methods,
+and retain the application executor/resources through confirmed retirement.
+Account routing never replaces desktop approval or per-operation host admission.
+Returning `undefined` leaves the optional runtime absent; no host is enabled by default.
+[Personal-host composition](../e2ee-client/README.md#shared-platform-runtime)
+explains the owned implementation.
+
 The separate `./host-keys` entry adds
 an unconnected host identity lifecycle seam using the workspace's Effect version.
 It does not enable encrypted workspaces or register IPC handlers.
@@ -66,3 +78,34 @@ The file-keychain fixture does not validate app entitlements, signed Electron/CL
 packaging, screen lock, a human denying access, upgrades or unattended operation.
 Windows/Linux stores and actual Web/iOS/Android devices need separate adapters and
 validation; none inherit this macOS result. All-platform Beta remains unaccepted.
+
+## Team membership
+
+The optional runtime member methods submit a native signed KeyPackage, inspect
+pending applications, approve/reject, revoke an invitation and reconcile key
+installation. Email automatic admission and link approval remain distinct.
+Callers must retain the original request on a lost response; membership and key
+readiness are separate. Credentials and private keys never cross this port.
+
+## Encrypted machine sharing
+
+`E2eeMachineSharingTransport` is an unconnected host transport interface using the
+canonical `@lody/cloud-api` DTOs. It supplies no provider or renderer capability.
+The host retains exact original frames, reconciles uncertain writes, verifies
+consecutive policy versions and owns execution freshness before using the core
+pure authorization decision. Every scope includes the ledger-qualified machine binding generation. Removal
+closes the old resource; readmission starts at revision one in a new resource,
+while atomic replacement preserves generation. Storage tombstones cannot replace
+verified history pins. The separate
+`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
+only and returns ciphertext/untrusted metadata, with no execution freshness.
+See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+
+## Portable personal-device runtime
+
+The existing `E2eeWorkspaceRuntime` contract is also implemented by the opt-in
+[`@lody/e2ee-client`](../e2ee-client/README.md) factory. Its application Scope owns
+pinned identity, real capability Layers and bounded retirement. Reader open never
+creates an identity; the shared provider requires an eligible usable epoch before
+content opens. Preserve the returned readerOwner and expected account on release.
+No public local-only selector or authenticated product-cloud entry is changed.

@@ -43,6 +43,7 @@ export type Operation =
       readonly replaces?: Bytes.SigningPublicKey | null;
     }
   | { readonly type: 'revokeDevice'; readonly target: Bytes.SigningPublicKey }
+  | { readonly type: 'removeMember'; readonly membershipId: Bytes.MembershipId }
   | { readonly type: 'transferOwner'; readonly successorMembershipId: Bytes.MembershipId }
   | {
       readonly type: 'publishEpoch';
@@ -130,7 +131,7 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           membershipId: yield* lift(Bytes.membershipId(p[1])),
           request: yield* parseJoin(p[2]!),
         });
-      // Tag 2 is retired. Member removal is only the atomic tag 8 operation.
+      // Tag 2 stays retired. Independent removal uses capability-gated tag 10.
       case 3: {
         yield* array(p, 3);
         const role = p[2] === 1 ? 'admin' : p[2] === 2 ? 'member' : p[2] === 3 ? 'guest' : null;
@@ -221,6 +222,12 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           capabilities: Object.freeze(capabilities),
         });
       }
+      case 10:
+        yield* array(p, 2);
+        return Object.freeze({
+          type: 'removeMember',
+          membershipId: yield* lift(Bytes.membershipId(p[1])),
+        });
       default:
         return yield* fail('unknown-operation');
     }

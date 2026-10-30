@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-Opening a conversation can still leave the whole pane blank until the reader presses
+The former implementation could leave the whole pane blank until the reader pressed
 "scroll to latest", after seven earlier fixes to the same area. Two state machines,
 the Virtua fork and `use-sticky-scroll`, both write `scrollTop` and learn about each other
 only through asynchronous scroll events. Positions are stored as pixels, compensation is
 applied as deltas, and a fail-closed gate hides the pane until the two agree.
 
-This note proposes one conversation scroll engine:
+One conversation scroll engine replaces those overlapping writers:
 
 - It is the only programmatic writer, and it owns the scroll extent.
 - Its state is the reader's intent, expressed as a semantic reading anchor, and every
@@ -181,7 +181,7 @@ Invariants are checked at the commit boundary, against the committed DOM.
   end: a downward scroll within 4px of the current bottom, or a downward scroll
   sequence that comes to rest (`scrollend`) at a bottom the range had while it ran.
 
-## Proposal
+## Decision
 
 ### Responsibilities
 
@@ -373,6 +373,31 @@ the event differs from `lastObserved`, and its cycle adopts and covers the new p
 
 How the compositor thread interacts with relative writes is a validation item on each
 supported platform, not an assumption.
+
+The WebKit DOM adapter releases native scrolling ownership around each relative
+correction: commit `overflow-y: hidden` with a layout read, apply the relative
+write, commit again, and restore the exact inline value and priority in `finally`.
+Content remains painted at the same origin. A synchronous CSSOM read-back alone
+does not acknowledge the native scrolling tree: in macOS Playwright WebKit 26.0, a
+synthetic leading-height change of +536 followed by -160 wheel inputs produced
+screen positions `0 → 696 → 320` instead of `0 → 160 → 320`. An empty non-passive
+wheel listener makes this crossing reproducible. Changing to absolute writes did
+not reliably prevent it. WebKit's [upstream async-scrolling reconciliation fix](https://github.com/WebKit/WebKit/commit/e8697834ad4b3d036032823f29b7d4329ffb45ec)
+describes the same class of crossed native/programmatic position updates; it does
+not establish which Safari releases contain that fix.
+
+The overflow handoff adds two synchronous layout reads per WebKit correction and
+may cancel an in-flight wheel input or touch momentum. This keeps the accepted
+interruption cost below explicit rather than deferring compensation or changing
+the coordinate origin. Other engines retain the ordinary relative write. The
+[adapter regression](../../../../packages/components/tests/engine-conversation-scroller.test.tsx)
+pins exception restoration; the
+[native wheel regression](../../../../packages/components/tests/e2e/conversation-scroll-engine.spec.ts)
+checks both input orderings, unchanged anchor geometry during each correction,
+monotonic reading motion, and continued native input after the handoff. It uses
+observed viewport progress: `mouse.wheel()` does not await native animation, and
+GTK and macOS need not finish the same distance within the same frame count.
+Physical iOS touch and momentum acceptance remains open.
 
 **No deferral in v1: an accepted iOS regression.**
 - **Current behavior on iOS.** The fork defers jumps while a scroll is active
@@ -1031,8 +1056,7 @@ completed with undelivered notifications" warning; its position assertions pass,
 and no other page errors occur. This probe uses injected event data and DOM offset
 steps; it does not generate native touchscreen movement or compositor momentum.
 
-At documentation head `a2429a57e`, GitHub CI's static checks, all test shards and
-Conversation browser tests pass. The original recording has no touch/scroll event
+The original recording has no touch/scroll event
 trace and no matched before/after capture on its phone. An available iOS simulator
 was booted, but no native touch experiment was completed: the Simulator UI is
 absent on this host and the current Lody panel could not be controlled. The original

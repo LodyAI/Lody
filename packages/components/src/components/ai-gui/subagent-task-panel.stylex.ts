@@ -74,6 +74,8 @@ export const styles = stylex.create({
     overflowY: 'auto',
     marginTop: '2px',
   },
+  /** Subagents and other tasks, side by side, when a turn has both. */
+  tabs: { minWidth: 0, marginTop: '2px' },
   rowRuled: { borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: colors.separator },
 
   /**

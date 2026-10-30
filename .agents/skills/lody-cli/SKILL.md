@@ -165,7 +165,7 @@ needed.
 
 - **Workspace.** `--workspace <selector>` takes an id, slug or name; get them from
   `lody workspace list --json`. `schedule` and the `agent-role` write commands also accept
-  `-w`. `session recover-inbox` needs the exact id.
+  `-w`.
 - **Other selectors.** `--agent-config`, `--machine`, `--agent-role` and MCP server names
   take an id or a name. An ambiguous name is rejected; retry with the id.
 - **Output.** For automation prefer `--json`; streaming commands also have `--jsonl`.
@@ -273,11 +273,6 @@ requires that machine online; it does not require a local runtime.
 - `archive` hides a session. `restore` brings it back.
 - `delete` permanently removes an archived session and cleans up its worktree on the
   machine.
-- `recover-inbox <id> --machine <mid> --workspace <wid>` inspects a session that is stuck
-  after a crash.
-  - To recover it, add `--execution <eid> --confirm-resources-released`.
-  - Use that only after confirming the old run has fully stopped on that machine. Your
-    confirmation is the safety check; never guess.
 
 ### Schedules (`lody schedule …`)
 
@@ -414,7 +409,6 @@ Confirm before running any of these:
 - `project delete`, which removes a registered project
 - `schedule edit`, which changes live automation
 - `app reset-cache --hard`
-- `recover-inbox --confirm-resources-released`
 - `logout`
 - `daemon stop` and `daemon restart`, which interrupt running sessions
 

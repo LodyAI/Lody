@@ -1,6 +1,6 @@
 # 发布者密钥可用性：先暂存再提交
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](publisher-key-recoverability.md)
@@ -20,5 +20,5 @@ Convex/Streams 事务。
 或管理设备的 occupied 声明不能授权删组。恶意发布者删除自己的组仍属于已知扣钥限制。后来加入的设备走普通 mailbox/repair。AEAD 不证明最新或无法扣留。
 
 Restricted A 仍只指已安装密钥的宿主保护，不是 vault 或身份恢复。本决定不增加
-紧急移除例外、账号后门、vault 包装/保留策略或严格 B。修订稿仍待审批；原生
+紧急移除例外、账号后门、vault 包装/保留策略或严格 B。修订稿于 2026-10-28 获批；原生
 protector 和私有产品启用另行验收。

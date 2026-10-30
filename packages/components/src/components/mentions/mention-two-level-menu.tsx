@@ -159,7 +159,7 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'contain',
   },
-  listDocked: { maxHeight: 'none', overflowY: 'visible' },
+  listDocked: { maxHeight: 'none', overflowX: 'clip', overflowY: 'visible' },
   level: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 },
   levelDeeper: {
     animationName: { default: enterDeeper, [REDUCED_MOTION]: 'none' },

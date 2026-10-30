@@ -16,6 +16,9 @@ Design, invariants I1–I8 and the coverage lemma:
   (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.
   Relative writes use the raw host offset as their baseline, while anchors and
   movement use bounded offsets; elasticity alone must not cause a write.
+- The WebKit DOM adapter commits `overflow-y: hidden` around relative compensation
+  and restores the exact inline value and priority in the same task. Content stays
+  painted; releasing native ownership may cancel in-flight input or momentum.
 - A transaction ends within two passes of at most two supplementary commits;
   `lastObserved` records only covered positions, and `onScroll` fires only for those.
   A React re-render that did not change the list must not start a new cycle (that

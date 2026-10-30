@@ -1,3 +1,5 @@
+import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
+import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -49,11 +51,7 @@ import type {
 import { SYNC_CONFIRMATION_TIMEOUT_MS, withTimeout } from '@/lib/loro/timeout-utils';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import type { OperationInboxLegacy } from '@/orchestration/inbox/legacy';
-import {
-  blockedInboxRecoveryMessage,
-  InboxExecutionBlocked,
-  InboxExecutionRejected,
-} from '@/orchestration/inbox/admission-failure';
+import { InboxExecutionRejected } from '@/orchestration/inbox/admission-failure';
 import {
   batchHistoryMembers,
   batchPreview,
@@ -62,6 +60,7 @@ import {
   type InboxScope,
 } from '@/orchestration/inbox/model';
 import { sessionExecutionResource } from '@/orchestration/platform/session-resources';
+import { TURN_BUDGETS } from './turn-budgets';
 import { formatErrorMessage, formatReportedError } from '@/utils/format-error';
 import {
   describeSessionStartFailure,
@@ -153,7 +152,7 @@ import {
   localProjectsLegacy,
 } from '@lody/shared/node/local-project';
 import { findProgressMessageId } from '@lody/shared/session-data';
-import { Cause, Clock, Data, Effect, Exit, Fiber, Option, Random, Scope } from 'effect';
+import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
@@ -201,11 +200,11 @@ type FinalizeTurnContext = {
   producedOutput?: boolean;
 };
 
+type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
 const DEAD_TURN_SCAN_ROWS = 64;
-/** Log, never fail, a yielded turn's finalization that is still running at release. */
-const YIELDED_FINALIZATION_SLOW_WARNING = '5 seconds';
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
 // authentication workflow. Keep the post-login capability proof inside that
 // envelope and leave a small delivery margin for the final response.
@@ -244,7 +243,11 @@ const SILENT_TURN_FAILURE_MESSAGE =
 
 type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
-  persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
+  persistCodeCollabTurnDiffs?: (
+    sessionId: SessionId,
+    turnId: string,
+    signal?: AbortSignal
+  ) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   updateSessionDiffStats: (
     sessionId: SessionId,
@@ -255,6 +258,7 @@ type TurnFinalizationEffects = {
       turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
       preferredBaseBranch?: string;
       skipHistoryFileDiff?: boolean;
+      signal?: AbortSignal;
     }
   ) => Promise<SessionHistoryInput['fileDiff']>;
   detectAndAssociatePR: (ctx: {
@@ -263,10 +267,15 @@ type TurnFinalizationEffects = {
     sessionDoc: SessionDocument;
     project?: ProjectRef;
     branchName?: string | null;
+    signal?: AbortSignal;
   }) => Promise<{ readonly baseBranch: string } | null>;
   /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
-  syncWorkspaceGitState: (sessionId: SessionId, session: ISession) => Promise<void>;
-  refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
+  syncWorkspaceGitState: (
+    sessionId: SessionId,
+    session: ISession,
+    signal?: AbortSignal
+  ) => Promise<void>;
+  refreshCodeCollabSharedState?: (sessionId: SessionId, signal?: AbortSignal) => Promise<void>;
   onTurnOutcome?: (fact: TurnOutcomeFact) => Promise<void>;
 };
 
@@ -315,6 +324,8 @@ type TurnInvocation = {
   notificationAudience?: TurnResultAudience;
 };
 
+type SessionStopFailurePhase = 'cancel' | 'timeout' | 'terminate';
+
 type TurnRuntimeState = {
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
@@ -343,12 +354,13 @@ type TurnRuntimeState = {
   releaseFailure?: unknown;
   rawPromptCompletion?: Promise<void>;
   disconnectedTransport?: boolean;
-  inboxOwner?: Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+  inboxOwner?: InboxExecutionHandle;
   /** Withdraw rather than release the unsubmitted Inbox execution at turn end. */
   withdrawInboxExecution?: boolean;
   cancelFinalized: boolean;
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
+  reportedStopFailures?: Set<SessionStopFailurePhase>;
   steerWaitController?: AbortController;
   /** Submitted handoff steer whose verdict may trail the yielded prompt's answer. */
   pendingHandoffSteerOutcome?: Promise<SteerOutcomeResult>;
@@ -359,6 +371,8 @@ type TurnRuntimeState = {
   activePromptRun?: PromptHandoffRun;
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
+  afterRelease: Array<() => Promise<unknown>>;
+  workspaceFinalizationDeadlineMs?: number;
   pendingSession?: Promise<ISession>;
   /**
    * Latched when the initialization stall watchdog halted this turn. The halt is
@@ -390,10 +404,8 @@ export type SessionExecutionSnapshot = {
   hasRewriteBarrier: boolean;
   /**
    * Set when the active turn ended but could not confirm releasing its execution
-   * resources (in-flight ACP requests, the Inbox execution record). Successors
-   * stay blocked, since an unconfirmed release may still be running, until
-   * `requestReleaseRecovery` proves release. This is not "the agent process
-   * should have exited": a normally released turn keeps its process for reuse.
+   * resources. Diagnostic only: retirement detaches the failed Agent and returns
+   * the input slot before the next turn. Normal release keeps its process for reuse.
    */
   releaseBlocked?: { reason: string };
 };
@@ -431,6 +443,7 @@ type VisibleSessionTurnContext = {
     unhandledErrorContext?: VisibleSessionTurnUnhandledErrorContext;
   }) => Effect.Effect<void, unknown, never>;
   prompt: (promptBlocks: ContentBlock[]) => Effect.Effect<void, unknown, never>;
+  claimExecution: () => Effect.Effect<void, unknown, never>;
 };
 
 type VisibleSessionTurnAnalytics = {
@@ -512,6 +525,7 @@ export type PreparedSessionDispatchOptions = {
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
+  onExecutionDeferred?: () => void | Promise<void>;
   onAccessAllowed: () => void | Promise<void>;
   onAccessDenied: (
     reason: MachineAccessVerification & { outcome: 'denied' }
@@ -544,6 +558,8 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   sessionId: SessionId;
   reason: ChatFailedReason;
 }> {}
+
+class SessionTurnExecutionDeferred extends Data.TaggedError('SessionTurnExecutionDeferred')<{}> {}
 
 class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
   sessionId: SessionId;
@@ -597,6 +613,9 @@ function truncateAnalyticsString(value: string, maxLength = 1_000): string {
 }
 
 export type SessionExecutionServiceDeps = {
+  /** Only encrypted workspace composition installs this shared execution gate. */
+  encryptedExecution?: EncryptedAgentExecution;
+  encryptedWorkspace?: boolean;
   logger: Logger;
   sessionManager: SessionManager;
   workspaceDocument: LoroDocumentManager;
@@ -657,13 +676,22 @@ export type SessionExecutionServiceDeps = {
     modelInfo: ModelInfo | undefined,
     userTurnId?: string
   ) => Promise<void>;
-  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
+  syncSessionBranchName: (
+    sessionId: SessionId,
+    session: ISession,
+    signal?: AbortSignal
+  ) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
   recordChatFailure: (
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
     message?: string,
     code?: ChatFailedCode
+  ) => Promise<void>;
+  recordSessionStopFailure: (
+    sessionId: SessionId,
+    turnId: string,
+    failure: { phase: SessionStopFailurePhase; message: string }
   ) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
@@ -875,18 +903,112 @@ export class SessionExecutionService {
     this.completionPublicationAbort.abort();
   }
 
+  private readonly shutdownAbort = new AbortController();
   private readonly ownedWork = new Set<Promise<unknown>>();
+  private ownBookkeeping<T>(sessionId: SessionId, work: Promise<T>): Promise<T | undefined> {
+    const observed = work.catch((error: unknown) => {
+      this.deps.logger.warn(`[${sessionId}] Turn bookkeeping failed: ${formatErrorMessage(error)}`);
+      return undefined;
+    });
+    this.ownedWork.add(observed);
+    void observed.then(() => this.ownedWork.delete(observed));
+    return observed;
+  }
+  private async runBookkeepingStage<T>(
+    sessionId: SessionId,
+    stage: string,
+    run: () => Promise<T>
+  ): Promise<T | undefined> {
+    return withTimeout(
+      this.ownBookkeeping(sessionId, Promise.resolve().then(run)),
+      TURN_BUDGETS.bookkeepingMs,
+      `${stage} timed out`
+    ).catch((error: unknown) => {
+      this.deps.logger.warn(`[${sessionId}] ${stage}: ${formatErrorMessage(error)}`);
+      return undefined;
+    });
+  }
+  private async runWorkspaceFinalization(
+    sessionId: SessionId,
+    turnId: string,
+    run: (signal: AbortSignal) => Promise<unknown>,
+    parentSignal?: AbortSignal
+  ): Promise<void> {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    const now = Date.now();
+    const deadline =
+      runtime?.workspaceFinalizationDeadlineMs ?? now + TURN_BUDGETS.workspaceStatsMs;
+    if (runtime) runtime.workspaceFinalizationDeadlineMs = deadline;
+    const remaining = deadline - now;
+    if (this.shutdownAbort.signal.aborted) return;
+    if (remaining <= 0) return this.deps.logger.warn(`[${sessionId}] Workspace stats expired`);
+    const controller = new AbortController();
+    const signal = AbortSignal.any([
+      controller.signal,
+      this.shutdownAbort.signal,
+      ...(parentSignal ? [parentSignal] : []),
+    ]);
+    try {
+      signal.throwIfAborted();
+      const wait = waitForSteer(run(signal), signal);
+      await withTimeout(wait, remaining, 'Workspace statistics deadline');
+    } catch (error) {
+      this.deps.logger.warn(
+        `[${sessionId}] Skipping workspace finalization: ${formatErrorMessage(error)}`
+      );
+    } finally {
+      controller.abort();
+    }
+  }
+  waitForImageUploads(id: SessionId, turnId: string | undefined, uploads: Promise<unknown>) {
+    const owned = this.ownBookkeeping(id, uploads);
+    const turn = turnId ?? this.turnRuntimeBySession.get(id)?.turnId ?? '';
+    return this.runWorkspaceFinalization(id, turn, () => owned);
+  }
+  async waitForInboxReleases(): Promise<void> {
+    const releases = this.getActiveTurnIds().map(({ sessionId, turnId }) =>
+      this.waitForTurnRelease(sessionId, turnId)
+    );
+    await withTimeout(
+      Promise.all(releases),
+      TURN_BUDGETS.shutdownReleaseWaitMs,
+      'Active execution releases exceeded shutdown budget'
+    ).catch(async (error: unknown) => {
+      this.deps.logger.warn(formatErrorMessage(error));
+      if (!this.shutdownAbort.signal.aborted) return;
+      const receipts = [...this.turnRuntimeBySession.values()].map(async (runtime) => {
+        const owner = runtime.inboxOwner;
+        if (!owner || !this.liveInboxExecutionIds.has(owner.id)) return;
+        this.deps.logger.warn(
+          `[${runtime.sessionId}] Shutdown forced release ${owner.id}; result unknown`
+        );
+        await this.writeFailedRelease(owner);
+        this.liveInboxExecutionIds.delete(owner.id);
+        if (owner.batch) await this.operationInbox?.settleUnknown(owner.batch);
+      });
+      const results = await withTimeout(
+        Promise.allSettled(receipts),
+        TURN_BUDGETS.shutdownForcedWriteMs,
+        'Shutdown release write timed out'
+      ).catch((cause: unknown) => this.deps.logger.warn(formatErrorMessage(cause)));
+      for (const result of results ?? [])
+        if (result.status === 'rejected') this.deps.logger.warn(formatErrorMessage(result.reason));
+    });
+  }
   async drainInboxExecutions(): Promise<void> {
     // Completed executions can enqueue delivery while the first snapshot drains.
     while (this.ownedWork.size) await Promise.allSettled([...this.ownedWork]);
     const failures = [...this.turnRuntimeBySession.values()].flatMap((runtime) =>
       runtime.releaseFailure ? [runtime.releaseFailure] : []
     );
-    if (failures.length) throw new AggregateError(failures, 'Execution resources remain owned');
+    if (failures.length)
+      this.deps.logger.warn(
+        `Execution cleanup incomplete for ${failures.length} turns; continuing shutdown`
+      );
   }
   async recoverUnreleasedInboxExecutions(): Promise<void> {
     for (const runtime of this.turnRuntimeBySession.values())
-      if (runtime.releaseFailure) await this.recoverInboxExecution(runtime.sessionId);
+      if (runtime.releaseFailure) await this.requestReleaseRecovery(runtime.sessionId);
   }
   private notificationWork:
     | {
@@ -934,11 +1056,6 @@ export class SessionExecutionService {
       kind: 'human',
       config: args.config,
     });
-    if (this.turnRuntimeBySession.get(args.sessionId)?.releaseFailure) {
-      await this.recoverInboxExecution(args.sessionId).catch((cause) =>
-        this.deps.logger.warn(`Inbox resources remain unreleased: ${formatErrorMessage(cause)}`)
-      );
-    }
   }
   async abandonInboxInput(sessionId: SessionId, inputId: string): Promise<void> {
     await this.operationInbox?.abandonInput(this.deps.workspaceId, sessionId, inputId);
@@ -954,6 +1071,7 @@ export class SessionExecutionService {
     return this.operationInbox?.inputCanceled(this.deps.workspaceId, sessionId, inputId) ?? false;
   }
   quiesceInboxExecutions(): void {
+    this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
       runtime.cancelRequested = true;
       runtime.pendingInputOnCancel = 'preserve';
@@ -967,41 +1085,46 @@ export class SessionExecutionService {
 
   private readonly releaseRecoveryBySession = new Map<SessionId, Promise<boolean>>();
 
-  /**
-   * Retry proving release for a turn whose release could not be confirmed.
-   *
-   * Called by the next input that waits on this session (a dispatch check or an
-   * Inbox readiness check), so recovery follows the fault clearing without a
-   * timer. Single-flight per session; a failed attempt keeps the slot and the
-   * next waiting input retries. Resolves true once the slot was released.
-   *
-   * Recovery may terminate the session's agent process: that is how it proves an
-   * unconfirmed release ended. It runs only for a blocked release, never after a
-   * normally released turn, whose process is kept for reuse.
-   */
-  requestReleaseRecovery(sessionId: SessionId): Promise<boolean> {
+  /** One bounded cleanup attempt; callers never wait for it to admit a successor. */
+  requestReleaseRecovery(sessionId: SessionId, retired?: TurnRuntimeState): Promise<boolean> {
     const inFlight = this.releaseRecoveryBySession.get(sessionId);
     if (inFlight) return inFlight;
-    if (this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined) {
+    const runtime = retired ?? this.turnRuntimeBySession.get(sessionId);
+    if (runtime?.releaseFailure === undefined) {
       return Promise.resolve(false);
     }
-    const recovery = this.recoverInboxExecution(sessionId)
-      .then(() => this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined)
-      .catch((cause: unknown) => {
-        this.deps.logger.warn(
-          `[${sessionId}] Turn resources remain unreleased; the next waiting input retries: ${formatErrorMessage(cause)}`
-        );
-        return false;
-      })
-      .finally(() => {
+    const recovery = (async () => {
+      try {
+        return await withTimeout(
+          this.recoverInboxExecution(sessionId, runtime),
+          TURN_BUDGETS.agentCleanupMs,
+          'Background execution cleanup timed out'
+        )
+          .then(() => true)
+          .catch((cause: unknown) => {
+            this.deps.logger.warn(
+              `[${sessionId}] Background execution cleanup incomplete; continuing: ${formatErrorMessage(cause)}`
+            );
+            return false;
+          });
+      } finally {
+        if (runtime.inboxOwner)
+          await this.writeFailedRelease(runtime.inboxOwner).catch((cause: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Retired execution release write failed: ${formatErrorMessage(cause)}`
+            )
+          );
         this.releaseRecoveryBySession.delete(sessionId);
-      });
+      }
+    })();
     this.releaseRecoveryBySession.set(sessionId, recovery);
+    this.ownedWork.add(recovery);
+    void recovery.then(() => this.ownedWork.delete(recovery));
     return recovery;
   }
 
-  async recoverInboxExecution(sessionId: SessionId): Promise<void> {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+  async recoverInboxExecution(sessionId: SessionId, retired?: TurnRuntimeState): Promise<void> {
+    const runtime = retired ?? this.turnRuntimeBySession.get(sessionId);
     if (!runtime?.releaseFailure) return;
     if (runtime.inboxOwner) {
       await runtime.inboxOwner.recover(
@@ -1009,11 +1132,11 @@ export class SessionExecutionService {
           const session = runtime.pendingSession
             ? await withTimeout(
                 runtime.pendingSession,
-                5_000,
+                TURN_BUDGETS.agentCleanupMs,
                 'Execution acquisition remains owned'
               )
             : runtime.session;
-          if (session) runtime.inboxOwner!.retain(sessionExecutionResource(session));
+          if (session) runtime.inboxOwner!.register(sessionExecutionResource(session));
         },
         () =>
           withTimeout(
@@ -1021,20 +1144,19 @@ export class SessionExecutionService {
               runtime.yieldedFinalization,
               ...(runtime.pendingSteerConfig ?? []),
             ]).then(() => undefined),
-            5_000,
+            TURN_BUDGETS.agentCleanupMs,
             'Execution finalization remains owned'
           )
       );
     } else if (runtime.session) await runtime.session.terminate(true);
     runtime.releaseFailure = undefined;
-    this.releaseTurnRuntime(sessionId, runtime.turnId);
-    await this.operationInbox?.wake();
-    this.onInboxReleased?.(sessionId);
   }
 
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /** Admission ownership outlives replaceable turn runtime registrations. */
+  private readonly liveInboxExecutionIds = new Set<string>();
   /** Start times of recent start retries, shared by every Session this service runs. */
   private readonly startRetryStartedAt: number[] = [];
   private readonly rewriteBarrierSessions = new Set<SessionId>();
@@ -1431,10 +1553,10 @@ export class SessionExecutionService {
   private async captureTurnCompleted(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    turnId: string
+    turnId: string,
+    analytics?: TurnAnalyticsState
   ): Promise<void> {
     try {
-      const analytics = this.turnAnalyticsBySession.get(sessionId);
       const totalTurnMs =
         analytics && analytics.turnId === turnId
           ? getServerNow() - analytics.startedAtMs
@@ -1450,7 +1572,8 @@ export class SessionExecutionService {
       }
       try {
         const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-        const latestAssistant = await backend.readLatestTurn('assistant');
+        const read = await backend.readTurn(turnId);
+        const latestAssistant = read.state === 'ready' ? read.turn : undefined;
         diffFileCount = Array.isArray(latestAssistant?.fileDiff)
           ? latestAssistant.fileDiff.length
           : 0;
@@ -1475,7 +1598,8 @@ export class SessionExecutionService {
     } catch {
       // Analytics must never break turn finalization.
     } finally {
-      this.turnAnalyticsBySession.delete(sessionId);
+      if (this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId)
+        this.turnAnalyticsBySession.delete(sessionId);
     }
   }
 
@@ -2374,6 +2498,7 @@ export class SessionExecutionService {
         ownedPromptRun.successor = nextPromptRun;
         runtime.activePromptRun = nextPromptRun;
         runtime.turnId = nextTurnId;
+        runtime.workspaceFinalizationDeadlineMs = undefined;
         runtime.userTurnId = options.userTurnId;
         if (!runtime.cancelRequested) runtime.steerWaitController = new AbortController();
         this.markCurrentTurn(options.sessionId, nextTurnId);
@@ -2830,6 +2955,9 @@ export class SessionExecutionService {
             return undefined;
           })
       );
+      if (visibleOutcome === 'execution-deferred') {
+        await options.onExecutionDeferred?.();
+      }
       if (
         outcome === 'unknown' ||
         visibleOutcome === 'duplicate' ||
@@ -2881,6 +3009,7 @@ export class SessionExecutionService {
       terminateSessionOnCancel: false,
       initializationStalled: false,
       yieldedFinalization: Promise.resolve(),
+      afterRelease: [],
     };
   }
 
@@ -2900,13 +3029,29 @@ export class SessionExecutionService {
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
   }
 
+  /**
+   * The only way a turn gives up its in-process slot: drop its live Inbox execution id
+   * and its runtime registration. Idempotent and keyed by turn, so it never frees a
+   * successor. Writing the durable release receipt is the caller's separate step.
+   */
+  private freeTurnSlot(runtime: TurnRuntimeState): void {
+    if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
+    this.releaseTurnRuntime(runtime.sessionId, runtime.turnId);
+  }
+
+  /** A retired or force-released execution ends as `failed`; a repeated write is a no-op. */
+  private async writeFailedRelease(owner: InboxExecutionHandle): Promise<void> {
+    await this.operationInbox?.release({
+      ...owner.input,
+      executionId: owner.id,
+      outcome: 'failed',
+    });
+  }
+
   private releaseTurnRuntime(sessionId: SessionId, turnId: string): void {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const releasedOwner = runtime?.turnId === turnId;
-    if (releasedOwner) {
-      runtime.inboxOwner?.detach();
-      this.turnRuntimeBySession.delete(sessionId);
-    }
+    if (releasedOwner) this.turnRuntimeBySession.delete(sessionId);
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
     if (releasedOwner || this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId) {
@@ -3015,6 +3160,34 @@ export class SessionExecutionService {
         this.deps.logger.debug(
           `[${runtime.sessionId}] Failed to cancel ${stage} turn ${runtime.turnId}: ${formatErrorMessage(error)}`
         );
+        this.reportSessionStopFailure(runtime.sessionId, runtime.turnId, 'cancel', error, runtime);
+      });
+  }
+
+  private reportSessionStopFailure(
+    sessionId: SessionId,
+    turnId: string,
+    phase: SessionStopFailurePhase,
+    error: unknown,
+    runtime?: TurnRuntimeState
+  ): void {
+    if (runtime) {
+      if (this.getTurnRuntime(sessionId, turnId) !== runtime) return;
+      runtime.reportedStopFailures ??= new Set();
+      if (runtime.reportedStopFailures.has(phase)) return;
+      runtime.reportedStopFailures.add(phase);
+    }
+    // Reporting must not delay termination or keep a completed raw request owned.
+    // The MessageHandler history writer owns persistence of this system notice.
+    void this.deps
+      .recordSessionStopFailure(sessionId, turnId, {
+        phase,
+        message: formatErrorMessage(error, { includeStack: true }),
+      })
+      .catch((noticeError: unknown) => {
+        this.deps.logger.warn(
+          `[${sessionId}] Failed to report Stop ${phase} failure: ${formatErrorMessage(noticeError)}`
+        );
       });
   }
 
@@ -3092,7 +3265,11 @@ export class SessionExecutionService {
     });
   }
 
-  private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
+  private drainCancelledPrompt(
+    session: ISession,
+    runtime?: TurnRuntimeState,
+    turnId = runtime?.turnId
+  ): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
     const requests = () =>
       [
@@ -3104,26 +3281,43 @@ export class SessionExecutionService {
     if (pending.length === 0) return Promise.resolve();
     const pendingPrompt = Promise.allSettled(pending).then(() => undefined);
 
-    const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
-      async () => {
-        // A terminal response may have won just after the timeout fired.
-        if (requests().length === 0) return;
-        if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
-        this.deps.logger.warn(
-          `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
-        );
-        try {
-          await session.terminate(true);
-        } catch (error) {
-          this.deps.logger.warn(
-            `[${session.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
-          );
-          // Failed termination is not permission to reuse a busy agent.
-          if (runtime) runtime.releaseFailure = error;
-          throw error;
-        }
+    const drain = withTimeout(
+      pendingPrompt,
+      TURN_BUDGETS.cancelDrainMs,
+      'ACP prompt cancellation timed out'
+    ).catch(async (timeoutError: unknown) => {
+      // A terminal response may have won just after the timeout fired.
+      if (requests().length === 0) return;
+      if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
+      this.deps.logger.warn(
+        `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+      );
+      if (turnId) {
+        this.reportSessionStopFailure(session.sessionId, turnId, 'timeout', timeoutError, runtime);
       }
-    );
+      try {
+        await session.terminate(true);
+      } catch (error) {
+        this.deps.logger.warn(
+          `[${session.sessionId}] Failed to terminate cancelled session; retiring Agent: ${formatErrorMessage(error)}`
+        );
+        if (turnId) {
+          this.reportSessionStopFailure(
+            session.sessionId,
+            turnId,
+            'terminate',
+            new Error(`${formatErrorMessage(error)}; continuing with a new Agent`),
+            runtime
+          );
+        }
+        // Failed termination is not permission to reuse a busy agent.
+        if (runtime) {
+          runtime.releaseFailure = error;
+          this.requestTurnInterrupt(runtime);
+        }
+        throw error;
+      }
+    });
     if (runtime) runtime.cancellationDrain = drain;
     return drain;
   }
@@ -3228,7 +3422,22 @@ export class SessionExecutionService {
         yield* self.ignoreWithWarning(
           options.sessionId,
           'Failed to terminate session after stop request',
-          self.tryPromise(() => sessionToTerminate.terminate(true))
+          self
+            .tryPromise(() => sessionToTerminate.terminate(true))
+            .pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  if (runtime) runtime.releaseFailure = error;
+                  self.reportSessionStopFailure(
+                    options.sessionId,
+                    options.turnId,
+                    'terminate',
+                    error,
+                    runtime
+                  );
+                })
+              )
+            )
         );
       }
 
@@ -3253,24 +3462,14 @@ export class SessionExecutionService {
             self.handleTurnError(options.sessionId, options.sessionDoc, new Error('cancelled'))
           )
         );
-      } else {
-        yield* self.ignoreWithWarning(
-          options.sessionId,
-          'Failed to refresh Code Collab v2 shared state for cancelled turn',
-          Effect.sync(() => self.refreshCodeCollabSharedStateAfterTurn(options.sessionId))
-        );
       }
 
-      // A stopped turn leaves the agent's edits on disk and nothing commits them
-      // or pushes on the session's behalf, so the dirty/unpushed flags that
-      // raise the Info Bar's Commit & Push have to be refreshed here too. This is the
-      // route a Stop during the PROMPT takes; the one in `finalizeTurn` only
-      // covers a Stop that raced finalization. Publish before idle so the flag
-      // has landed by the time the UI stops showing Working.
-      const cancelledSession = options.session;
-      if (cancelledSession) {
+      if (options.session) {
+        const session = options.session;
         yield* self.tryPromise(() =>
-          self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, cancelledSession)
+          self.runWorkspaceFinalization(options.sessionId, options.turnId, (signal) =>
+            self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, session, signal)
+          )
         );
       }
 
@@ -3289,7 +3488,9 @@ export class SessionExecutionService {
       if (sessionToDrain && !options.terminateSession) {
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
-        yield* self.tryPromise(() => self.drainCancelledPrompt(sessionToDrain, runtime));
+        yield* self.tryPromise(() =>
+          self.drainCancelledPrompt(sessionToDrain, runtime, options.turnId)
+        );
       }
 
       if (runtime?.promptStarted) {
@@ -3298,11 +3499,23 @@ export class SessionExecutionService {
           'Failed to settle context compaction after cancelled ACP prompt stopped',
           self.tryPromise(async () => {
             await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId);
-            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
+            await self.runWorkspaceFinalization(
+              options.sessionId,
+              options.turnId,
+              async (signal) => {
+                await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId, signal);
+                signal.throwIfAborted();
+                await self.deps.turnFinalization.refreshCodeCollabSharedState?.(
+                  options.sessionId,
+                  signal
+                );
+              }
+            );
           })
         );
       }
     }).pipe(
+      Effect.uninterruptible,
       Effect.ensuring(
         Effect.sync(() => {
           self.clearTurnCancellation(options.sessionId, options.turnId);
@@ -3737,11 +3950,10 @@ export class SessionExecutionService {
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
+    const turnId =
+      this.turnRuntimeBySession.get(sessionId)?.turnId ?? this.currentTurnBySession.get(sessionId);
     try {
-      await this.deps.turnFinalization.finalizeACPState(
-        sessionId,
-        this.currentTurnBySession.get(sessionId)
-      );
+      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
     } catch (finalizationError) {
       // The normal path fails on unfinished history. Error settlement must still
       // run independent status, failure attention and release bookkeeping.
@@ -3749,11 +3961,9 @@ export class SessionExecutionService {
         `[${sessionId}] Failed to finalize error history: ${formatErrorMessage(finalizationError)}`
       );
     }
-    await this.persistCodeCollabTurnDiffsAfterACPFinalization(
-      sessionId,
-      this.currentTurnBySession.get(sessionId)
+    await this.runWorkspaceFinalization(sessionId, turnId ?? '', (signal) =>
+      this.persistTurnDiffsAndFlushUsage(sessionId, turnId, signal)
     );
-    await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
       if (acpError) {
@@ -3827,7 +4037,13 @@ export class SessionExecutionService {
       }
     }
 
-    this.refreshCodeCollabSharedStateAfterTurn(sessionId);
+    await this.runWorkspaceFinalization(
+      sessionId,
+      this.turnRuntimeBySession.get(sessionId)?.turnId ?? '',
+      (signal) =>
+        this.deps.turnFinalization.refreshCodeCollabSharedState?.(sessionId, signal) ??
+        Promise.resolve()
+    );
     await sessionDoc.waitUntilSynced();
     await sessionDoc.setStatus(SessionStatusFactory.idle());
   }
@@ -3838,7 +4054,7 @@ export class SessionExecutionService {
       return;
     }
     // The Code Collab service owns cancellation, deadlines and publication repair.
-    // Optional file-view refresh must never retain the turn's execution/presence lease.
+    // This inactive-Stop refresh owns no turn lease.
     void Promise.resolve()
       .then(() => refresh(sessionId))
       .catch((error: unknown) => {
@@ -3850,16 +4066,18 @@ export class SessionExecutionService {
 
   private async persistCodeCollabTurnDiffsAfterACPFinalization(
     sessionId: SessionId,
-    turnId: string | undefined
+    turnId: string | undefined,
+    signal: AbortSignal
   ): Promise<boolean> {
     const persist = this.deps.turnFinalization.persistCodeCollabTurnDiffs;
     if (!persist || !turnId) {
       return false;
     }
     try {
-      return await persist(sessionId, turnId);
+      signal.throwIfAborted();
+      return await persist(sessionId, turnId, signal);
     } catch (error) {
-      this.deps.logger.error(
+      this.deps.logger.warn(
         `[${sessionId}] Failed to persist Code Collab v2 turn diff evidence; not falling back to git history fileDiff: ${formatErrorMessage(error)}`
       );
       return true;
@@ -3885,8 +4103,10 @@ export class SessionExecutionService {
   private async syncWorkspaceGitStateOnce(
     sessionId: SessionId,
     turnId: string,
-    session: ISession
+    session: ISession,
+    signal?: AbortSignal
   ): Promise<void> {
+    signal?.throwIfAborted();
     const runtime = this.getTurnRuntime(sessionId, turnId);
     if (runtime?.workspaceGitStateSynced) {
       return;
@@ -3895,8 +4115,9 @@ export class SessionExecutionService {
       runtime.workspaceGitStateSynced = true;
     }
     await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
-      await this.deps.syncSessionBranchName(sessionId, session);
-      await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
+      await this.deps.syncSessionBranchName(sessionId, session, signal);
+      signal?.throwIfAborted();
+      await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session, signal);
     });
   }
 
@@ -3904,7 +4125,8 @@ export class SessionExecutionService {
     sessionId: SessionId,
     turnId: string,
     stage: string,
-    run: () => Promise<T>
+    run: () => Promise<T>,
+    signal?: AbortSignal
   ): Promise<T> {
     const span = startTraceSpan(this.deps.logger, 'execution.finalization_stage', {
       sessionId,
@@ -3913,7 +4135,9 @@ export class SessionExecutionService {
     });
     const startedAtMs = Date.now();
     try {
+      signal?.throwIfAborted();
       const result = await run();
+      signal?.throwIfAborted();
       span.end();
       return result;
     } catch (error) {
@@ -3931,25 +4155,22 @@ export class SessionExecutionService {
 
   private async persistTurnDiffsAndFlushUsage(
     sessionId: SessionId,
-    turnId: string
+    turnId: string | undefined,
+    signal: AbortSignal
   ): Promise<boolean> {
+    signal.throwIfAborted();
     const codeCollabHistoryFileDiffPersisted = await this.runTurnFinalizationStage(
       sessionId,
-      turnId,
+      turnId ?? '',
       'persistCodeCollabTurnDiffs',
-      async () => await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, turnId)
+      async () =>
+        await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, turnId, signal)
     );
-    await this.runTurnFinalizationStage(sessionId, turnId, 'flushSessionUsage', async () => {
+    signal.throwIfAborted();
+    await this.runTurnFinalizationStage(sessionId, turnId ?? '', 'flushSessionUsage', async () => {
       await this.deps.turnFinalization.flushSessionUsage(sessionId);
     });
     return codeCollabHistoryFileDiffPersisted;
-  }
-
-  private async finalizeTurnOutput(sessionId: SessionId, turnId: string): Promise<boolean> {
-    await this.runTurnFinalizationStage(sessionId, turnId, 'finalizeACPState', async () => {
-      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
-    });
-    return await this.persistTurnDiffsAndFlushUsage(sessionId, turnId);
   }
 
   private async finalizeYieldedTurnOutput(
@@ -3962,16 +4183,46 @@ export class SessionExecutionService {
     });
     runtime.yieldedFinalization = runtime.yieldedFinalization
       .then(async () => {
-        await this.persistTurnDiffsAndFlushUsage(sessionId, turnId);
+        await this.runWorkspaceFinalization(sessionId, turnId, (signal) =>
+          this.persistTurnDiffsAndFlushUsage(sessionId, turnId, signal)
+        );
       })
       .catch((error: unknown) => {
-        this.deps.logger.error(
+        this.deps.logger.warn(
           `[${sessionId}] Yielded turn ${turnId} ancillary finalization failed: ${formatErrorMessage(error)}`
         );
       });
   }
 
   private async finalizeTurn(ctx: FinalizeTurnContext): Promise<void> {
+    const { sessionId, sessionDoc, turnId } = ctx;
+    await this.runTurnFinalizationStage(sessionId, turnId, 'finalizeACPState', () =>
+      this.deps.turnFinalization.finalizeACPState(sessionId, turnId)
+    );
+    const notificationRuntime = this.getTurnRuntime(sessionId, turnId);
+    if (notificationRuntime)
+      notificationRuntime.notificationOutcome =
+        ctx.producedOutput === false
+          ? { kind: 'failed', code: 'no_agent_output' }
+          : { kind: 'succeeded' };
+
+    const analytics = this.turnAnalyticsBySession.get(sessionId);
+    notificationRuntime?.afterRelease.push(() =>
+      this.runBookkeepingStage(sessionId, 'captureTurnCompleted', () =>
+        this.captureTurnCompleted(sessionId, sessionDoc, turnId, analytics)
+      )
+    );
+    await this.runWorkspaceFinalization(
+      sessionId,
+      turnId,
+      (signal) => this.finalizeTurnWorkspace(ctx, signal),
+      ctx.abortSignal
+    );
+  }
+  private async finalizeTurnWorkspace(
+    ctx: FinalizeTurnContext,
+    signal: AbortSignal
+  ): Promise<void> {
     const {
       sessionId,
       session,
@@ -3995,24 +4246,21 @@ export class SessionExecutionService {
       // Push, and nothing commits or pushes on the session's behalf, so an
       // interrupted turn that left stale `false`s here would hide real
       // unpublished work behind a PR that looks current.
-      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session);
+      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session, signal);
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.deps.touchSession(sessionId);
       return true;
     };
 
-    const codeCollabHistoryFileDiffPersisted = await this.finalizeTurnOutput(sessionId, turnId);
+    const codeCollabHistoryFileDiffPersisted = await this.persistTurnDiffsAndFlushUsage(
+      sessionId,
+      turnId,
+      signal
+    );
 
     if (await stopIfTurnCancelled('ACP finalization')) {
       return;
     }
-
-    const notificationRuntime = this.getTurnRuntime(sessionId, turnId);
-    if (notificationRuntime)
-      notificationRuntime.notificationOutcome =
-        ctx.producedOutput === false
-          ? { kind: 'failed', code: 'no_agent_output' }
-          : { kind: 'succeeded' };
 
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
@@ -4024,7 +4272,8 @@ export class SessionExecutionService {
       sessionId,
       turnId,
       'syncSessionBranchName',
-      async () => await this.deps.syncSessionBranchName(sessionId, session)
+      () => this.deps.syncSessionBranchName(sessionId, session, signal),
+      signal
     );
 
     if (await stopIfTurnCancelled('branch synchronization')) {
@@ -4044,7 +4293,9 @@ export class SessionExecutionService {
               sessionDoc,
               project,
               branchName,
-            })
+              signal,
+            }),
+          signal
         );
         preferredStatsBaseBranch = detectedPr?.baseBranch ?? preferredStatsBaseBranch;
       } catch (error) {
@@ -4060,26 +4311,37 @@ export class SessionExecutionService {
       // session on the fast refresh cadence after a turn ends
       // (specs/pr-status-reconciler.md).
 
-      await this.runTurnFinalizationStage(sessionId, turnId, 'updateSessionDiffStats', async () => {
-        await this.deps.turnFinalization.updateSessionDiffStats(sessionId, session, {
-          turnId,
-          baseCommitHash: baseCommitHash ?? undefined,
-          turnStartWorkingTreeDiff,
-          preferredBaseBranch: preferredStatsBaseBranch,
-          skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
-        });
-        this.markWorkspaceGitStateSynced(sessionId, turnId);
-      });
+      await this.runTurnFinalizationStage(
+        sessionId,
+        turnId,
+        'updateSessionDiffStats',
+        async () => {
+          await this.deps.turnFinalization.updateSessionDiffStats(sessionId, session, {
+            turnId,
+            baseCommitHash: baseCommitHash ?? undefined,
+            turnStartWorkingTreeDiff,
+            preferredBaseBranch: preferredStatsBaseBranch,
+            skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
+            signal,
+          });
+          this.markWorkspaceGitStateSynced(sessionId, turnId);
+        },
+        signal
+      );
 
       if (await stopIfTurnCancelled('diff recording')) {
         return;
       }
     }
 
-    this.refreshCodeCollabSharedStateAfterTurn(sessionId);
-    await this.runTurnFinalizationStage(sessionId, turnId, 'captureTurnCompleted', async () => {
-      await this.captureTurnCompleted(sessionId, sessionDoc, turnId);
-    });
+    await this.runTurnFinalizationStage(
+      sessionId,
+      turnId,
+      'refreshCodeCollabSharedState',
+      () =>
+        this.deps.turnFinalization.refreshCodeCollabSharedState?.(sessionId, signal) ??
+        Promise.resolve()
+    );
     this.deps.logger.info(`Session chat completed: ${sessionId}`);
 
     this.deps.touchSession(sessionId);
@@ -4195,9 +4457,29 @@ export class SessionExecutionService {
       releaseConflict();
     }
     let inboxBatch = options.inboxBatch;
+    let releaseRetryFailed = false;
     try {
       if (inboxInput) {
-        runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+        try {
+          runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+        } catch (cause) {
+          if (!(cause instanceof InboxExecutionRejected)) throw cause;
+          const prior = inbox!.activeExecution(this.deps.workspaceId, sessionId);
+          if (!prior || this.liveInboxExecutionIds.has(prior.executionId)) throw cause;
+          // Only retry retirement and admission once; never replay the old input.
+          releaseRetryFailed = true;
+          try {
+            await inbox!.release({ ...prior, kind: 'task', config: {}, outcome: 'failed' });
+            runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+            releaseRetryFailed = false;
+          } catch (retryCause) {
+            this.deps.logger.warn(
+              `[${sessionId}] Inbox release/admission retry failed: ${formatErrorMessage(retryCause)}`
+            );
+            throw cause;
+          }
+        }
+        this.liveInboxExecutionIds.add(runtime.inboxOwner.id);
         inboxBatch = runtime.inboxOwner.batch;
         if (inboxBatch) {
           try {
@@ -4226,41 +4508,16 @@ export class SessionExecutionService {
       try {
         // A rejected begin acquired nothing. Its deterministic ID can match an
         // older blocked execution, which only the recovery owner may release.
-        if (
-          inboxInput &&
-          !(cause instanceof InboxExecutionBlocked) &&
-          !(cause instanceof InboxExecutionRejected)
-        )
+        if (inboxInput && !(cause instanceof InboxExecutionRejected))
           await inbox!.release({ ...inboxInput, executionId: turnId, outcome: 'failed' });
-        this.releaseTurnRuntime(sessionId, turnId);
       } catch (releaseCause) {
         runtime.releaseFailure = new AggregateError(
           [cause, releaseCause],
           'Inbox preparation and release failed'
         );
-      }
-      if (cause instanceof InboxExecutionBlocked) {
-        // Inbox preparation precedes the scoped turn error handler. Persist its
-        // verified diagnostic here so a rejected send is not only a daemon log.
-        await this.recordKnownChatFailure({
-          sessionId,
-          sessionDoc,
-          userTurnId,
-          reason: 'turn_pre_prompt_failed',
-          message: blockedInboxRecoveryMessage(
-            cause,
-            { machineId: this.deps.machineId, workspaceId: this.deps.workspaceId, sessionId },
-            process.platform
-          ),
-        });
-        // Keep Inbox eligibility aligned with the terminal visible failure.
-        // A repeated ID must not alter the original active input's evidence;
-        // unrelated queued input is also untouched.
-        if (inboxInput)
-          await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
-        await closeLeftoverEntry();
-        span.end({ outcome: 'inbox-blocked' });
-        throw cause;
+      } finally {
+        // Preparation acquired no prompt; a failed release write cannot retain its slot.
+        this.freeTurnSlot(runtime);
       }
       if (
         !runtime.releaseFailure &&
@@ -4281,11 +4538,30 @@ export class SessionExecutionService {
         span.end({ outcome: 'inbox-input-ended' });
         return 'inbox-input-ended';
       }
+      if (releaseRetryFailed) {
+        await this.recordKnownChatFailure({
+          sessionId,
+          sessionDoc,
+          userTurnId,
+          reason: 'turn_pre_prompt_failed',
+          message:
+            "Lody couldn't record the previous turn in its local database (the disk may be full). Free up space and send again.",
+        });
+        await inbox!
+          .abandonInput(this.deps.workspaceId, sessionId, inboxInput!.inputId, true)
+          .catch((error: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Failed to retire rejected input: ${formatErrorMessage(error)}`
+            )
+          );
+        await closeLeftoverEntry();
+      }
       span.end({ outcome: 'inbox-prepare-failed' });
       throw cause;
     }
     const self = this;
     let assistantEntryOpened = false;
+    let executionPermit: RealtimeStartPermit | undefined;
     let effectiveErrorContext: VisibleSessionTurnUnhandledErrorContext = {
       code: options.unhandledErrorCode,
       describe: options.describeUnhandledError,
@@ -4298,31 +4574,6 @@ export class SessionExecutionService {
         (presenceScope, exit) =>
           Effect.gen(function* () {
             const turnRuntime = runtime;
-            // Yielded-turn finalization is Lody's own bookkeeping, and its chain
-            // catches every failure, so it always settles. A slow run is waited
-            // for and only logged: treating it as a release failure would block
-            // the session until a recovery that terminates its agent process.
-            const yieldedFinalizationSettled = yield* Effect.interruptible(
-              self.tryPromise(() => turnRuntime.yieldedFinalization)
-            ).pipe(
-              Effect.timeoutOption(YIELDED_FINALIZATION_SLOW_WARNING),
-              Effect.orElseSucceed(() => Option.some(undefined))
-            );
-            if (Option.isNone(yieldedFinalizationSettled)) {
-              self.deps.logger.warn(
-                `[${sessionId}] Yielded turn finalization is still running after ${YIELDED_FINALIZATION_SLOW_WARNING}; turn ${turnRuntime.turnId} waits for it before release`
-              );
-            }
-            yield* self
-              .tryPromise(() => turnRuntime.yieldedFinalization)
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() => {
-                    turnRuntime.releaseFailure = cause;
-                  }).pipe(Effect.andThen(Effect.failCause(cause)))
-                ),
-                Effect.orDie
-              );
             const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
             const wasCancelled =
               turnRuntime.cancelRequested ||
@@ -4347,7 +4598,7 @@ export class SessionExecutionService {
                 .tryPromise(() =>
                   withTimeout(
                     turnRuntime.session!.terminate(true),
-                    5_000,
+                    TURN_BUDGETS.agentCleanupMs,
                     'Disconnected execution release timed out'
                   )
                 )
@@ -4360,6 +4611,18 @@ export class SessionExecutionService {
                   Effect.orDie
                 );
             }
+            const yielded = self.ownBookkeeping(sessionId, turnRuntime.yieldedFinalization);
+            yield* self.ignoreWithWarning(
+              sessionId,
+              'Yielded bookkeeping continues after release',
+              self.tryPromise(() =>
+                withTimeout(
+                  waitForSteer(yielded, self.shutdownAbort.signal),
+                  TURN_BUDGETS.bookkeepingMs,
+                  'Yielded finalization timed out'
+                )
+              )
+            );
             // Raw work drains before presence clears; failed cleanup retains the Inbox owner.
             yield* Scope.close(presenceScope, exit).pipe(
               Effect.catchCause((cause) =>
@@ -4631,11 +4894,7 @@ export class SessionExecutionService {
                   { type: 'text', text: batchPreview(inboxBatch, members) },
                 ];
               }
-              if (runtime.inboxOwner) {
-                yield* self.tryPromise(() =>
-                  runtime.inboxOwner!.register(sessionExecutionResource(activeSession))
-                );
-              }
+              runtime.inboxOwner?.register(sessionExecutionResource(activeSession));
               runtime.terminateSessionOnCancel = false;
               self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
 
@@ -4719,6 +4978,78 @@ export class SessionExecutionService {
               return undefined;
             });
 
+            const claimExecution = Effect.fnUntraced(function* (): Effect.fn.Return<void, unknown> {
+              const gate = self.deps.encryptedExecution;
+              if (!gate && !self.deps.encryptedWorkspace) return undefined;
+              yield* abortIfCancelled();
+              const result =
+                gate && userTurnId
+                  ? yield* gate.claim({
+                      workspaceId: self.deps.workspaceId,
+                      sessionId,
+                      userTurnId,
+                      localProjectId:
+                        runtime.project?.kind === 'local'
+                          ? runtime.project.localProjectId
+                          : undefined,
+                      requesterUserId: options.invocation?.requesterUserId,
+                      inputConfig: options.invocation?.inputConfig,
+                    })
+                  : { state: 'denied' as const };
+              if (result.state === 'pending-evidence') {
+                runtime.withdrawInboxExecution = true;
+                return yield* Effect.fail(new SessionTurnExecutionDeferred());
+              }
+              if (result.state === 'claimed') {
+                executionPermit = result.permit;
+                // Authorization may have yielded while Stop was requested.
+                yield* abortIfCancelled();
+                self.deps.logger.debug('[e2ee-rpc-timing]', {
+                  stage: 'handler-start',
+                  userTurnId,
+                  at: yield* Clock.currentTimeMillis,
+                });
+                return undefined;
+              }
+              if (result.state === 'completed' && userTurnId) {
+                const backend = yield* self.tryPromise(() =>
+                  self.getSessionBackend(sessionDoc, sessionId)
+                );
+                const history = yield* self.tryPromise(() =>
+                  backend.readDispatchHistory([userTurnId])
+                );
+                if (
+                  history.some(
+                    (entry) =>
+                      entry.id === userTurnId &&
+                      ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(
+                        entry.status ?? ''
+                      )
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    new SessionTurnClaimContended({ sessionId, turnId: runtime.turnId })
+                  );
+                }
+              }
+              return yield* self.recordKnownChatFailureAndHaltEffect({
+                sessionId,
+                sessionDoc,
+                userTurnId,
+                reason: 'turn_pre_prompt_failed',
+                message:
+                  result.state === 'uncertain'
+                    ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
+                    : result.state === 'completed'
+                      ? 'This encrypted turn already finished and will not be started again.'
+                      : result.state === 'expired'
+                        ? 'This encrypted turn expired before execution. Send a new turn to continue.'
+                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_shared'
+                          ? 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。'
+                          : 'This encrypted turn is not authorized for execution.',
+              });
+            });
+
             // Bound the whole turn against the initialization stall watchdog.
             // The watchdog only ever fires while the published presence status
             // is `initializing`, so a turn that reaches `running` races against
@@ -4733,9 +5064,19 @@ export class SessionExecutionService {
                 abortIfCancelled,
                 openAssistantEntry,
                 prompt,
+                claimExecution,
               }),
               self.awaitInitializationStall(sessionId, sessionDoc, runtime, presenceLease)
             );
+            if (executionPermit && self.deps.encryptedExecution) {
+              // Execution never repeats to repair a failed result write. The
+              // retained start remains uncertain and the actual turn can release.
+              yield* self.ignoreWithWarning(
+                sessionId,
+                'Encrypted execution result remains unknown',
+                self.deps.encryptedExecution.complete(executionPermit)
+              );
+            }
             return undefined;
           })
         )
@@ -4800,6 +5141,7 @@ export class SessionExecutionService {
     errorContext: VisibleSessionTurnUnhandledErrorContext;
   }): Promise<string> {
     const { sessionId, sessionDoc, runtime, error, errorContext } = options;
+    if (error instanceof SessionTurnExecutionDeferred) return 'execution-deferred';
     if (isSessionTurnClaimContended(error)) {
       return 'claim-contended';
     }
@@ -4865,9 +5207,8 @@ export class SessionExecutionService {
    * eviction, archive, or an abnormal path (an agent that ignores Stop, a lost
    * connection) ends it.
    *
-   * A release that cannot be confirmed keeps `releaseFailure` and the slot, so
-   * successors stay blocked until `recoverInboxExecution` proves release; the
-   * next input that waits on this session requests that recovery.
+   * An unconfirmed release retires the old Session and returns the slot. Cleanup
+   * gets one bounded background attempt with the old handles, never the successor.
    */
   private async releaseVisibleTurn(options: {
     sessionId: SessionId;
@@ -4893,28 +5234,6 @@ export class SessionExecutionService {
           return false;
         }));
       if (inboxInput && !withdrawn) {
-        if (inboxBatch)
-          await (
-            await createSessionBackend(sessionDoc)
-          )
-            .applyHistoryAction({
-              kind: 'operation-batch-status',
-              batchId: inboxBatch.batchId,
-              turnId:
-                inboxBatch.kind === 'automatic'
-                  ? inboxBatch.inputId
-                  : `operation-batch:${inboxBatch.batchId}`,
-              status: !runtime.promptStarted
-                ? 'not_submitted'
-                : outcome === 'completed' && !runtime.promptFailed
-                  ? 'settled'
-                  : 'unknown',
-            })
-            .catch((cause) =>
-              this.deps.logger.warn(
-                `Inbox history status projection failed: ${formatErrorMessage(cause)}`
-              )
-            );
         await runtime.inboxOwner!.finish(
           runtime.cancelRequested || outcome === 'cancelled'
             ? 'user_stop'
@@ -4923,22 +5242,67 @@ export class SessionExecutionService {
               : 'failed',
           runtime.releaseFailure
         );
+        if (inboxBatch)
+          runtime.afterRelease.push(() =>
+            this.runBookkeepingStage(sessionId, 'operation-batch-status', async () =>
+              (await createSessionBackend(sessionDoc)).applyHistoryAction({
+                kind: 'operation-batch-status',
+                batchId: inboxBatch.batchId,
+                turnId:
+                  inboxBatch.kind === 'automatic'
+                    ? inboxBatch.inputId
+                    : `operation-batch:${inboxBatch.batchId}`,
+                status: !runtime.promptStarted
+                  ? 'not_submitted'
+                  : outcome === 'completed' && !runtime.promptFailed
+                    ? 'settled'
+                    : 'unknown',
+              })
+            )
+          );
         if (runtime.inboxOwner!.failure) runtime.releaseFailure = runtime.inboxOwner!.failure;
       }
     } catch (cause) {
       runtime.releaseFailure ??= cause;
-      throw cause;
+      this.deps.logger.warn(
+        `[${sessionId}] Inbox release incomplete: ${formatErrorMessage(cause)}`
+      );
     } finally {
       // Freeze the outcome before waking a successor; delivery owns no prompt slot.
       const fact = this.resolveTurnOutcomeFact(runtime, !!inboxInput);
       const completedAt = getServerNow();
       try {
-        if (inboxInput && !runtime.releaseFailure) {
-          this.releaseTurnRuntime(sessionId, runtime.turnId);
-          await inbox!.wake();
-          this.onInboxReleased?.(sessionId);
+        if (runtime.releaseFailure) {
+          if (runtime.session) this.deps.sessionManager.detachSession(runtime.session);
+          else if (runtime.pendingSession)
+            this.deps.sessionManager.abandonPendingSessionCreate(sessionId, 'unconfirmed-release');
+          this.reportSessionStopFailure(
+            sessionId,
+            runtime.turnId,
+            'terminate',
+            new Error(
+              'Some processes from the previous turn could not be confirmed stopped; continuing.'
+            ),
+            runtime
+          );
+          void this.requestReleaseRecovery(sessionId, runtime);
+        }
+        if (inboxInput || runtime.releaseFailure) {
+          this.freeTurnSlot(runtime);
+          if (inbox && outcome !== 'execution-deferred') {
+            await inbox!
+              .wake()
+              .catch((cause: unknown) =>
+                this.deps.logger.warn(
+                  `[${sessionId}] Inbox wake failed: ${formatErrorMessage(cause)}`
+                )
+              );
+            this.onInboxReleased?.(sessionId);
+          }
         }
       } finally {
+        for (const run of runtime.afterRelease.splice(0))
+          void this.ownBookkeeping(sessionId, Promise.resolve().then(run));
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
@@ -6209,7 +6573,8 @@ export class SessionExecutionService {
 
       // Inbox has already crossed its durable start fence before prompt submission.
       // A disconnected transport with no observed output cannot prove non-consumption.
-      // Ordinary turns retain their existing bounded stale-connection recovery.
+      // Encrypted turns also retain their start evidence instead of retrying an
+      // uncertain submission. Ordinary turns keep their bounded recovery.
       const promptWithStaleACPRecovery = (
         promptBlocks: ContentBlock[]
       ): Effect.Effect<void, unknown, Scope.Scope> =>
@@ -6219,6 +6584,8 @@ export class SessionExecutionService {
               const hasPromptEvents =
                 self.deps.hasPromptEventsForTurn?.(sessionId, runtime.turnId) ?? true;
               if (
+                self.deps.encryptedWorkspace ||
+                Boolean(self.deps.encryptedExecution) ||
                 dispatchOptions?.dispatchSource === 'inbox' ||
                 Boolean(dispatchOptions?.inboxBatch) ||
                 Boolean(ctx.runtime.inboxOwner?.batch) ||
@@ -6308,7 +6675,6 @@ export class SessionExecutionService {
       yield* abortIfCancelled();
 
       yield* promptWithStaleACPRecovery(promptBlocks);
-      yield* self.tryPromise(() => runtime.yieldedFinalization);
 
       const completedTurnId = runtime.turnId;
       const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
@@ -6446,6 +6812,7 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
+          yield* ctx.claimExecution();
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -6807,9 +7174,11 @@ export class SessionExecutionService {
         abortIfCancelled,
         openAssistantEntry,
         prompt,
+        claimExecution,
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
+          yield* claimExecution();
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -7071,7 +7440,6 @@ export class SessionExecutionService {
           yield* abortIfCancelled();
 
           yield* prompt(promptBlocks);
-          yield* self.tryPromise(() => runtime.yieldedFinalization);
 
           const completedTurnId = runtime.turnId;
           const completedUserTurnId = runtime.userTurnId ?? userTurnId;
@@ -7522,6 +7890,7 @@ export class SessionExecutionService {
     } catch (error) {
       const errorMessage = formatErrorMessage(error);
       this.deps.logger.error(`[${sessionId}] Failed to stop session: ${errorMessage}`);
+      this.reportSessionStopFailure(sessionId, turnId, 'cancel', error);
       return {
         success: false,
         error: errorMessage,
@@ -7584,16 +7953,6 @@ export class SessionExecutionService {
           magpieGatewayUrl: config.magpieGatewayUrl,
           env: config.env,
         });
-      const existing = await this.deps.workspaceDocument.getAcpCapabilities(
-        this.deps.machineId,
-        agentConfigId
-      );
-      const availableCommands =
-        capabilities.availableCommands !== undefined
-          ? capabilities.availableCommands
-          : existing?.sourceVersion === sourceVersion
-            ? existing.availableCommands
-            : undefined;
       await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         agentConfigId,
@@ -7602,7 +7961,7 @@ export class SessionExecutionService {
         capabilities.modes,
         capabilities.models,
         capabilities.configOptions,
-        availableCommands,
+        undefined,
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
@@ -7613,18 +7972,6 @@ export class SessionExecutionService {
           rateLimits: capabilities.rateLimits,
           modelCapabilities: capabilities.modelCapabilities,
         }
-      );
-      this.acpCapabilityLaunchInputFingerprints.set(
-        agentConfigId,
-        fingerprintAcpLaunchInputs({
-          configId: agentConfigId,
-          cliType: config.agentCliType,
-          agentType: config.agentType,
-          env: config.env,
-          customAcp: config.customAcp,
-          runtimeOverrides: config.runtimeOverrides,
-          magpieGatewayUrl: config.magpieGatewayUrl,
-        })
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -8041,11 +8388,14 @@ export class SessionExecutionService {
       env: message.env,
     });
     const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
+    const entry = await this.deps.workspaceDocument.getAcpCapabilities(
+      this.deps.machineId,
+      message.configId
+    );
+    // Session-confirmed models do not prove the project-independent command preview.
+    if (entry?.availableCommands === undefined) return undefined;
     const decision = decideAcpCapabilityRefreshCache({
-      entry: await this.deps.workspaceDocument.getAcpCapabilities(
-        this.deps.machineId,
-        message.configId
-      ),
+      entry,
       expectedSourceVersion,
       launchInputs:
         recordedFingerprint === undefined
@@ -8091,7 +8441,7 @@ export class SessionExecutionService {
         modes,
         models,
         configOptions,
-        availableCommands,
+        availableCommands = [],
         sessionFork,
         acknowledgedSteer,
         sessionTitle,

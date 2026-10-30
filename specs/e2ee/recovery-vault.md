@@ -5,6 +5,12 @@ Translation: current
 
 [中文](recovery-vault.zh.md)
 
+## Approved format boundaries
+
+On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor must be independently confirmed. An encrypted package, its source locator or a server response alone does not establish that anchor or prove the latest ledger head.
+
+Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries are approved; the remaining vault design and this Spec as a whole remain **draft**, and the recovery vault is outside the MVP. The current implementation has not yet implemented the package version field; approval does not establish deployed or real-device behavior.
+
 ## Recovery material and ciphertext
 
 One canonical CBOR `vault-v1` recovery file opens an encrypted vault. Its fixed tuple is

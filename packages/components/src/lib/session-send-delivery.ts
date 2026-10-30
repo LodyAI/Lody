@@ -41,7 +41,9 @@ export type SessionSendRuntime = Pick<
   WorkspaceRuntime,
   'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
 > &
-  Partial<Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode'>>;
+  Partial<
+    Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'>
+  >;
 
 /** Trusted human-send provenance, committed before history or queue activation. */
 export async function persistHumanInputReceipt(
@@ -113,7 +115,8 @@ export async function writeUserTurn(
   throwIfSendAborted(signal);
   if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
-  if (send.delivery.kind === 'dispatch') await activateUserTurn(runtime, send.sessionId, send.entry.id);
+  if (send.delivery.kind === 'dispatch')
+    await activateUserTurn(runtime, send.sessionId, send.entry.id);
 }
 
 /** Only local control metadata; this does not write history or start execution. */
@@ -187,6 +190,43 @@ export async function dispatchUserTurn(
     });
   const machineId = options?.machineId ?? (await readMachineId(runtime, sessionId));
   let rpc: Promise<boolean> = Promise.resolve(false);
+  if (
+    runtime.contentMode === 'e2ee' &&
+    runtime.prepareEncryptedDispatch &&
+    machineId &&
+    inputConfig &&
+    userId &&
+    timestamp
+  ) {
+    try {
+      const prepared = await runtime.prepareEncryptedDispatch(machineId, {
+        sessionId,
+        userTurnId,
+        userId,
+        timestamp,
+        inputConfig,
+      });
+      await runtime.sendResources.withSessionStore(sessionId, (store) => {
+        store.setState((draft: SessionDocDraft) => {
+          const existing = draft.rpcDispatchOriginals?.[userTurnId];
+          if (existing !== undefined && existing !== prepared.original.frameHex)
+            throw new Error('e2ee_rpc_original_conflict');
+          draft.rpcDispatchOriginals ??= {};
+          draft.rpcDispatchOriginals[userTurnId] = prepared.original.frameHex;
+        });
+      });
+      rpc = prepared.send().then(
+        (response) => {
+          if (response?.accepted) options?.onAccepted?.();
+          return response?.accepted ?? false;
+        },
+        () => false
+      );
+    } catch {
+      // Preparation/storage failure cannot remove or delay durable activation.
+      log('Encrypted dispatch acceleration unavailable for %s/%s', sessionId, userTurnId);
+    }
+  }
   if (runtime.contentMode !== 'e2ee' && machineId && inputConfig && userId && timestamp) {
     const rpcArgs = { sessionId, userTurnId, userId, timestamp, inputConfig };
     // Attachments ride as references, so payloads are normally small; skip the

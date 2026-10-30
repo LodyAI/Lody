@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
@@ -7,7 +9,7 @@ import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
-import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { usePlatformCapability } from '@lody/platform/react';
 import { getServerNow, type LocalProjectId, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
   getShortcutEmoji,
@@ -153,7 +155,7 @@ const styles = stylex.create({
 export function PromptShortcutsSetting() {
   const allowed = useWorkspaceFeature('shortcuts');
   const state = usePromptShortcuts();
-  if (!allowed) return null;
+  if (!allowed) return <WorkspaceFeatureNotice feature="shortcuts" />;
   return (
     <PromptShortcutsSettingContent
       key={
@@ -625,7 +627,7 @@ function useShortcutScopeOptions(workspaceIdInput?: string) {
     workspaceId ? { workspaceId } : undefined
   );
   const configs = useAtomValue(getAllAgentConfigAtom);
-  const repositories = useCloudQuery(
+  const repositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );

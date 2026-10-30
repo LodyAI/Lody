@@ -77,12 +77,20 @@ describe('current Inbox scheduling contract', () => {
       trace('human', 'schedule', 'submit', 'result', 'normal', 'human', 'schedule', 'submit')
     ).toMatchObject({ active: 'human', receipts: [[1]], pending: [] });
   });
-  it('unreleased work blocks even a fresh human until resource recovery', () => {
-    expect(trace('human', 'schedule', 'submit', 'unreleased', 'human', 'schedule')).toMatchObject({
-      blocked: true,
-      active: 'human',
-      human: true,
-    });
+  it('restart retires interrupted work without replay and admits fresh human input', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'restart',
+        'schedule',
+        'human',
+        'schedule',
+        'submit'
+      )
+    ).toMatchObject({ active: 'human', batch: [1], receipts: [[1]], pending: [] });
   });
   it('withdrawing an unverified human execution reschedules the same results once', () => {
     expect(

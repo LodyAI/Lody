@@ -4,6 +4,7 @@ import {
   buildOpenedBySessionTree,
   countOpenedByTreeRoots,
   hasOpenedByTreeNesting,
+  placeOpenedSessionsWithOpeners,
 } from '../src/lib/session-opened-by-tree';
 
 type Row = { id: string; openedBy?: string | null };
@@ -232,5 +233,38 @@ describe('hasOpenedByTreeNesting', () => {
   test('stays true for a collapsed opener, whose children are hidden but real', () => {
     const rows: Row[] = [{ id: 'a' }, { id: 'b', openedBy: 'a' }];
     expect(hasOpenedByTreeNesting(build(rows, { collapsed: ['a'] }))).toBe(true);
+  });
+});
+
+describe('placeOpenedSessionsWithOpeners', () => {
+  const place = (rows: Array<Row & { group: string }>) => {
+    const openedBy = new Map(rows.map((row) => [row.id, row.openedBy ?? null]));
+    const moved = placeOpenedSessionsWithOpeners(
+      new Map(rows.map((row) => [row.id, row.group])),
+      (id) => openedBy.get(id)
+    );
+    return Object.fromEntries(moved);
+  };
+
+  test('moves an opened Session into the group of its topmost rendered ancestor', () => {
+    expect(
+      place([
+        { id: 'opener', group: 'local:m1:p1' },
+        { id: 'chat', group: 'chats', openedBy: 'opener' },
+        { id: 'repo', group: 'repo:o/r', openedBy: 'chat' },
+        { id: 'sibling', group: 'local:m1:p1', openedBy: 'opener' },
+        { id: 'plain', group: 'chats' },
+      ])
+    ).toEqual({ chat: 'local:m1:p1', repo: 'local:m1:p1' });
+  });
+
+  test('keeps rows whose opener is not rendered, or that form a cycle, in their own group', () => {
+    expect(
+      place([
+        { id: 'orphan', group: 'chats', openedBy: 'pinned-or-archived' },
+        { id: 'a', group: 'chats', openedBy: 'b' },
+        { id: 'b', group: 'repo:o/r', openedBy: 'a' },
+      ])
+    ).toEqual({});
   });
 });

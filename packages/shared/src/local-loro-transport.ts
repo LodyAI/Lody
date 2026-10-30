@@ -623,7 +623,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       // Connection liveness is the relay's concern, not the adapter's.
       return;
     }
-    if (message.type === 'presence' || message.type === 'machine-monitor') {
+    if (
+      message.type === 'presence' ||
+      message.type === 'machine-monitor' ||
+      message.type === 'prompt-suggestions'
+    ) {
       // Workspace-level ephemeral state is consumed by the runtime layer, not
       // the repo transport; ignore it here.
       return;

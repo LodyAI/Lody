@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import {
   useCallback,
   useEffect,
@@ -9,7 +10,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { useCloudMutation } from '@lody/platform/react';
 import { toast } from '@/lib/toast';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
@@ -215,7 +215,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   // hidden and canUpdateSharing stays false as a logic-gate.
   const teamSharingAvailable = useAppCapability('teamSharing');
   const sessionMetaList = useMemo(() => Object.values(sessionMetas), [sessionMetas]);
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
 

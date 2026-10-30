@@ -1,5 +1,6 @@
+import { localMachineIdAtom } from '@/atoms/local-probe';
 import { collectFileDownload } from '@/lib/file-download';
-import { useWorkspaceFeature } from './use-workspace-feature';
+import { useWorkspaceFeatureReason } from './use-workspace-feature';
 import { useSessionWorkspacePath } from './use-session-workspace-path';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
@@ -350,7 +351,9 @@ function useCodeCollabFileIndexLoadState(args: {
 export function useCodeCollabSessionFileProvider(
   options: UseCodeCollabSessionFileProviderOptions
 ): UseCodeCollabSessionFileProviderResult {
-  const indexAllowed = useWorkspaceFeature('code-collab-index');
+  const indexReason = useWorkspaceFeatureReason('code-collab-index');
+  const indexAllowed = !indexReason;
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const sessionId = options.sessionId as SessionId;
   const sessionRoomId = getSessionRoomId(sessionId);
@@ -573,6 +576,8 @@ export function useCodeCollabSessionFileProvider(
 
   const provider = useMemo<SessionFileProvider | null>(() => {
     const sharedState = materializedSharedState;
+    if (!indexAllowed && !(desktopPreview && machineId && machineId === localMachineId))
+      return null;
     if (!rpcRuntime || (!sharedState && !desktopPreview)) return null;
     return new CodeCollabSessionFileProvider({
       runtime: rpcRuntime,
@@ -583,12 +588,23 @@ export function useCodeCollabSessionFileProvider(
       updatedAtMs: sharedState?.updatedAtMs,
       textState: providerTextState,
     });
-  }, [desktopPreview, materializedSharedState, providerTextState, role, rpcRuntime, sourceState]);
+  }, [
+    indexAllowed,
+    machineId,
+    localMachineId,
+    desktopPreview,
+    materializedSharedState,
+    providerTextState,
+    role,
+    rpcRuntime,
+    sourceState,
+  ]);
 
   return useMemo<UseCodeCollabSessionFileProviderResult>(() => {
     if (options.enabled === false) {
       return disabledResult;
     }
+    if (indexReason) return { provider, status: 'unavailable', space: null, message: indexReason };
     if (!runtime) {
       return {
         provider: null,
@@ -632,6 +648,7 @@ export function useCodeCollabSessionFileProvider(
       message: CODE_COLLAB_SHARED_STATE_LOADING_MESSAGE,
     };
   }, [
+    indexReason,
     fileIndexLoadState,
     machineId,
     materializedSharedState,

@@ -94,25 +94,24 @@ append(owner, [8, membership['bob'], 2, filled(22), filled(0x32, 72)])
 append(owner, [1, membership['carol'], join(carol, 3)])
 append(owner, [6, membership['carol']])
 append(carol, [9, [1]])
+append(carol, [10, membership['owner']])
+append(carol, [9, [2]])
 
 print(json.dumps({
     'source': 'Python hashlib SHA256 and PyNaCl 1.6.2 Ed25519; independent ledger v1 encoding',
     'anchor': anchor.hex(),
     'records': [{'hex': record.hex(), 'hash': record_hash(record).hex()} for record in records],
     'expected': {
-        'verifiedLength': 11,
-        'failure': {'code': 'upgrade-required', 'position': 11},
+        'verifiedLength': 13,
+        'failure': {'code': 'upgrade-required', 'position': 13},
         'owner': membership['carol'].hex(),
         'members': {
-            membership['owner'].hex(): {'userId': filled(10).hex(), 'role': 'admin'},
             membership['carol'].hex(): {'userId': filled(3).hex(), 'role': 'owner'},
         },
         'devices': {
-            owner.pk.hex(): {'membershipId': membership['owner'].hex(), 'kind': 'personal'},
             carol.pk.hex(): {'membershipId': membership['carol'].hex(), 'kind': 'personal'},
-            replacement_machine.pk.hex(): {'membershipId': membership['owner'].hex(), 'kind': 'machine'},
         },
-        'machineBindings': {replacement_machine.pk.hex(): machine_id.decode('utf-8')},
-        'epoch': {'number': 2, 'keyCommitment': filled(22).hex(), 'rotationRequired': False},
+        'machineBindings': {},
+        'epoch': {'number': 2, 'keyCommitment': filled(22).hex(), 'rotationRequired': True},
     },
 }, indent=2))

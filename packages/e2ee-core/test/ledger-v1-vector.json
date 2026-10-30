@@ -49,46 +49,40 @@
     {
       "hex": "828358202d479a23a222cdb7c843845aa83ee36c9a6a773638db6db7bb0b57ac182628a35820ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d182098101584086e496e9847a3ac3179b24f60889cc097442521f689dca22f5a547437d55897aab13fd5f56b543d6dcbab5129fdf44004c86bfc1aa4759fa9d8355237b9f1208",
       "hash": "f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc7"
+    },
+    {
+      "hex": "82835820f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc75820ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1820a500a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a584056f6935b84022dc31c7519ea35b5002efa3855fbd55bb432c0f1ff3d040d16af2af5483e132a2cdf9a9ff319f9f45c375839ff51c86e2e3951e16ea49808f907",
+      "hash": "f9833dcb48bf934079bd74ce78d8aa2706cde8b12e7e8c4a3c680c7d74c7acc0"
+    },
+    {
+      "hex": "82835820f9833dcb48bf934079bd74ce78d8aa2706cde8b12e7e8c4a3c680c7d74c7acc05820ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d18209810258406f51cfd10d8f08cc323f6242d81203795c128af14efa28954449ce04bfdc1f26d9d77f9fa35afef32f018a8b0ed7dcaf083429ee1c4836ff9e93ce437886b805",
+      "hash": "5e0a05ec746d594f6da4144e00a0bab26cbb65f7651e70543208bb9016ac2046"
     }
   ],
   "expected": {
-    "verifiedLength": 11,
+    "verifiedLength": 13,
     "failure": {
       "code": "upgrade-required",
-      "position": 11
+      "position": 13
     },
     "owner": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
     "members": {
-      "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a": {
-        "userId": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        "role": "admin"
-      },
       "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c": {
         "userId": "0303030303030303030303030303030303030303030303030303030303030303",
         "role": "owner"
       }
     },
     "devices": {
-      "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c": {
-        "membershipId": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        "kind": "personal"
-      },
       "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1": {
         "membershipId": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
         "kind": "personal"
-      },
-      "1398f62c6d1a457c51ba6a4b5f3dbd2f69fca93216218dc8997e416bd17d93ca": {
-        "membershipId": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        "kind": "machine"
       }
     },
-    "machineBindings": {
-      "1398f62c6d1a457c51ba6a4b5f3dbd2f69fca93216218dc8997e416bd17d93ca": "machine/\u00e9"
-    },
+    "machineBindings": {},
     "epoch": {
       "number": 2,
       "keyCommitment": "1616161616161616161616161616161616161616161616161616161616161616",
-      "rotationRequired": false
+      "rotationRequired": true
     }
   }
 }

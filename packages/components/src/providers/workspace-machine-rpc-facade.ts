@@ -21,6 +21,8 @@ import type {
 } from '@lody/loro-streams-rpc';
 import {
   McpToolListResultSchema,
+  McpAuthenticationResultSchema,
+  MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
@@ -37,6 +39,7 @@ import {
   machineSupportsSessionHistoryProtocol,
   type MachineProtocolCapabilities,
   type AgentConfigId,
+  type CodeCollabRole,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
   type CodeCollabV2FileIndexSnapshot,
@@ -96,6 +99,11 @@ import {
   sessionEditAndResendFailure,
 } from '@lody/shared';
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
+import {
+  protectedFileWriteDeniedMessage,
+  workspaceFeatureUnavailableMessage,
+} from '@/lib/workspace-feature';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { WorkspaceTargetRouter } from './workspace-target-router';
 
@@ -119,8 +127,16 @@ type LspRequest = {
 };
 
 export type WorkspaceMachineRpcFacadeDeps = {
+  waitForContentAdmission?: () => Promise<void>;
+  requestEncryptedFeature?: (
+    request: LocalMachineRpcRequest
+  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
-  /** Same-computer control only; never enables network RPC or a local file API. */
+  /** Encrypted content: remote file work uses only `requestEncryptedFeature`, when the host has it. */
+  protectedContent?: boolean;
+  /** Verified ledger role for display gates; the receiving machine still authorizes every request. */
+  protectedCodeCollabRole?: () => CodeCollabRole;
+  /** Trusted same-computer control/file surfaces only; never enables network RPC. */
   isLocalControlMachine?: (machineId: MachineId) => boolean;
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
@@ -137,14 +153,23 @@ const toCodeCollabTransportError = (error: unknown): CodeCollabV2Error => ({
   retryable: true,
 });
 
-const getLocalMachineRpcSender = (): LocalMachineRpcSender | undefined =>
+const getPlatformLocalMachineRpcSender = (): LocalMachineRpcSender | undefined =>
   getIpcServices()?.machineRpc.send;
 
 export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeDeps) {
   const { workspaceId, targetRouter, getMachineRpcClient } = deps;
+  const getLocalMachineRpcSender = (): LocalMachineRpcSender | undefined => {
+    const sender = getPlatformLocalMachineRpcSender();
+    if (!sender) return undefined;
+    return async (request) => {
+      await deps.waitForContentAdmission?.();
+      return sender(request);
+    };
+  };
   const codeCollabDiffRpcGate = createAsyncConcurrencyGate(CODE_COLLAB_DIFF_RPC_CONCURRENCY_LIMIT);
 
   const waitForMachineRoute = async (machineId: MachineId): Promise<void> => {
+    await deps.waitForContentAdmission?.();
     if (targetRouter.getPlaneForMachine(machineId) !== null) return;
     try {
       await targetRouter.resolvePlaneForMachine(machineId, {
@@ -160,6 +185,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     options?: { timeoutMs?: number }
   ): Promise<'local' | 'cloud'> => {
+    await deps.waitForContentAdmission?.();
     const existing = targetRouter.getPlaneForMachine(machineId);
     if (existing) return existing;
     return await targetRouter.resolvePlaneForMachine(machineId, {
@@ -168,6 +194,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   };
 
   const canUseLocalMachineRpc = async (machineId: MachineId): Promise<boolean> => {
+    await deps.waitForContentAdmission?.();
+    if (deps.isLocalControlMachine?.(machineId)) {
+      if (typeof window === 'undefined' || !window.__LODY_ELECTRON__ || !getLocalMachineRpcSender())
+        throw new Error('Local Machine RPC is not available.');
+      return true;
+    }
     await waitForMachineRoute(machineId);
     return Boolean(
       typeof window !== 'undefined' &&
@@ -180,6 +212,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   const sendLocalMachineRpcRequest = async (
     request: LocalMachineRpcRequest
   ): Promise<LocalMachineRpcResult | CodeCollabV2Error | null> => {
+    await deps.waitForContentAdmission?.();
     const sender = getLocalMachineRpcSender();
     if (!sender) {
       return toCodeCollabTransportError(new Error('Local Machine RPC is not available.'));
@@ -189,6 +222,26 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       return toCodeCollabTransportError(new Error(response.error));
     }
     return response.result;
+  };
+
+  /** Refuse before signing: a missing host port or a non-writer role cannot become a timeout. */
+  const protectedRemoteRefusal = (method: string): CodeCollabV2Error | null => {
+    if (!deps.protectedContent) return null;
+    if (!deps.requestEncryptedFeature)
+      return {
+        status: 'error',
+        code: 'permission_denied',
+        retryable: false,
+        message: workspaceFeatureUnavailableMessage('rpc'),
+      };
+    if (!isE2eeReadQuery(method, undefined) && deps.protectedCodeCollabRole?.() !== 'write')
+      return {
+        status: 'error',
+        code: 'permission_denied',
+        retryable: false,
+        message: protectedFileWriteDeniedMessage(),
+      };
+    return null;
   };
 
   const requestCodeCollab = async <TResult>(
@@ -202,6 +255,13 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           | TResult
           | CodeCollabV2Error
           | null;
+      }
+      const refusal = protectedRemoteRefusal(localRequest.method);
+      if (refusal) return refusal;
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature(localRequest);
+        if (!response.ok) throw new Error(response.error);
+        return response.result as TResult;
       }
       return await cloudRequest(await getMachineRpcClient(machineId));
     } catch (error) {
@@ -311,6 +371,13 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     );
   };
 
+  const protectedPreviewUnavailable = (path: string) =>
+    filePreviewV3Error('permission_denied', {
+      message: workspaceFeatureUnavailableMessage('rpc'),
+      path,
+      retryable: false,
+    });
+
   const requestFilePreview = async (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -370,6 +437,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           }
           if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
             return unsupportedMarkdownLinks();
+          if (deps.protectedContent && !deps.requestEncryptedFeature)
+            return protectedPreviewUnavailable(request.path);
+          if (deps.requestEncryptedFeature) {
+            const response = await deps.requestEncryptedFeature({
+              machineId,
+              workspaceId,
+              method: 'file/preview',
+              params,
+              ...ownerSessionFields(options),
+              timeoutMs: options?.timeoutMs ?? 30_000,
+            });
+            if (!response.ok) throw new Error(response.error);
+            return FilePreviewV3ResponseSchema.parse(response.result);
+          }
           const client = await getMachineRpcClient(machineId);
           return await client.requestFilePreview({
             ...params,
@@ -379,6 +460,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
           return unsupportedMarkdownLinks();
+        if (deps.protectedContent && !deps.requestEncryptedFeature)
+          return protectedPreviewUnavailable(request.path);
+        if (deps.requestEncryptedFeature) {
+          const response = await deps.requestEncryptedFeature({
+            machineId,
+            workspaceId,
+            method: 'file/preview',
+            params,
+            ...ownerSessionFields(options),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          });
+          if (!response.ok) throw new Error(response.error);
+          return FilePreviewV3ResponseSchema.parse(response.result);
+        }
         const client = await getMachineRpcClient(machineId);
         return await client.requestFilePreview({
           ...params,
@@ -649,7 +744,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
+    options?: {
+      timeoutMs?: number;
+      subagentTaskId?: string;
+      cancelId?: string;
+      pauseInbox?: boolean;
+    }
   ): Promise<SessionCancelResponse | null> => {
     try {
       if (
@@ -670,6 +770,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
             turnId,
             subagentTaskId: options?.subagentTaskId,
             ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
+            ...(options?.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
           },
           timeoutMs: options?.timeoutMs ?? 2_000,
         });
@@ -692,6 +793,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         turnId,
         subagentTaskId: options?.subagentTaskId,
         ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
+        ...(options?.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
         timeoutMs: options?.timeoutMs ?? 2_000,
       });
     } catch (error) {
@@ -1000,7 +1102,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewCreateResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-create',
           machineId,
@@ -1009,6 +1114,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewCreateResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-create',
+          params: { sessionId, requestedByUserId, target, approval, restart: options?.restart },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewCreateResponse;
       }
@@ -1157,7 +1273,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewStatusResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-status',
           machineId,
@@ -1166,6 +1285,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewStatusResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-status',
+          params: { sessionId, requestedByUserId, renewEndpointId: options?.renewEndpointId },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewStatusResponse;
       }
@@ -1279,7 +1409,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewRevokeResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-revoke',
           machineId,
@@ -1288,6 +1421,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewRevokeResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-revoke',
+          params: { sessionId, requestedByUserId, reason: options?.reason },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewRevokeResponse;
       }
@@ -1567,7 +1711,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
-  const requestLocalMcpTools = async (machineId: MachineId, server: WorkspaceMcpServerMeta) => {
+  const requestLocalMcpTools = async (
+    machineId: MachineId,
+    server: WorkspaceMcpServerMeta,
+    requesterUserId?: string
+  ) => {
     const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
     if (
       !machineSupportsProtocolCapability(
@@ -1583,14 +1731,51 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       machineId,
       workspaceId,
       method: 'mcp/list-tools',
-      params: { server },
+      params: {
+        server,
+        ...(requesterUserId &&
+        machineSupportsProtocolCapability(
+          { protocolCapabilities },
+          MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication,
+          MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION
+        )
+          ? { requesterUserId }
+          : {}),
+      },
       timeoutMs: 35_000,
     });
     return McpToolListResultSchema.parse(result);
   };
 
+  const requestLocalMcpAuthentication = async (
+    machineId: MachineId,
+    params: Extract<LocalMachineRpcRequest, { method: 'mcp/authentication' }>['params']
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication,
+        MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION
+      ) ||
+      !(await canUseLocalMachineRpc(machineId))
+    ) {
+      throw new Error('MCP authentication requires a supported local daemon.');
+    }
+    return McpAuthenticationResultSchema.parse(
+      await sendLocalMachineRpcRequest({
+        machineId,
+        workspaceId,
+        method: 'mcp/authentication',
+        params,
+        timeoutMs: 35_000,
+      })
+    );
+  };
+
   return {
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,

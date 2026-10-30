@@ -1,6 +1,6 @@
 # 优先使用快照的工作区邀请
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](snapshot-join.md)

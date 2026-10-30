@@ -70,6 +70,8 @@ const SESSION_RECONCILE_CONCURRENCY = 4;
 type SessionUserResolverLike = Pick<SessionUserResolver, 'resolve' | 'clear'>;
 
 type SessionDispatchWatcherDeps = {
+  /** Encrypted turn execution is admitted only by its verified-device gate. */
+  encryptedWorkspace?: boolean;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -128,7 +130,7 @@ type SessionDispatchWatcherDeps = {
   onFatalAuthFailure?: (error: Error) => void;
 };
 
-/** A running verify-with-retry fiber for a transient access failure on `turnId`. */
+/** A running per-turn admission retry: access or missing execution evidence. */
 type AccessRetryHandle = {
   turnId: string;
   fiber: Fiber.Fiber<void, never>;
@@ -437,6 +439,7 @@ export class SessionDispatchWatcher {
   private metadataReconcileChain: Promise<void> = Promise.resolve();
   private readonly pendingMetadataSessionIds = new Set<SessionId>();
   private metadataReconcileDrainScheduled = false;
+  private wakeMetadataReconcile?: () => void;
   private activeSessionReconciles = 0;
   private activeBootstrapReconciles = 0;
   private readonly sessionReconcileWaiters: SessionReconcileWaiter[] = [];
@@ -940,9 +943,10 @@ export class SessionDispatchWatcher {
    */
   private enqueueMetadataReconcile(sessionId: SessionId): void {
     // Reinsert so a fresh event moves ahead of stale catch-up work already in
-    // the queue. The drain takes from the newest end in bounded batches.
+    // the queue. The drain takes from the newest end as slots become free.
     this.pendingMetadataSessionIds.delete(sessionId);
     this.pendingMetadataSessionIds.add(sessionId);
+    this.wakeMetadataReconcile?.();
     this.scheduleMetadataReconcileDrain();
   }
 
@@ -955,28 +959,35 @@ export class SessionDispatchWatcher {
     const next = this.metadataReconcileChain
       .catch(() => {})
       .then(async () => {
-        while (
-          this.started &&
-          lifecycleGeneration === this.lifecycleGeneration &&
-          this.pendingMetadataSessionIds.size > 0
-        ) {
-          const sessionIds = [...this.pendingMetadataSessionIds]
-            .slice(-SESSION_RECONCILE_CONCURRENCY)
-            .reverse();
-          for (const sessionId of sessionIds) {
+        const running = new Set<Promise<void>>();
+        const isActive = () => this.started && lifecycleGeneration === this.lifecycleGeneration;
+        while (isActive() && (this.pendingMetadataSessionIds.size > 0 || running.size > 0)) {
+          while (
+            this.pendingMetadataSessionIds.size > 0 &&
+            running.size < SESSION_RECONCILE_CONCURRENCY
+          ) {
+            const sessionId = [...this.pendingMetadataSessionIds].at(-1);
+            if (!sessionId) break;
             this.pendingMetadataSessionIds.delete(sessionId);
+            const task = this.withSessionReconcileSlot('metadata', async () => {
+              await this.reconcileSessionWatch(sessionId, 'metadata-watch', {
+                awaitInitialChecks: true,
+                lifecycleGeneration,
+              });
+            })
+              .catch(() => undefined)
+              .finally(() => running.delete(task));
+            running.add(task);
           }
-          await Promise.all(
-            sessionIds.map((sessionId) =>
-              this.withSessionReconcileSlot('metadata', async () => {
-                await this.reconcileSessionWatch(sessionId, 'metadata-watch', {
-                  awaitInitialChecks: true,
-                  lifecycleGeneration,
-                });
-              }).catch(() => undefined)
-            )
-          );
+          await Promise.race([
+            ...running,
+            new Promise<void>((resolve) => {
+              this.wakeMetadataReconcile = resolve;
+            }),
+          ]);
+          this.wakeMetadataReconcile = undefined;
         }
+        await Promise.all(running);
       })
       .finally(() => {
         this.metadataReconcileDrainScheduled = false;
@@ -1553,6 +1564,9 @@ export class SessionDispatchWatcher {
 
       const accessPromise = dispatchTurnPromise.then(async (turn) => {
         ensureActive();
+        // Account labels cannot authorize or reject encrypted execution. This
+        // only reaches the service's mandatory signer/ledger + journal gate.
+        if (this.deps.encryptedWorkspace) return { outcome: 'allowed' as const };
         const access = await traceAsync(
           this.deps.logger,
           'dispatch.verify_machine_access',
@@ -1577,8 +1591,9 @@ export class SessionDispatchWatcher {
       // outcome falls through to the pre-started backend verify DAG node, so the
       // dominant "owner sending to their own machine" case skips the blocking wait
       // while still using the prepared-turn execution path.
-      const localAccess =
-        this.deps.accessPolicy && this.deps.currentUserId
+      const localAccess = this.deps.encryptedWorkspace
+        ? ({ outcome: 'allow' } as const)
+        : this.deps.accessPolicy && this.deps.currentUserId
           ? await Effect.runPromise(
               this.deps.accessPolicy.decide({
                 workspaceId: this.deps.workspaceId,
@@ -1645,6 +1660,9 @@ export class SessionDispatchWatcher {
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
+            onExecutionDeferred: () => {
+              if (isActive()) this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+            },
             onAccessAllowed: async () => {
               ensureActive();
               this.interruptAccessRetry(sessionId);
@@ -1713,7 +1731,7 @@ export class SessionDispatchWatcher {
     const record = this.deps.recordOwnerAccessSnapshot;
     // The snapshot only ever represents "the current user owns this machine";
     // rechecks for foreign requesters must not touch it.
-    if (!record || requesterUserId !== this.deps.currentUserId) {
+    if (this.deps.encryptedWorkspace || !record || requesterUserId !== this.deps.currentUserId) {
       return;
     }
     void (async () => {
@@ -1747,7 +1765,12 @@ export class SessionDispatchWatcher {
     verdict: Promise<MachineAccessVerification>
   ): void {
     const record = this.deps.recordMemberAccessSnapshot;
-    if (!record || !this.deps.currentUserId || requesterUserId === this.deps.currentUserId) {
+    if (
+      this.deps.encryptedWorkspace ||
+      !record ||
+      !this.deps.currentUserId ||
+      requesterUserId === this.deps.currentUserId
+    ) {
       void verdict.catch(() => undefined);
       return;
     }
@@ -1764,6 +1787,21 @@ export class SessionDispatchWatcher {
         `[${sessionId}] Failed to record member access verdict: ${formatErrorMessage(error)}`
       );
     });
+  }
+
+  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string): void {
+    this.interruptAccessRetry(sessionId);
+    const program = Effect.sleep('1 second').pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          this.clearAccessFiberIf(sessionId, turnId);
+          void this.enqueueSessionCheck(sessionId);
+        })
+      )
+    );
+    // Share the existing per-session admission-retry owner and its lifecycle
+    // cancellation. Never wake the withdrawn Inbox in a tight release loop.
+    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program) });
   }
 
   /**

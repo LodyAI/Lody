@@ -66,7 +66,10 @@ are outside the first version.
 
 Draft overrides are isolated by workspace/project immediately on a scope change.
 Do not allow default-derived sends until the local snapshot has been read;
-remote catch-up does not gate sending. Deferred attachment
+remote catch-up does not gate sending. Failed local reads retry automatically while
+consumers remain, with capped backoff and an explicit retry action. The failure
+notice also offers **Send without MCP**, authoring `[]` for that send only without
+changing project defaults or the draft selection. It never replays an input. Deferred attachment
 sends preserve the click-time selection. A selected switch means selected, not
 connected or successfully loaded.
 

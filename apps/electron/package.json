@@ -53,6 +53,7 @@
     "@lody/shared": "workspace:*",
     "@tanstack/react-router": "catalog:",
     "better-auth": "catalog:",
+    "better-sqlite3": "catalog:",
     "conf": "^15.1.0",
     "convex": "catalog:",
     "devframe": "catalog:",
@@ -66,7 +67,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:",
-    "@lody/cloud-api": "workspace:*"
+    "@lody/cloud-api": "workspace:*",
+    "@lody/loro-streams-rpc": "workspace:*"
   },
   "devDependencies": {
     "@lody/e2ee-core": "workspace:*",
@@ -98,6 +100,8 @@
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vite-plugin-wasm": "^3.6.0",
-    "tsx": "4.23.7"
+    "tsx": "4.23.7",
+    "@lody/e2ee-machine-sharing": "workspace:*",
+    "@lody/e2ee-client": "workspace:*"
   }
 }

@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import { loadSessionMcpCatalog } from './session-mcp-resolver';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
@@ -37,20 +38,19 @@ const catalogFlock = flockWithRows([
 ]);
 
 describe('loadSessionMcpCatalog', () => {
-  it('does not open or sync a document for an empty selection', async () => {
-    const openFlockDoc = vi.fn();
-    const syncFlockDoc = vi.fn();
+  it('does not need a catalog for an empty selection', async () => {
+    const unexpectedRead = async (): Promise<never> => {
+      throw new Error('Empty selections must not access the catalog');
+    };
     const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc },
-      syncFlockDoc,
+      repo: { openFlockDoc: unexpectedRead },
+      waitForCatalogBaseline: unexpectedRead,
       workspaceId,
       sessionId,
       selectedIds: [],
       logger: { debug: vi.fn() },
     });
     expect(select(undefined)).toEqual({ servers: [], problems: [] });
-    expect(openFlockDoc).not.toHaveBeenCalled();
-    expect(syncFlockDoc).not.toHaveBeenCalled();
   });
 
   it('reads the catalog and expands target-daemon environment variables', async () => {
@@ -69,7 +69,11 @@ describe('loadSessionMcpCatalog', () => {
   });
 
   it('finishes every read before the agent capabilities are known', async () => {
-    const openFlockDoc = vi.fn(async () => ({ flock: catalogFlock }));
+    let selecting = false;
+    const openFlockDoc = async () => {
+      if (selecting) throw new Error('Selection must not read or prepare the catalog again');
+      return { flock: catalogFlock };
+    };
     const select = await loadSessionMcpCatalog({
       repo: { openFlockDoc },
       workspaceId,
@@ -78,13 +82,12 @@ describe('loadSessionMcpCatalog', () => {
       logger: { debug: vi.fn() },
       env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
     });
-    expect(openFlockDoc).toHaveBeenCalledTimes(1);
+    selecting = true;
 
     // Selecting twice with different capabilities must not touch the document
     // again: the load phase is what ACP startup overlaps with its handshake.
     expect(select({ http: true }).servers).toHaveLength(1);
     expect(select({ http: false }).servers).toHaveLength(1);
-    expect(openFlockDoc).toHaveBeenCalledTimes(1);
   });
 
   it('turns catalog read failures into catalog_unavailable', async () => {
@@ -102,27 +105,43 @@ describe('loadSessionMcpCatalog', () => {
     ]);
   });
 
-  it('refreshes first and falls back to local rows if refresh fails', async () => {
-    const order: string[] = [];
-    const syncFlockDoc = vi.fn(async () => {
-      order.push('sync');
-      throw new Error('offline');
-    });
-    const openFlockDoc = vi.fn(async () => {
-      order.push('open');
-      return { flock: catalogFlock };
-    });
-    const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc },
-      syncFlockDoc,
+  it('waits for the shared baseline and then loads the selected server', async () => {
+    const baseline = Promise.withResolvers<void>();
+    let ready = false;
+    const loading = loadSessionMcpCatalog({
+      repo: {
+        openFlockDoc: async () => {
+          if (!ready) throw new Error('Read before the baseline');
+          return { flock: catalogFlock };
+        },
+      },
+      waitForCatalogBaseline: () => baseline.promise,
       workspaceId,
       sessionId,
       selectedIds: [selectedId],
       logger: { debug: vi.fn() },
       env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
     });
-    expect(order).toEqual(['sync', 'open']);
-    expect(syncFlockDoc).toHaveBeenCalledWith('workspace-1:wf:workspace', { timeoutMs: 5_000 });
+    ready = true;
+    baseline.resolve();
+    const select = await loading;
     expect(select(undefined).servers).toHaveLength(1);
+  });
+
+  it('preserves the original cold-baseline error instead of freezing an empty catalog', async () => {
+    const cause = new Error('Synthetic initial-sync timeout');
+    const error = new WorkspaceSyncUnavailableError({ message: 'Catalog is still syncing', cause });
+    const loading = loadSessionMcpCatalog({
+      repo: { openFlockDoc: async () => ({ flock: flockWithRows([]) }) },
+      waitForCatalogBaseline: async () => {
+        throw error;
+      },
+      workspaceId,
+      sessionId,
+      selectedIds: [selectedId],
+      logger: { debug: () => {} },
+    });
+    await expect(loading).rejects.toBe(error);
+    expect(error.cause).toBe(cause);
   });
 });

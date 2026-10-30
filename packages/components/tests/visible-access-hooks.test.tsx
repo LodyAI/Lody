@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 
 import { act, createElement, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,7 +61,7 @@ import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { useWorkspaceAgentRoles } from '../src/hooks/use-workspace-agent-roles';
 import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, setLodyPresenceNowMsAtom } from '../src/atoms/presence';
-import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   useVisibleLocalProjects,
   useVisibleLocalProjectsFromMachineIndex,
@@ -254,7 +255,16 @@ describe('visible access hooks', () => {
   }
 
   async function mount(workspaceId: string, node: ReactNode) {
+    store.set(currentWorkspaceSlugAtom, workspaceId);
     store.set(currentWorkspaceIdAtom, workspaceId as WorkspaceId);
+    const accountId = store.get(userAtom)?.id;
+    if (accountId)
+      store.set(workspaceContentModeAtom, {
+        accountId,
+        workspaceId,
+        workspaceSlug: workspaceId,
+        descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+      });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -628,7 +638,7 @@ describe('visible access hooks', () => {
       );
       store.set(runtimeAtom, {
         workspaceId: scenario.runtimeWorkspace as WorkspaceId,
-        workspaceSlug: 'offline',
+        workspaceSlug: scenario.runtimeWorkspace,
         contentMode: scenario.mode,
         accountId: 'viewer-user',
       } as WorkspaceRuntime);
@@ -694,7 +704,7 @@ describe('visible access hooks', () => {
         sessions: scenario.visible ? [session.id] : [],
         archived: scenario.visible ? [archived.id] : [],
         roles: scenario.visible ? [privateRole.id] : [],
-        isLoading: true,
+        isLoading: scenario.mode !== 'e2ee' || scenario.runtimeWorkspace !== 'offline-workspace',
       });
     });
   }

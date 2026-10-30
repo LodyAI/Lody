@@ -59,7 +59,12 @@ identity, best-effort fetch success or permission to forcibly remove a directory
 Ordinary helper diagnostic failure can be recorded while the original failed Git
 operation still fails; a diagnostic's unreleased process cannot be swallowed.
 Git exit fallback policy remains for the manager migration to classify precisely.
-Git's ten-minute deadline and 64 MiB output ceiling are unchanged. Helper probing
+Git defaults to ten minutes and a 64 MiB output ceiling. Best-effort fetch uses
+30 seconds: a bare CommandTimedOut reaches the manager only after Scope cleanup,
+so local restoration may continue with a warning. Mixed cleanup/release failures
+still escape with their recovery owners; required fetch still rejects. The earlier
+blanket timeout rejection protected writers but unnecessarily blocked local refs
+after the fetch was proven stopped. The next restore retries; no failure is cached. Helper probing
 now has a five-second deadline and retains the shared one MiB output ceiling.
 The [worktree lifecycle Spec](../../../../specs/session-worktree-lifecycle.md)
 remains draft and records this failure guarantee.

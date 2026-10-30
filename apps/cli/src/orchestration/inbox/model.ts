@@ -36,7 +36,7 @@ export type InboxMember = {
 };
 export type InboxRelease = InboxInput & {
   executionId: string;
-  outcome: 'normal' | 'user_stop' | 'failed' | 'unreleased';
+  outcome: 'normal' | 'user_stop' | 'failed';
   cause?: string;
   releaseWatermark?: number;
 };

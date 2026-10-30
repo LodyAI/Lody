@@ -1,4 +1,5 @@
 import { PostHog } from 'posthog-node';
+import { redactedTelemetryException } from '@lody/platform/telemetry';
 import { resolvePlatformKind } from '@lody/shared/platform-kind';
 // The published package name stays `lody`, but the version must follow the
 // release manifest (`@/pkg`): cloud builds alias it to the composing package so
@@ -9,17 +10,9 @@ import { getRuntimeEnv } from './utils/runtime-env';
 import { getSystemMachineId } from './utils/const';
 import { captureCli, flushCliAnalytics } from './lib/analytics/posthog';
 
-/**
- * CLI error reporting via PostHog error tracking (replaces @sentry/node).
- *
- * Crashes are captured as PostHog `$exception` events through `posthog-node`,
- * which parses the Error into stack frames and tags them with chunk ids so the
- * source maps uploaded at build time symbolicate the trace. We use the official
- * SDK here (unlike the lightweight analytics poster in lib/analytics/posthog.ts)
- * precisely because exception formatting + source-map matching is non-trivial to
- * reproduce by hand. The ingestion key is resolved the same way as the analytics
- * poster, so both share whatever key delivery the CLI build already relies on.
- */
+/** CLI and embedded cloud-daemon failures use a fixed error vocabulary. The
+ * process can serve multiple workspaces, so it cannot authorize raw exception
+ * details using a single workspace's mode. */
 
 const DEFAULT_HOST = 'https://us.i.posthog.com';
 const DEFAULT_FLUSH_TIMEOUT_MS = 2000;
@@ -99,27 +92,31 @@ export const flushTelemetry = async (timeoutMs = DEFAULT_FLUSH_TIMEOUT_MS): Prom
 };
 
 export const captureException = (
-  error: unknown,
+  _error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> => {
   if (!client) {
     return Promise.resolve();
   }
-  const normalizedError = error instanceof Error ? error : new Error(String(error));
   try {
-    client.captureException(normalizedError, distinctId, {
-      ...baseExceptionProps,
-      ...(context?.component ? { component: context.component } : {}),
-      ...(context?.extra ?? {}),
+    // A daemon can own several workspaces. There is no process-wide plaintext
+    // admission, including in the cloud desktop's embedded CLI.
+    const pending = client.captureImmediate({
+      event: '$exception',
+      distinctId,
+      properties: { ...baseExceptionProps, ...redactedTelemetryException(context?.extra) },
     });
+    return Promise.race([
+      pending.catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, DEFAULT_FLUSH_TIMEOUT_MS)),
+    ]);
   } catch {
     return Promise.resolve();
   }
-  return flushErrorReporting();
 };
 
 export const captureMessage = (
-  message: string,
+  _message: string,
   context?: {
     component?: string;
     level?: 'info' | 'warning' | 'error';
@@ -130,12 +127,7 @@ export const captureMessage = (
   // (slow-init reports, dropped notifications) are routed to a regular analytics
   // event via the lightweight poster instead of being forged into $exceptions.
   try {
-    captureCli('cli/diagnostic', {
-      message,
-      level: context?.level ?? 'info',
-      ...(context?.component ? { component: context.component } : {}),
-      ...(context?.extra ?? {}),
-    });
+    captureCli('cli/diagnostic', redactedTelemetryException(context?.extra));
   } catch {
     return Promise.resolve();
   }

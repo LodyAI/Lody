@@ -5,6 +5,12 @@ Translation: current
 
 [English](recovery-vault.md)
 
+## 已批准的格式边界
+
+2026-10-28，owner Zixuan Chen（zxch3n）仅批准以下边界，见[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)（[批准记录更新 #2032](https://github.com/LodyAI/Lody/pull/2032)）：恢复设备登记保留现有账本 tag 4 和 `lody-e2ee/possess/v2\0` 字节，genesis 不变。加密恢复包使用 `formatVersion: 1`，保存恢复 generation 和可信账本材料；可信锚须由外部独立确认。加密包、其来源定位符或服务端响应本身不能建立可信锚，也不能证明账本最新。
+
+恢复验收前须导入 R 的密钥、独立确认可信锚、实际解密发给 R 的当前代信封，并根据账本承诺核对恢复出的代钥。R 的签名绑定加密公钥，但单凭签名不能证明加密私钥持有。包版本和上述边界已批准；保险库的其余设计及本 Spec 整体仍为 **draft**，恢复保险库不在 MVP 内。当前实现尚未加入包版本字段；批准不代表已部署或真机行为已通过验收。
+
 ## 恢复材料与密文
 
 一个规范 CBOR `vault-v1` 恢复文件打开加密 vault。固定元组为

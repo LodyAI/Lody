@@ -1,25 +1,38 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import {
+  ArrowUpDown,
+  ArrowUpRight,
   CalendarClock,
-  ChevronRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Clock,
   CloudOff,
   ExternalLink,
+  Folder,
   History,
+  Info,
+  ListFilter,
+  MessageSquare,
+  MoreHorizontal,
   PanelLeft,
   Pause,
   Play,
   Plus,
   RotateCcw,
   Search,
+  Square,
   Trash2,
 } from 'lucide-react';
 import { getServerNow, type ScheduleRegistryRow, type ScheduleRuntimeRow } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Input } from '@lody/ui/input';
+import { Menu } from '@lody/ui/menu';
+import { Popover } from '@lody/ui/popover';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Tooltip } from '@lody/ui/tooltip';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
@@ -36,12 +49,9 @@ import {
   useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import {
-  describeDestination,
-  describeStatus,
+  describeScheduleState,
   describeTrigger,
-  formatInstant,
-  formatUpcoming,
-  triggerTimeZone,
+  scheduleRowTimeZone,
   type ScheduleStatus,
 } from './schedule-format';
 
@@ -53,6 +63,24 @@ export function matchingScheduleRuntime(row: ScheduleRegistryRow, runtimes: Sche
       runtime.activationId === row.activationId &&
       runtime.observedDefinitionFingerprint === row.definitionFingerprint
   );
+}
+
+/** `matchingScheduleRuntime` for many rows: one pass over the runtimes. */
+export function indexScheduleRuntimes(runtimes: ScheduleRuntimeRow[]) {
+  const key = (id: string, machine: string, activation: string, fingerprint: string) =>
+    `${id}\u0000${machine}\u0000${activation}\u0000${fingerprint}`;
+  const byKey = new Map<string, ScheduleRuntimeRow>();
+  for (const runtime of runtimes) {
+    const k = key(
+      runtime.scheduleId,
+      runtime.machineId,
+      runtime.activationId,
+      runtime.observedDefinitionFingerprint
+    );
+    if (!byKey.has(k)) byKey.set(k, runtime);
+  }
+  return (row: ScheduleRegistryRow) =>
+    byKey.get(key(row.scheduleId, row.machineId, row.activationId, row.definitionFingerprint));
 }
 
 export type ScheduleRowContext = {
@@ -67,236 +95,22 @@ export type ScheduleRowContext = {
   canRun?: boolean;
   /** Owner only; deleting is always possible, even when the machine is gone. */
   canDelete?: boolean;
+  /**
+   * The chat runs go into, for a schedule that posts into one chat. No
+   * `sessionId` while its own chat has not been created by a first run.
+   */
+  chat?: { title: string; sessionId?: string };
 };
 
-/** Pixel widths of the resizable columns; "Runs with" takes the rest. */
-export type ScheduleColumnWidths = { name: number; frequency: number; next: number };
-const DEFAULT_COLUMN_WIDTHS: ScheduleColumnWidths = { name: 300, frequency: 150, next: 140 };
-const MIN_COLUMN_WIDTH = 72;
-const MAX_COLUMN_WIDTH = 720;
-const clampWidth = (value: number) =>
-  Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, value)));
-
-const DARK =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+export type ScheduleListProjectFilter =
+  | { kind: 'all' }
+  | { kind: 'none' }
+  | { kind: 'project'; name: string };
+export type ScheduleListStatusFilter = 'all' | ScheduleStatus['group'];
+export type ScheduleListSort = 'next' | 'recent' | 'name' | 'created';
 
 const styles = stylex.create({
-  statusPill: {
-    display: 'inline-flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    whiteSpace: 'nowrap',
-    borderWidth: '0.5px',
-    borderStyle: 'solid',
-    borderColor: 'hsl(var(--border))',
-    borderRadius: '9999px',
-    paddingLeft: '6px',
-    paddingRight: '6px',
-    paddingTop: '1px',
-    paddingBottom: '1px',
-    fontSize: '0.85em',
-    fontWeight: 400,
-    lineHeight: 1.25,
-    color: 'hsl(var(--muted-foreground))',
-  },
-  statusAttention: {
-    borderColor: 'hsl(var(--status-warning) / 0.4)',
-    color: 'hsl(var(--status-warning))',
-  },
-  statusProgress: {
-    borderColor: 'hsl(var(--status-info) / 0.4)',
-    color: 'hsl(var(--status-info))',
-  },
-  listGrid: {
-    display: 'grid',
-    columnGap: '12px',
-  },
-  cellName: { gridColumnStart: 1, gridRowStart: 1 },
-  cellFrequency: {
-    gridColumnEnd: {
-      default: 'span 2',
-      '@media (min-width: 640px)': 3,
-    },
-    gridRowStart: {
-      default: 2,
-      '@media (min-width: 640px)': 1,
-    },
-    gridColumnStart: {
-      default: null,
-      '@media (min-width: 640px)': 2,
-    },
-  },
-  cellNext: {
-    gridColumnEnd: {
-      default: 'span 2',
-      '@media (min-width: 640px)': 4,
-    },
-    gridRowStart: {
-      default: 3,
-      '@media (min-width: 640px)': 1,
-    },
-    gridColumnStart: {
-      default: null,
-      '@media (min-width: 640px)': 3,
-    },
-  },
-  cellTarget: {
-    gridColumnEnd: {
-      default: 'span 2',
-      '@media (min-width: 640px)': 5,
-    },
-    gridRowStart: {
-      default: 4,
-      '@media (min-width: 640px)': 1,
-    },
-    gridColumnStart: {
-      default: null,
-      '@media (min-width: 640px)': 4,
-    },
-  },
-  cellActions: {
-    gridColumnStart: {
-      default: 2,
-      '@media (min-width: 640px)': 5,
-    },
-    gridRowStart: {
-      default: 1,
-      '@media (min-width: 640px)': 1,
-    },
-  },
-  row: {
-    position: 'relative',
-    alignItems: 'flex-start',
-    rowGap: {
-      default: '2px',
-      '@media (min-width: 640px)': 0,
-    },
-    borderBottomWidth: '0.5px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border))',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    fontSize: '0.9em',
-    lineHeight: '20px',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-  rowHover: { backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--hover))' } },
-  rowSelected: {
-    backgroundColor: {
-      default: 'hsl(var(--foreground) / 0.06)',
-      [DARK]: 'hsl(0 0% 100% / 0.08)',
-    },
-  },
-  openButton: {
-    minWidth: 0,
-    textAlign: 'left',
-    outlineStyle: {
-      ':focus-visible': { default: 'none', '@media (forced-colors: active)': 'solid' },
-    },
-    outlineWidth: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
-    outlineColor: { ':focus-visible': { '@media (forced-colors: active)': 'transparent' } },
-    outlineOffset: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
-  },
-  rowHitTarget: { position: 'absolute', inset: 0 },
-  titleLine: { display: 'flex', minWidth: 0, alignItems: 'center', columnGap: '8px' },
-  titleText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontWeight: 400,
-  },
-  mobileOnly: {
-    display: {
-      default: null,
-      '@media (min-width: 640px)': 'none',
-    },
-  },
-  desktopOnly: {
-    display: {
-      default: 'none',
-      '@media (min-width: 640px)': 'inline',
-    },
-  },
-  frequency: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  nextCell: {
-    display: 'flex',
-    minWidth: 0,
-    alignItems: 'center',
-    columnGap: '8px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  upcoming: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'hsl(var(--foreground) / 0.8)',
-  },
-  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  firstPill: { marginLeft: { default: null, ':first-child': '-6px' } },
-  target: {
-    display: 'flex',
-    minWidth: 0,
-    flexDirection: 'column',
-    justifyContent: 'center',
-    rowGap: '1px',
-  },
-  targetLine: { display: 'flex', minWidth: 0, alignItems: 'center', columnGap: '6px' },
-  mutedText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  offlineIcon: {
-    width: '14px',
-    height: '14px',
-    flexShrink: 0,
-    color: 'hsl(var(--status-warning))',
-  },
-  icon14: { width: '14px', height: '14px', flexShrink: 0 },
-  mutedIcon: {
-    width: '14px',
-    height: '14px',
-    flexShrink: 0,
-    color: 'hsl(var(--muted-foreground))',
-  },
-  machineLine: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: '0.85em',
-    lineHeight: '16px',
-    color: 'hsl(var(--muted-foreground) / 0.7)',
-  },
-  separator: { paddingLeft: '4px', paddingRight: '4px', opacity: 0.5 },
-  actions: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    columnGap: '2px',
-    marginTop: '-4px',
-    marginBottom: '-4px',
-  },
-  actionIcon: { width: '100%', height: '100%' },
-  actionButton: { flexShrink: 0 },
-  chevron: {
-    width: '14px',
-    height: '14px',
-    flexShrink: 0,
-    color: 'hsl(var(--muted-foreground) / 0.5)',
-  },
-  list: {
+  page: {
     position: 'relative',
     display: 'flex',
     height: '100%',
@@ -304,20 +118,20 @@ const styles = stylex.create({
     flexDirection: 'column',
     overflow: 'hidden',
   },
-  listHeader: {
+  header: {
     boxSizing: 'border-box',
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     columnGap: '8px',
-    height: '44px',
-    paddingLeft: '16px',
-    paddingRight: '16px',
+    height: '52px',
+    paddingLeft: { default: '16px', '@media (min-width: 640px)': '24px' },
+    paddingRight: { default: '16px', '@media (min-width: 640px)': '24px' },
   },
-  // The phone route is edge-to-edge. Grow the 44px row so the title stays
-  // under the status bar; the home tab already sits under its own header.
-  listHeaderSafeArea: {
-    height: 'calc(44px + var(--safe-area-top, 0px))',
+  // The phone route is edge-to-edge. Grow the row so the title stays under the
+  // status bar; the home tab already sits under its own header.
+  headerSafeArea: {
+    height: 'calc(52px + var(--safe-area-top, 0px))',
     paddingTop: 'var(--safe-area-top, 0px)',
   },
   // The show-sidebar button's -4px lands its left edge at 96px, matching Chat
@@ -325,83 +139,267 @@ const styles = stylex.create({
   headerBesideTrafficLights: { paddingLeft: '100px' },
   sidebarToggle: { marginInlineStart: '-4px' },
   glyph: { width: '16px', height: '16px' },
+  icon14: { width: '14px', height: '14px', flexShrink: 0 },
+  mutedIcon: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
   pageTitle: {
     marginRight: 'auto',
     flexShrink: 0,
     whiteSpace: 'nowrap',
-    fontSize: '1em',
-    fontWeight: 400,
+    fontSize: '1.15em',
+    fontWeight: 600,
     color: 'hsl(var(--foreground))',
   },
   search: {
-    width: {
-      default: '160px',
-      '@media (min-width: 640px)': '224px',
-    },
+    width: { default: '160px', '@media (min-width: 640px)': '224px' },
     minWidth: 0,
     flexShrink: 1,
   },
-  newButtonLabel: {
-    display: {
-      default: 'none',
-      '@media (min-width: 640px)': 'inline',
-    },
+  newButtonLabel: { display: { default: 'none', '@media (min-width: 640px)': 'inline' } },
+  shrinkless: { flexShrink: 0 },
+  scroller: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflow: 'auto',
+    paddingLeft: { default: '12px', '@media (min-width: 640px)': '24px' },
+    paddingRight: { default: '12px', '@media (min-width: 640px)': '24px' },
+    paddingBottom: '32px',
   },
-  tableScroller: { height: '100%', minHeight: 0, flex: '1 1 0%', overflow: 'auto' },
-  tableMinimum: (minimum: string) => ({
-    minWidth: {
-      default: null,
-      '@media (min-width: 640px)': minimum,
-    },
-  }),
-  headerRow: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 20,
-    display: {
-      default: 'none',
-      '@media (min-width: 640px)': 'grid',
-    },
-    borderBottomWidth: '0.5px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border))',
-    backgroundColor: 'hsl(var(--background))',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '6px',
+  filters: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: '6px',
+    paddingTop: '2px',
+    paddingBottom: '4px',
+    overflowX: 'auto',
+    scrollbarWidth: 'none',
+  },
+  spacer: { flex: '1 1 0%' },
+  section: { marginTop: '18px' },
+  sectionHead: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: '2px',
+    minHeight: '28px',
+    paddingLeft: '4px',
     paddingBottom: '6px',
-    fontSize: '0.75em',
-    fontWeight: 400,
+    fontSize: '0.9em',
+  },
+  sectionTitle: { fontWeight: 500, color: 'hsl(var(--foreground))' },
+  sectionCount: {
+    marginLeft: '6px',
+    color: 'hsl(var(--muted-foreground))',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  infoText: {
+    margin: 0,
+    maxWidth: '300px',
+    fontSize: '0.9em',
+    lineHeight: 1.55,
     color: 'hsl(var(--muted-foreground))',
   },
-  headerCell: { position: 'relative', minWidth: 0 },
-  headerLabel: {
+  infoTitle: {
+    display: 'block',
+    marginBottom: '2px',
+    fontWeight: 500,
+    color: 'hsl(var(--foreground))',
+  },
+  card: {
+    overflow: 'hidden',
+    borderRadius: '12px',
+    backgroundColor: 'hsl(var(--popover))',
+    boxShadow: '0 1px 2px hsl(0 0% 0% / 0.06), 0 0 0 1px hsl(var(--border) / 0.7)',
+  },
+  grid: {
+    display: 'grid',
+    alignItems: 'center',
+    columnGap: '16px',
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr) auto',
+      '@media (min-width: 640px)': 'minmax(0, 1fr) minmax(0, 220px) 168px 64px',
+    },
+  },
+  // The mobile home tab can be a narrow pane inside a wide viewport.
+  compactGrid: {
+    display: 'grid',
+    alignItems: 'center',
+    columnGap: '16px',
+    rowGap: { default: 0, '@media (min-width: 640px)': '4px' },
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+  },
+  columns: {
+    display: { default: 'none', '@media (min-width: 640px)': 'grid' },
+    paddingLeft: '16px',
+    paddingRight: '10px',
+    paddingTop: '8px',
+    paddingBottom: '6px',
+    fontSize: '0.8em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  alignEnd: { textAlign: 'right' },
+  row: {
+    position: 'relative',
+    minHeight: '58px',
+    paddingLeft: '16px',
+    paddingRight: { default: '14px', '@media (min-width: 640px)': '10px' },
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    fontSize: '0.95em',
+    // The column header is always the first child (hidden on a phone), so the
+    // first row rules above itself only where that header shows.
+    borderTopWidth: {
+      default: '0.5px',
+      ':nth-child(2)': { default: 0, '@media (min-width: 640px)': '0.5px' },
+    },
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border))',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--foreground) / 0.04)' },
+  },
+  rowSelected: { backgroundColor: 'hsl(var(--foreground) / 0.07)' },
+  openButton: {
+    minWidth: 0,
+    textAlign: 'left',
+    outlineStyle: { ':focus-visible': 'none' },
+  },
+  // Row-wide hit target: the whole row opens it; controls stay above it.
+  rowHitTarget: {
+    position: 'absolute',
+    inset: 0,
+    borderRadius: 'inherit',
+    outlineStyle: { default: 'none', [stylex.when.ancestor(':focus-visible')]: 'solid' },
+    outlineWidth: '2px',
+    outlineOffset: '-2px',
+    outlineColor: 'hsl(var(--ring))',
+  },
+  name: {
     display: 'block',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontWeight: 500,
+    color: 'hsl(var(--foreground))',
+  },
+  nameEnded: { color: 'hsl(var(--muted-foreground))', fontWeight: 400 },
+  summary: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    marginTop: '1px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    fontSize: '0.88em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  summaryPart: { overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0 },
+  wideOnly: { display: { default: 'none', '@media (min-width: 640px)': 'contents' } },
+  narrowOnly: { display: { default: 'contents', '@media (min-width: 640px)': 'none' } },
+  separator: { paddingLeft: '5px', paddingRight: '5px', opacity: 0.55, flexShrink: 0 },
+  offline: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    columnGap: '4px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  destination: {
+    position: 'relative',
+    display: { default: 'none', '@media (min-width: 640px)': 'flex' },
+    minWidth: 0,
+    alignItems: 'center',
+    columnGap: '6px',
+    fontSize: '0.88em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  compactDestination: {
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 2 },
+  },
+  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  // Pull the ghost button's padding back so its icon lines up with the others.
+  chatButton: { maxWidth: '100%', minWidth: 0, marginInlineStart: '-8px' },
+  status: {
+    display: 'flex',
+    minWidth: 0,
+    // A long reason must not squeeze the name on a phone.
+    maxWidth: { default: '45vw', '@media (min-width: 640px)': 'none' },
+    overflow: 'hidden',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    textAlign: 'right',
+  },
+  compactStatus: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: { default: '45vw', '@media (min-width: 640px)': 'none' },
+    overflow: 'hidden',
+    flexDirection: 'column',
+    alignItems: { default: 'flex-end', '@media (min-width: 640px)': 'flex-start' },
+    textAlign: { default: 'right', '@media (min-width: 640px)': 'left' },
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 3 },
+  },
+  statusMain: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    columnGap: '5px',
+    whiteSpace: 'nowrap',
+    fontSize: '0.92em',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--foreground))',
+  },
+  statusMuted: { color: 'hsl(var(--muted-foreground))' },
+  statusProgress: { color: 'hsl(var(--status-info))' },
+  statusAttention: { color: 'hsl(var(--status-warning))' },
+  statusDetail: {
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.82em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  actions: {
+    position: 'relative',
+    display: { default: 'none', '@media (min-width: 640px)': 'flex' },
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    columnGap: '2px',
+  },
+  compactActions: {
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 2 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowEnd: { default: null, '@media (min-width: 640px)': 'span 3' },
+  },
+  // Hidden until the row is hovered or focused, only where hover exists.
+  hoverAction: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        default: 0,
+        [stylex.when.ancestor(':hover')]: 1,
+        [stylex.when.ancestor(':focus-within')]: 1,
+      },
+    },
+  },
+  error: {
+    paddingTop: '24px',
+    paddingBottom: '8px',
+    fontSize: '1em',
+    color: 'hsl(var(--destructive))',
   },
   skeletonRow: {
     display: 'flex',
     alignItems: 'center',
     columnGap: '12px',
-    borderBottomWidth: '0.5px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border))',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '12px',
-    paddingBottom: '12px',
-    marginBlockEnd: { default: '1px', ':last-child': 0 },
+    padding: '16px',
   },
-  error: {
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '32px',
-    paddingBottom: '32px',
-    fontSize: '1em',
-    color: 'hsl(var(--destructive))',
-  },
+  skeletonTrailing: { marginLeft: 'auto' },
   empty: {
     display: 'flex',
     maxWidth: '384px',
@@ -420,6 +418,12 @@ const styles = stylex.create({
   emptyTitle: { fontSize: '1em', fontWeight: 400 },
   emptyHelp: { fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
   emptyAction: { marginTop: '8px' },
+  sectionEmpty: {
+    margin: 0,
+    padding: '16px',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground))',
+  },
   visuallyHidden: {
     position: 'absolute',
     width: '1px',
@@ -431,287 +435,340 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     borderWidth: 0,
   },
-  skeletonTrailing: { marginLeft: 'auto' },
-  resizeHandle: {
-    position: 'absolute',
-    top: '-6px',
-    bottom: '-6px',
-    right: '-9px',
-    zIndex: 10,
-    display: 'flex',
-    width: '12px',
-    cursor: 'col-resize',
-    touchAction: 'none',
-    userSelect: 'none',
-    justifyContent: 'center',
-    outlineStyle: {
-      ':focus-visible': { default: 'none', '@media (forced-colors: active)': 'solid' },
-    },
-    outlineWidth: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
-    outlineColor: { ':focus-visible': { '@media (forced-colors: active)': 'transparent' } },
-    outlineOffset: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
-  },
-  resizeLine: {
-    height: '100%',
-    width: '1px',
-    backgroundColor: {
-      default: 'transparent',
-      [stylex.when.ancestor(':hover')]: 'hsl(var(--border))',
-      [stylex.when.ancestor(':focus-visible')]: 'hsl(var(--ring))',
-      [stylex.when.ancestor(':active')]: 'hsl(var(--ring))',
-    },
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-  columnTracks: (name: number, frequency: number, next: number) => ({
-    gridTemplateColumns: {
-      default: 'minmax(0, 1fr) auto',
-      '@media (min-width: 640px)': `minmax(${MIN_COLUMN_WIDTH}px,${name}px) minmax(${MIN_COLUMN_WIDTH}px,${frequency}px) minmax(${MIN_COLUMN_WIDTH}px,${next}px) minmax(0, 1fr) 5.75rem`,
-    },
-  }),
 });
 
-/**
- * Only states that are not the happy path get a pill. An enabled schedule with
- * a next run already says so by having a next run.
- */
-function StatusPill({ status }: { status: ScheduleStatus }) {
-  if (status.tone === 'active') return null;
-  return (
-    <span
-      {...stylex.props(
-        styles.statusPill,
-        status.tone === 'attention' && styles.statusAttention,
-        status.tone === 'progress' && styles.statusProgress
-      )}
-    >
-      {status.label}
-    </span>
-  );
-}
-
-/**
- * One column template for the header and every row.
- *
- * The actions column is a fixed width rather than `auto`: sized by its content
- * it varied per row, which redistributed the `fr` columns and left Frequency
- * and Next run visibly unaligned down the list.
- */
-/**
- * The resizable tracks shrink before they overflow: `minmax(min, width)` keeps a
- * dragged width in a wide window and still fits a narrow panel.
- */
-const cell = {
-  name: styles.cellName,
-  frequency: styles.cellFrequency,
-  next: styles.cellNext,
-  target: styles.cellTarget,
-  actions: styles.cellActions,
-} as const;
-
-function ScheduleListRow({
-  row,
-  runtime,
-  context,
-  widths,
-  now,
-  onOpen,
-  onToggle,
-  onRun,
-  onDelete,
-  onOpenSession,
-  selected,
-}: {
-  row: ScheduleRegistryRow;
-  runtime?: ScheduleRuntimeRow;
-  /** The schedule open beside the list. */
-  selected?: boolean;
-  context?: ScheduleRowContext;
-  widths: ScheduleColumnWidths;
-  now: number;
+type RowHandlers = {
   onOpen: () => void;
   onToggle?: () => void;
   onRun?: () => void;
   onDelete?: () => void;
   onOpenSession?: (id: string) => void;
+};
+
+type Entry = {
+  row: ScheduleRegistryRow;
+  runtime?: ScheduleRuntimeRow;
+  context?: ScheduleRowContext;
+  status: ScheduleStatus;
+};
+
+const STATUS_ICONS = {
+  due: Clock,
+  paused: Pause,
+  attention: CircleAlert,
+  sent: Check,
+  cancelled: Square,
+} as const;
+
+export function ScheduleStatusText({
+  status,
+  inline = false,
+  compact = false,
+}: {
+  status: ScheduleStatus;
+  inline?: boolean;
+  compact?: boolean;
+}) {
+  const Icon = status.icon ? STATUS_ICONS[status.icon] : null;
+  const main = (
+    <span
+      {...stylex.props(
+        styles.statusMain,
+        status.tone === 'muted' && styles.statusMuted,
+        status.tone === 'progress' && styles.statusProgress,
+        status.tone === 'attention' && styles.statusAttention
+      )}
+    >
+      {Icon ? <Icon {...stylex.props(styles.icon14)} aria-hidden="true" /> : null}
+      {status.label}
+    </span>
+  );
+  if (inline)
+    return (
+      <span>
+        {main}
+        {status.detail ? (
+          <span {...stylex.props(styles.statusMuted)}> · {status.detail}</span>
+        ) : null}
+      </span>
+    );
+  return (
+    <div {...stylex.props(compact ? styles.compactStatus : styles.status)}>
+      {main}
+      {status.detail ? <span {...stylex.props(styles.statusDetail)}>{status.detail}</span> : null}
+    </div>
+  );
+}
+
+/** What the row's menus offer, in one order for the ⋯ menu and the context menu. */
+/** One schedule action, as the row's menus and the open schedule's ⋯ menu show it. */
+export type ScheduleAction = {
+  key: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  onClick: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+};
+
+function useRowActions(entry: Entry, handlers: RowHandlers) {
+  const { t } = useTranslation();
+  const { row, runtime, context } = entry;
+  const actions: ScheduleAction[] = [
+    {
+      key: 'open',
+      label: t('schedules.open', 'Open'),
+      icon: ExternalLink,
+      onClick: handlers.onOpen,
+    },
+  ];
+  if (!row.scheduledMessage && handlers.onRun && context?.canRun !== false)
+    actions.push({
+      key: 'run',
+      label: t('schedules.runNow', 'Run now'),
+      icon: Play,
+      onClick: handlers.onRun,
+    });
+  if (
+    !row.scheduledMessage &&
+    row.trigger.kind !== 'manual' &&
+    handlers.onToggle &&
+    context?.canToggle !== false
+  )
+    actions.push({
+      key: 'toggle',
+      label: row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume'),
+      icon: row.enabled ? Pause : RotateCcw,
+      onClick: handlers.onToggle,
+    });
+  const chatId = context?.chat?.sessionId;
+  if (chatId && handlers.onOpenSession)
+    actions.push({
+      key: 'chat',
+      label: t('schedules.openChat', 'Open chat “{{title}}”', { title: context.chat!.title }),
+      icon: MessageSquare,
+      onClick: () => handlers.onOpenSession!(chatId),
+    });
+  const last = runtime?.lastDispatch?.sessionId;
+  if (last && !chatId && handlers.onOpenSession)
+    actions.push({
+      key: 'last',
+      label: t('schedules.lastRun', 'Last run'),
+      icon: History,
+      onClick: () => handlers.onOpenSession!(last),
+    });
+  if (handlers.onDelete && context?.canDelete !== false)
+    actions.push({
+      key: 'delete',
+      label: t('schedules.delete', 'Delete'),
+      icon: Trash2,
+      onClick: handlers.onDelete,
+      destructive: true,
+    });
+  return actions;
+}
+
+/** Destructive actions sit after a separator. */
+export function ScheduleMenuItems({
+  actions,
+  Item,
+  Separator,
+}: {
+  actions: ScheduleAction[];
+  Item: typeof Menu.Item | typeof ContextMenu.Item;
+  Separator: typeof Menu.Separator | typeof ContextMenu.Separator;
+}) {
+  return (
+    <>
+      {actions.map((action) => (
+        <Fragment key={action.key}>
+          {action.destructive ? <Separator /> : null}
+          <Item
+            icon={action.icon}
+            tone={action.destructive ? 'destructive' : undefined}
+            disabled={action.disabled}
+            onClick={action.onClick}
+          >
+            {action.label}
+          </Item>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function Destination({
+  entry,
+  onOpenSession,
+  compact,
+}: {
+  entry: Entry;
+  onOpenSession?: (id: string) => void;
+  compact: boolean;
+}) {
+  const { t } = useTranslation();
+  const { row, context } = entry;
+  if (row.destination.kind === 'new_session')
+    return (
+      <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
+        <Folder {...stylex.props(styles.icon14)} aria-hidden="true" />
+        <span {...stylex.props(styles.truncate)}>
+          {t('schedules.destination.newSession', 'New chat each run')} ·{' '}
+          {context?.project ?? (row.projectKey || t('schedules.chatOnly', 'Chat only'))}
+        </span>
+      </span>
+    );
+  const chat = context?.chat;
+  if (chat?.sessionId && onOpenSession)
+    return (
+      <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
+        <Button
+          variant="ghost"
+          size="small"
+          className={stylex.props(styles.chatButton).className}
+          title={t('schedules.openChat', 'Open chat “{{title}}”', { title: chat.title })}
+          onClick={() => onOpenSession(chat.sessionId!)}
+        >
+          <MessageSquare {...stylex.props(styles.icon14)} aria-hidden="true" />
+          <span {...stylex.props(styles.truncate)}>{chat.title}</span>
+          <ArrowUpRight {...stylex.props(styles.mutedIcon)} aria-hidden="true" />
+        </Button>
+      </span>
+    );
+  return (
+    <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
+      <MessageSquare {...stylex.props(styles.icon14)} aria-hidden="true" />
+      <span {...stylex.props(styles.truncate)}>
+        {chat?.title ??
+          (row.destination.kind === 'own_session'
+            ? t('schedules.destination.ownSession', 'One chat for this task')
+            : t('schedules.destination.existingSession', 'An existing chat'))}
+        {row.destination.kind === 'own_session' && !chat?.sessionId
+          ? ` · ${t('schedules.destination.notCreatedYet', 'Not created yet')}`
+          : ''}
+      </span>
+    </span>
+  );
+}
+
+function ScheduleListRow({
+  entry,
+  selected,
+  compact,
+  name,
+  viewerTimeZone,
+  ...handlers
+}: RowHandlers & {
+  entry: Entry;
+  selected?: boolean;
+  compact: boolean;
+  name: string;
+  viewerTimeZone?: string;
 }) {
   const { t, i18n } = useTranslation();
-  const zone = triggerTimeZone(row.trigger, context?.timeZone);
-  const status = describeStatus(
-    t,
-    row.enabled,
-    runtime?.queueState,
-    row.scheduledMessage ? (runtime?.messageState ?? 'pending') : undefined
-  );
-  const next = row.enabled ? runtime?.nextScheduledAt : undefined;
-  // A run that is appended to a chat has that chat's workspace, so the
-  // destination is the more useful fact than a project it does not have.
-  const project =
-    row.destination.kind !== 'new_session'
-      ? describeDestination(row.destination, t)
-      : (context?.project ?? (row.projectKey || null) ?? t('schedules.chatOnly', 'Chat only'));
-  const manual = row.trigger.kind === 'manual';
-  const offline = context ? context.presence !== 'online' : false;
-  const canToggle = !row.scheduledMessage && !!onToggle && context?.canToggle !== false;
-  const canRun = !row.scheduledMessage && !!onRun && context?.canRun !== false;
-  const canDelete = !!onDelete && context?.canDelete !== false;
-  const lastSessionId = runtime?.lastDispatch?.sessionId;
-  const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');
-  const rowStyle = stylex.props(
-    styles.listGrid,
-    styles.columnTracks(widths.name, widths.frequency, widths.next),
-    styles.row,
-    selected ? styles.rowSelected : styles.rowHover
-  );
+  const { row, context, status } = entry;
+  const actions = useRowActions(entry, handlers);
+  const zone = scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone);
+  const offline = context ? context.presence === 'offline' : false;
+  const frequency = describeTrigger(row.trigger, t, i18n.language, zone);
+  // The one action worth a button: delete a finished message, run a manual
+  // task, pause or resume a timed one.
+  const primaryKey = row.scheduledMessage
+    ? status.group === 'ended'
+      ? 'delete'
+      : undefined
+    : row.trigger.kind === 'manual'
+      ? 'run'
+      : 'toggle';
+  const primary = actions.find((action) => action.key === primaryKey);
   const rowElement = (
     <div
       data-schedule-row=""
       aria-current={selected ? 'true' : undefined}
-      className={cn(rowStyle.className, 'group')}
-      style={rowStyle.style}
+      {...stylex.props(
+        compact ? styles.compactGrid : styles.grid,
+        styles.row,
+        selected && styles.rowSelected
+      )}
     >
-      <button type="button" onClick={onOpen} {...stylex.props(cell.name, styles.openButton)}>
-        {/* Row-wide hit target: the whole row opens the schedule, while the
-            action buttons stay above it and keep their own clicks. */}
+      <button type="button" onClick={handlers.onOpen} {...stylex.props(styles.openButton)}>
         <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
-        <span {...stylex.props(styles.titleLine)}>
-          <span {...stylex.props(styles.titleText)}>{row.title}</span>
-          <span {...stylex.props(styles.mobileOnly)}>
-            <StatusPill status={status} />
-          </span>
+        <span
+          {...stylex.props(styles.name, status.group === 'ended' && styles.nameEnded)}
+          title={name}
+        >
+          {name}
         </span>
-      </button>
-
-      <div {...stylex.props(cell.frequency, styles.frequency)}>
-        {describeTrigger(row.trigger, t, i18n.language, zone)}
-      </div>
-
-      <div {...stylex.props(cell.next, styles.nextCell)}>
-        {next != null ? (
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <span {...stylex.props(styles.upcoming)}>
-                  {formatUpcoming(next, zone, now, i18n.language)}
-                </span>
-              }
-            />
-            <Tooltip.Content>
-              {formatInstant(next, zone, i18n.language)} · {zone}
-            </Tooltip.Content>
-          </Tooltip.Root>
-        ) : manual ? (
-          <span {...stylex.props(styles.truncate)}>
-            {t('schedules.trigger.onDemand', 'On demand')}
-          </span>
-        ) : row.enabled ? (
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <span {...stylex.props(styles.truncate)}>
-                  {t('schedules.notScheduledYet', 'Not scheduled yet')}
-                </span>
-              }
-            />
-            <Tooltip.Content>
-              {t('schedules.awaitingMachine', 'Waiting for the machine to check the schedule')}
-            </Tooltip.Content>
-          </Tooltip.Root>
-        ) : null}
-        {/* A pill that starts the cell pulls its text back onto the column line. */}
-        <span {...stylex.props(styles.desktopOnly, styles.firstPill)}>
-          <StatusPill status={status} />
-        </span>
-      </div>
-
-      <div {...stylex.props(cell.target, styles.target)}>
-        <span {...stylex.props(styles.targetLine)}>
-          <span {...stylex.props(styles.mutedText)}>{context?.agent ?? row.agentConfigId}</span>
-          {offline ? (
-            <Tooltip.Root>
-              <Tooltip.Trigger render={<CloudOff {...stylex.props(styles.offlineIcon)} />} />
-              <Tooltip.Content>
-                {t(
+        <span {...stylex.props(styles.summary)}>
+          <span {...stylex.props(styles.summaryPart)}>{frequency}</span>
+          {context?.chat ? (
+            <span {...stylex.props(styles.narrowOnly)}>
+              <span {...stylex.props(styles.separator)}>·</span>
+              <span {...stylex.props(styles.summaryPart)}>{context.chat.title}</span>
+            </span>
+          ) : null}
+          <span {...stylex.props(styles.wideOnly)}>
+            <span {...stylex.props(styles.separator)}>·</span>
+            <span {...stylex.props(styles.summaryPart)}>{context?.agent ?? row.agentConfigId}</span>
+            <span {...stylex.props(styles.separator)}>·</span>
+            {offline ? (
+              <span
+                {...stylex.props(styles.offline)}
+                title={t(
                   'schedules.machineOfflineHint',
                   'The target machine is not connected right now.'
                 )}
-              </Tooltip.Content>
-            </Tooltip.Root>
-          ) : null}
-        </span>
-        {/* The machine is what separates two same-named Agents, and two
-            chat-only schedules that would otherwise read identically. */}
-        <span
-          {...stylex.props(styles.machineLine)}
-          title={`${context?.machine ?? row.machineId} · ${project}`}
-        >
-          {context?.machine ?? row.machineId}
-          <span {...stylex.props(styles.separator)}>·</span>
-          {project}
-        </span>
-      </div>
-
-      {/* 28px buttons centred on the 20px first line. */}
-      <div {...stylex.props(cell.actions, styles.actions)}>
-        {runtime?.lastDispatch && onOpenSession ? (
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="small"
-                  icon
-                  // Visible by default; only a device that actually has hover is
-                  // allowed to hide it until the row is hovered or focused.
-                  className="shrink-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
-                  onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
-                  aria-label={t('schedules.lastRun', 'Last run')}
-                >
-                  <History {...stylex.props(styles.actionIcon)} />
-                </Button>
-              }
-            />
-            <Tooltip.Content>{t('schedules.lastRun', 'Last run')}</Tooltip.Content>
-          </Tooltip.Root>
-        ) : null}
-        {/* A manual task's main action is running it; a timed one's is pausing.
-            The other stays one right-click away. */}
-        {manual && canRun ? (
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="small"
-                  icon
-                  className={stylex.props(styles.actionButton).className}
-                  onClick={onRun}
-                  aria-label={t('schedules.runNow', 'Run now')}
-                >
-                  <Play {...stylex.props(styles.actionIcon)} />
-                </Button>
-              }
-            />
-            <Tooltip.Content>{t('schedules.runNow', 'Run now')}</Tooltip.Content>
-          </Tooltip.Root>
-        ) : !manual && canToggle ? (
-          <Button
-            variant="ghost"
-            size="small"
-            icon
-            className={stylex.props(styles.actionButton).className}
-            onClick={onToggle}
-            aria-label={toggleLabel}
-          >
-            {row.enabled ? (
-              <Pause {...stylex.props(styles.actionIcon)} />
+              >
+                <CloudOff {...stylex.props(styles.icon14)} aria-hidden="true" />
+                {t('schedules.machineOffline', '{{machine}} offline', {
+                  machine: context?.machine ?? row.machineId,
+                })}
+              </span>
             ) : (
-              <RotateCcw {...stylex.props(styles.actionIcon)} />
+              <span {...stylex.props(styles.summaryPart)}>{context?.machine ?? row.machineId}</span>
             )}
-          </Button>
+          </span>
+        </span>
+      </button>
+      <Destination entry={entry} onOpenSession={handlers.onOpenSession} compact={compact} />
+      <ScheduleStatusText status={status} compact={compact} />
+      <div {...stylex.props(styles.actions, compact && styles.compactActions)}>
+        {primary ? (
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="small"
+                  icon
+                  className={stylex.props(styles.hoverAction).className}
+                  onClick={primary.onClick}
+                  aria-label={primary.label}
+                >
+                  <primary.icon {...stylex.props(styles.icon14)} />
+                </Button>
+              }
+            />
+            <Tooltip.Content>{primary.label}</Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
-        <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('schedules.more', 'More actions')}
+              />
+            }
+          >
+            <MoreHorizontal {...stylex.props(styles.icon14)} />
+          </Menu.Trigger>
+          <Menu.Content align="end">
+            <ScheduleMenuItems actions={actions} Item={Menu.Item} Separator={Menu.Separator} />
+          </Menu.Content>
+        </Menu.Root>
       </div>
     </div>
   );
@@ -719,39 +776,97 @@ function ScheduleListRow({
     <ContextMenu.Root>
       <ContextMenu.Trigger render={rowElement} />
       <ContextMenu.Content>
-        <ContextMenu.Item icon={ExternalLink} onClick={onOpen}>
-          {t('schedules.open', 'Open')}
-        </ContextMenu.Item>
-        {canRun ? (
-          <ContextMenu.Item icon={Play} onClick={onRun}>
-            {t('schedules.runNow', 'Run now')}
-          </ContextMenu.Item>
-        ) : null}
-        {canToggle ? (
-          <ContextMenu.Item icon={row.enabled ? Pause : RotateCcw} onClick={onToggle}>
-            {toggleLabel}
-          </ContextMenu.Item>
-        ) : null}
-        {lastSessionId && onOpenSession ? (
-          <ContextMenu.Item icon={History} onClick={() => onOpenSession(lastSessionId)}>
-            {t('schedules.lastRun', 'Last run')}
-          </ContextMenu.Item>
-        ) : null}
-        {canDelete ? (
-          <>
-            <ContextMenu.Separator />
-            <ContextMenu.Item tone="destructive" icon={Trash2} onClick={onDelete}>
-              {t('schedules.delete', 'Delete')}
-            </ContextMenu.Item>
-          </>
-        ) : null}
+        <ScheduleMenuItems
+          actions={actions}
+          Item={ContextMenu.Item}
+          Separator={ContextMenu.Separator}
+        />
       </ContextMenu.Content>
     </ContextMenu.Root>
   );
 }
 
-const BLANK_CLICK_EXCLUDE =
-  'button, a, input, textarea, select, label, [role="separator"], [role="tab"], [data-schedule-row], [data-schedule-detail]';
+function SectionInfo({ title, children }: { title: string; children: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        openOnHover
+        delay={150}
+        render={
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            aria-label={t('schedules.whatIs', 'What are {{title}}?', { title })}
+          />
+        }
+      >
+        <Info {...stylex.props(styles.mutedIcon)} />
+      </Popover.Trigger>
+      <Popover.Content align="start">
+        <p {...stylex.props(styles.infoText)}>
+          <strong {...stylex.props(styles.infoTitle)}>
+            {t('schedules.whatIs', 'What are {{title}}?', { title })}
+          </strong>
+          {children}
+        </p>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+function FilterMenu<T extends string>({
+  icon,
+  value,
+  options,
+  onChange,
+  active,
+  label,
+}: {
+  icon: ReactNode;
+  value: T;
+  options: { value: T; label: string; count?: number }[];
+  onChange: (value: T) => void;
+  active: boolean;
+  label: string;
+}) {
+  const current = options.find((option) => option.value === value) ?? options[0]!;
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            variant={active ? 'secondary' : 'ghost'}
+            size="small"
+            aria-label={`${label}: ${current.label}`}
+            className={stylex.props(styles.shrinkless).className}
+          />
+        }
+      >
+        {icon}
+        {current.label}
+        <ChevronDown {...stylex.props(styles.mutedIcon)} aria-hidden="true" />
+      </Menu.Trigger>
+      <Menu.Content align="start">
+        <Menu.RadioGroup value={value} onValueChange={(next) => onChange(next as T)}>
+          {options.map((option) => (
+            <Menu.RadioItem
+              key={option.value}
+              value={option.value}
+              endContent={option.count != null ? String(option.count) : undefined}
+            >
+              {option.label}
+            </Menu.RadioItem>
+          ))}
+        </Menu.RadioGroup>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+const projectKey = (filter: ScheduleListProjectFilter) =>
+  filter.kind === 'project' ? `project:${filter.name}` : filter.kind;
 
 export function ScheduleListView({
   rows,
@@ -765,17 +880,17 @@ export function ScheduleListView({
   onToggle,
   onRun,
   onDelete,
+  onClearEnded,
   contextForRow,
+  contentForRow,
   onOpenSession,
-  columnWidths: controlledWidths,
-  onColumnWidthsChange,
   selectedId,
-  renderBody,
-  onBlankClick,
   insetSafeArea = false,
   hideHeader = false,
   query: controlledQuery,
+  initialFilters,
   now = getServerNow(),
+  viewerTimeZone,
 }: {
   rows: ScheduleRegistryRow[];
   runtimes: ScheduleRuntimeRow[];
@@ -788,41 +903,44 @@ export function ScheduleListView({
   onToggle?: (row: ScheduleRegistryRow) => void;
   onRun?: (row: ScheduleRegistryRow) => void;
   onDelete?: (row: ScheduleRegistryRow) => void;
+  /** Deletes every finished scheduled message the person owns, after confirming. */
+  onClearEnded?: (rows: ScheduleRegistryRow[]) => void;
   contextForRow?: (row: ScheduleRegistryRow) => ScheduleRowContext;
-  /** Persisted by the container; uncontrolled (defaults) when omitted. */
-  columnWidths?: ScheduleColumnWidths;
-  onColumnWidthsChange?: (next: ScheduleColumnWidths) => void;
+  /** A scheduled message's text; its stored title is only the fallback. */
+  contentForRow?: (row: ScheduleRegistryRow) => string | undefined;
   onOpenSession?: (id: string) => void;
-  /** Wraps the table under the header — the split view places the open
-   *  schedule beside it there, so the header never moves. */
-  renderBody?: (table: ReactNode) => ReactNode;
-  /** A click on the page's empty space (the open schedule does not count). */
-  onBlankClick?: () => void;
   /** Phone page that draws under the status bar. The home tab leaves this off. */
   insetSafeArea?: boolean;
   /** Home tab draws search and the new button in its own header. */
   hideHeader?: boolean;
-  /** When set, the home search field filters this list. */
+  /** When set, the home search text filters this list. */
   query?: string;
-  /** The schedule open beside the list, highlighted. */
+  /** Stories and tests start from a given filter. */
+  initialFilters?: {
+    project?: ScheduleListProjectFilter;
+    status?: ScheduleListStatusFilter;
+    sort?: ScheduleListSort;
+  };
+  /** The schedule open over the list, highlighted. */
   selectedId?: string;
-  /** Injected so stories and tests render a fixed "next run" column. */
+  /** Injected so stories and tests render fixed times. */
   now?: number;
+  /** Injected so tests can fix the viewer clock independently of the host zone. */
+  viewerTimeZone?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
   const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDrag = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
-    insideWorkspaceFrame: true,
-  });
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ insideWorkspaceFrame: true });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
   const showSidebarToggle = !isMobile && isLeftSidebarHidden;
+  const besideTrafficLights = showSidebarToggle && hasMacOSTitlebarInset;
   const headerChromeClassName = [
     windowDrag,
     windowsCaptionPadClass,
@@ -832,50 +950,144 @@ export function ScheduleListView({
     .filter(Boolean)
     .join(' ');
   const [localQuery, setLocalQuery] = useState('');
-  const query = controlledQuery ?? localQuery;
-  const [localWidths, setLocalWidths] = useState(DEFAULT_COLUMN_WIDTHS);
-  const widths = controlledWidths ?? localWidths;
-  const resize = (key: keyof ScheduleColumnWidths, value: number) => {
-    const next = { ...widths, [key]: clampWidth(value) };
-    setLocalWidths(next);
-    onColumnWidthsChange?.(next);
-  };
-  const filtered = rows.filter((row) =>
-    row.title.toLowerCase().includes(query.trim().toLowerCase())
+  const query = (controlledQuery ?? localQuery).trim().toLowerCase();
+  const [project, setProject] = useState<ScheduleListProjectFilter>(
+    initialFilters?.project ?? { kind: 'all' }
   );
+  const [statusFilter, setStatusFilter] = useState<ScheduleListStatusFilter>(
+    initialFilters?.status ?? 'all'
+  );
+  const [sort, setSort] = useState<ScheduleListSort>(initialFilters?.sort ?? 'next');
+
+  const runtimeOf = indexScheduleRuntimes(runtimes);
+  const entries: Entry[] = rows.map((row) => {
+    const runtime = runtimeOf(row);
+    const context = contextForRow?.(row);
+    return {
+      row,
+      runtime,
+      context,
+      status: describeScheduleState(t, row, runtime, {
+        timeZone: scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone),
+        now,
+        locale: i18n.language,
+      }),
+    };
+  });
+  const projectOf = (entry: Entry) => entry.context?.project ?? (entry.row.projectKey || null);
+  const nameOf = (row: ScheduleRegistryRow) =>
+    (row.scheduledMessage ? contentForRow?.(row)?.trim() : undefined) || row.title;
+  const matchesProject = (entry: Entry, filter: ScheduleListProjectFilter) =>
+    filter.kind === 'all' ||
+    (filter.kind === 'none' ? projectOf(entry) === null : projectOf(entry) === filter.name);
+  const matchesStatus = (entry: Entry, filter: ScheduleListStatusFilter) =>
+    filter === 'all' || entry.status.group === filter;
+  const projectNames = [
+    ...new Set(entries.map(projectOf).filter((name): name is string => !!name)),
+  ].sort();
+  const compare = {
+    next: (a: Entry, b: Entry) =>
+      (a.runtime?.nextScheduledAt ?? Number.POSITIVE_INFINITY) -
+      (b.runtime?.nextScheduledAt ?? Number.POSITIVE_INFINITY),
+    recent: (a: Entry, b: Entry) =>
+      (b.runtime?.lastDispatch?.dispatchedAt ?? 0) - (a.runtime?.lastDispatch?.dispatchedAt ?? 0),
+    name: (a: Entry, b: Entry) =>
+      nameOf(a.row).localeCompare(nameOf(b.row), i18n.language.replace('_', '-')),
+    created: (a: Entry, b: Entry) => b.row.createdAt - a.row.createdAt,
+  }[sort];
+  const visible = entries
+    .filter(
+      (entry) =>
+        nameOf(entry.row).toLowerCase().includes(query) &&
+        matchesProject(entry, project) &&
+        matchesStatus(entry, statusFilter)
+    )
+    .sort((a, b) => compare(a, b) || nameOf(a.row).localeCompare(nameOf(b.row)));
+  const filtering = project.kind !== 'all' || statusFilter !== 'all';
+
+  const projectOptions = [
+    {
+      value: 'all',
+      label: t('schedules.filter.allProjects', 'All projects'),
+      count: entries.length,
+    },
+    ...projectNames.map((name) => ({
+      value: `project:${name}`,
+      label: name,
+      count: entries.filter((entry) => projectOf(entry) === name).length,
+    })),
+    {
+      value: 'none',
+      label: t('schedules.filter.noProject', 'No project (chat only)'),
+      count: entries.filter((entry) => projectOf(entry) === null).length,
+    },
+  ];
+  const statusOptions = (
+    [
+      ['all', t('schedules.filter.allStatuses', 'All statuses')],
+      ['running', t('schedules.filter.running', 'Active')],
+      ['paused', t('schedules.paused', 'Paused')],
+      ['attention', t('schedules.state.blocked', 'Needs attention')],
+      ['ended', t('schedules.filter.ended', 'Finished')],
+    ] as const
+  ).map(([value, label]) => ({
+    value,
+    label,
+    count: entries.filter((entry) => matchesStatus(entry, value)).length,
+  }));
+  const sortOptions = (
+    [
+      ['next', t('schedules.sort.next', 'Next run')],
+      ['recent', t('schedules.sort.recent', 'Last run')],
+      ['name', t('schedules.sort.name', 'Name')],
+      ['created', t('schedules.sort.created', 'Newest')],
+    ] as const
+  ).map(([value, label]) => ({ value, label }));
+
+  const sections: {
+    key: 'tasks' | 'messages';
+    title: string;
+    info?: string;
+    entries: Entry[];
+    total: number;
+  }[] = [
+    {
+      key: 'tasks',
+      title: t('schedules.section.tasks', 'Scheduled tasks'),
+      // Tasks are the page's own subject; only the one-off messages need a word.
+      info: undefined,
+      entries: visible.filter((entry) => !entry.row.scheduledMessage),
+      total: entries.filter((entry) => !entry.row.scheduledMessage).length,
+    },
+    {
+      key: 'messages',
+      title: t('schedules.section.messages', 'Scheduled messages'),
+      info: t(
+        'schedules.section.messagesInfo',
+        'A message written in a chat with “Schedule send…”, sent to that chat once at the chosen time.'
+      ),
+      entries: visible.filter((entry) => entry.row.scheduledMessage),
+      total: entries.filter((entry) => entry.row.scheduledMessage).length,
+    },
+  ];
+
   return (
-    // Own the tooltip context rather than depending on an ancestor: the row
-    // tooltips carry the exact next-run instant and the offline reason, which
-    // must not be what makes this list crash where it is mounted.
     <Tooltip.Provider>
-      {/* A click on nothing in particular — not a row, a control or the open
-          schedule — closes the schedule. Close and Escape stay the keyboard path. */}
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
-      <section
-        // Positioning context for the open schedule, which covers the header.
-        {...stylex.props(styles.list)}
-        onClick={(event) => {
-          const target = event.target as Element;
-          // Popups portal out of this DOM; their clicks must not count.
-          if (!onBlankClick || !event.currentTarget.contains(target)) return;
-          if (target.closest(BLANK_CLICK_EXCLUDE)) return;
-          onBlankClick();
-        }}
-      >
-        {/* Joins the Electron window's drag strip, which would otherwise swallow
-            clicks on the search and New button under it. */}
+      <section {...stylex.props(styles.page)}>
         {hideHeader ? null : (
+          // Joins the Electron window's drag strip, which would otherwise
+          // swallow clicks on the search and New button under it.
           <header
             {...withClassName(
               stylex.props(
-                styles.listHeader,
-                insetSafeArea && styles.listHeaderSafeArea,
-                showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
+                styles.header,
+                insetSafeArea && styles.headerSafeArea,
+                besideTrafficLights && styles.headerBesideTrafficLights
               ),
               headerChromeClassName
             )}
             data-safe-area-inset={insetSafeArea ? '' : undefined}
-            data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
+            data-beside-traffic-lights={besideTrafficLights ? '' : undefined}
           >
             {showSidebarToggle ? (
               <Button
@@ -900,13 +1112,13 @@ export function ScheduleListView({
               aria-label={t('schedules.search', 'Search schedules')}
               placeholder={t('schedules.search', 'Search schedules')}
               className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
-              value={query}
+              value={localQuery}
               onChange={(event) => setLocalQuery(event.target.value)}
             />
             <Button
               variant="primary"
               size="small"
-              className={cn(stylex.props(styles.actionButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              className={cn(stylex.props(styles.shrinkless).className, WINDOW_DRAG_EXEMPT_CLASS)}
               onClick={onNew}
               // The label is the only text and it is hidden on narrow screens.
               aria-label={t('schedules.new', 'New schedule')}
@@ -919,195 +1131,192 @@ export function ScheduleListView({
           </header>
         )}
 
-        {(renderBody ?? ((table: ReactNode) => table))(
-          // Header and rows scroll together, sideways too when the columns do
-          // not fit the pane: each column keeps its width instead of squeezing.
-          <div {...stylex.props(styles.tableScroller)}>
-            <div
-              {...stylex.props(
-                styles.tableMinimum(
-                  `${widths.name + widths.frequency + widths.next + 200 + 92 + 48 + 32}px`
-                )
-              )}
-            >
-              {error ? (
-                <div {...stylex.props(styles.error)} role="alert">
-                  <p>
-                    {rows.length > 0
-                      ? t(
-                          'schedules.syncError',
-                          'Schedules could not be synced. Showing saved tasks.'
-                        )
-                      : t('schedules.loadError', 'Schedules could not be loaded.')}
-                  </p>
-                  {onRetry ? (
-                    <Button variant="secondary" size="small" disabled={retrying} onClick={onRetry}>
-                      {retrying
-                        ? t('schedules.retrying', 'Retrying…')
-                        : t('schedules.retry', 'Retry')}
-                    </Button>
-                  ) : null}
-                </div>
+        <div {...stylex.props(styles.scroller)}>
+          {error ? (
+            <div {...stylex.props(styles.error)} role="alert">
+              <p>
+                {rows.length > 0
+                  ? t('schedules.syncError', 'Schedules could not be synced. Showing saved tasks.')
+                  : t('schedules.loadError', 'Schedules could not be loaded.')}
+              </p>
+              {onRetry ? (
+                <Button variant="secondary" size="small" disabled={retrying} onClick={onRetry}>
+                  {retrying ? t('schedules.retrying', 'Retrying…') : t('schedules.retry', 'Retry')}
+                </Button>
               ) : null}
-              {ready && filtered.length > 0 ? (
-                <div
-                  {...stylex.props(
-                    styles.listGrid,
-                    styles.columnTracks(widths.name, widths.frequency, widths.next),
-                    styles.headerRow
-                  )}
-                >
-                  {(
-                    [
-                      ['name', t('schedules.column.name', 'Name')],
-                      ['frequency', t('schedules.column.frequency', 'Frequency')],
-                      ['next', t('schedules.column.next', 'Next run')],
-                    ] as const
-                  ).map(([key, label]) => (
-                    // The cell must not clip: the handle hangs into the column gap.
-                    <span key={key} {...stylex.props(styles.headerCell)}>
-                      <span {...stylex.props(styles.headerLabel)}>{label}</span>
-                      <ColumnResizeHandle
-                        label={t('schedules.resizeColumn', 'Resize {{column}}', { column: label })}
-                        value={widths[key]}
-                        onChange={(value) => resize(key, value)}
-                        onReset={() => resize(key, DEFAULT_COLUMN_WIDTHS[key])}
-                      />
-                    </span>
-                  ))}
-                  <span>{t('schedules.column.target', 'Runs with')}</span>
-                  <span />
-                </div>
-              ) : null}
-              {!ready ? (
-                <div aria-busy="true">
-                  <span {...stylex.props(styles.visuallyHidden)}>
-                    {t('schedules.loading', 'Loading schedules…')}
-                  </span>
-                  {[0, 1, 2].map((index) => (
-                    <div key={index} {...stylex.props(styles.skeletonRow)}>
-                      <Skeleton shape="line" width={192} />
-                      <Skeleton
-                        shape="line"
-                        width={96}
-                        className={stylex.props(styles.skeletonTrailing).className}
-                      />
-                      <Skeleton shape="line" width={80} />
-                    </div>
-                  ))}
-                </div>
-              ) : error && rows.length === 0 ? null : filtered.length === 0 ? (
-                <div {...stylex.props(styles.empty)}>
-                  <CalendarClock {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
-                  <p {...stylex.props(styles.emptyTitle)}>
-                    {query
-                      ? t('schedules.noMatches', 'No schedules match your search')
-                      : t('schedules.empty', 'No schedules yet')}
-                  </p>
-                  {query ? null : (
-                    <>
-                      <p {...stylex.props(styles.emptyHelp)}>
-                        {t(
-                          'schedules.emptyHelp',
-                          'Choose a prompt and a time. Your machine will start a new chat for each run.'
-                        )}
-                      </p>
-                      <Button
-                        variant="secondary"
-                        size="small"
-                        className={stylex.props(styles.emptyAction).className}
-                        onClick={onNew}
-                      >
-                        <Plus {...stylex.props(styles.icon14)} />
-                        {t('schedules.new', 'New schedule')}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              ) : (
-                filtered.map((row) => (
-                  <ScheduleListRow
-                    key={row.scheduleId}
-                    row={row}
-                    now={now}
-                    runtime={matchingScheduleRuntime(row, runtimes)}
-                    context={contextForRow?.(row)}
-                    widths={widths}
-                    onOpen={() => onOpen(row.scheduleId)}
-                    onToggle={onToggle ? () => onToggle(row) : undefined}
-                    onRun={onRun ? () => onRun(row) : undefined}
-                    onDelete={onDelete ? () => onDelete(row) : undefined}
-                    onOpenSession={onOpenSession}
-                    selected={row.scheduleId === selectedId}
-                  />
-                ))
-              )}
             </div>
-          </div>
-        )}
+          ) : null}
+          {!ready ? (
+            <div aria-busy="true" {...stylex.props(styles.section, styles.card)}>
+              <span {...stylex.props(styles.visuallyHidden)}>
+                {t('schedules.loading', 'Loading schedules…')}
+              </span>
+              {[0, 1, 2].map((index) => (
+                <div key={index} {...stylex.props(styles.skeletonRow)}>
+                  <Skeleton shape="line" width={192} />
+                  <Skeleton
+                    shape="line"
+                    width={96}
+                    className={stylex.props(styles.skeletonTrailing).className}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : error && rows.length === 0 ? null : rows.length === 0 ? (
+            <div {...stylex.props(styles.empty)}>
+              <CalendarClock {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
+              <p {...stylex.props(styles.emptyTitle)}>{t('schedules.empty', 'No schedules yet')}</p>
+              <p {...stylex.props(styles.emptyHelp)}>
+                {t(
+                  'schedules.emptyHelp',
+                  'Choose a prompt and a time. Your machine will start a new chat for each run.'
+                )}
+              </p>
+              <Button
+                variant="secondary"
+                size="small"
+                className={stylex.props(styles.emptyAction).className}
+                onClick={onNew}
+              >
+                <Plus {...stylex.props(styles.icon14)} />
+                {t('schedules.new', 'New schedule')}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div
+                {...stylex.props(styles.filters)}
+                role="toolbar"
+                aria-label={t('schedules.filter.label', 'Filter and sort')}
+              >
+                <FilterMenu
+                  label={t('schedules.filter.project', 'Project')}
+                  icon={<Folder {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
+                  value={projectKey(project)}
+                  options={projectOptions}
+                  active={project.kind !== 'all'}
+                  onChange={(value) =>
+                    setProject(
+                      value === 'all' || value === 'none'
+                        ? { kind: value }
+                        : { kind: 'project', name: value.slice('project:'.length) }
+                    )
+                  }
+                />
+                <FilterMenu
+                  label={t('schedules.filter.status', 'Status')}
+                  icon={<ListFilter {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
+                  value={statusFilter}
+                  options={statusOptions}
+                  active={statusFilter !== 'all'}
+                  onChange={setStatusFilter}
+                />
+                {filtering ? (
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    className={stylex.props(styles.shrinkless).className}
+                    onClick={() => {
+                      setProject({ kind: 'all' });
+                      setStatusFilter('all');
+                    }}
+                  >
+                    {t('schedules.filter.clear', 'Clear filters')}
+                  </Button>
+                ) : null}
+                <span {...stylex.props(styles.spacer)} />
+                <FilterMenu
+                  label={t('schedules.sort.label', 'Sort')}
+                  icon={<ArrowUpDown {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
+                  value={sort}
+                  options={sortOptions}
+                  active={false}
+                  onChange={setSort}
+                />
+              </div>
+              {sections
+                .filter((section) => section.total > 0)
+                .map((section) => {
+                  const ended = section.entries.filter(
+                    (entry) =>
+                      entry.status.group === 'ended' &&
+                      entry.row.scheduledMessage &&
+                      entry.context?.canDelete !== false
+                  );
+                  return (
+                    <div key={section.key} {...stylex.props(styles.section)}>
+                      <div {...stylex.props(styles.sectionHead)}>
+                        <h2 {...stylex.props(styles.sectionTitle)}>{section.title}</h2>
+                        <span {...stylex.props(styles.sectionCount)}>{section.entries.length}</span>
+                        {section.info ? (
+                          <SectionInfo title={section.title}>{section.info}</SectionInfo>
+                        ) : null}
+                        <span {...stylex.props(styles.spacer)} />
+                        {section.key === 'messages' && ended.length > 0 && onClearEnded ? (
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            onClick={() => onClearEnded(ended.map((entry) => entry.row))}
+                          >
+                            {t('schedules.clearEnded', 'Clear finished ({{count}})', {
+                              count: ended.length,
+                            })}
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div {...stylex.props(styles.card)}>
+                        {section.entries.length === 0 ? (
+                          <p {...stylex.props(styles.sectionEmpty)}>
+                            {query
+                              ? t('schedules.noMatches', 'No schedules match your search')
+                              : t(
+                                  'schedules.filter.noMatches',
+                                  'Nothing here matches the filters.'
+                                )}
+                          </p>
+                        ) : (
+                          <>
+                            <div
+                              {...stylex.props(styles.grid, styles.columns)}
+                              style={hideHeader ? { display: 'none' } : undefined}
+                              aria-hidden="true"
+                            >
+                              <span>{t('schedules.column.name', 'Name')}</span>
+                              <span>
+                                {section.key === 'tasks'
+                                  ? t('schedules.column.results', 'Results go to')
+                                  : t('schedules.column.sendsTo', 'Sends to')}
+                              </span>
+                              <span {...stylex.props(styles.alignEnd)}>
+                                {t('schedules.column.status', 'Status')}
+                              </span>
+                              <span />
+                            </div>
+                            {section.entries.map((entry) => (
+                              <ScheduleListRow
+                                key={entry.row.scheduleId}
+                                entry={entry}
+                                name={nameOf(entry.row)}
+                                viewerTimeZone={viewerTimeZone}
+                                selected={entry.row.scheduleId === selectedId}
+                                compact={hideHeader}
+                                onOpen={() => onOpen(entry.row.scheduleId)}
+                                onToggle={onToggle ? () => onToggle(entry.row) : undefined}
+                                onRun={onRun ? () => onRun(entry.row) : undefined}
+                                onDelete={onDelete ? () => onDelete(entry.row) : undefined}
+                                onOpenSession={onOpenSession}
+                              />
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </>
+          )}
+        </div>
       </section>
     </Tooltip.Provider>
-  );
-}
-
-/**
- * Drag handle on a header column's right edge, centred in the column gap.
- *
- * Pointer capture keeps the drag alive outside the header; arrow keys step by
- * 16px for keyboard users; double-click restores the default width.
- */
-function ColumnResizeHandle({
-  label,
-  value,
-  onChange,
-  onReset,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  onReset: () => void;
-}) {
-  const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: value };
-  };
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const active = drag.current;
-    if (!active || active.pointerId !== event.pointerId) return;
-    onChange(active.startWidth + event.clientX - active.startX);
-  };
-  const end = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointerId !== event.pointerId) return;
-    drag.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.key === 'ArrowLeft' ? -16 : event.key === 'ArrowRight' ? 16 : 0;
-    if (!step) return;
-    event.preventDefault();
-    onChange(value + step);
-  };
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuenow={value}
-      aria-valuemin={MIN_COLUMN_WIDTH}
-      aria-valuemax={MAX_COLUMN_WIDTH}
-      tabIndex={0}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onDoubleClick={onReset}
-      onKeyDown={onKeyDown}
-      {...stylex.props(stylex.defaultMarker(), styles.resizeHandle)}
-    >
-      <span {...stylex.props(styles.resizeLine)} />
-    </div>
   );
 }

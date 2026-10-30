@@ -1,3 +1,5 @@
+import { userAtom } from '../src/atoms';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   createSessionSendResources,
   type SessionSendResources,
@@ -559,6 +561,17 @@ describe('useSessionActions', () => {
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
     jotaiStore.set(currentWorkspaceIdAtom, options.workspaceId ?? ('workspace-1' as WorkspaceId));
     jotaiStore.set(currentWorkspaceSlugAtom, options.workspaceSlug ?? 'workspace-slug');
+    jotaiStore.set(userAtom, { id: 'synthetic-session-account' } as never);
+    jotaiStore.set(workspaceContentModeAtom, {
+      accountId: 'synthetic-session-account',
+      workspaceId: options.workspaceId ?? 'workspace-1',
+      workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
+      descriptor: {
+        workspaceId: options.workspaceId ?? 'workspace-1',
+        contentMode: 'plaintext',
+        contentModeVersion: 1,
+      },
+    });
 
     let actions: SessionActions | null = null;
     container = document.createElement('div');
@@ -605,6 +618,39 @@ describe('useSessionActions', () => {
     await actions.requestSessionCancel(sessionId, 'assistant-legacy');
     expect(received).toEqual(['assistant-legacy']);
     expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-legacy');
+  });
+
+  it('interrupts without a Stop identity so queued input keeps its eligibility', async () => {
+    const sessionId = 'session-interrupt' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'machine-1', userId: 'user-1' } as SessionMeta,
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const rpcOptions: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, _turnId, options) => {
+      rpcOptions.push(options);
+      return { success: true } as never;
+    };
+    try {
+      const actions = await renderActions(runtime);
+      await actions.requestSessionCancel(sessionId, 'assistant-running', { interrupt: true });
+
+      expect(rpcOptions).toEqual([{ timeoutMs: 2_000, pauseInbox: false }]);
+      expect(control.getState().cancelRequest?.id).toBeUndefined();
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-running');
+    } finally {
+      control.dispose();
+    }
   });
 
   it('persists Stop details before publishing only its marker, and reuses the request on RPC', async () => {

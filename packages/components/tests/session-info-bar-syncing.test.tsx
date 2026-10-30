@@ -128,6 +128,9 @@ describe('SessionInfoBar ambient information', () => {
   it('shows the execution target alone while keeping owner details out of the resting bar', () => {
     act(() => root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} machine={MACHINE} />));
     expect(container.textContent).toBe(MACHINE.name);
+    const surface = container.querySelector('[data-info-bar-surface]');
+    expect(surface).not.toBeNull();
+    expect(surface!.className).toContain('rounded-lg');
     expect(container.querySelector('img')).toBeNull();
     expect(document.body.textContent).not.toContain('Maya Chen');
     act(() => container.querySelector<HTMLButtonElement>('button')!.click());

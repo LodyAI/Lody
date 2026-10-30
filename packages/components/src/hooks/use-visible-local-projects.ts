@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorkspaceId } from '@lody/shared';
@@ -14,7 +16,6 @@ import {
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import type { VisibleMachineIndex } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { LocalProjectVisibilityAccess };
@@ -51,27 +52,34 @@ export function useVisibleLocalProjectsFromMachineIndex(
 ): VisibleLocalProjectIndex {
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const canQuery =
+    enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const currentUserId = useWorkspaceLocalAccountId();
   const {
     machines: visibleMachines,
     accessByMachineId,
     isLoading: machineVisibilityLoading,
   } = visibleMachineIndex;
-  const queriedAccessRows = useCloudQuery(
+  const queriedAccessRows = useLegacyWorkspaceQuery(
     cloudOperations.localProjects.listVisibleLocalProjects,
-    enabled && workspaceId ? { workspaceId } : 'skip'
+    enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
-  const rawAccessRows = queriedAccessRows ?? EMPTY_ACCESS_ROWS;
+  const rawAccessRows = legacyQueriesEnabled
+    ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS)
+    : EMPTY_ACCESS_ROWS;
   const isLoading =
     enabled &&
     (machineVisibilityLoading ||
-      isAuthedWorkspaceQueryLoading({
-        workspaceId,
-        isConvexAuthLoading,
-        canQuery,
-        queryResult: queriedAccessRows,
-      }));
+      legacyQueryStatus === 'pending' ||
+      (legacyQueriesEnabled &&
+        isAuthedWorkspaceQueryLoading({
+          workspaceId,
+          isConvexAuthLoading,
+          canQuery,
+          queryResult: queriedAccessRows,
+        })));
 
   return useMemo(
     () =>

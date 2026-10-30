@@ -131,7 +131,11 @@ import type { AgentConfigMeta, WorkspaceId } from '@lody/shared';
 import { MachineAccessVerificationError } from '@/session/session-access-retry';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 
-import { __lodyMcpServerInternals, buildSessionToolServer } from './lody-mcp-server';
+import {
+  __lodyMcpServerInternals,
+  buildSessionToolServer,
+  runWithMcpSessionContext,
+} from './lody-mcp-server';
 
 const {
   mcpErrorResult,
@@ -223,6 +227,50 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+it('returns an explicit Inbox error before opening storage, then accepts calls after recovery', async () => {
+  let available = false;
+  const handlers: SessionToolHandlers = new Map();
+  const server = buildSessionToolServer(handlers);
+  const handler = handlers.get('lody_operation_get');
+  if (!handler) throw new Error('operation_get handler missing');
+  const call = () =>
+    runWithMcpSessionContext(
+      {
+        machineId: 'machine-id',
+        workspaceId: 'workspace-id',
+        sessionId: requesterSession.id as SessionId,
+        localControlSocketPath: undefined,
+        workdir: '/tmp',
+        assertOperationInboxAvailable: () => {
+          if (!available)
+            throw new LodyOperationStoreError(
+              'INBOX_UNAVAILABLE',
+              'Inbox is temporarily unavailable',
+              true
+            );
+        },
+      },
+      () => handler({ operationId: 'startup-test' })
+    );
+  try {
+    const degraded = await call();
+    expect(degraded.isError).toBe(true);
+    expect(JSON.parse((degraded.content[0] as { text: string }).text)).toMatchObject({
+      ok: false,
+      error: { code: 'INBOX_UNAVAILABLE', retryable: true },
+    });
+    available = true;
+    mocks.snapshot.mockReturnValue({ operationId: 'startup-test', state: 'active' });
+    const recovered = await call();
+    expect(JSON.parse((recovered.content[0] as { text: string }).text)).toMatchObject({
+      operationId: 'startup-test',
+      state: 'active',
+    });
+  } finally {
+    await server.close();
+  }
 });
 
 describe('session chat prevalidation sync failures', () => {

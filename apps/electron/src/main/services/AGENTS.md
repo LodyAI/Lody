@@ -89,7 +89,9 @@ resets. Relaunching quits the embedded CLI: never make it a default recovery ste
 LoginShellCache Layer owns the shell environment; getUserShellEnvCachedLegacy
 is launcher-only. After renderer unload approval, quit awaits application disposal
 and CLI exit. Retain failed process owners for quit/recovery; never substitute null
-or bind replacements before release. See the
+or bind replacements before release. After a failed quit, retry owners once before rebuilding
+the shell and relays and reopening a product window; unresolved owners use the localized
+quit/retry dialog. See the
 [decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
 ## E2EE runtime
@@ -99,20 +101,30 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 [join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
-Lazy custody; no network under locks; drain native work before release.
-Keep verification/storage errors owner-local; malformed input keeps readers.
+Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
+No network under locks; drain before release.
+Bad keys allow ledger open; core repairs.
+Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
-Conflicts refuse fallback; availability may use pinned renderer reads.
-Fixed cloud refs; authenticate/bound/abort requests; disposal fences late calls.
-Retain uncertain bytes; raw/SDK causes stay in main, never IPC/telemetry.
-Verified readback beats lost ACKs; cleanup retains admission.
+Conflicts refuse fallback. Failed close retains its fence; report restart-required.
+Fixed cloud refs; auth/bound/abort; fence late disposed calls.
+Keep uncertain bytes; raw/SDK causes never leave main.
+Verified reads beat lost ACKs; cleanup retains admission.
 `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
 Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
-Missing credentials block approval; never export credentials. Failed begin stays discoverable.
+Missing credentials block approval; never export them. Failed begin stays discoverable.
 Archive terminal/foreign attempts, including pin-only+relay; fence same-request
 unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
 Retirement needs exact superseded socket receipt and atomic all-null local match;
 fresh sessions need consent. Unsigned staged material stays pending across windows/retries
-until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Old keys use
-mailbox+verified history, never staging. Show file protection; socket timeout stays pending. Await CLI current-key install.
+until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
+denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
+
+Only rotate resumes candidates. Keep errors transport-free.
+
+Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
+Passive cache inspection uses existing entries only; never call openWorkspace or
+readMachineSharing from that path. Counts are diagnostic, not execution authority.
+Policy errors affect dependent execution only. Narrow read/update methods keep keys
+and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

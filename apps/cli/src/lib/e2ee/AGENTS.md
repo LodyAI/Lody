@@ -1,58 +1,65 @@
-# Machine E2EE custody
+# Machine E2EE
 
-`CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
+`CLAUDE.md` aliases this; CLI rules apply.
 
-- Lazy, machine-only module: ordinary CLI startup never probes the keyring.
-- First creation write/read-probes a temporary OS keystore entry and permanently selects
-  os-keystore or file protection. Reopen never probes/changes selection; originals require
-  their selector and KEK.
-- File protection requires owner-only directories/files, no symlinks; Windows uses actual
-  owner/DACL checks through the official process Layer, not Unix mode bits.
-- Blob formats belong in core node-custody. No personal management, private exports,
-  plaintext device files or silent downgrade after keyring errors.
-- Display file protection before pairing approval.
+- Lazy machine-only; ordinary startup never probes keyring.
+- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+  Reopen: original selector/KEK; no re-probe/switch.
+- File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
+  process Layer, never Unix mode bits.
+- Core node-custody owns blobs; no personal management, private exports/plaintext device files
+  or silent keyring downgrade.
+- Disclose file protection pre-approval.
 
-- Native keyring calls run in a managed helper: 10-second timeout, secrets only on stdin.
-  Confirm termination before fallback; preserve process-release recovery owners.
-- Batch Windows root/file ACL checks in one process. SQLite selection retries SQLITE_BUSY
-  asynchronously with a bound; no blocking busy_timeout while awaiting keyring work.
+- Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
+- Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
-- Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
+- Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
-  Open/status are offline; cloud requests stay in cloud-cli-port.
-- Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
-  first. Retired cache cleanup cannot fail local open.
-- No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
-  while their encrypted channels remain unimplemented.
-- `realtime-journal.ts` is storage only; exclusive `create` provisions schema 2.
-  Never upgrade/repair/replace schema or originals. Reject unknown committed schema
-  before app settings/chmod/writes; native SQLite recovery may precede validation.
-  Immutable requests/responses/first outcomes; no expiry GC/replay. Bound owners retaining
-  permits/failed cleanup. Persist replies before send; indexes select no wire profile.
-  Failed responses retain one original/permit for exact retry and preserve results.
-  Fence execution AND Meta/history.
-  Preserve the file-global clock floor across workspaces/restarts and readable completed
-  evidence. No floor reset, deadline extension or new time source/recovery generation.
-  See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
+  Offline open/status; cloud I/O stays in cloud-cli-port.
+  Distinguish damaged history/pins; never reset trusted pins from remote hints.
+- Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
+  RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
+  never network-retry.
+- Journal originals before feed/pin; rebase core pin first after 64 records.
+  Retired cache cleanup must fail closed.
+- No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
+  plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
+- `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
+  Retire readable current keys before intact archive; unreadable keys refuse reset.
+  No auto-replace/GC/archive replay/import. Exact originals/first outcome;
+  uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
+  Before writes reject local >10min ahead of authenticated now, never frame
+  time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
+  keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
+  failed main close. Bound permits/cleanup; reply before send; exact retries.
+  `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
+  authority. UI accounts are display-only. No capability: deny.
+  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  substitution or uncertain ACP retry.
+  [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
-  possession additionally binds the strict UTF-8 machineId; activation compares it
-  with both the verified current device and the retained signed admission. Session
+  desktop 16-byte pairing session via core's fixed v1 helper. Machine
+  possession binds strict UTF-8 machineId; activation matches the verified current
+  device and retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
-  Pairing preparation and activation run only on the OS-user control socket;
-  Fleet checks its own account and discovered encrypted workspace/genesis first.
-  Activation refreshes the verified ledger and mailbox and acknowledges only an
-  installed current key; temporary failure leaves the same pairing retryable.
+  Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
+  Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
+  The local catalog never refuses that check: a workspace it lacks or binds to another
+  genesis waits for the first authoritative list outcome (list, rejection, subscription
+  error or shutdown), then fails closed; a cached match proceeds offline
+  ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
 
-- Pin M2 write epoch. rotationRequired only prompts administrators to update keys; it
-  must not latch sends off or block workspace use. Do not add rotation-hint send guards.
+- Staging read denial/I/O failure cannot block independently verified mailbox reception.
+- Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
+  [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
-  before Fleet attaches rooms. The marker grants no authority; match genesis/device.
+  before Fleet attaches rooms. Marker grants no authority; match genesis/device.
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 
-- Never construct/register the Fleet PR poller for encrypted workspaces.
+- Never register Fleet PR pollers for encrypted workspaces.
 - Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
   credentials; never send decrypted repository names through its credential broker.
 
@@ -63,12 +70,13 @@
   Hints follow replacements only after verified admission/install. Pairing waits raise
   no startup issue/timer/global offline state. Activation binds the approved key,
   drains other identities and retains its cleanup retry owner.
-- Only activation/binding/device-original ENOENT means pairing wait. Check the
-  original before custody init; stale hints cannot trigger keyring probes. Preserve
-  other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Next seal coalesces one
-  storage-error refresh without reconnecting healthy readers. Validation/conflict needs
-  explicit normal refresh; seal cannot auto-recover it.
+- Only activation/binding/device-original ENOENT means pairing wait. Check originals
+  before custody init; stale hints never probe keyrings. Other errors retain Fleet
+  retry; never cache transient I/O as missing pairing.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
@@ -77,15 +85,15 @@
   need consent; preserve signer/keys/credential. Preflight latest session before Fleet
   ownership changes; reject late sessions.
 - Publish ownership before replacement originals; publish material/current identity atomically.
-  Same-scope takeover atomically changes old creating=-1/new creating=1, retaining bytes.
+  Same-scope takeover: atomic old creating=-1/new creating=1, retain bytes.
   Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
   Reuse originals. Unpublished generations with retained credentials cannot replace missing
   devices; fresh explicit sessions may replace lost published identities with distinct
   signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
   retries keep healthy owners; only identical intents share flights. Cancellation never
   guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- OS-user socket only; partial upgrades fail closed. No remote authentication. See the
-  [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+- Remote commands use workspace custody and scoped grants; see the
+  [remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
 
 ## Catalog and Fleet containment
 
@@ -93,7 +101,9 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Never overwrite unreadable sidecars; retain errors in memory and usable ordinary rows.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
   Persist ordinary remote-list results; return degraded receipts with current auth/revocation
   checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
   writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
@@ -102,6 +112,13 @@
 
 - Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
   archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
-- Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
-  for encrypted workspaces
+- Never cache an unimplemented content mode. `export` decrypts locally; `export` and
+  `sync` include encrypted Schedule documents and Registry
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.
+
+Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
+erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
+cleanup before open; preserve projects. Rejoin with new member/keys.

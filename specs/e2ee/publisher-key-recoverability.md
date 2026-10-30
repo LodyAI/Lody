@@ -1,6 +1,6 @@
 # Publisher key availability: stage before commit
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 Translation: current
 
 [中文](publisher-key-recoverability.zh.md)
@@ -28,6 +28,5 @@ mailbox/repair. No global freshness or anti-withholding proof is inferred from A
 
 Restricted A remains installed-key host protection, not a vault or identity
 recovery mechanism. This choice does not introduce emergency removal exceptions,
-new account backdoors, vault wrapping/retention, or strict B. The revised Spec
-remains draft for review; production protector and private product activation
+new account backdoors, vault wrapping/retention, or strict B. The revised Spec was approved on 2026-10-28; production protector and private product activation
 have their own acceptance requirements.

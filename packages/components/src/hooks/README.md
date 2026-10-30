@@ -4,6 +4,29 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Explicit plaintext copies
+
+`use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
+transcript and PNG exports. Each encrypted export asks again before capture. Its
+one in-memory choice binds the account, routed workspace, runtime, genesis and
+selected source; guards recheck before output after asynchronous reads/capture.
+The final output also re-enters the captured runtime's admission gate, preserving
+C1 even when retirement precedes publication of the replacement UI state.
+Export reads verify that the selected history is the view owned by the captured
+runtime's current Session store. A loading replacement may still display an old
+view, which cannot be relabeled as a source in the replacement workspace. PNG
+snapshots carry the runtime returned by their actual reader through selection.
+Local exports reuse the retained E2EE account selector during uncertain offline
+authentication. Confirmed logout or a different live account still rejects the
+copy. This local identity never authorizes static publication or another cloud API.
+Cancellation or scope changes retire only that export, retain selection and never
+clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
+the existing Blob, Electron or native byte-save path; native staging cleanup and
+OS cancellation stay with that adapter, with no new key or file-path bridge.
+An abandoned UI waiter does not await obsolete capture/reads or prevent a new
+copy. The raw operation still observes rejection and drains its own cleanup;
+late continuations must pass the retired source guard before any further output.
+
 ## Session submission
 
 `use-session-actions.ts` binds admission, analytics, and Jotai observations to
@@ -29,20 +52,36 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 
 ## MCP default readiness
 
-`use-session-mcp-selection.ts` allows default-derived creation after the local
-catalog loads on local-only platforms. Cloud/dual composition additionally waits
-for the first catalog sync: a nonempty local catalog can still lack the project's
-preference row. Existing conversations and explicit selections bypass this gate.
-No extra transport or cloud request is created by the hook.
+`use-session-mcp-selection.ts` allows default-derived sends after the local catalog
+loads in every composition; remote catch-up does not gate sending. Unreadable
+snapshots stay errors. The shared room retries with capped backoff while borrowed,
+and the notice offers retry or an explicit one-send `[]` without changing defaults.
+Successful one-send opt-out keeps a renderer-local recovery entry scoped to runtime
+and session, so a promoted composer ignores that turn's `[]` and resumes its project
+defaults once readable. The common new-turn sender gates implicit selections while defaults are unread,
+reports loading/read failure with recovery actions, and consumes recovery after
+acceptance for both shortcuts and the composer. Every acceptance invalidates older
+recovery toast actions; each opt-out action can run only once, including before
+its send settles. Explicit ids, including `[]`,
+bypass default resolution. Explicit menu `[]` remains a normal durable selection. No extra history field, schema version or
+daemon capability is introduced. Recovery does not cross renderer reload, runtime
+replacement or devices; those readers retain the historical `[]` behavior.
+Existing conversations remain usable. See the
+[availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-mcp-defaults-send-gate.md).
 
 ## Session ACP catalogs
 
 `use-session-acp-selector-context.ts` owns the Provider subscription for persisted
 and draft composers. It resolves the exact bound id through the shared Provider
-atom and passes its current runtime overrides to both models and slash commands.
-Missing or mismatched Providers expose no catalog; extension changes invalidate
-old capabilities until a matching probe arrives. A matching extension catalog
-must not be read as though no extensions were selected.
+atom and passes its current runtime overrides to models and the initial command
+preview. Missing or mismatched Providers expose no Provider catalog; extension
+changes invalidate old capabilities until a matching probe arrives.
+
+Before an Agent starts, `use-available-commands.ts` displays the Provider probe's
+commands. Once the Session reports `acpRuntimeConfig.availableCommands`, its own
+list wins, including an empty list. Provider refreshes cannot replace that list.
+Commands remain scoped to the same ACP runtime across turns; a replacement runtime
+reports its own list. See the [command ownership decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-command-catalogs.md).
 
 ## Avatar sources
 

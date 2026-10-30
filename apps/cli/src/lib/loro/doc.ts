@@ -42,12 +42,14 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
+  getWorkspaceFlockDocId,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
+  getReadableAcpCapabilityCacheEntry,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -99,6 +101,8 @@ import {
 } from 'loro-repo';
 import { createCliPresenceRuntimeLegacy, type CliPresenceRuntimeLegacy } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
+import { CliPromptSuggestions } from './prompt-suggestions';
+import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
   type AutoMarkLatestUserHistoryAsReadHandle,
@@ -124,6 +128,7 @@ import type { RateLimit } from 'acp-extension-core';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
   createCliSqliteRepoStore,
+  hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
@@ -183,7 +188,8 @@ const createLocalLoroDataPlaneServer = (
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   presenceRuntime: CliPresenceRuntimeLegacy,
-  machineMonitorRuntime: CliMachineMonitorRuntime
+  machineMonitorRuntime: CliMachineMonitorRuntime,
+  promptSuggestions: CliPromptSuggestions
 ): LocalLoroDataPlaneServerLegacy =>
   new LocalLoroDataPlaneServerLegacy({
     workspaceId,
@@ -200,6 +206,10 @@ const createLocalLoroDataPlaneServer = (
     presenceSource: {
       encodeLocalOrigin: () => presenceRuntime.encodeLocalOriginPresence(),
       subscribeLocalOrigin: (listener) => presenceRuntime.subscribeLocalOriginPresence(listener),
+    },
+    promptSuggestionSource: {
+      encodeAll: () => promptSuggestions.state.encode(),
+      subscribe: (listener) => promptSuggestions.state.subscribe(listener),
     },
     machineMonitorSource: {
       apply: (update) => machineMonitorRuntime.applyLocalState(update),
@@ -338,12 +348,16 @@ export interface LoroDocumentManagerOptions {
   initialMetaSyncCompleted?: boolean;
   presenceRuntime?: CliPresenceRuntimeLegacy | null;
   machineMonitorRuntime?: CliMachineMonitorRuntime | null;
+  promptSuggestions?: CliPromptSuggestions | null;
   localLoroDataPlaneServer?: LocalLoroDataPlaneServerLegacy | null;
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
-  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
+  encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
+  >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -363,6 +377,7 @@ export type LoroRepoPersistReason =
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
   sessions: Map<SessionId, SessionDocument> = new Map();
+  private readonly sessionDocCleanup = new Map<SessionId, Promise<void>>();
   machine: MachineDocument | null = null;
   private readonly workspaceId: WorkspaceId;
   private readonly userId: string;
@@ -385,6 +400,7 @@ export class LoroDocumentManager {
   private readonly initialMetaSyncPromise: Promise<boolean>;
   private presenceRuntime: CliPresenceRuntimeLegacy | null;
   private machineMonitorRuntime: CliMachineMonitorRuntime | null;
+  private readonly promptSuggestions: CliPromptSuggestions | null;
   private remoteStreamsTokens: Awaited<
     ReturnType<CliPresenceRuntimeLegacy['createStreamsTokens']>
   > | null = null;
@@ -392,7 +408,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -405,12 +421,33 @@ export class LoroDocumentManager {
     return this.encryptedWorkspace !== undefined;
   }
 
+  async getEncryptedAttachmentToken(): Promise<string> {
+    if (!this.encryptedWorkspace?.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+    return this.encryptedWorkspace.attachmentToken();
+  }
+
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
     await this.catalogSync?.hold(flockDocId);
   }
 
   async catalogBaselineReady(flockDocId: string | undefined, timeoutMs: number): Promise<boolean> {
     return this.catalogSync ? this.catalogSync.ready(flockDocId, timeoutMs) : true;
+  }
+
+  /** Projects the existing reader owner, including daemon calls outside Session ALS. */
+  hasWorkspaceCatalogReader(): boolean {
+    return this.catalogSync !== undefined;
+  }
+
+  /** Past remote receipt, not current connectivity or a fresh authorization verdict. */
+  hasPersistedWorkspaceCatalog(): boolean {
+    return (
+      this.sqliteRepoStore !== null &&
+      hasPersistedFlockRemoteState(
+        this.sqliteRepoStore.dbPath,
+        getWorkspaceFlockDocId(this.workspaceId)
+      )
+    );
   }
 
   static async create(
@@ -428,7 +465,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -444,11 +481,18 @@ export class LoroDocumentManager {
     // the Streams token is fetched only when the remote bridge attaches later
     // (attachRemoteStreamsTransport), not eagerly here.
     installCliHttpGlobalDispatcher({ logger });
+    if (options.encryptedWorkspace && !options.encryptedWorkspace.repositoryDirectory)
+      throw new Error('e2ee_invalid_input');
     const cliSqliteRepoStore = await traceAsync(
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
+      async () =>
+        await createCliSqliteRepoStore(
+          workspaceId,
+          options.onStorageWriteFailure,
+          options.encryptedWorkspace?.repositoryDirectory
+        )
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);
@@ -486,8 +530,11 @@ export class LoroDocumentManager {
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
       // Streams sink is attached later by the remote bridge.
-      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId);
+      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId, {
+        minimal: !!options.encryptedWorkspace,
+      });
       const machineMonitorRuntime = new CliMachineMonitorRuntime({ workspaceId, logger });
+      const promptSuggestions = new CliPromptSuggestions(workspaceId, logger);
       // No transport is registered at startup: rooms stay pending/detached
       // while offline, and renderer↔CLI document sync is served out-of-band by
       // the data-plane server engine. The cloud Streams transport is added
@@ -496,7 +543,8 @@ export class LoroDocumentManager {
         createdRepo,
         workspaceId,
         presenceRuntime,
-        machineMonitorRuntime
+        machineMonitorRuntime,
+        promptSuggestions
       );
       const metaSub = await traceAsync(
         logger,
@@ -523,6 +571,7 @@ export class LoroDocumentManager {
         initialMetaSyncCompleted: false,
         presenceRuntime,
         machineMonitorRuntime,
+        promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore: createDocumentRemoteCursorStore(
@@ -627,6 +676,7 @@ export class LoroDocumentManager {
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
     this.machineMonitorRuntime = options.machineMonitorRuntime ?? null;
+    this.promptSuggestions = options.promptSuggestions ?? null;
     const initialTransportStatus = options.initialTransportStatus ?? 'disconnected';
     const initialMetaSyncPromise = options.initialMetaSyncPromise ?? Promise.resolve(false);
     const initialMetaSyncCompleted = options.initialMetaSyncCompleted ?? false;
@@ -764,10 +814,22 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      if (!this.encryptedWorkspace) {
-        await this.presenceRuntime.attachStreams({
+      const presenceAttach = this.presenceRuntime.attachStreams({
+        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+        auth: streamsTokens.native.createAuthCallback(),
+        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
+      });
+      if (this.encryptedWorkspace) {
+        // Liveness failure remains unknown and cannot roll back protected document sync.
+        await presenceAttach.catch(() => {
+          this.logger.warn(`[${this.workspaceId}] Presence unavailable; machine status is unknown`);
+        });
+      } else {
+        await presenceAttach;
+        this.promptSuggestions?.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTokens.native.createAuthCallback(),
+          auth: streamsTransport.tokenProvider.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
         });
         this.machineMonitorRuntime?.attachStreams({
@@ -808,6 +870,7 @@ export class LoroDocumentManager {
       const detached = await Promise.allSettled([
         this.presenceRuntime?.detachStreams(),
         this.machineMonitorRuntime?.detachStreams(),
+        this.promptSuggestions?.detachStreams(),
       ]);
       for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
       // Registration happens before connect, so remove and close both boundaries.
@@ -849,6 +912,7 @@ export class LoroDocumentManager {
     const detached = await Promise.allSettled([
       this.presenceRuntime?.detachStreams(),
       this.machineMonitorRuntime?.detachStreams(),
+      this.promptSuggestions?.detachStreams(),
     ]);
     for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
     try {
@@ -1169,6 +1233,14 @@ export class LoroDocumentManager {
     }
   }
 
+  /** Observation of the machine catalog already owned by the runtime. */
+  peekLocalProjectRootPath(
+    machineId: MachineId,
+    localProjectId: import('@lody/shared').LocalProjectId
+  ): string | null {
+    return this.machineFlockSync.peekLocalProjectRootPath(machineId, localProjectId);
+  }
+
   async syncMachineFlockDoc(
     machineId: MachineId,
     options: { timeoutMs?: number; reason?: string; scheduleRetry?: boolean } = {}
@@ -1438,6 +1510,25 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
+    if (existing?.isDestroyed) {
+      try {
+        await withTimeout(
+          this.cleanSessionDoc(sessionId),
+          1_000,
+          `Session ${sessionId} cleanup still pending`
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[${sessionId}] Session document cleanup retry failed: ${formatErrorMessage(error)}`
+        );
+        // A failed backend disposal can still own a writer. Retry next time;
+        // only a released backend permits a new wrapper on the same storage.
+        if (this.sessionDocCleanup.has(sessionId) || existing.getSessionBackend()) throw error;
+        if (this.sessions.get(sessionId) === existing) this.sessions.delete(sessionId);
+      }
+      // Concurrent callers share both cleanup and the normal initialization below.
+      return this.getOrCreateSessionDoc(sessionId, options);
+    }
     if (existing) {
       if (options.historyBackend) {
         await createSessionBackend(existing, { historyBackend: options.historyBackend });
@@ -1877,10 +1968,10 @@ export class LoroDocumentManager {
       throw error;
     }
     try {
-      await this.machineMonitorRuntime?.stop();
+      await Promise.all([this.machineMonitorRuntime?.stop(), this.promptSuggestions?.stop()]);
     } catch (error) {
       this.logger.debug(
-        `[${this.workspaceId}] Failed to stop machine monitor runtime: ${formatErrorMessage(error)}`
+        `[${this.workspaceId}] Failed to stop advisory workspace runtimes: ${formatErrorMessage(error)}`
       );
     }
     if (this.remoteStreamsTokens) {
@@ -1908,17 +1999,16 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = null;
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
-    // Await and destroy any in-flight session doc inits so they don't
-    // re-register themselves after cleanup has run.
-    for (const [sessionId, pending] of this.pendingSessionDocs) {
+    const failures: unknown[] = presenceCleanupFailure ? [presenceCleanupFailure] : [];
+    const attempt = async (scope: string, close: () => Promise<unknown>) => {
       try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveSessionStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+        await close();
+      } catch (cause) {
+        failures.push(new Error(`${scope}: cleanup failed; persistence unconfirmed`, { cause }));
       }
-    }
+    };
+    // An init rejection has no registered doc. A destroy rejection must be reported.
+    await Promise.allSettled(this.pendingSessionDocs.values());
     this.pendingSessionDocs.clear();
     this.localDocRoomBridges.clear();
     for (const bridge of this.localFlockRoomBridges.values()) {
@@ -1926,19 +2016,35 @@ export class LoroDocumentManager {
     }
     this.localFlockRoomBridges.clear();
 
-    for (const sessionDoc of this.sessions.values()) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveSessionStatus });
+    for (const sessionId of this.sessions.keys()) {
+      await attempt(`Session ${sessionId}`, () =>
+        this.cleanSessionDoc(sessionId, { preserveStatus: options.preserveSessionStatus })
+      );
     }
-    await this.machine?.destroy();
+    await attempt('Machine document', async () => this.machine?.destroy());
     this.machine = null;
     this.sessions.clear();
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    if (failures.length) {
+      presenceCleanupFailure = new AggregateError(failures, 'Workspace cleanup failed');
+      this.logger.warn(
+        `[${this.workspaceId}] ${failures.map((error) => formatErrorMessage(error)).join('; ')}`
+      );
+    }
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
+  }
+
+  publishPromptSuggestion(
+    machineId: MachineId,
+    sessionId: SessionId,
+    suggestion: LodyPromptSuggestion
+  ): void {
+    this.promptSuggestions?.state.publish(machineId, { ...suggestion, sessionId });
   }
 
   configureMachineMonitor(
@@ -1952,28 +2058,26 @@ export class LoroDocumentManager {
     this.machineMonitorRuntime?.clearProvider();
   }
 
-  async cleanSessionDoc(
-    sessionId: SessionId,
-    options: { preserveStatus?: boolean } = {}
-  ): Promise<void> {
-    // Also await any in-flight init for this session
-    const pending = this.pendingSessionDocs.get(sessionId);
-    if (pending) {
-      try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+  cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
+    const active = this.sessionDocCleanup.get(sessionId);
+    if (active) return active;
+    const cleanup = (async () => {
+      const pending = this.pendingSessionDocs.get(sessionId);
+      if (pending) await pending.catch(() => undefined);
+      const sessionDoc = this.sessions.get(sessionId);
+      if (sessionDoc) {
+        await sessionDoc.destroy(options);
+        if (this.sessions.get(sessionId) === sessionDoc) this.sessions.delete(sessionId);
       }
-      this.pendingSessionDocs.delete(sessionId);
-    }
-
-    const sessionDoc = this.sessions.get(sessionId);
-    if (sessionDoc) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveStatus });
-      this.sessions.delete(sessionId);
-    }
+    })();
+    this.sessionDocCleanup.set(sessionId, cleanup);
+    void cleanup
+      .finally(() => {
+        if (this.sessionDocCleanup.get(sessionId) === cleanup)
+          this.sessionDocCleanup.delete(sessionId);
+      })
+      .catch(() => undefined);
+    return cleanup;
   }
 }
 
@@ -2014,6 +2118,12 @@ const acpRuntimeConfigEqual = (
   left.basedOnUserTurnId === right.basedOnUserTurnId &&
   left.modeId === right.modeId &&
   left.modelId === right.modelId &&
+  JSON.stringify(
+    left.availableCommands?.map(({ name, description }) => ({ name, description }))
+  ) ===
+    JSON.stringify(
+      right.availableCommands?.map(({ name, description }) => ({ name, description }))
+    ) &&
   configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
 
 /**
@@ -2810,6 +2920,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         current?.acpSessionId === durablePatch.acpSessionId &&
         current.basedOnUserTurnId === basedOnUserTurnId;
       const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+        ...(current?.acpSessionId === durablePatch.acpSessionId &&
+        current.availableCommands !== undefined
+          ? { availableCommands: current.availableCommands }
+          : {}),
         ...(continuesCurrentSnapshot
           ? {
               ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
@@ -3660,7 +3774,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       modes: normalizedModes,
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
-      availableCommands: availableCommands?.length ? availableCommands : undefined,
+      availableCommands,
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
@@ -3681,6 +3795,11 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
+    // Only probes replace the preview. Omission preserves the latest same-runtime
+    // probe, read beside the write so concurrent session starts cannot roll it back.
+    if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {
+      entry.availableCommands = getReadableAcpCapabilityCacheEntry(existing)?.availableCommands;
+    }
     // The per-model row holds no timestamp, so an unchanged declaration is
     // skipped by the row comparison and costs no write or sync.
     const modelCapabilitiesChanged =

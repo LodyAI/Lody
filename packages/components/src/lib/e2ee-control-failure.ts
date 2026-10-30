@@ -16,6 +16,8 @@ import {
  *   verified (rollback or fork). Resettable only after support confirms the server.
  * - `local-corrupt`: an unreadable optional cache; deleting it is safe. */
 export type E2eeControlFailureKind =
+  | 'approval-required'
+  | 'local-identity'
   | 'network'
   | 'auth'
   | 'server'
@@ -25,6 +27,13 @@ export type E2eeControlFailureKind =
   | 'progress-conflict'
   | 'local-corrupt';
 
+/** Project only the portable host's single typed failure, never a mixed cleanup cause. */
+export function personalHostFailureCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if (!('_tag' in error) || error._tag !== 'PersonalHostError') return undefined;
+  return 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
+
 export interface E2eeControlFailure {
   kind: E2eeControlFailureKind;
   code: string;
@@ -33,6 +42,7 @@ export interface E2eeControlFailure {
 
 const identityConflicts = new Set([
   'Genesis pin changed',
+  'Workspace identity must be checked again',
   'Workspace mode conflicts with encrypted evidence',
   'Immutable workspace mode changed',
   'Legacy workspace cannot become encrypted',
@@ -53,9 +63,20 @@ function serverCode(error: unknown): string | null {
 
 /** Classify a control-page failure. Unknown errors are treated as transport failures. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
+  const portable = personalHostFailureCode(error);
+  if (portable === 'identity-lost' || portable === 'approval-required')
+    return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';
-  if (message.includes('e2ee_local-evidence-conflict')) return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
-  if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict')) return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  if (message.includes('e2ee_local-evidence-conflict'))
+    return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
+  if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
+    return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  const local =
+    /\be2ee_(permissions|identity-lost|corrupt|missing-binding|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
+      message
+    );
+  if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };
+
   if (error instanceof E2eeHistoryError) {
     if (error.kind === 'local-conflict')
       return {

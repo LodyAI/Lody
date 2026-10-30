@@ -1,3 +1,4 @@
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 /**
  * INTEGRATION HARNESS — not production, and NOT a place to change UI appearance.
  *
@@ -91,7 +92,6 @@ import {
 import { SessionChatInputArea } from '@/components/sessions/session-chat-input-area';
 import {
   Archive,
-  ChevronLeft,
   Copy,
   Ellipsis,
   FileText,
@@ -115,7 +115,10 @@ import {
   type MobileSessionMenuAction,
   type MobileSessionMenuInfoRow,
 } from '@/components/mobile/mobile-session-menu-sheet';
-import { GlassIconButton } from '@/components/mobile/glass-icon-button';
+import {
+  GlassIconButton,
+  MobileSessionHeaderBackButton,
+} from '@/components/mobile/glass-icon-button';
 import {
   buildAcpSelectorOptions,
   type AcpConfigOptionValue,
@@ -224,6 +227,11 @@ type StableSessionValue = NonNullable<
 const storyRuntime = {
   workspaceId: STORY_WORKSPACE_ID,
   workspaceSlug: STORY_WORKSPACE_SLUG,
+  // Frozen preview runtimes have no live prediction source.
+  subscribePromptSuggestion: ((_machineId, _sessionId, listener) => {
+    listener(null);
+    return () => {};
+  }) satisfies WorkspaceRuntime['subscribePromptSuggestion'],
   withSessionStore: async () => Promise.reject(new Error('Story runtime does not persist changes')),
 } as unknown as WorkspaceRuntime;
 
@@ -1588,6 +1596,8 @@ function StoryInfoBar({
       onEditSave={fn()}
       onSteer={fn()}
       showSteerAction
+      roomy={mobile}
+      footerPosition={mobile ? 'inline' : 'below'}
     />
   ) : undefined;
   if (withoutBar) return <SessionInfoBar status={null} queue={queue} />;
@@ -1634,13 +1644,25 @@ function StoryComposer({
   isAgentBusy,
   onSendMessage,
   initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
+  modelLabel,
+  claimNavigationFocus,
 }: {
   session: SessionMeta;
   isAgentBusy: boolean;
   onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
   initialInputText?: string;
+  modelLabel?: string;
+  claimNavigationFocus?: () => boolean;
 }) {
-  const options = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
+  const baseOptions = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
+  const options = modelLabel
+    ? {
+        ...baseOptions,
+        modelOptions: [{ value: modelLabel, label: modelLabel }],
+        modeOptions: [{ value: 'auto', label: 'Auto' }],
+        configOptionSelectors: [],
+      }
+    : baseOptions;
   const [mode, setMode] = useState<string | null>(options.modeOptions[0]?.value ?? null);
   const [model, setModel] = useState<string | null>(options.modelOptions[0]?.value ?? null);
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
@@ -1651,6 +1673,7 @@ function StoryComposer({
 
   return (
     <SessionChatInputArea
+      claimNavigationFocus={claimNavigationFocus}
       // The info bar above owns this gap, as on the session page.
       hideTopSpacer
       session={session}
@@ -1854,6 +1877,10 @@ export function SessionConversationStoryHarness({
   machineInfo,
   machineOnly = false,
   annotationPreview = false,
+  firstUserMessage,
+  onPresented,
+  composerModelLabel,
+  claimNavigationFocus,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1870,10 +1897,17 @@ export function SessionConversationStoryHarness({
   machineInfo?: SessionMachineInfo;
   machineOnly?: boolean;
   annotationPreview?: boolean;
+  firstUserMessage?: string;
+  onPresented?: () => void;
+  composerModelLabel?: string;
+  claimNavigationFocus?: () => boolean;
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
 }) {
   const { t } = useTranslation();
+  useLayoutEffect(() => {
+    onPresented?.();
+  }, [onPresented]);
   const [streamChunkCount, setStreamChunkCount] = useState(0);
   const [readingLiveTimestamp] = useState(() => new Date(getServerNow() - 45_000).toISOString());
   const [readingPanel, setReadingPanel] = useState<ReadingPanelSelection | null>(
@@ -1935,12 +1969,23 @@ export function SessionConversationStoryHarness({
   }, [state]);
   const history = useMemo(
     () =>
-      shareImage
-        ? [...buildShareHistory(), ...sentMessages]
-        : showCollaborators
-          ? collaborativeMessages()
-          : buildHistory(state, streamChunkCount, showCapacityRetry, readingLiveTimestamp),
+      firstUserMessage !== undefined
+        ? [
+            buildMessage({
+              id: 'new-chat-first-turn',
+              role: 'user',
+              userId: STORY_USER_ID,
+              timestamp: '2026-10-28T00:00:00.000Z',
+              items: [{ type: 'text', text: firstUserMessage }],
+            }),
+          ]
+        : shareImage
+          ? [...buildShareHistory(), ...sentMessages]
+          : showCollaborators
+            ? collaborativeMessages()
+            : buildHistory(state, streamChunkCount, showCapacityRetry, readingLiveTimestamp),
     [
+      firstUserMessage,
       shareImage,
       sentMessages,
       showCapacityRetry,
@@ -2190,15 +2235,7 @@ export function SessionConversationStoryHarness({
                           hideMenuButton
                           className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
                           style={{ height: '3rem' }}
-                          leading={
-                            // Mirrors production `MobileSessionHeaderBackButton`.
-                            <GlassIconButton
-                              label={translate('common.back', 'Back')}
-                              onClick={action}
-                            >
-                              <ChevronLeft className="h-5 w-5" />
-                            </GlassIconButton>
-                          }
+                          leading={<MobileSessionHeaderBackButton onBack={action} />}
                           title={mobileTitleNode}
                           actions={mobileHeaderActions}
                         />
@@ -2289,8 +2326,10 @@ export function SessionConversationStoryHarness({
                                   }
                                 />
                                 <StoryComposer
+                                  claimNavigationFocus={claimNavigationFocus}
                                   session={session}
                                   isAgentBusy={isWorking}
+                                  modelLabel={composerModelLabel}
                                   initialInputText={
                                     shareImage
                                       ? 'Can we compare the profiler results next?'
@@ -2420,7 +2459,7 @@ function makeMobileViewportDecorator(width: number, height?: number): Decorator 
         window.dispatchEvent(new Event('resize'));
       };
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (Story) => (
     <MobileViewport>
@@ -2446,7 +2485,7 @@ const withDesktopViewport: Decorator = (Story) => {
       clearViewportLock(frame);
       window.dispatchEvent(new Event('resize'));
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (
     <DesktopViewport>
@@ -2651,6 +2690,12 @@ export const DesktopQueuedMessages: Story = {
   args: { state: 'working', queued: 'with-info-bar' },
   globals: { theme: 'light' },
   decorators: [withDesktopViewport],
+};
+
+export const MobileQueuedMessages: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
 };
 
 /** With nothing for the info bar to show, the queue sits on the composer. */

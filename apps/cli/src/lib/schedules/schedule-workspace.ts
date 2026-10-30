@@ -11,6 +11,7 @@ import {
   scheduleDefinitionFingerprint,
   scheduleRegistryKeys,
   ScheduleRuntimeRowSchema,
+  type ScheduleAuthorizationRequest,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
@@ -37,7 +38,6 @@ import {
   scheduleDestinationSessionId,
   scheduleRequiredLocalProjectId,
 } from './schedule-run-preparation';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import { readMergedAgentConfigById } from '../agent-config-machine-flock';
 import {
   commitPreparedSessionDispatch,
@@ -63,11 +63,14 @@ export async function createScheduleWorkspace(args: {
   workspace: WorkspaceSummary;
   auth: AuthContext;
   localOnly: boolean;
-  slots: AgentExecutionSlots;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   logger: Logger;
+  /** Run completion: the chat's own Turns plus delegated Operations it still awaits. */
   hasSessionWork: (sessionId: SessionId) => boolean;
+  /** Message admission: only work that occupies the chat's own Turns. */
+  hasSessionTurnWork: (sessionId: SessionId) => boolean;
 }): Promise<ScheduleWorkspaceHandle> {
-  const { manager, workspace, auth, slots } = args;
+  const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
@@ -132,7 +135,8 @@ export async function createScheduleWorkspace(args: {
       if (problem || (run.message && (sessionRecord?.meta as SessionMeta | undefined)?.isArchived))
         throw new ScheduleConfigurationError(problem ?? 'SESSION_UNAVAILABLE');
       // A timed message waits for this chat rather than interrupting its active turn.
-      if (run.message && args.hasSessionWork(destinationSessionId))
+      // Delegated Operations still running elsewhere do not occupy this chat.
+      if (run.message && args.hasSessionTurnWork(destinationSessionId))
         throw new ScheduleConfigurationError('SESSION_BUSY');
     }
     return buildScheduleRunTarget({
@@ -146,10 +150,11 @@ export async function createScheduleWorkspace(args: {
     machineId: auth.machineId,
     userId: auth.userId,
     store,
-    slots,
     now: getServerNow,
     disabled: () => disabled || disposed,
     ready: isReady,
+    encrypted: workspace.contentMode === 'e2ee',
+    authorize: args.authorize,
     list: () => repository.list(),
     read: async (id) => {
       if (!args.localOnly)
@@ -209,6 +214,12 @@ export async function createScheduleWorkspace(args: {
         scheduleId: run.scheduleId,
         turnId: prepared.userTurn.id,
         title: notificationLabel(run.definition.title) ?? '',
+        ...(workspace.contentMode === 'e2ee'
+          ? {
+              definitionFingerprint: run.definitionFingerprint,
+              ...(run.manual ? { manualRunKey: run.runKey } : {}),
+            }
+          : {}),
       };
       prepared.source = {
         id: run.sourceEntryId,
@@ -299,11 +310,19 @@ export async function createScheduleWorkspace(args: {
         `[schedules] evaluation failed workspaceId=${workspaceId}; see Schedule runtime state`
       ),
   });
-  engine.restoreOccupancy();
 
   const pass = async (): Promise<void> => {
     if (disposed) return;
     if (isReady() && !disabled) {
+      try {
+        await repository.pruneExpiredMessages({
+          now: getServerNow(),
+          ownerId: auth.userId,
+          machineId: auth.machineId,
+        });
+      } catch {
+        args.logger.warn('[schedules] retention sweep failed; will retry');
+      }
       const rows = await repository.list();
       for (const entry of registry.flock.scan({ prefix: ['manual'] })) {
         const request = entry.value as unknown as {
@@ -362,7 +381,7 @@ export async function createScheduleWorkspace(args: {
   const wake = (): void => {
     void evaluate().catch(() => args.logger.warn('[schedules] wake failed'));
   };
-  cleanups.push(registry.flock.subscribe(wake), slots.subscribe(wake));
+  cleanups.push(registry.flock.subscribe(wake));
 
   // One short timer is also the wake-from-sleep clock check. No per-Schedule
   // timer survives a definition edit, and evaluation coalesces in the engine.

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import type { CloudApi, PlatformProvider } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import { TEST_CLOUD_PLATFORM } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestOrdinaryWorkspaceProvider } from './test-platform';
 import { WorkspaceJoinRequestsSettings } from '../src/components/settings/workspace-join-requests-settings';
 import { initI18n } from '../src/i18n';
 
@@ -62,9 +62,11 @@ it('shows the deferred fee before approving membership', async () => {
   };
   await act(async () =>
     root.render(
-      <PlatformContext.Provider value={platform}>
-        <WorkspaceJoinRequestsSettings workspaceId="workspace" />
-      </PlatformContext.Provider>
+      <TestOrdinaryWorkspaceProvider workspaceId="workspace">
+        <PlatformContext.Provider value={platform}>
+          <WorkspaceJoinRequestsSettings workspaceId="workspace" />
+        </PlatformContext.Provider>
+      </TestOrdinaryWorkspaceProvider>
     )
   );
   await act(async () =>

@@ -15,6 +15,79 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Encrypted-workspace feature availability
+
+`workspaceSupports` owns ordinary-channel capability verdicts. UI reads the existing admission-mode
+atom through `useWorkspaceFeature` and gets localized reasons from
+`useWorkspaceFeatureReason`; operations still check their explicit content/runtime.
+Protected remote execution requires the host's real dispatch pair; feature reads
+additionally require its feature pair (`protectedRpcAvailable`). This is not a blanket UI grant:
+ordinary RPC/provider writes remain unavailable. Supported calls use the existing
+signed request/response bridge, dedicated RPC grants and final receiving-machine
+execution checks. A missing optional host port keeps protected dispatch unavailable.
+Unsupported composer and conversation actions and remote-machine controls
+explain the restriction before users begin editing or transfer. Presence
+uses a neutral status-slot message; Code Collab reports unavailable rather than
+waiting for an intentionally disabled index. Schedules use the protected Repo, including
+the workspace Registry, and retain ordinary machine/readiness validation. Confirmed local desktop file preview
+and prepared local file receipts keep their IPC paths. Encrypted attachments use per-file keys inside protected conversation content and opaque relay parts; preparation failures preserve the draft. The Loro pending queue prepares new images and files through that protected path and verifies their manifests before history writes. Direct ordinary uploads require an account/workspace-bound mode proof before any source bytes leave the client; unknown-mode admission waits before consuming the composer draft. The [attachment decision](../notes/implemented/architecture/2026-10-28-encrypted-attachments.md) explains historical reads, local backfill receipts and cloud authorization. Local failure cannot enable an unprotected upload. See the
+[availability decision](../notes/implemented/bug-fix/2026-10-27-e2ee-feature-availability.md).
+
+Legacy cloud machine/project visibility, inbox, GitHub and usage queries require
+an explicit ordinary or legacy descriptor from `workspaceContentModeAtom`, bound
+to the current account, workspace ID and routed slug. Unknown mode, including
+`descriptor: null` on a provisional runtime, keeps those catalogs pending. No
+query starts another describe or mode cache; runtime admission publishes the one
+verdict, including after recovery. `useLegacyWorkspaceQuery`,
+`useLegacyWorkspaceMutation` and `useLegacyWorkspaceAction` own these reads and
+writes. Imperative writes recheck the live atoms at invocation and bind retained
+callbacks to their original account and workspace; the GitHub token adapter also
+checks after responses and before an auth retry. `pnpm check:legacy-cloud-access`
+rejects direct legacy API references, including newly added operations in the
+protected protocol families. Its `--inventory` output lists every client entry
+and the exact non-React/control exceptions with their safety basis.
+
+Prompt Shortcuts waits before opening a cloud store/sync lifetime; its local store
+needs no cloud admission. Retiring the mode immediately hides the old instance,
+and its existing identity checks stop late initialization and pending sync calls.
+The restored onboarding Projects step consumes the same verdict: unknown remote
+catalogs load, encrypted mode offers a router link to control/pairing, and local
+projects and Back remain available. Local runtime opening, reading and composer
+input remain available while verification runs. Encrypted workspaces keep these
+queries off, including paired desktops. Visibility retains only the
+existing local owner projection; absent legacy access rows never grant another
+member's machine. Account/control, billing and encrypted publication APIs retain
+their own supported paths. Ordinary query failures still reach their owning error
+boundary. Devices without an admitted encrypted runtime open the workspace control
+route for pairing; paired runtimes retain the chat route.
+
+Portable personal hosts expose requester-only pairing without desktop endorsement
+methods. The control route shows desktop approval guidance for their typed missing
+identity/approval outcomes, while public ledger verification remains available.
+Only a successful host read-open offers the workspace entry; entering it rechecks
+content readiness in RuntimeProvider. Control reads capture account and reader
+labels, fence preallocated cold opens and retain incomplete closes across route
+changes. Unknown-genesis cold readers block only the same account/workspace until
+their actual close finishes; independent workspaces remain usable.
+Retirement joins native acquisition and confirmed close, never the subsequent
+public describe/history refresh. A closed reader can reopen while an obsolete
+public request remains pending; disposed results cannot ingest records, publish
+a view or update observed checkpoints.
+
+The onboarding tour uses the real session composer. Scheduled-message draft atoms
+keep their identity while React reattaches subscriptions, and across simultaneous
+observers in separate Jotai stores. The last release evicts only after a microtask
+confirms there was no reattachment. Durable draft text remains in its existing
+storage; the transient saving flag expires with its last observer.
+
+Schedule mutations share the runtime's mode-admission gate before acquiring a
+write store and recheck retirement before invoking the domain write. Provisional
+local reading/input remains available; accepting a plan cannot clear its draft
+into an ordinary namespace that an encrypted verdict would retire. The remote
+machine owns timing and its durable occurrence ledger. An authorization-blocked
+message displays the owner's review/save action instead of promising delivery;
+the original signed-definition and actual-start checks remain in the CLI.
+
 ## Startup frame and handoff
 
 The [startup intent](../../specs/app-startup-landing.md) keeps destination selection
@@ -83,7 +156,10 @@ provider has its own page boundary because it sits above the Outlet boundary. Se
 Both cache-recovery levels defer their asynchronous deletes to the next boot because
 `deleteDatabase()` blocks while the runtime still holds a connection; synchronous
 storage is cleared first so the boot flag is never written over a half-cleared state.
-The localStorage sweep is an explicit DELETE list rather than a keep-allowlist so that
+The IndexedDB pass targets known rebuildable cache names and replica/cursor
+families. Unknown stores survive, including custody, installation receipts and
+unresolved originals; late caller-supplied names use the same policy. Full reset
+retains its explicit destructive semantics. The localStorage sweep is an explicit DELETE list rather than a keep-allowlist so that
 the failure mode of forgetting a key is a surviving cache entry, not a wiped user
 preference.
 
@@ -317,7 +393,6 @@ The parser also normalizes `scheduled_reset` independently of `active_watch`. Bo
 points and the dialog prioritize an announced schedule over the forecast probability.
 The local scheduled time is optional; crossing it shows pending execution confirmation.
 See the [API compatibility decision](../notes/implemented/bug-fix/2026-10-02-codex-scheduled-reset.md).
-
 
 ## Direct folder project creation
 
