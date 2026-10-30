@@ -6,12 +6,21 @@ import {
   type E2eeLocalDataScope,
 } from './e2ee-local-data';
 
-/** Only the native, authenticated member-removal result triggers terminal cleanup. */
+/** Exact native results of credential-authenticated access loss. Whole-member
+ * removal ends membership; device revocation ends only this device's identity. */
+export type E2eeAccessLoss = 'e2ee_member_removed' | 'e2ee_device_revoked';
+const accessLossPattern =
+  /^(?:Error invoking remote method 'e2ee[.:](?:open|refresh|contentStreamsToken|removeMember|setMemberRole)': Error: )?(e2ee_member_removed|e2ee_device_revoked)$/;
+
+/** Only these exact native results trigger terminal cleanup; any other error never does. */
+export const e2eeAccessLoss = (error: unknown): E2eeAccessLoss | null =>
+  error instanceof Error
+    ? ((accessLossPattern.exec(error.message)?.[1] as E2eeAccessLoss | undefined) ?? null)
+    : null;
 export const isE2eeMemberRemoved = (error: unknown): boolean =>
-  error instanceof Error &&
-  /^(?:Error invoking remote method 'e2ee[.:](?:open|refresh|contentStreamsToken|removeMember|setMemberRole)': Error: )?e2ee_member_removed$/.test(
-    error.message
-  );
+  e2eeAccessLoss(error) === 'e2ee_member_removed';
+export const isE2eeDeviceRevoked = (error: unknown): boolean =>
+  e2eeAccessLoss(error) === 'e2ee_device_revoked';
 
 /** Call after this window's workspace runtime closes. Each other window retires
  * its own namespace on the same authenticated removal; never delete global stores. */

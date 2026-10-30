@@ -6,6 +6,7 @@ import { desktopWindowId } from '@/lib/desktop-window';
 import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
+  e2eeAccessLoss,
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
@@ -279,7 +280,7 @@ function WorkspaceControlRoute() {
                 try {
                   await runtime.refresh(workspaceId, { installKeys: false });
                 } catch (checked) {
-                  if (isE2eeMemberRemoved(checked)) throw checked;
+                  if (e2eeAccessLoss(checked)) throw checked;
                 }
               }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
@@ -327,7 +328,7 @@ function WorkspaceControlRoute() {
           custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
         });
       } catch (error) {
-        if (!disposed && isE2eeMemberRemoved(error)) {
+        if (!disposed && e2eeAccessLoss(error)) {
           try {
             if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
@@ -347,6 +348,12 @@ function WorkspaceControlRoute() {
             return;
           }
           if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          // A revoked device keeps its membership: reopen without this identity,
+          // which lands in the existing re-pairing guidance instead of removal.
+          if (!isE2eeMemberRemoved(error)) {
+            if (!disposed) setGeneration((value) => value + 1);
+            return;
+          }
           if (!disposed)
             setState((previous) =>
               previous.scope === scope

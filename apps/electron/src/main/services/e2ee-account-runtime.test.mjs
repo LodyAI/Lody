@@ -1,5 +1,5 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
@@ -55,7 +55,7 @@ async function load(relative, dependencies, console = globalThis.console, env = 
           : id === '../../services/e2ee-member-join.mjs'
             ? memberJoining
             : id === '../../services/e2ee-cloud-errors.mjs'
-              ? { E2eeMemberRemovedError }
+              ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
               : id === '../../services/e2ee-personal-pairing.mjs'
                 ? { PersonalPairingOfferSchema }
                 : require(id)
@@ -783,7 +783,12 @@ async function personalJoinFixture(t) {
   }
   let lockDepth = 0
   const rows = new Map()
-  const relay = { statusFailure: null, loseCancelReceipt: false, memberRemoved: false }
+  const relay = {
+    statusFailure: null,
+    loseCancelReceipt: false,
+    memberRemoved: false,
+    deviceRevoked: false
+  }
   const remote = (work) =>
     Effect.try({
       try: () => {
@@ -799,10 +804,13 @@ async function personalJoinFixture(t) {
   }
   const client = {
     history: () => Effect.fail(new Error('unauthorized history')),
+    // An unclassified rejection (raw error text) must never authorize deletion.
     contentStreamsToken: () =>
       relay.memberRemoved
         ? Effect.fail(new E2eeMemberRemovedError())
-        : Effect.fail(new Error('e2ee_device_revoked')),
+        : relay.deviceRevoked
+          ? Effect.fail(new E2eeDeviceRevokedError())
+          : Effect.fail(new Error('e2ee_device_revoked')),
     memberCreateInvitation: () => Effect.fail(new E2eeMemberRemovedError()),
     memberPending: () => Effect.fail(new E2eeMemberRemovedError()),
     memberRead: () => Effect.fail(new E2eeMemberRemovedError()),
@@ -1992,6 +2000,45 @@ void test('credential-authenticated member removal drains and deletes through th
     0
   )
   await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
+})
+
+void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('revoked-ipc')
+  await owner.create()
+  const status = await owner.ipc.status(f.workspaceId)
+  f.relay.deviceRevoked = true
+  await assert.rejects(owner.ipc.contentStreamsToken(f.workspaceId), /^Error: e2ee_device_revoked$/)
+  assert.equal(owner.readers.has(f.workspaceId), false)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  await assert.rejects(
+    owner.ipc.seal(f.workspaceId, {
+      epoch: 0,
+      room: { kind: 'meta' },
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch'
+      },
+      plaintext: new Uint8Array([1]),
+      additionalData: new Uint8Array([2])
+    }),
+    /e2ee_not_open|e2ee_device_revoked/
+  )
+  assert.equal(
+    f.db(
+      owner,
+      'creations.sqlite',
+      (db) => db.prepare('SELECT count(*) AS n FROM creations').get().n
+    ),
+    0
+  )
+  await assert.rejects(readFile(join(owner.path, 'workspaces', f.workspaceId, 'history.sqlite')), {
+    code: 'ENOENT'
+  })
+  // A later open, with a freshly constructed owner, reports the persisted reason.
+  await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'device_revoked')
+  assert.ok(status.signingPublicKey)
 })
 
 void test('credential-authenticated joining management uses exact-identity removal cleanup through IPC', async (t) => {

@@ -105,6 +105,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
 }> {}
@@ -268,8 +269,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         if (observed) yield* openedEntry.observe(observed, proof)
         return openedEntry
       }
-      if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
-        return yield* fail('member_removed')
+      const removed = yield* options.bootstrap.removedReason(workspaceId)
+      if (removed) return yield* fail(removed)
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
       const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {

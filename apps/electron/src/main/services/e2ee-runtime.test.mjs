@@ -610,7 +610,10 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
           remote
         )
         assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-        assert.equal(yield* removed.bootstrap.recordRemovedWorkspace(original), true)
+        // Personal re-pair also covers an authenticated revocation of only this device:
+        // the receipt is the same exact device record, labelled with its reason.
+        const reason = installation === 'member' ? 'member_removed' : 'device_revoked'
+        assert.equal(yield* removed.bootstrap.recordRemovedWorkspace({ ...original, reason }), true)
         const drain = yield* removed.host.beginCloseWorkspace(workspaceId)
         yield* drain
         assert.equal(yield* removed.bootstrap.forgetRemovedWorkspace(original), true)
@@ -633,10 +636,8 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
         }
         assert.equal(yield* removed.bootstrap.hasRemovedWorkspace(workspaceId), true)
         assert.equal((yield* Effect.result(removed.custody.openDevice(genesis)))._tag, 'Failure')
-        assert.equal(
-          (yield* Effect.result(removed.host.open(workspaceId))).failure.code,
-          'member_removed'
-        )
+        assert.equal((yield* Effect.result(removed.host.open(workspaceId))).failure.code, reason)
+        assert.equal(yield* removed.bootstrap.removedReason(workspaceId), reason)
 
         const next =
           installation === 'member'
@@ -717,6 +718,7 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
           }
         }
         assert.equal(yield* removed.bootstrap.hasRemovedWorkspace(workspaceId), false)
+        assert.equal(yield* removed.bootstrap.removedReason(workspaceId), null)
         const installed = yield* removed.host.open(workspaceId)
         currentKey = installed.signingPublicKey
         currentCredential = yield* removed.bootstrap.deviceCredential(workspaceId)
