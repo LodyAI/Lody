@@ -3,6 +3,7 @@
 Status: rejected
 Type: architecture
 Translation: current
+PR: [#2118](https://github.com/LodyAI/Lody/pull/2118)
 
 [中文](2026-10-30-renderer-code-memory.zh.md)
 
