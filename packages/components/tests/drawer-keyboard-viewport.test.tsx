@@ -6,7 +6,13 @@ import { Menu } from '@lody/ui/menu';
 import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '../src/ui/drawer';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+  DrawerDescription,
+  type DrawerContentProps,
+} from '../src/ui/drawer';
 import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
@@ -46,11 +52,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderDrawer(repositionInputs = true) {
+function renderDrawer(
+  repositionInputs = true,
+  bottomPadding?: DrawerContentProps['bottomPadding']
+) {
   act(() => {
     root.render(
       <Drawer direction="right" open modal={false} repositionInputs={repositionInputs}>
-        <DrawerContent aria-describedby={undefined}>
+        <DrawerContent aria-describedby={undefined} bottomPadding={bottomPadding}>
           <DrawerTitle>Conversation</DrawerTitle>
           <textarea aria-label="Message" />
         </DrawerContent>
@@ -127,14 +136,18 @@ describe('native side-drawer keyboard layout', () => {
     }
   });
 
-  it('restores CSS sizing after a resizing keyboard hides with the input still focused', () => {
-    const drawer = renderDrawer();
-    resize(480, 480);
-    resize(800, 800);
-    expect(document.activeElement).toBe(drawer.querySelector('textarea'));
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
+  it.each([undefined, 'safeArea'] as const)(
+    'restores CSS sizing after the keyboard hides with bottomPadding=%s and input still focused',
+    (bottomPadding) => {
+      const drawer = renderDrawer(true, bottomPadding);
+      expect(drawer.hasAttribute('bottomPadding')).toBe(false);
+      resize(480, 480);
+      resize(800, 800);
+      expect(document.activeElement).toBe(drawer.querySelector('textarea'));
+      expect(drawer.style.height).toBe('');
+      expect(drawer.style.bottom).toBe('0px');
+    }
+  );
 
   it('tracks overlay keyboard height through intermediate changes and repeated open/hide cycles', () => {
     const drawer = renderDrawer();

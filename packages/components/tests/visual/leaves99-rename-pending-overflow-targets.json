@@ -1,0 +1,66 @@
+{
+  "viewports": [
+    {
+      "name": "visible-phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["components-renamesessiondialog--pending-save"],
+  "ready": {
+    "components-renamesessiondialog--pending-save": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "fill",
+        "selector": "textarea",
+        "value": "Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 Keep imperative overflow while saving 中文 "
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('textarea')?.style.overflowY==='auto'"
+      }
+    ]
+  },
+  "states": {
+    "components-renamesessiondialog--pending-save": [
+      {
+        "name": "saving-keeps-auto",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='auto' && document.querySelector('[data-rename-result]')?.textContent==='Saving'"
+          }
+        ]
+      },
+      {
+        "name": "reject-keeps-auto",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!window.__longRejectSent){window.__longRejectSent=true;window.dispatchEvent(new CustomEvent('rename-fixture-settle',{detail:'reject'}));}return document.querySelector('textarea')?.disabled===false&&document.querySelector('textarea')?.style.overflowY==='auto'&&document.querySelector('[data-rename-result]')?.textContent==='Attempt failed';}"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": []
+}

@@ -16,6 +16,27 @@ over `file://` with no server. It backs `lody review <file>.review.md` (CLI) and
 `dist-standalone/` is gitignored and regenerated. The `build` script runs
 `build:standalone`, so `pnpm -r build` (topological) builds it before dependents.
 
+## Style extraction and single-file output
+
+The renderer, Storybook, standalone bundle and Vitest share
+[`stylex-options.ts`](stylex-options.ts). Local StyleX blocks read the helper's
+own element-local CSS variables; this host does not import product UI or palette
+aliases. Its CSS layer order is `theme, base, stylex, components, utilities`.
+
+The standalone config keeps StyleX source transforms in the pre phase, then
+runs that same plugin instance's `generateBundle` hook in a post companion
+immediately before `viteSingleFile()`. Vite emits CSS after pre plugins. Running
+extraction there originally left the rules in an unreferenced `stylex.css` after
+the inliner had consumed the CSS assets, despite a successful build and correct
+Storybook rendering. Keeping the shared plugin closure preserves its injection
+state and avoids the unused-sidecar fallback.
+
+Verify the emitted HTML through `file://` with a synthetic review injected by
+`injectReviewSnapshot`. Check that migrated rules are inside its actual inline
+stylesheet, that no external stylesheet is required, and that painted layout,
+reference navigation and findings match the unchanged standalone baseline.
+Storybook screenshots alone cannot establish the single-file contract.
+
 ## How the viewer reaches the CLI
 
 The ~8 MB `standalone.html` is NOT bundled into `lody`. The sibling package

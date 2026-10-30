@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
 import tailwindcss from '@tailwindcss/vite';
 import { mergeConfig } from 'vite';
+import stylex from '@stylexjs/unplugin';
+import { reviewStylexOptions } from '../stylex-options';
 
 const require = createRequire(import.meta.url);
 
@@ -20,7 +22,7 @@ const config: StorybookConfig = {
   async viteFinal(viteConfig) {
     return mergeConfig(viteConfig, {
       assetsInclude: ['**/*.review.json.gz'],
-      plugins: [tailwindcss()],
+      plugins: [tailwindcss(), stylex.vite(reviewStylexOptions)],
       resolve: {
         alias: {
           '@': fileURLToPath(new URL('../src', import.meta.url)),

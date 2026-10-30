@@ -29,6 +29,7 @@ const styles = stylex.create({
     flexDirection: 'column',
   },
   fullWidth: { width: '100%', maxWidth: 'none' },
+  safeAreaBottom: { paddingBottom: 'max(1.25rem,var(--safe-area-bottom,0px))' },
   grabber: {
     backgroundColor: `color-mix(in oklab, ${themeColors.mutedForeground} 40%, transparent)`,
     marginInline: 'auto',
@@ -165,9 +166,18 @@ export type DrawerContentProps = Omit<
   /** Fill the available width without directional caps. Omission preserves defaults.
    * Regular class and inline-style precedence still applies. */
   width?: 'full';
+  /** Bottom clearance reads the safe-area variable on the content element. */
+  bottomPadding?: 'safeArea';
 };
 
-function DrawerContent({ width, className, children, style, ...props }: DrawerContentProps) {
+function DrawerContent({
+  width,
+  bottomPadding,
+  className,
+  children,
+  style,
+  ...props
+}: DrawerContentProps) {
   const viewportBottom = useDrawerViewportBottom();
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
   const mergedStyle = {
@@ -182,7 +192,11 @@ function DrawerContent({ width, className, children, style, ...props }: DrawerCo
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(
-          stylex.props(styles.content, width === 'full' && styles.fullWidth).className,
+          stylex.props(
+            styles.content,
+            width === 'full' && styles.fullWidth,
+            bottomPadding === 'safeArea' && styles.safeAreaBottom
+          ).className,
           'group/drawer-content',
           // Directional variants outrank ordinary caller classes in the original
           // utilities layer. Keep that public override order during coexistence.

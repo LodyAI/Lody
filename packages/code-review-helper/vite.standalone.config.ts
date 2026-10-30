@@ -3,6 +3,8 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
+import stylex from '@stylexjs/unplugin';
+import { reviewStylexOptions } from './stylex-options';
 
 /**
  * Build for the standalone single-file review viewer (`pnpm build:standalone`).
@@ -47,8 +49,27 @@ function curatedShikiLangs(): Plugin {
   };
 }
 
+const { generateBundle: appendStylexCss, ...stylexTransform } = stylex.vite(
+  reviewStylexOptions
+) as Plugin;
+
+// Vite emits CSS after pre plugins. Append extracted rules after that emission,
+// before singlefile consumes the assets; source transforms must still run pre.
+const stylexOutput: Plugin = {
+  name: 'review-stylex-before-singlefile',
+  enforce: 'post',
+  generateBundle: appendStylexCss,
+};
+
 export default defineConfig({
-  plugins: [curatedShikiLangs(), react(), tailwindcss(), viteSingleFile()],
+  plugins: [
+    curatedShikiLangs(),
+    react(),
+    tailwindcss(),
+    stylexTransform,
+    stylexOutput,
+    viteSingleFile(),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

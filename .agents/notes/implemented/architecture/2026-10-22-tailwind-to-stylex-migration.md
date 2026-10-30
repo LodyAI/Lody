@@ -2064,6 +2064,8 @@ old timeout's exact cause.
 | `leaves85-88-acceptance.html` |                                284 / 284 / 12,554 | No new formal OPEN; all historical OPEN retained.                           |
 | `leaves90-93-acceptance.html` |                                 164 / 164 / 8,068 | Original hover three pairs 5,602 / 5,534; native header one pair 473 / 402. |
 | `leaves94-95-acceptance.html` |                                152 / 152 / 27,218 | No new formal OPEN; ten known size-token negatives remain separate.         |
+| `leaves97-acceptance.html`    |                                   64 / 60 / 5,704 | Four original header OPENs: 78 raw / 2 threshold pixels.                    |
+| `leaves99-acceptance.html`    |                                 110 / 109 / 2,848 | One original pending OPEN: 5,932 raw / 0 threshold pixels.                  |
 
 The 85–88 group includes 36 actual stack pairs and 24 separately identified
 existing-API controls; controls add no utility count. Later matching controls
@@ -2109,9 +2111,55 @@ send/stop dispatch. Table's 78 unchanged Styleq warnings match through84. Earlie
 full runs retain their exact boundaries; the unrelated root ACP prerequisite
 still blocks root-check PASS.
 
+The core continuation migrates two fixed safe-area bottom paddings through an
+opt-in on the existing Vaul Content owner. Its local `max(1.25rem,
+var(--safe-area-bottom, 0px))` expression preserves rem and safe-area inputs;
+default directional styles, keyboard positioning, focus and portal ownership stay
+unchanged. A minimal actual Add-project story supplies the callbacks missing in
+the earlier fixture. An injected `pb-0` utility exposes the changed layer boundary
+and remains a negative for these fixed private calls, not a general public-caller
+precedence promise.
+
+Rename's fixed Textarea uses existing resize/min-height/padding contracts and a
+layout overflow style. Its ref still owns height and switches overflow between
+hidden and auto; long-value saving/failure renders with no draft change verify
+that the new prop does not reset that writer. Leading and composed shadow/ring
+utilities remain. The original 320px dialog clipping is recorded without redesign.
+The one 5,932-raw-pixel pending frame remains OPEN despite at most one level of RGB
+change per channel and zero threshold pixels. Canonical-launcher controls and
+system-Chrome controls retain distinct engine boundaries; they do not prove the
+original rendering trigger.
+
 The shared UI-only run through95 additionally passes 25 files / 313 tests, with
 111 source/test/manifest hashes unchanged and the same 78 existing Styleq warnings.
 This does not extend the through93 full components/Electron boundary.
+
+### Independent review-renderer host
+
+The helper establishes its own StyleX 0.19 compiler configuration across Vite,
+Storybook, standalone HTML and Vitest, keeping its existing local CSS variables
+and layer order. Findings and reference chips remove 59 source utilities;
+private writers and local control compatibility remain. This host imports no
+product primitive or palette group. The lock change adds only the helper's two
+importer entries and five required peer-context snapshots, retaining all original
+resolutions.
+
+Real `file://` verification caught missing compiled styles after a successful
+build: extraction ran before Vite emitted CSS, and its fallback wrote an unused
+sidecar after single-file inlining. The final configuration keeps pre transforms
+and moves the same plugin's output hook immediately before the inliner. The
+[standalone build owner](../../../../packages/code-review-helper/standalone-build.md#style-extraction-and-single-file-output)
+records the ordering. Eight fixed standalone pairs match PNGs and complete
+records. The original broken HTML, twelve images and eight rejected comparisons
+remain; identical crops with unequal offscreen records were not accepted.
+
+`leaves96-98-acceptance.html` contains 128 formal pairs: 125 byte-exact and
+66,536 equal full standard records. Seven original raster differences, including
+four native supplements, remain OPEN at 187 raw/zero threshold pixels; bounded
+same-source controls do not establish their cause. The existing helper suite
+passes five files/33 tests, and the public-boundary check passes. These results
+cover the fixed Vesper theme and audited states, not unvisited helper sections or
+the whole monorepo. Core component inventories do not subtract these removals.
 
 ## Remaining work
 
@@ -2143,6 +2191,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 88, with partial visual acceptance    | v2             |       1,451 |   159 |        726 |
 | Exact source through 93, with partial visual acceptance    | v2             |       1,445 |   157 |        725 |
 | Exact source through 95, with partial visual acceptance    | v2             |       1,430 |   157 |        725 |
+| Exact source through 99, with partial visual acceptance    | v2             |       1,424 |   157 |        725 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2162,13 +2211,14 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through95 v2 split is components: 996 occurrences/141 files/632
+The published through99 v2 split is components: 990 occurrences/141 files/632
 unresolved, legacy UI: 429/14/93 and routes: 5/2/0, from 790 recorded source files.
 Shared UI source and export metadata are frozen outside that three-root count.
 Known StyleX templates remain unresolved expressions, not newly introduced
 Tailwind strings. Through88 remains a separate immutable inventory; eight source
 removals plus two newly visible retained margins produce the net decrease of six.
-The 94–95 group removes fifteen further source occurrences. Later batches and
+The 94–95 group removes fifteen further source occurrences; 97 and 99 remove
+six more. The frozen broader through95 count remains historical. Later batches and
 other package hosts are excluded.
 
 The full product `src` audit through95, excluding stories, uses the same v2
@@ -2198,9 +2248,10 @@ All inventory totals above concern `packages/components/src`, not the entire
 monorepo. The Electron renderer imports that package's Tailwind sheet; its
 development-panel CSS hooks are not utility-removal credit. The standalone
 `packages/code-review-helper` renderer and `site-docs` have separate Tailwind
-pipelines and remain outside these inventories and visual claims. Their own
-compiler setup and real browser baselines are follow-up UI work, not implicitly
-accepted by component screenshots. Isolated ACP demo/editor apps are excluded
+pipelines and remain outside these inventories. The helper's findings/reference
+batch has its own compiler and standalone evidence above; other helper sections
+and site-docs still need independent baselines. Component screenshots do not
+implicitly accept either host. Isolated ACP demo/editor apps are excluded
 from this migration; no submodule operation is needed.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router

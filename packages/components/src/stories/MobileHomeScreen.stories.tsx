@@ -202,6 +202,7 @@ function MobileHomeScreenStory({
   showInboxTab = false,
   inboxItems: inboxItemsProp = [],
   workspaceSwitcher = false,
+  projectActions = false,
 }: {
   theme: 'ios' | 'material';
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
@@ -224,7 +225,9 @@ function MobileHomeScreenStory({
   showInboxTab?: boolean;
   inboxItems?: MobileInboxItem[];
   workspaceSwitcher?: boolean;
+  projectActions?: boolean;
 }) {
+  const [projectAction, setProjectAction] = useState('none');
   const [selectedTab, setSelectedTab] = useState<MobileHomeTab>(initialTab);
   const [selectedProjectsSubTab, setSelectedProjectsSubTab] =
     useState<MobileProjectsSubTab>('local');
@@ -310,6 +313,8 @@ function MobileHomeScreenStory({
           onWorkspaceSelect={fn()}
           onWorkspaceMenuOpen={workspaceSwitcher ? fn() : undefined}
           onTabSelect={setSelectedTab}
+          onAddLocalProject={projectActions ? () => setProjectAction('local') : undefined}
+          onAddGitHubRepository={projectActions ? () => setProjectAction('github') : undefined}
           onLocalProjectSelect={fn()}
           onGitHubRepositorySelect={fn()}
           onChatSelect={fn()}
@@ -317,6 +322,7 @@ function MobileHomeScreenStory({
           onNewChat={fn()}
           onboardingDownloadUrl="https://lody.ai/download"
         />
+        {projectActions ? <output data-project-action={projectAction} hidden /> : null}
       </div>
     </div>
   );
@@ -471,6 +477,21 @@ export const TeamPrivateProjects: Story = {
         ...project,
         isPrivate: index < 2,
       }))}
+    />
+  ),
+};
+
+/** Real Add/Help sheet entrances; existing stories keep their omitted action callbacks. */
+export const SafeAreaSheets: Story = {
+  ...TeamPrivateProjects,
+  render: () => (
+    <MobileHomeScreenStory
+      theme="ios"
+      initialTab="projects"
+      showInboxTab
+      projectActions
+      machines={machines.map((machine, index) => ({ ...machine, isPrivate: index === 0 }))}
+      localProjects={localProjects.map((project, index) => ({ ...project, isPrivate: index < 2 }))}
     />
   ),
 };

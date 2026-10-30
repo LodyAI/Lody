@@ -16,7 +16,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 - `mobile-home-screen.tsx` — workspace home. `workspaceTabSpecs` builds the
   Inbox / Chat / Projects dock tabs. The header's connection/pull pill is
   absolutely centred on the h-9 chrome row, and the pill bar expands above the
-  scroll region.
+  scroll region. Its Add project and private-resource Help sheets opt into
+  [DrawerContent](../../ui/drawer.tsx)'s `bottomPadding="safeArea"`; the sheet owns
+  that local bottom clearance.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
 - `mobile-workspace-layout.tsx`, [`mobile-workspace-tabbar.tsx`](../../../../../specs/mobile-workspace-dock.md),

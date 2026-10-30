@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { canUseWASM } from '@pierre/diffs';
 import {
   memo,
@@ -1358,6 +1359,122 @@ function DiffStyleControl({
   );
 }
 
+const findingsStyles = stylex.create({
+  section: { minWidth: 0 },
+  headingRow: {
+    marginBottom: 'calc(var(--spacing) * 2.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 0.5)',
+  },
+  heading: { fontSize: '11px', textTransform: 'uppercase', color: 'hsl(var(--muted-foreground))' },
+  separator: {
+    height: '1px',
+    flex: '1',
+    backgroundColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    },
+  },
+  list: { display: 'grid', gap: 'calc(var(--spacing) * 2)' },
+  item: {
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--card))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    paddingBottom: 'calc(var(--spacing) * 2.5)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  badge: {
+    marginBottom: 'calc(var(--spacing) * 1.5)',
+    display: 'inline-flex',
+    height: '17px',
+    alignItems: 'center',
+    borderRadius: '0.25rem',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+  },
+  body: {
+    minWidth: 0,
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  bodyBlocks: { display: 'grid', gap: 'calc(var(--spacing) * 1.5)' },
+  refChip: {
+    'margin-inline': '1px',
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: '0.25rem',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--primary))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--primary)) 40%, transparent)',
+        },
+      },
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted))' },
+    },
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    'padding-block': '1px',
+    verticalAlign: 'baseline',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  refLabel: { textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' },
+  oldRefLabel: {
+    fontSize: '8.5px',
+    textTransform: 'uppercase',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+    },
+  },
+});
+
 // Top-level `## Review` findings: cross-cutting P0/P1/P2 conclusions, each with
 // clickable file-label chips that jump the center diff to the referenced location.
 function ReviewFindingsSection({
@@ -1373,14 +1490,19 @@ function ReviewFindingsSection({
     return null;
   }
   return (
-    <section aria-label="Review findings" className="min-w-0">
-      <div className="mb-2.5 flex items-center gap-2 px-0.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+    <section aria-label="Review findings" {...stylex.props(findingsStyles.section)}>
+      <div {...stylex.props(findingsStyles.headingRow)}>
+        <span
+          className={cn(
+            stylex.props(findingsStyles.heading).className,
+            'font-semibold tracking-[0.16em]'
+          )}
+        >
           Review
         </span>
-        <span className="h-px flex-1 bg-border/70" />
+        <span {...stylex.props(findingsStyles.separator)} />
       </div>
-      <ul className="grid gap-2">
+      <ul {...stylex.props(findingsStyles.list)}>
         {findings.map((finding) => (
           <FindingItem key={finding.id} finding={finding} files={files} onJump={onJump} />
         ))}
@@ -1405,17 +1527,18 @@ function FindingItem({
   return (
     <li
       id={findingDomId(finding.id)}
-      className="crh-finding rounded-md border border-border bg-card/60 px-3 pb-2.5 pt-2 transition-colors"
+      className={cn('crh-finding', stylex.props(findingsStyles.item).className)}
     >
       <span
         className={cn(
-          'mb-1.5 inline-flex h-[17px] items-center rounded border px-1.5 text-[10px] font-semibold uppercase leading-none tracking-wide',
+          stylex.props(findingsStyles.badge).className,
+          'font-semibold leading-none tracking-wide',
           SEVERITY_MARKER[finding.severity]
         )}
       >
         {findingSeverityLabel(finding.severity)}
       </span>
-      <div className="min-w-0 text-[13px] leading-[1.7] text-foreground/90">
+      <div className={cn(stylex.props(findingsStyles.body).className, 'leading-[1.7]')}>
         <FindingBody markdown={finding.bodyMarkdown} files={files} onJump={onJump} />
       </div>
     </li>
@@ -1732,7 +1855,7 @@ function FindingBody({
 }) {
   const blocks = parseLightMarkdownBlocks(markdown, { headings: false });
   return (
-    <div className="grid gap-1.5">
+    <div {...stylex.props(findingsStyles.bodyBlocks)}>
       {blocks.map((block, index) =>
         renderLightMarkdownBlock(
           block,
@@ -1765,15 +1888,20 @@ function FindingRefChip({
       type="button"
       onClick={() => onJump(refItem)}
       title={`Jump to ${refItem.path}${refItem.range ? ` line ${refItem.range.start}` : ''}`}
-      className="crh-ref-chip mx-[1px] inline-flex max-w-full translate-y-[0.18em] items-center gap-1 rounded border border-border/70 bg-muted/40 px-1 py-px align-baseline font-mono text-[11px] leading-none text-foreground/85 transition-colors hover:border-primary/40 hover:bg-muted hover:text-foreground"
+      className={cn(
+        'crh-ref-chip translate-y-[0.18em] leading-none',
+        stylex.props(findingsStyles.refChip).className
+      )}
     >
       <FileIcon filePath={refItem.path} className="size-3 shrink-0" />
-      <span className="truncate">
+      <span {...stylex.props(findingsStyles.refLabel)}>
         {fileBaseName(refItem.path)}
         {lineLabel}
       </span>
       {refItem.side === 'old' ? (
-        <span className="text-[8.5px] uppercase tracking-wide text-muted-foreground/80">old</span>
+        <span className={cn('tracking-wide', stylex.props(findingsStyles.oldRefLabel).className)}>
+          old
+        </span>
       ) : null}
     </button>
   );

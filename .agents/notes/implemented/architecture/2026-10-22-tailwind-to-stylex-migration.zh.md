@@ -1469,6 +1469,8 @@ SessionDetail loading 分支，没有替换子组件或 runtime。已有全宽 A
 | `leaves85-88-acceptance.html` |                 284／284／12,554 | 无新增正式 OPEN；所有历史 OPEN 保留。                  |
 | `leaves90-93-acceptance.html` |                  164／164／8,068 | 原 hover 三对 5,602／5,534；native 页头一对 473／402。 |
 | `leaves94-95-acceptance.html` |                 152／152／27,218 | 无新增正式 OPEN；十组已知尺寸 Token 负控单列。         |
+| `leaves97-acceptance.html`    |                    64／60／5,704 | 原页头四对 OPEN：78 原始／2 阈值像素。                 |
+| `leaves99-acceptance.html`    |                  110／109／2,848 | 原 pending 一对 OPEN：5,932 原始／0 阈值像素。         |
 
 85–88 组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
 后继匹配控制不关闭原未知栅格差异。实际主题门禁拒绝 light URL 错标的固定 dark 场景；
@@ -1500,8 +1502,40 @@ Electron 构建／四页冒烟通过，主 Agent 已看四张应用图。它们�
 的 local chat 不证明真实 agent send/stop 调度。Table 的七十八条既有 Styleq warning
 与截至 84 相同；更早全量回归保留准确边界，无关根 ACP 前置失败仍阻止将根检查称为通过。
 
+主组件续迁通过已有 Vaul Content 的显式选项迁移两处固定安全区底部 padding，保留局部
+`max(1.25rem, var(--safe-area-bottom, 0px))` 的 rem／安全区输入；默认方向样式、键盘位置、
+焦点和 portal 归属不变。最小真实 Add-project story 补上旧夹具缺失的 callbacks。注入
+`pb-0` 的控制暴露迁层后的胜负变化，继续作为固定私有调用的负控，不承诺任意公开 caller
+的优先级均等价。
+
+Rename 固定 Textarea 使用已有 resize／min-height／padding 合同及布局 overflow style。
+ref 继续拥有 height，并切换 hidden／auto；长值保存／失败且 draft 不变的真实重渲染验证
+新属性不会重置该 writer。leading 和组合 shadow／ring utility 保留。原 320px Dialog
+裁切单列，没有借迁移重新设计。原 pending 帧 5,932 个原始差异像素仍 OPEN，即使各 RGB
+通道仅差一级、阈值像素为零。canonical launcher 与 system Chrome 控制保持不同 engine
+边界，不能据此证明原栅格触发原因。
+
 截至 95 的共享 UI 独立全量回归另通过 25 文件／313 测试，111 份源码／测试／manifest
 哈希不变，七十八条既有 Styleq warning 相同。这不扩展截至 93 的完整组件／Electron 边界。
+
+### 独立 Review Renderer 样式宿主
+
+helper 在 Vite、Storybook、独立 HTML 和 Vitest 之间共享自己的 StyleX 0.19 编译配置，
+保留既有元素局部 CSS 变量与层顺序。Findings 和引用 chip 移除五十九处源码 utility，
+私有 writer 与局部控件兼容类保留；不导入产品 primitive 或调色板组。lock 只增加 helper
+的两个 importer 条目和五个必需 peer-context snapshot，原有解析结果全部不变。
+
+真实 `file://` 验证发现构建成功仍会丢失编译样式：提取早于 Vite 输出 CSS，随后兜底在
+单文件内联之后写出无人引用的 sidecar。最终配置保留 pre 源码变换，将同一个 plugin 的
+输出 hook 移至 inliner 之前。[独立构建归属文档](../../../../packages/code-review-helper/standalone-build.md#style-extraction-and-single-file-output)
+说明该顺序。修复后八对独立 HTML 的 PNG 和完整记录相同。原错误 HTML、十二张图与八对
+被拒比较仍保留；截图裁切相同但视口外记录不同的结果没有被验收。
+
+`leaves96-98-acceptance.html` 包含一百二十八对正式帧，其中一百二十五对 PNG 字节相同，
+66,536 条完整标准记录相同。包含四对 native 补充帧在内的七个原栅格差异仍 OPEN，共
+187 原始／零阈值像素；有限同源控制不证明原因。已有 helper 测试通过五文件／三十三例，
+公开边界检查通过。这些结果仅覆盖固定 Vesper 主题与已审查状态，不扩展到未访问的
+helper 区域或整个 monorepo，主组件库存不扣除本宿主的移除数量。
 
 ## 后续工作
 
@@ -1532,6 +1566,7 @@ Electron 构建／四页冒烟通过，主 Agent 已看四张应用图。它们�
 | 精确截至 88 的源码，视觉部分验收 | v2       |    1,451 |  159 |    726 |
 | 精确截至 93 的源码，视觉部分验收 | v2       |    1,445 |  157 |    725 |
 | 精确截至 95 的源码，视觉部分验收 | v2       |    1,430 |  157 |    725 |
+| 精确截至 99 的源码，视觉部分验收 | v2       |    1,424 |  157 |    725 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1544,11 +1579,12 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 95 的 v2 分项为 components 996 处／141 文件／632 未解析，旧 UI 429／14／93，
+已发布截至 99 的 v2 分项为 components 990 处／141 文件／632 未解析，旧 UI 429／14／93，
 routes 五处／两文件／零，来自三根 790 份冻结源码。共享 UI 源码与导出元数据位于该计数
 范围外单独冻结。已知 StyleX 模板继续作为未解析表达式，不代表新增 Tailwind 字符串。
 截至 88 仍是独立不可变库存；八处源码删除加两个新可见的保留 margin，使数字净减六。
-94–95 再移除十五处源码出现次数；不含后续批次或其他包宿主。
+94–95 再移除十五处源码出现次数，97／99 再移除六处；较广的截至 95 库存仍保留历史边界，
+不含后续批次或其他包宿主。
 
 截至 95 的完整产品 `src` 审计排除 stories，仍用同一 v2 扫描器；1,396 份冻结 JS／TS 得到
 1,439 处／159 文件／729 未解析。截至 88 的全域库存 1,460／161／730 保持原样。三根外九处属于 `conversation-layout.ts` 与
@@ -1567,8 +1603,9 @@ StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一�
 
 以上库存总数均针对 `packages/components/src`，不是整个 monorepo。Electron 渲染入口
 导入该包的 Tailwind 样式；开发面板的普通 CSS hook 不计作 utility 删除。独立的
-`packages/code-review-helper` 渲染器与 `site-docs` 各自拥有 Tailwind 编译管线，尚未纳入
-这些库存与视觉结论。它们需要独立编译配置和真实浏览器基线，不能由组件截图隐式验收。
+`packages/code-review-helper` 渲染器与 `site-docs` 各自拥有 Tailwind 编译管线，不纳入
+这些库存。helper 的 findings／引用批次已有上文独立编译与单文件证据，其余 helper 区域及
+site-docs 仍需独立基线，不能由组件截图隐式验收。
 隔离 ACP demo／编辑器应用不在本次迁移范围，也不需要子模块操作。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的

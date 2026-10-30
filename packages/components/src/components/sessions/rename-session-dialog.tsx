@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -14,6 +15,10 @@ import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  titleFieldLayout: {
+    [fieldTokens.textareaMinHeight]: 'calc(var(--spacing) * 9)',
+    [fieldTokens.paddingBlock]: 'calc(var(--spacing) * 2)',
+  },
   titleTypography: {
     [dialog.titleSize]: 'var(--text-base)',
     [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
@@ -176,7 +181,12 @@ export function RenameSessionDialogView({
             rows={1}
             value={draft}
             disabled={saving}
-            className="min-h-9 resize-none overflow-y-hidden py-2 leading-5 shadow-xs focus-visible:ring-1 focus-visible:ring-ring"
+            resize="none"
+            style={{ overflowY: 'hidden' }}
+            className={clsx(
+              stylex.props(styles.titleFieldLayout).className,
+              'leading-5 shadow-xs focus-visible:ring-1 focus-visible:ring-ring'
+            )}
             onChange={(e) => setDraft(e.target.value.replace(/[\r\n]+/g, ' '))}
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {

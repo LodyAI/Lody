@@ -1,0 +1,281 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--grouped-refactor",
+    "code-review-helper-reviewrenderer--with-existing-comments",
+    "code-review-helper-reviewrenderer--split-view",
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics",
+    "code-review-helper-reviewrenderer--file-statuses"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('.crh-shell.dark'),e=document.querySelector('section[aria-label=\"Review findings\"]');if(!root||getComputedStyle(root).colorScheme!=='dark'||getComputedStyle(root).backgroundColor!=='rgb(19, 20, 22)'||getComputedStyle(document.documentElement).getPropertyValue('--background').trim()!=='220 7.3% 8%'||!e||e.querySelectorAll('li.crh-finding').length!==3||document.fonts.status!=='loaded')return false;const r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight){e.scrollIntoView({block:'center',behavior:'instant'});return false;}return r.width>0&&r.left>=0&&r.right<=innerWidth&&getComputedStyle(e.querySelector('li')).opacity==='1';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('.crh-shell.dark'),e=document.querySelector('section[aria-label=\"Review findings\"]');if(!root||getComputedStyle(root).colorScheme!=='dark'||getComputedStyle(root).backgroundColor!=='rgb(19, 20, 22)'||getComputedStyle(document.documentElement).getPropertyValue('--background').trim()!=='220 7.3% 8%'||!e||e.querySelectorAll('li.crh-finding').length!==3||document.fonts.status!=='loaded')return false;const r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight){e.scrollIntoView({block:'center',behavior:'instant'});return false;}return r.width>0&&r.left>=0&&r.right<=innerWidth&&getComputedStyle(e.querySelector('li')).opacity==='1';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-reviewrenderer--split-view": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('.crh-shell.dark'),e=document.querySelector('section[aria-label=\"Review findings\"]');if(!root||getComputedStyle(root).colorScheme!=='dark'||getComputedStyle(root).backgroundColor!=='rgb(19, 20, 22)'||getComputedStyle(document.documentElement).getPropertyValue('--background').trim()!=='220 7.3% 8%'||!e||e.querySelectorAll('li.crh-finding').length!==3||document.fonts.status!=='loaded')return false;const r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight){e.scrollIntoView({block:'center',behavior:'instant'});return false;}return r.width>0&&r.left>=0&&r.right<=innerWidth&&getComputedStyle(e.querySelector('li')).opacity==='1';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('.crh-shell.dark') && getComputedStyle(document.querySelector('.crh-shell.dark')).backgroundColor==='rgb(19, 20, 22)' && !document.querySelector('section[aria-label=\"Review findings\"]') && document.fonts.status==='loaded'"
+      }
+    ],
+    "code-review-helper-reviewrenderer--file-statuses": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('.crh-shell.dark') && getComputedStyle(document.querySelector('.crh-shell.dark')).backgroundColor==='rgb(19, 20, 22)' && !document.querySelector('section[aria-label=\"Review findings\"]') && document.fonts.status==='loaded'"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "finding-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "section[aria-label=\"Review findings\"] li.crh-finding > span",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "naming.ts"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('title')==='Jump to packages/adaptors/src/naming.ts'"
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-jump",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "naming.ts",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.bottom>0&&r.top<innerHeight;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "name": "finding-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "section[aria-label=\"Review findings\"] li.crh-finding > span",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "naming.ts"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('title')==='Jump to packages/adaptors/src/naming.ts'"
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-jump",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "naming.ts",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.bottom>0&&r.top<innerHeight;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--split-view": [
+      {
+        "name": "finding-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "section[aria-label=\"Review findings\"] li.crh-finding > span",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "naming.ts"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('title')==='Jump to packages/adaptors/src/naming.ts'"
+          }
+        ]
+      },
+      {
+        "name": "ref-keyboard-jump",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "naming.ts",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.bottom>0&&r.top<innerHeight;}"
+          }
+        ]
+      }
+    ]
+  }
+}

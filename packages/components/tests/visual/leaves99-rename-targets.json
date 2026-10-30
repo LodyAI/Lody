@@ -1,0 +1,427 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1000
+    },
+    {
+      "name": "wide",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--wrapping-title",
+    "components-renamesessiondialog--empty-title",
+    "components-renamesessiondialog--overflow-title",
+    "components-renamesessiondialog--interactive",
+    "components-renamesessiondialog--pending-save",
+    "components-renamesessiondialog--failure-retry"
+  ],
+  "ready": {
+    "components-renamesessiondialog--default": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--wrapping-title": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--empty-title": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--overflow-title": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--pending-save": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--failure-retry": [
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-renamesessiondialog--default": [
+      {
+        "name": "long-overflow",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. "
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='auto'"
+          }
+        ]
+      },
+      {
+        "name": "short-hidden",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='hidden'"
+          }
+        ]
+      },
+      {
+        "name": "clear-disabled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": ""
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='hidden'"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--wrapping-title": [
+      {
+        "name": "short-hidden",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='hidden'"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--empty-title": [
+      {
+        "name": "filled-ready",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      },
+      {
+        "name": "cleared-disabled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": ""
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--overflow-title": [
+      {
+        "name": "short-hidden",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='hidden'"
+          }
+        ]
+      },
+      {
+        "name": "long-again",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. Review the original local workspace 中文 title and preserve wrapping. "
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='auto'"
+          }
+        ]
+      },
+      {
+        "name": "cleared-hidden",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": ""
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.style.overflowY==='hidden'"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "name": "saved-closed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea') && !document.querySelector('[role=dialog]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-rename-result]')?.textContent==='Saved: Updated synthetic title 中文'"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open rename dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('textarea');if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility!=='visible'||s.opacity!=='1')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "escape-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea') && !document.querySelector('[role=dialog]')"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--pending-save": [
+      {
+        "name": "save-pending-disabled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-rename-result]')?.textContent==='Saving'"
+          }
+        ]
+      },
+      {
+        "name": "escape-retains-pending",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=dialog]"
+          }
+        ]
+      },
+      {
+        "name": "failed-enabled",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!window.__renameRejectOnce){window.__renameRejectOnce=true;window.dispatchEvent(new CustomEvent('rename-fixture-settle',{detail:'reject'}));}return document.querySelector('textarea')?.disabled===false&&document.querySelector('[data-rename-result]')?.textContent==='Attempt failed'&&document.body.textContent.includes('Synthetic rename failed');}"
+          },
+          {
+            "action": "enabled",
+            "selector": "textarea"
+          }
+        ]
+      },
+      {
+        "name": "retry-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          }
+        ]
+      },
+      {
+        "name": "saved-closed",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {if(!window.__renameResolveOnce){window.__renameResolveOnce=true;window.dispatchEvent(new CustomEvent('rename-fixture-settle',{detail:'resolve'}));}return !document.querySelector('textarea')&&document.querySelector('[data-rename-result]')?.textContent==='Saved: Updated synthetic title 中文';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea') && !document.querySelector('[role=dialog]')"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--failure-retry": [
+      {
+        "name": "failed-retains-title",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Updated synthetic title 中文"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-rename-result]')?.textContent==='Attempt failed'&&document.querySelector('textarea')?.value==='Updated synthetic title 中文'&&document.body.textContent.includes('Synthetic rename failed')"
+          }
+        ]
+      },
+      {
+        "name": "retry-saved-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea') && !document.querySelector('[role=dialog]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-rename-result]')?.textContent==='Saved: Updated synthetic title 中文'"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--wrapping-title",
+    "components-renamesessiondialog--empty-title",
+    "components-renamesessiondialog--overflow-title"
+  ]
+}

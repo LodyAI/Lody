@@ -2,6 +2,27 @@
 
 Standalone local code-review renderer and agent prompt package for Lody.
 
+| Area           | Owner                                                     | Responsibility                                                               |
+| -------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Review UI      | [`src/react`](src/react)                                  | Renders groups, diffs, findings and local comments.                          |
+| Local controls | [`src/ui`](src/ui)                                        | Keeps the standalone renderer independent of product UI.                     |
+| Styling builds | [`stylex-options.ts`](stylex-options.ts)                  | Shared StyleX configuration for Vite, Storybook, standalone HTML and Vitest. |
+| Review format  | [File responsibilities](context/file-responsibilities.md) | Parsing, references and checklist ownership.                                 |
+
+Owned renderer styles migrate progressively to local `stylex.create` blocks.
+They read this package's existing CSS variables at the styled element; product
+palette aliases can resolve at a different scope. Tailwind remains for control,
+private-writer and third-party compatibility. Keep the original dark theme,
+responsive layout and interactions; a styling change does not change reference
+navigation, diff readiness or comment ownership.
+
+The four build/test entries share the same compiler options. CSS layers place
+StyleX after base styles and before components/utilities. The standalone build
+keeps source transforms pre and extracts CSS post, immediately before the
+single-file inliner. Its generated HTML requires no stylesheet sidecar; the
+[standalone pipeline](standalone-build.md#style-extraction-and-single-file-output)
+owns that ordering and its `file://` verification.
+
 ## Review file format (`.review.md`)
 
 A `.review.md` file organizes a PR or commit range into human-reviewable groups.

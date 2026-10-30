@@ -1787,7 +1787,7 @@ function AddProjectActionSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="pb-[max(1.25rem,var(--safe-area-bottom,0px))]">
+      <DrawerContent bottomPadding="safeArea">
         <DrawerTitle visuallyHidden>{title}</DrawerTitle>
         <DrawerDescription visuallyHidden>{title}</DrawerDescription>
         <div {...stylex.props(styles.sheetStack)}>
@@ -1826,7 +1826,7 @@ function PrivateResourceHelpSheet({
   const title = labels.privateHelpTitle ?? 'Private resources are only visible to you';
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="pb-[max(1.25rem,var(--safe-area-bottom,0px))]">
+      <DrawerContent bottomPadding="safeArea">
         <div {...stylex.props(styles.helpStack)}>
           <span {...stylex.props(styles.helpIcon)}>
             <LockKeyhole className={stylex.props(styles.icon5).className} aria-hidden="true" />

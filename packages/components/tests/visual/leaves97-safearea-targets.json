@@ -1,0 +1,258 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "wide",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "mobile-mobilehomescreen--safe-area-sheets",
+    "ui-drawermigration--bottom",
+    "ui-drawermigration--top",
+    "ui-drawermigration--left",
+    "ui-drawermigration--right"
+  ],
+  "ready": {
+    "mobile-mobilehomescreen--safe-area-sheets": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "了解私密资源",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "添加项目"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark') === (getComputedStyle(document.documentElement).colorScheme==='dark')"
+      }
+    ],
+    "ui-drawermigration--bottom": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open drawer"
+      }
+    ],
+    "ui-drawermigration--top": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open drawer"
+      }
+    ],
+    "ui-drawermigration--left": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open drawer"
+      }
+    ],
+    "ui-drawermigration--right": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open drawer"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobilehomescreen--safe-area-sheets": [
+      {
+        "name": "help-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "了解私密资源",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-slot=\"drawer-content\"]'); if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&s.opacity==='1'&&['none','matrix(1, 0, 0, 1, 0, 0)'].includes(s.transform)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "help-escape-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"drawer-content\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')"
+          }
+        ]
+      },
+      {
+        "name": "help-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "了解私密资源",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-slot=\"drawer-content\"]'); if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&s.opacity==='1'&&['none','matrix(1, 0, 0, 1, 0, 0)'].includes(s.transform)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "add-project-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "知道了"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "添加项目"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-slot=\"drawer-content\"]'); if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&s.opacity==='1'&&['none','matrix(1, 0, 0, 1, 0, 0)'].includes(s.transform)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "local-callback-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "添加文件夹",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-project-action]')?.dataset.projectAction==='local'"
+          }
+        ]
+      },
+      {
+        "name": "add-project-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "添加项目"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const e=document.querySelector('[data-slot=\"drawer-content\"]'); if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&s.opacity==='1'&&['none','matrix(1, 0, 0, 1, 0, 0)'].includes(s.transform)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "github-callback-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "添加 GitHub 仓库",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-project-action]')?.dataset.projectAction==='github'"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--bottom": [
+      {
+        "name": "default-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--top": [
+      {
+        "name": "default-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--left": [
+      {
+        "name": "default-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--right": [
+      {
+        "name": "default-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -6,6 +6,11 @@ Standalone local code-review renderer and agent prompt package.
 
 - This package is independent from Lody session, Code Collab, workspace runtime,
   Convex, i18n, and `@lody/components` business UI.
+- New owned renderer styles use local StyleX blocks and this package's existing
+  CSS variables. The development renderer, Storybook, standalone build and tests
+  share `stylex-options.ts`; keep standalone styles in the generated HTML. Retain
+  control and third-party compatibility utilities until their real contracts are
+  verified. Do not import product primitives or palette themes to migrate a leaf.
 - Git state is read only. The CLI may run `git show`, `git diff`, `git rev-parse`,
   and serve a local Vite viewer, but it must not mutate the reviewed repository.
 - `.review.md` line references use original merge-base/current source line numbers;

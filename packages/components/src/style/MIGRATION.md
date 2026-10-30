@@ -4,6 +4,13 @@ Move one owned surface at a time, preserving its rendered layout and behavior.
 Tailwind remains available for unmigrated consumers and documented compatibility
 cases. The [token reference](README.md) owns the shared vocabulary.
 
+The independent [code-review helper](../../../code-review-helper/README.md) has
+its own compiler configuration and CSS variables. Verify its real standalone
+`file://` output as well as Storybook: extraction must precede single-file CSS
+consumption, as documented by its
+[build owner](../../../code-review-helper/standalone-build.md#style-extraction-and-single-file-output).
+Its utility inventory is separate from this package's source count.
+
 ## Ownership and cascade
 
 | Concern               | Owner                                             | Migration rule                                                                                                |
