@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Effect, Exit } from 'effect';
 import { ContentError } from '@lody/e2ee-core/protocol';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
-import { openDispatchAfterLedgerCatchUp } from './rpc-ledger-catch-up';
+import { openDispatchAfterLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
 
 // The host has verified epoch `local`; the frame was sealed at `sealed`. Opening
 // succeeds only once the host has caught up, exactly like the core epoch guard.
@@ -73,5 +73,42 @@ describe('dispatch open after an epoch rotation', () => {
     } finally {
       f.close();
     }
+  });
+});
+
+describe('feature and dispatch requests share the rotation catch-up', () => {
+  const stale = () => {
+    let local = 0;
+    const observed: unknown[] = [];
+    const reopen = (name: string) => (_machineId: string, _frameHex: string) =>
+      Effect.suspend(() =>
+        local === 1 ? Effect.succeed(name) : Effect.fail(new ContentError({ code: 'unauthorized' }))
+      );
+    const native = withLedgerCatchUp(
+      { openDispatch: reopen('dispatch'), openFeature: reopen('feature'), close: () => 'kept' },
+      {
+        currentEpoch: () => Effect.sync(() => local),
+        catchUp: async () => {
+          local = 1;
+        },
+        frameEpoch: () => 1,
+        observe: (event) => observed.push(event),
+      }
+    );
+    return { native, observed, reset: () => (local = 0) };
+  };
+
+  it('reopens a feature request sealed after rotation once the ledger caught up', async () => {
+    const s = stale();
+    expect(await Effect.runPromise(s.native.openFeature('machine', 'frame'))).toBe('feature');
+    s.reset();
+    expect(await Effect.runPromise(s.native.openDispatch('machine', 'frame'))).toBe('dispatch');
+    expect(s.native.close()).toBe('kept');
+  });
+
+  it('reports only the two non-secret epoch integers and the outcome', async () => {
+    const s = stale();
+    await Effect.runPromise(s.native.openFeature('machine', 'frame'));
+    expect(s.observed).toEqual([{ frameEpoch: 1, localEpoch: 0, outcome: 'caught-up' }]);
   });
 });

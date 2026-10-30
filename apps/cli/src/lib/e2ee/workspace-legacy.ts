@@ -8,7 +8,8 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
-import { openDispatchAfterLedgerCatchUp } from './rpc-ledger-catch-up';
+import { withLedgerCatchUp } from './rpc-ledger-catch-up';
+import { getLogger } from '../../utils/logger';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -752,16 +753,14 @@ async function openWorkspaceOwned(
     Date.now
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
-  // Both the realtime offer and the durable execution origin reopen dispatch frames.
-  const dispatchNative = {
-    ...rpc,
-    openDispatch: openDispatchAfterLedgerCatchUp({
-      open: rpc.openDispatch,
-      currentEpoch: () =>
-        Effect.map(opened.runtime.executionLedger(), (view) => view.inspectState().epoch.number),
-      catchUp: () => refreshInBackground(),
-    }),
-  };
+  // Realtime dispatch, the durable execution origin and feature requests reopen frames.
+  const dispatchNative = withLedgerCatchUp(rpc, {
+    currentEpoch: () =>
+      Effect.map(opened.runtime.executionLedger(), (view) => view.inspectState().epoch.number),
+    catchUp: () => refreshInBackground(),
+    // Two epoch integers and an outcome only; never the frame or its plaintext.
+    observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
+  });
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
@@ -1294,7 +1293,7 @@ async function openWorkspaceOwned(
                       workspaceId: options.workspaceId,
                       genesis: binding.genesisHash,
                       machineId,
-                      native: rpc,
+                      native: dispatchNative,
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,
