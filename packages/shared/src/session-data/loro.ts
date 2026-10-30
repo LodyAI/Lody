@@ -1,4 +1,5 @@
 import type { SubagentRunItem } from '../ai';
+import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import type { SessionSubagentRun } from './types';
 import { selectTurnOutput } from './read';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
@@ -692,5 +693,26 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     identityDirty = true;
   };
 
-  return { sessionId, history, commands, writer, snapshots, dispose };
+  const readLatestGoal = (): SessionGoalMessage | null => {
+    for (let position = list.length - 1; position >= 0; position -= 1) {
+      const items = readField(list.get(position), 'items');
+      for (let index = readLength(items) - 1; index >= 0; index -= 1) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'goal' ||
+          readString(readField(item, 'threadId')) === undefined ||
+          readString(readField(item, 'objective')) === undefined ||
+          readString(readField(item, 'status')) === undefined
+        )
+          continue;
+        const goal = resolveLatestSessionGoalFromHistory([
+          { items: [isContainer(item) ? item.toJSON() : item] },
+        ]);
+        if (goal) return structuredClone(goal);
+      }
+    }
+    return null;
+  };
+
+  return { sessionId, history, commands, writer, snapshots, readLatestGoal, dispose };
 }
