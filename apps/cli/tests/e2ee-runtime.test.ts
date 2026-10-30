@@ -1300,10 +1300,20 @@ describe('machine E2EE local runtime', () => {
           },
         };
         expect(await host.content.snapshotUpload.canUpload()).toBe(true);
+        if (rotation === 'epoch') {
+          await expect(protection.config.provider.seal(snapshotInput)).rejects.toMatchObject({
+            code: 'missing-read-key',
+          });
+          expect((await stream.appendWriteOnly()).ok).toBe(false);
+          expect(frames).toHaveLength(0);
+          expect(doc.getText('draft').toString()).toBe('retained local edit');
+          releaseReceive.resolve();
+          await recovery;
+        }
         const retainedSnapshot = await protection.config.provider.seal(snapshotInput);
         expect(
           Result.getOrThrow(inspectContentFrame(retainedSnapshot.sealed, 'doc-snapshot')).epoch
-        ).toBe(0);
+        ).toBe(rotation === 'epoch' ? 1 : 0);
         expect(
           await protection.config.provider.open({
             ...retainedSnapshot,
@@ -3991,6 +4001,16 @@ describe('machine E2EE local runtime', () => {
         repair: () => Effect.void,
       };
       const records = [...fixture.records, ...fixture.rotationSuffix];
+      const request = {
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch',
+        } as const,
+        plaintext: new Uint8Array([1, 2]),
+        additionalData: () => new Uint8Array([3]),
+      };
+      let retained: { header: Uint8Array; sealed: Uint8Array } | undefined;
       for (const reopened of [false, true])
         await execute(
           Effect.gen(function* () {
@@ -4011,6 +4031,8 @@ describe('machine E2EE local runtime', () => {
             if (!reopened) {
               yield* runtime.ingest(page(fixture.records));
               yield* runtime.receiveKeys();
+              const prior = yield* runtime.binding('doc:after-rotation', 'loro', 0);
+              retained = yield* prior.seal(request);
               yield* runtime.ingest(page(records, fixture.records.length));
             }
             expect((yield* runtime.status()).hasCurrentKey).toBe(false);
@@ -4019,21 +4041,15 @@ describe('machine E2EE local runtime', () => {
               0
             );
             const old = yield* runtime.binding('doc:after-rotation', 'loro', 0);
-            const retained = yield* old.seal({
-              context: {
-                protocol: 'loro-streams-crdt-payload-protection',
-                version: 2,
-                kind: 'update_batch',
-              },
-              plaintext: new Uint8Array([1, 2]),
-              additionalData: () => new Uint8Array([3]),
-            });
-            expect(retained.sealed.length).toBeGreaterThan(2);
+            expect(Result.isFailure(yield* Effect.result(old.seal(request)))).toBe(true);
+            if (!retained) throw new Error('missing pre-rotation original');
+            expect(
+              yield* old.open({ ...request, ...retained, additionalData: new Uint8Array([3]) })
+            ).toEqual(request.plaintext);
             if (!reopened) return;
             yield* runtime.receiveKeys();
             expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-            const binding = yield* runtime.binding('doc:after-rotation', 'loro', 1);
-            const sealed = yield* binding.seal({
+            const sealed = yield* old.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
                 version: 2,
@@ -4042,6 +4058,7 @@ describe('machine E2EE local runtime', () => {
               plaintext: new Uint8Array([1, 2]),
               additionalData: () => new Uint8Array([3]),
             });
+            expect(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch).toBe(1);
             expect(sealed.sealed.length).toBeGreaterThan(2);
           })
         );

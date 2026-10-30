@@ -27,6 +27,7 @@ import {
 } from '@lody/e2ee-core/adapters/indexeddb';
 import {
   Bytes,
+  inspectContentFrame,
   hashRecordBytes,
   signGenesisRecord,
   verifyLedger,
@@ -910,8 +911,13 @@ export async function invoke(action: string) {
             return yield* session!.keyRound();
           case 'keyRound':
             return yield* session!.keyRound();
-          case 'seal': {
-            const doc = yield* session!.document('doc:1', 'loro');
+          case 'seal':
+          case 'sealOldHint': {
+            const doc = yield* session!.document(
+              'doc:1',
+              'loro',
+              action === 'sealOldHint' ? 0 : 'current'
+            );
             const sealed = yield* doc.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
@@ -925,7 +931,7 @@ export async function invoke(action: string) {
               'sealed',
               JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
             );
-            return true;
+            return { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
           }
           case 'openBody': {
             const doc = yield* session!.document('doc:1', 'loro');
@@ -1225,10 +1231,11 @@ export async function runtimeInvoke(action: string) {
         value = true;
         break;
       case 'seal':
+      case 'sealOldHint':
       case 'sealMutable': {
         const status = await runtime.status(offer.workspaceId);
         const input = {
-          epoch: status.writeEpoch ?? status.epoch,
+          epoch: action === 'sealOldHint' ? 0 : (status.writeEpoch ?? status.epoch),
           room: { kind: 'doc' as const, docId: '1' },
           context: runtimeContext,
           plaintext: Uint8Array.of(72, 105),
@@ -1245,7 +1252,7 @@ export async function runtimeInvoke(action: string) {
           'runtime-sealed',
           JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
         );
-        value = true;
+        value = { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
         break;
       }
       case 'openBody': {

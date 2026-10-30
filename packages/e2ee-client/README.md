@@ -41,6 +41,13 @@ signing capability.
   credential and database owners. Close/logout/cache cleanup never delete identity.
   The composition creates no timer, document Repo or ordinary transport.
 
+## Sealing epoch
+
+New document/Meta/Flock seals select the current verified epoch inside core.
+An old caller epoch is only a hint; missing current keys fail for retry rather
+than producing new ciphertext at a retained epoch. Already sealed old frames
+and historical reads remain valid. A future epoch hint fails until verified catch-up.
+
 ## Bounded retirement
 
 Owned host and session `close()` fence new work immediately and share a five-second

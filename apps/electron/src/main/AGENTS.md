@@ -76,6 +76,10 @@ The encrypted adapter enables Meta, Loro documents and the owning workspace/mach
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
 
+New content seals select the verified current epoch inside core, never an older
+renderer hint. Missing current keys fail for retry; keep already sealed old frames
+and historical reads. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+
 All installed/candidate binding fields are authenticated AAD and encrypted in the
 core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
 `retainDevice(actualGenesis, prepared)` before any network/CAS; failed preparations
