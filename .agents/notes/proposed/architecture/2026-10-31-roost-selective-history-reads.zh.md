@@ -192,7 +192,7 @@ footprint 包含 GC／内存页波动，输出的微小下降属于测量噪声�
 
 ### PR 与构建依赖
 
-分为三个 draft：Roost 上游、Lody 共用查询与 Roost 接入、Loro 目标写入／回滚；Loro 叠在基础 PR 上。历史写入 Spec 增加 v2 成员格式后保持 draft，等待审阅。
+已发三个 draft：[Roost 上游 #29](https://github.com/loro-dev/roost/pull/29)、[Lody 共用查询与 Roost 接入 #2132](https://github.com/LodyAI/Lody/pull/2132)、[Loro 目标写入／回滚 #2133](https://github.com/LodyAI/Lody/pull/2133)；Loro 叠在基础 PR 上。历史写入 Spec 增加 v2 成员格式后保持 draft，等待审阅。
 
 验证使用忽略的本地 SDK／Native 链接和合成数据。已发布 0.3.0 不包含新 API，合并基础 PR 前需配套发布 SDK／Native，并更新 Lody manifest／lockfile；未进行未经请求的发布，不提交会话记录或本地二进制。draft PR 必须明确这项依赖，不能把旧发布包的普通安装当成候选验收。
 

@@ -192,7 +192,7 @@ Footprint includes GC/page variation; the small output decrease is measurement n
 
 ### PR and artifact dependencies
 
-Deliver three drafts: upstream Roost; Lody shared queries plus Roost integration; then Loro selected writes/rollback. The latter stacks on the foundation PR. The reviewed history-write Spec remains draft for its v2 membership-format addition.
+Delivered drafts: [upstream Roost #29](https://github.com/loro-dev/roost/pull/29), [shared queries/Roost integration #2132](https://github.com/LodyAI/Lody/pull/2132), and [Loro selected writes/rollback #2133](https://github.com/LodyAI/Lody/pull/2133). The latter stacks on the foundation PR. The reviewed history-write Spec remains draft for its v2 membership-format addition.
 
 Validation uses ignored local SDK/Native links and synthetic fixtures. Published 0.3.0 artifacts do not expose the new APIs; coordinated SDK/Native release and Lody manifest/lockfile pins are required before merging the foundation. No unrequested release, captured conversation or local binary is committed. This dependency must remain explicit in the draft PR; a normal install of the old published artifacts is not candidate acceptance.
 
