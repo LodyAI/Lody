@@ -103,6 +103,8 @@ executable with `THIRD_PARTY_NOTICES.txt`. The notices come from a static JSON
 import in `cloudflared-binary.ts`, so source, bundled CLI and embedded CLI use the
 same text without a second asset-copy pipeline. Existing incomplete installations
 are errors, not repair or migration inputs.
+The [security release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-cloudflared-emudhra-update.md)
+records the current pin and its distribution prerequisites.
 
 ## Updating notices with the pinned release
 
