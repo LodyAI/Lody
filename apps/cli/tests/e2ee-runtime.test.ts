@@ -64,6 +64,8 @@ import {
   Exit as TokenExit,
 } from 'effect';
 import { LoroDoc, LoroMap } from 'loro-crdt';
+import { z } from 'zod';
+import { createCloudE2eePort } from '../src/lib/cloud-cli-port';
 import {
   StreamsCrdt,
   createLoroDocAdapter,
@@ -426,6 +428,7 @@ describe('machine E2EE local runtime', () => {
     async (mode) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rpc-key-catch-up-'));
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
       let oldRefresh: Promise<void> | undefined;
       const receiveEntered = Promise.withResolvers<void>();
@@ -482,9 +485,34 @@ describe('machine E2EE local runtime', () => {
           })
         );
         let history = page(fixture.records);
+        // The hosted readGroup boundary accepts precisely these four fields.
+        // Use the real HTTP adapter: the native locator also carries a local
+        // signer, which must not leak into this strict wire object.
+        const stagingKey = z.strictObject({
+          genesis: z.string(),
+          epoch: z.number(),
+          commitment: z.string(),
+          recordHash: z.string(),
+        });
+        vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+          const request = JSON.parse(init.body as string);
+          expect(request.path).toBe('e2eeEpochStaging:readGroup');
+          const parsed = stagingKey.safeParse(request.args[0].key);
+          return Response.json(
+            parsed.success
+              ? { status: 'success', value: encodeEpochStagedGroup(stagedGroup) }
+              : {
+                  status: 'error',
+                  errorMessage: 'ArgumentValidationError: extra staging key field',
+                }
+          );
+        });
+        const stagingPort = createCloudE2eePort({
+          authBaseUrl: 'https://synthetic-staging.convex.cloud',
+        });
         const cloud = {
           getHistory: async () => history,
-          readEpochGroup: async () => encodeEpochStagedGroup(stagedGroup),
+          readEpochGroup: stagingPort.readEpochGroup,
           mailboxCall: async (
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
@@ -601,6 +629,7 @@ describe('machine E2EE local runtime', () => {
         await host?.close();
         catchUpSpy?.mockRestore();
         doc.free();
+        vi.unstubAllGlobals();
         vi.unstubAllEnvs();
         await rm(directory, { recursive: true, force: true });
       }

@@ -557,7 +557,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       key: {
         genesis: 'ab'.repeat(32),
         epoch: 1,
-        publisher: 'cd'.repeat(32),
+        recordHash: 'cd'.repeat(32),
         commitment: 'ef'.repeat(32),
       },
     });
@@ -572,7 +572,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
         key: {
           genesis: 'ab'.repeat(32),
           epoch: 1,
-          publisher: 'cd'.repeat(32),
+          recordHash: 'cd'.repeat(32),
           commitment: 'ef'.repeat(32),
         },
       })
