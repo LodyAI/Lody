@@ -656,6 +656,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const encryptedRuntime = platform.e2eeWorkspaces?.runtime;
     let nativeLease: string | null = null;
     let nativeReaderOwner: string | undefined;
+    let nativeLeasePreallocated = false;
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
@@ -740,6 +741,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         );
         if (nativeLease) {
           await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!nativeLeasePreallocated) nativeLease = null;
         }
         await initialization;
         // Legacy hosts acquire their lease only after open settles. A capable
@@ -941,6 +945,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             if (requestedReader) {
               nativeLease = effectiveWorkspaceId;
               nativeReaderOwner = requestedReader;
+              nativeLeasePreallocated = true;
             }
             const status = await native.open(
               effectiveWorkspaceId,

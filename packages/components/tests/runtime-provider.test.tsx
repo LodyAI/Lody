@@ -883,6 +883,40 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(readers).toEqual(new Set(['other-window']));
   });
 
+  it('releases exactly one count of a legacy window-scoped reader', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    // Electron main counts acquisitions per window and workspace, and labels all
+    // of them with one account-owner ID. The control page in this same window
+    // already holds one count that the content runtime must not release.
+    let count = 1;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'account-owner',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => {
+        count += 1;
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {
+        count = Math.max(0, count - 1);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(count).toBe(2);
+    await act(async () => root.render(null));
+    expect(prepared.disposed).toBe(true);
+    expect(count).toBe(1);
+  });
+
   it('opens an independent ordinary workspace while an encrypted workspace retains incomplete native close', async () => {
     ordinaryCloud();
     listEncrypted();

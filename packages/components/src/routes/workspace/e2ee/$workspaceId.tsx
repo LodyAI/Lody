@@ -96,6 +96,7 @@ function WorkspaceControlRoute() {
     let hostOpened = false;
     let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
     let readerOwner: string | undefined;
+    let readerPreallocated = false;
     let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
@@ -108,7 +109,12 @@ function WorkspaceControlRoute() {
       }),
       async () => {
         // Fence a preallocated cold open before joining its actual settlement.
-        if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+        if (hostOpened) {
+          await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!readerPreallocated) hostOpened = false;
+        }
         // Join only actual native acquisition. Public describe/history can stay
         // offline after this reader is confirmed closed; they own no host lease.
         await nativeAcquisition?.then(
@@ -177,7 +183,7 @@ function WorkspaceControlRoute() {
               if (disposed) return undefined;
               readerOwner =
                 runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-              if (readerOwner) hostOpened = true;
+              if (readerOwner) hostOpened = readerPreallocated = true;
               const opened = await runtime.open(
                 workspaceId,
                 readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
@@ -328,7 +334,11 @@ function WorkspaceControlRoute() {
             /* Native receipt still retries local cleanup on the next open. */
           }
           try {
-            if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+            if (hostOpened) {
+              await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+              // Unmount must not release this confirmed reader a second time.
+              hostOpened = false;
+            }
           } catch (closeError) {
             // Preserve the full reader owner and never erase borrowed stores
             // before the actual host close can finish.

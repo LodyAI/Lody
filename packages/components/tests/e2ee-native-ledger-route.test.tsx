@@ -567,6 +567,31 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
+it('releases exactly one count of a legacy window-scoped control reader', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // Electron main counts acquisitions per window and workspace. The content
+  // runtime in this same window already holds one count.
+  let count = 1;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {
+      count = Math.max(0, count - 1);
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(count).toBe(2);
+  await act(async () => root.unmount());
+  expect(count).toBe(1);
+});
+
 it('fences the preallocated control reader before a cold open settles', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;

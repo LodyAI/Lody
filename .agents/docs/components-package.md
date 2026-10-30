@@ -70,7 +70,11 @@ labels, fence preallocated cold opens and retain incomplete closes across route
 changes. Unknown-genesis cold readers block only the same account/workspace until
 their actual close finishes; independent workspaces remain usable.
 Retirement joins native acquisition and confirmed close, never the subsequent
-public describe/history refresh. A closed reader can reopen while an obsolete
+public describe/history refresh. Portable hosts close a preallocated label before
+and after settlement; Electron's readers are an unlabeled count per window and
+workspace, so a settled Electron acquisition is closed once. A second close would
+release the other reader of that window, such as RuntimeProvider's content reader
+or the control page that replaced it. A closed reader can reopen while an obsolete
 public request remains pending; disposed results cannot ingest records, publish
 a view or update observed checkpoints.
 
