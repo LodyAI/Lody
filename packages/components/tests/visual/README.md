@@ -654,6 +654,10 @@ ordering belong to [the helper build guide](../../../code-review-helper/standalo
 | `artifacts/visual/leaves96-98-acceptance.html` | Independent code-review-helper pipeline: 59 utilities in one Renderer across findings and reference chips                                                     | 125/128 formal PNG pairs exact; 66,536 standard records equal                                 | Seven original raster OPENs/187 raw/0 threshold remain. Eight fixed real offline single-file pairs match complete PNG/style/geometry; the original missing-CSS outputs and twelve original run images are retained             |
 | `artifacts/visual/leaves99-acceptance.html`    | Four fixed Rename Textarea utilities adopt existing owner tokens, resize and layout APIs; ref-owned height/overflow remain                                    | 109/110 formal PNG pairs exact; 2,848 standard records equal                                  | Original pending/Escape OPEN/5,932 raw/0 threshold remains; 24 native and eight normal-motion pairs match; token negatives, browser controls, 17 failed frames and 44 existing 320px clipped states are retained               |
 
+| `artifacts/visual/leaves100-acceptance.html` | Twenty private helper severity-map color utilities across actual badges and inline markers | 80/80 formal PNG pairs exact; 44,560 full standard records equal | Six standalone pairs match; four original native OPENs/130 raw/0 threshold pixels remain; matching normal/coarse/full-panel controls do not establish their cause |
+
+| `artifacts/visual/leaves101-102-acceptance.html` | 49 private GroupSection utilities and 27 local Alert owner utilities; actual monospace, local colors and CVA selector preserved | 76/92 formal PNG pairs exact; 24,255 standard records equal | 16 formal OPENs/75 raw plus five native OPENs/22 raw; initial ten record mismatches and compiler/fallback/theme failures retained. No 101 standalone pair was captured; two final file images are After-only |
+
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
 flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
@@ -684,8 +688,14 @@ Compare it with the earlier full scan of the same package path, 1,460/161/730;
 it does not cover every package or Tailwind host. Keep this separate from the
 three-root timeline. The through93 manual audit separately retains sixteen
 unconsumed skip-link literals, three touch-helper literals and four opaque caller
-arguments after batch 92; its older six-argument audit is unchanged. The independent helper batches 96 and 98 have a separate selected-source ledger;
-their 59 removed utilities do not reduce this component inventory. Any later application
+arguments after batch 92; its older six-argument audit is unchanged. The independent
+helper batches 96, 98, 100, 101 and 102 remove 155 selected-source utilities without
+reducing this component inventory. Its separate through102 source snapshot validates
+32 production JS/TS files against the successful build and uses its actual CSS entry
+with the same v2 AST rules: 1,075 occurrences/ten files/26 unresolved expressions.
+Stories, tests and later work are excluded; see
+`inventory-helper-source-through102-proof.json`. The historical through100 bound
+remains 1,151/ten/26; the two units remove exactly 76. Any later application
 batch requires a fresh source-frozen inventory before advancing the through99
 timeline. These static lower
 bounds are not completion percentages.
@@ -695,8 +705,8 @@ from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
 same-element token-input negatives are separate. An original Gallery gate failure
 and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
 verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 45 frozen reports, including the separately scoped batches 97, 99
-and 96/98. Those later reports preserve every earlier OPEN rather than closing
+keyboard/pointer zoom and 1280/390px layouts. The index now links 47 frozen reports, including the separately scoped batches
+97, 99, 96/98, 100 and 101–102. Those later reports preserve every earlier OPEN rather than closing
 issues through a new successful subset.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its

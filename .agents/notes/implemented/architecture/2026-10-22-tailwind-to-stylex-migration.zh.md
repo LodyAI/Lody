@@ -1551,6 +1551,30 @@ helper 区域或整个 monorepo，主组件库存不扣除本宿主的移除数�
 四个原 native 差异即使完整记录字段相同仍 OPEN，共 130 原始／零阈值像素。一次有界完整
 面板控制、两对正常动效与两对粗指针控制也相同，均不证明原栅格原因或扩大固定主题边界。
 
+分组／Alert 续迁再移除七十六处 utility：私有分组区域四十九处、局部 Alert owner 二十七处。
+页头 ref、ResizeObserver、sticky offset 与回调不变，窄页原来不固定的行为也保留。
+编号继续使用 `calc(infinity * 1px)`，统计数字保持真实完整 monospace 栈，六个私有 writer
+或复合规则保留。一次误用 camelCase CSSOM 查询产生空 font-family 候选，两个构建均在
+任何有效 After 图产生前失败；修正候选读取真实编译声明。
+
+Alert 保留 CVA 选择既有变体，只将各值映射为静态 StyleX 类，不重写 default／null 语义。
+六个 SVG／条件 grid utility 与三个 Title writer 保留。七个透明度声明恢复原不透明 HSL
+fallback 及对应 color-mix 支持条件；仅在支持该特性的 Chromium 中截图遗漏了这个问题。
+修复后四对隔离 fallback 分支的比较相同，四对保留候选存在 564,770 原始／558,438 阈值
+像素差异。CSSOM 分支隔离仅为诊断，不代表在原生不支持浏览器上执行。局部明暗调色板
+夹具与真实固定 Vesper 宿主分列，原十二张误标 dark 的浅色帧不计暗主题覆盖。
+
+`leaves101-102-acceptance.html` 记录九十二对正式帧，其中七十六对 PNG 字节相同，24,255
+条标准记录相同。十六对正式差异共七十五原始像素，五对 native 差异另有二十二原始像素，
+阈值像素均为零，全部仍 OPEN。首轮六十六帧分组矩阵另保留十对完整记录不等、九对 PNG
+不等；一次完整预热后的严格矩阵六十六对完整记录相同，不能据此关闭旧证据。native 共
+验证 1,486 条完整节点记录。分组没有执行独立 HTML 的 Before／After，两个真实单文件
+After-only 图明确仅作冒烟。合组报告已通过真实桌面／手机浏览器验收。
+
+同一独立 helper 库存在这两单元后为十文件／1,075 处／二十六个未解析表达式，三十二份
+生产 JS／TS 文件均按最终成功构建哈希核对。较 1,151 减少七十六处，不包含 stories、
+测试、后续正在迁移的代码，也不与主组件时间线混算。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)

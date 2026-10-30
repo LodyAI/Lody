@@ -1,0 +1,31 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--budget-and-line-diagnostics"],
+  "ready": {
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('.crh-main [data-slot=alert]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell.dark')).backgroundColor==='rgb(19, 20, 22)';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ]
+  }
+}

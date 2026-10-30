@@ -1906,6 +1906,70 @@ function FindingRefChip({
   );
 }
 
+const groupSectionStyles = stylex.create({
+  section: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 3.5)',
+    borderTopStyle: 'var(--tw-border-style)',
+    borderTopWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    paddingTop: 'calc(var(--spacing) * 6)',
+  },
+  header: {
+    position: 'sticky',
+    top: 'var(--crh-toolbar-h)',
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--background))',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  headingRow: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+  },
+  index: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    },
+    fontSize: '13px',
+    color: 'hsl(var(--foreground))',
+  },
+  heading: { minWidth: 0, overflowWrap: 'break-word', fontSize: '17px' },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  stats: {
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12px',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  fileCount: { fontSize: '12px', color: 'hsl(var(--muted-foreground))' },
+  body: { display: 'grid', minWidth: 0, gap: 'calc(var(--spacing) * 3.5)' },
+  files: { display: 'grid', gap: 'calc(var(--spacing) * 3)' },
+});
+
 const ReviewGroupSection = memo(function ReviewGroupSection({
   index,
   group,
@@ -1999,29 +2063,32 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
       id={groupDomId(group.id)}
       data-group-id={group.id}
       aria-labelledby={headingId}
-      className="crh-group-section flex min-w-0 flex-col gap-3.5 border-t border-border pt-6"
+      className={cn('crh-group-section', stylex.props(groupSectionStyles.section).className)}
     >
       <header
         ref={headerRef}
-        className="crh-group-header sticky top-[var(--crh-toolbar-h)] z-20 flex items-center justify-between gap-3 bg-background py-2.5"
+        className={cn('crh-group-header', stylex.props(groupSectionStyles.header).className)}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-[13px] font-semibold text-foreground">
+        <div {...stylex.props(groupSectionStyles.headingRow)}>
+          <span className={cn(stylex.props(groupSectionStyles.index).className, 'font-semibold')}>
             {index + 1}
           </span>
           <span
             id={headingId}
-            className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight md:text-lg"
+            className={cn(
+              stylex.props(groupSectionStyles.heading).className,
+              'font-semibold leading-snug tracking-tight md:text-lg'
+            )}
           >
             {group.title}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="font-mono text-[12px] tabular-nums">
-            <span className="text-addition">+{groupStats.additions}</span>{' '}
-            <span className="text-deletion">−{groupStats.deletions}</span>
+        <div {...stylex.props(groupSectionStyles.actions)}>
+          <span className={cn(stylex.props(groupSectionStyles.stats).className, 'tabular-nums')}>
+            <span {...stylex.props(groupSectionStyles.additions)}>+{groupStats.additions}</span>{' '}
+            <span {...stylex.props(groupSectionStyles.deletions)}>−{groupStats.deletions}</span>
           </span>
-          <span className="text-[12px] text-muted-foreground">{groupFiles.length} files</span>
+          <span {...stylex.props(groupSectionStyles.fileCount)}>{groupFiles.length} files</span>
           <GroupMenu
             reviewState={reviewState}
             onMarkAllViewed={() => onReviewedChange(true)}
@@ -2032,7 +2099,7 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
         </div>
       </header>
 
-      <div className="grid min-w-0 gap-3.5">
+      <div {...stylex.props(groupSectionStyles.body)}>
         {summaryMarkdown.length > 0 && (
           <SimpleMarkdown markdown={summaryMarkdown} tone="foreground" />
         )}
@@ -2041,7 +2108,7 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
 
         {group.diagnostics.length > 0 && <Diagnostics diagnostics={group.diagnostics} />}
 
-        <div className="grid gap-3">
+        <div {...stylex.props(groupSectionStyles.files)}>
           {group.blocks.map((block) => (
             <ReviewDiffBlock
               key={block.id}

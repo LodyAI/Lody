@@ -2180,6 +2180,42 @@ threshold pixels, despite equal complete recorded fields. A bounded full-panel
 control, two normal-motion pairs and two coarse-pointer pairs also match;
 none establishes the original raster cause or extends the fixed theme scope.
 
+The group/Alert continuation removes another 76 utilities: 49 in the private
+group section and 27 in the local Alert owner. Header refs, ResizeObservers,
+sticky offsets and callbacks remain unchanged; the narrow page's original
+non-pinning behavior is retained. The index keeps `calc(infinity * 1px)`, the
+statistics keep the actual complete monospace stack, and six private writers or
+compound rules remain. A mistaken camel-case CSSOM lookup produced an empty
+font-family candidate: both builds failed before producing any accepted After
+image. The corrected candidate reads the real compiler declaration.
+
+Alert keeps CVA as its variant selector, mapping its existing cases to static
+StyleX classes rather than replacing its default/null behavior with a new
+normalizer. Six SVG/conditional-grid utilities and three Title writers remain.
+Seven alpha declarations preserve the original opaque HSL fallback and matching
+color-mix support condition. Chromium's supported-feature screenshots alone missed
+that omission; four isolated-fallback comparisons match after the repair, while
+four retained candidates differ by 564,770 raw/558,438 threshold pixels. That
+CSSOM branch isolation is a diagnostic, not execution on an unsupported browser.
+Its local light/dark palette fixtures are distinct from the fixed Vesper host.
+Twelve original dark-labelled frames actually used a light palette and are not
+accepted as dark coverage.
+
+`leaves101-102-acceptance.html` records 92 formal pairs, 76 byte-exact PNGs and
+24,255 equal standard records. Sixteen original formal differences total 75 raw
+pixels; five native differences add 22 raw pixels, all with zero threshold pixels.
+They remain OPEN. The first 66-frame group matrix separately retains ten unequal
+full-record pairs and nine unequal PNGs. One strict, fully prewarmed matrix then
+compares all 66 complete records equally; it does not close the earlier evidence.
+Native checks cover 1,486 complete recorded nodes. No group-specific standalone
+Before/After run occurred; two real standalone After-only images remain explicitly
+smoke coverage. The combined report passes real desktop/phone browser QA.
+
+The same independent helper inventory after these two units records 1,075
+occurrences/ten files/26 unresolved expressions across 32 production JS/TS files,
+all checked against the successful final build. The decrease from 1,151 is 76;
+stories, tests, active later work and the core component timeline are excluded.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)

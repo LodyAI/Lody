@@ -1,0 +1,74 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 320,
+      "height": 1300
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-alertmigration--variants",
+    "code-review-helper-alertmigration--structure",
+    "code-review-helper-alertmigration--variant-defaults",
+    "code-review-helper-alertmigration--caller-overrides"
+  ],
+  "ready": {
+    "code-review-helper-alertmigration--variants": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const s=document.querySelector('[data-alert-migration]');return !!s && s.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') && getComputedStyle(s).backgroundColor === (matchMedia('(prefers-color-scheme: dark)').matches ? 'rgb(21, 22, 25)' : 'rgb(255, 255, 255)') && s.querySelectorAll('[data-slot=alert]').length===4 && document.fonts.status==='loaded' && [...s.querySelectorAll('[data-slot=alert]')].every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;});}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-alertmigration--structure": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const s=document.querySelector('[data-alert-migration]');return !!s && s.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') && getComputedStyle(s).backgroundColor === (matchMedia('(prefers-color-scheme: dark)').matches ? 'rgb(21, 22, 25)' : 'rgb(255, 255, 255)') && s.querySelectorAll('[data-slot=alert]').length===4 && document.fonts.status==='loaded' && [...s.querySelectorAll('[data-slot=alert]')].every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;});}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-alertmigration--variant-defaults": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const s=document.querySelector('[data-alert-migration]');return !!s && s.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') && getComputedStyle(s).backgroundColor === (matchMedia('(prefers-color-scheme: dark)').matches ? 'rgb(21, 22, 25)' : 'rgb(255, 255, 255)') && s.querySelectorAll('[data-slot=alert]').length===4 && document.fonts.status==='loaded' && [...s.querySelectorAll('[data-slot=alert]')].every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;});}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "code-review-helper-alertmigration--caller-overrides": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const s=document.querySelector('[data-alert-migration]');return !!s && s.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') && getComputedStyle(s).backgroundColor === (matchMedia('(prefers-color-scheme: dark)').matches ? 'rgb(21, 22, 25)' : 'rgb(255, 255, 255)') && s.querySelectorAll('[data-slot=alert]').length===4 && document.fonts.status==='loaded' && [...s.querySelectorAll('[data-slot=alert]')].every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;});}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      }
+    ]
+  }
+}
