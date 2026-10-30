@@ -111,6 +111,61 @@ async function account(options = {}) {
     }
   }
 }
+void test('passive account inspection never reopens an absent or closed owner', async () => {
+  let leases = 0,
+    custody = 0,
+    hosts = 0
+  const { api, identity } = await account({
+    identityStorage: {
+      leaseE2eeIdentity: () =>
+        Effect.sync(() => {
+          leases++
+        })
+    },
+    custody: () =>
+      Effect.sync(() => {
+        custody++
+        return {}
+      }),
+    host: () =>
+      Effect.sync(() => {
+        hosts++
+        return {
+          inspectCachedState: (workspaceId, machineId) =>
+            Effect.succeed({
+              workspaceId,
+              machineId,
+              entryPresent: true,
+              cachedPolicies: 1,
+              cachedExecutionGrants: 1
+            })
+        }
+      })
+  })
+  const inspect = () => api.inspectDesktopE2eeCachedState('account', 'team', 'machine')
+  assert.equal((await inspect()).ownerPresent, false)
+  assert.deepEqual([leases, custody, hosts], [0, 0, 0])
+  await api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.sync(() => {
+        owner.readers.set('team', new Map([[1, 2]]))
+      }),
+    'team'
+  )
+  const live = await inspect()
+  assert.equal(live.ownerPresent, true)
+  assert.equal(live.activeContentReaders, 2)
+  assert.equal(live.cachedExecutionGrants, 1)
+  const opened = [leases, custody, hosts]
+  await api.closeDesktopE2eeAccount()
+  assert.equal((await inspect()).ownerPresent, false)
+  assert.equal((await inspect()).activeContentReaders, 0)
+  assert.deepEqual([leases, custody, hosts], opened)
+  identity.userId = 'other'
+  await assert.rejects(inspect(), /e2ee_host_operation_failed/)
+  assert.deepEqual([leases, custody, hosts], opened)
+})
+
 void test('failed account cleanup cannot block sign-out or authorize replacement on a second close', async () => {
   const { api, warnings } = await account()
   await api.withDesktopE2eeAccount((owner) =>
@@ -2212,6 +2267,7 @@ async function memberIpcFixture() {
     keyEntered = deferredMember(),
     keyGate = deferredMember()
   let holdCloud = false
+  let trusted = true
   const makeOwner = (accountId, label) => ({
     accountId,
     label,
@@ -2221,6 +2277,14 @@ async function memberIpcFixture() {
       acceptMemberJoin: () => Effect.void
     },
     host: {
+      inspectCachedState: (workspaceId, machineId) =>
+        Effect.succeed({
+          workspaceId,
+          machineId,
+          entryPresent: false,
+          cachedPolicies: 0,
+          cachedExecutionGrants: 0
+        }),
       memberOffer: () =>
         Effect.sync(() => {
           signed.push(label)
@@ -2264,7 +2328,11 @@ async function memberIpcFixture() {
       getIpcContext: () => ({ event: { sender } })
     },
     '../../platform': { isLocalPlatform: () => false },
-    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../assert-sender': {
+      assertProductWindowSender: () => {
+        if (!trusted) throw new Error('untrusted sender')
+      }
+    },
     '../ipc-service-deps': {
       getIpcServiceDeps: () => ({
         authService: { getCachedSessionIdentity: () => ({ ...identity }) }
@@ -2272,6 +2340,18 @@ async function memberIpcFixture() {
     },
     '../../services/e2ee-bootstrap.mjs': {},
     '../../services/e2ee-account-runtime': {
+      inspectDesktopE2eeCachedState: async (accountId, workspaceId, machineId) => {
+        if (current.accountId !== accountId) throw new Error('e2ee_account_mismatch')
+        return {
+          ...(await Effect.runPromise(current.host.inspectCachedState(workspaceId, machineId))),
+          accountId,
+          ownerPresent: true,
+          activeContentReaders: [...(current.readers.get(workspaceId)?.values() ?? [])].reduce(
+            (sum, n) => sum + n,
+            0
+          )
+        }
+      },
       withDesktopE2eeAccount: async (work) => Effect.runPromise(work(current)),
       desktopE2eeCloudClient: async () => {
         cloudEntered.resolve()
@@ -2300,6 +2380,9 @@ async function memberIpcFixture() {
     keyEntered,
     keyGate,
     makeOwner,
+    setTrusted(value) {
+      trusted = value
+    },
     setOwner(owner) {
       current = owner
     },
@@ -2369,3 +2452,26 @@ for (const code of ['machine_not_owned', 'machine_not_shared']) {
     )
   })
 }
+
+void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
+  const f = await memberIpcFixture()
+  const owner = f.makeOwner('A', 'passive-A')
+  owner.readers.clear()
+  f.setOwner(owner)
+  const snapshot = await f.ipc.inspectCachedState('team', 'machine')
+  assert.equal(snapshot.accountId, 'A')
+  assert.equal(snapshot.workspaceId, 'team')
+  assert.equal(snapshot.machineId, 'machine')
+  assert.equal(snapshot.activeContentReaders, 0)
+  assert.equal(snapshot.cachedExecutionGrants, 0)
+  assert.equal(owner.readers.size, 0)
+  assert.deepEqual(f.signed, [])
+  assert.deepEqual(f.closed, [])
+  f.identity.userId = 'B'
+  await assert.rejects(f.ipc.inspectCachedState('team', 'machine'), /e2ee_account_mismatch/)
+  f.identity.userId = 'A'
+  f.setTrusted(false)
+  await assert.rejects(f.ipc.inspectCachedState('team', 'machine'), /untrusted sender/)
+  f.setTrusted(true)
+  await assert.rejects(f.ipc.inspectCachedState('', 'machine'), /e2ee_invalid-input/)
+})

@@ -1715,6 +1715,23 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
       openContent: (workspaceId: string, input: E2eeContentOpen) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.openContent(input))),
+      // Read only an existing entry. Unlike status/readMachineSharing this never
+      // calls openWorkspace, opens storage, refreshes grants or discovers a target.
+      inspectCachedState: (workspaceId: string, machineId: string) =>
+        run(
+          Effect.sync(() => {
+            const entry = entries.get(workspaceId)
+            return {
+              workspaceId,
+              machineId,
+              entryPresent: Boolean(entry),
+              ...(entry?.sharing.inspectCache(machineId) ?? {
+                cachedPolicies: 0,
+                cachedExecutionGrants: 0
+              })
+            }
+          })
+        ),
       readMachineSharing: (
         workspaceId: string,
         machineId: string,

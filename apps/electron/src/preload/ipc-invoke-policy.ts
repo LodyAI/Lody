@@ -52,6 +52,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'prepareFeatureRpc',
       'acceptFeatureRpcResponse',
       'prepareDispatch',
+      'inspectCachedState',
       'readMachineSharing',
       'updateMachineSharing',
       'acceptDispatchResponse',

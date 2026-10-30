@@ -227,6 +227,50 @@ export function withDesktopE2eeAccount<A>(
   })
 }
 
+/** Passive metadata only: never acquire a lease or construct an absent owner. */
+export function inspectDesktopE2eeCachedState(
+  accountId: string,
+  workspaceId: string,
+  machineId: string
+) {
+  return Effect.runPromise(
+    serial.withPermit(
+      Effect.gen(function* () {
+        if (quitting) return yield* Effect.fail(accountFailure('closed'))
+        const auth = getIpcServiceDeps().authService
+        const identity = auth.getCachedSessionIdentity()
+        if (!identity.userId || identity.userId !== accountId)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        const owner = owners.get(identityDirectory(accountId, workspaceId))
+        if (owner?.closeFailed) return yield* Effect.fail(accountFailure('restart-required'))
+        const state = owner
+          ? yield* owner.host.inspectCachedState(workspaceId, machineId)
+          : {
+              workspaceId,
+              machineId,
+              entryPresent: false,
+              cachedPolicies: 0,
+              cachedExecutionGrants: 0
+            }
+        const latest = auth.getCachedSessionIdentity()
+        if (latest.userId !== accountId || latest.generation !== identity.generation)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        return {
+          ...state,
+          accountId,
+          ownerPresent: Boolean(owner),
+          activeContentReaders: [...(owner?.readers.get(workspaceId)?.values() ?? [])].reduce(
+            (sum, count) => sum + count,
+            0
+          )
+        }
+      })
+    )
+  ).catch((error: unknown) => {
+    throw publicE2eeFailure(error)
+  })
+}
+
 /** Quit/logout await actual in-flight native operations before releasing stores. */
 export function closeDesktopE2eeAccount(options?: {
   quit?: boolean

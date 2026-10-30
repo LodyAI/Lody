@@ -631,6 +631,10 @@ it('opens policy storage lazily and retries a failed open without touching conte
         readEpochKey: () => Effect.succeed(f.f.secret),
         refreshLedger: () => Effect.void,
       });
+      expect(host.inspectCache('fixture-machine')).toEqual({
+        cachedPolicies: 0,
+        cachedExecutionGrants: 0,
+      });
       expect(
         (yield* host.authorize('fixture-machine', hex(f.f.owner.publicKey), 'project-a', f.remote))
           .allowed
@@ -865,5 +869,49 @@ it('qualifies compact ledger checkpoints from originals and preserves the genera
         )
       );
       expect(f.head()).toMatchObject({ generation, revision: 2 });
+    })
+  ));
+
+it('passive cache evidence counts only the requested machine and never renews a grant', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(900),
+          { kind: 'machine', sharedWithTeam: true },
+          f.remote
+        )
+      );
+      yield* f.run(
+        f.machine.authorize('fixture-machine', hex(f.bob.publicKey), undefined, f.remote)
+      );
+      const before = f.io.reads;
+      expect(f.machine.inspectCache('fixture-machine')).toEqual({
+        cachedPolicies: 1,
+        cachedExecutionGrants: 1,
+      });
+      expect(f.machine.inspectCache('another-machine')).toEqual({
+        cachedPolicies: 0,
+        cachedExecutionGrants: 0,
+      });
+      f.io.wall += 900_001;
+      f.io.mono += 900_001;
+      expect(f.machine.inspectCache('fixture-machine').cachedExecutionGrants).toBe(1);
+      expect(f.io.reads).toBe(before);
+      // An expired retained object is observable, not thereby authorized. A real
+      // start must refresh; inspecting repeatedly cannot extend the original stamp.
+      f.io.offline = true;
+      expect(
+        Result.isFailure(
+          yield* Effect.result(
+            f.run(f.machine.authorize('fixture-machine', hex(f.bob.publicKey), undefined, f.remote))
+          )
+        )
+      ).toBe(true);
+      expect(f.machine.inspectCache('fixture-machine').cachedExecutionGrants).toBe(0);
+      f.machine.stop();
+      expect(f.machine.inspectCache('fixture-machine').cachedPolicies).toBe(0);
     })
   ));

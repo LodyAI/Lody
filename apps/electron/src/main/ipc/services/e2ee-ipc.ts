@@ -21,6 +21,7 @@ import {
   prepareDesktopE2eeCreation,
   desktopE2eeCloudClient,
   runDesktopE2eeOperation,
+  inspectDesktopE2eeCachedState,
   withDesktopE2eeAccount,
   cleanupRemovedDesktopWorkspace
 } from '../../services/e2ee-account-runtime'
@@ -1454,6 +1455,16 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+  }
+  /** Passive process-bound evidence; no reader open, cloud access or cache renewal. */
+  @IpcMethod()
+  async inspectCachedState(workspaceId: string, machineId: string) {
+    if (!sharingId.safeParse(workspaceId).success || !sharingId.safeParse(machineId).success)
+      throw new Error('e2ee_invalid-input')
+    sender()
+    const accountId = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
+    if (!accountId) throw new Error('e2ee_account_unavailable')
+    return inspectDesktopE2eeCachedState(accountId, workspaceId, machineId)
   }
   @IpcMethod()
   async readMachineSharing(workspaceId: string, machineId: string) {

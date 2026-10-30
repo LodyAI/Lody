@@ -32,6 +32,7 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'open',
     'close',
     'status',
+    'inspectCachedState',
     'readIdentity',
     'ingestLedgerRecords',
     'ledgerView',

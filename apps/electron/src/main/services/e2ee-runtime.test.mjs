@@ -4256,3 +4256,28 @@ void test('sharing host retains an unknown owner original across reopen and pres
   assert.equal(version.frameHex, original)
   assert.equal(commits, 1)
 })
+
+void test('passive cache state never opens workspace custody or changes sibling entries', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      expectNoEntry(yield* owner.host.inspectCachedState(workspaceId, 'fixture-machine'))
+      assert.equal(existsSync(join(directory, 'workspaces', workspaceId)), false)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const before = yield* owner.host.status(workspaceId)
+      const snapshot = yield* owner.host.inspectCachedState(workspaceId, 'fixture-machine')
+      assert.equal(snapshot.entryPresent, true)
+      assert.equal(snapshot.cachedExecutionGrants, 0)
+      assert.deepEqual(yield* owner.host.status(workspaceId), before)
+      expectNoEntry(yield* owner.host.inspectCachedState('unopened-sibling', 'fixture-machine'))
+      assert.equal(existsSync(join(directory, 'workspaces', 'unopened-sibling')), false)
+    })
+  )
+})
+function expectNoEntry(snapshot) {
+  assert.equal(snapshot.entryPresent, false)
+  assert.equal(snapshot.cachedPolicies, 0)
+  assert.equal(snapshot.cachedExecutionGrants, 0)
+}
