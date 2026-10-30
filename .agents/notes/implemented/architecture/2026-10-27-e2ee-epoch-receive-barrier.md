@@ -2,13 +2,15 @@
 
 Status: implemented
 Translation: current
-PR: https://github.com/LodyAI/Lody/pull/1954
+PR: https://github.com/LodyAI/Lody/pull/2131
 
 [中文](2026-10-27-e2ee-epoch-receive-barrier.zh.md)
 
 ## Abstract
 
 New content is sealed at the verified current epoch inside the native host. Retained ciphertext and historical reads remain available, but stale provider hints never authorize new old-epoch ciphertext.
+
+This corrects the earlier reception/selection policy in [#1954](https://github.com/LodyAI/Lody/pull/1954).
 
 ## Authority and selection
 

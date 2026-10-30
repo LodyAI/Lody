@@ -2,13 +2,15 @@
 
 Status: implemented
 Translation: current
-PR: https://github.com/LodyAI/Lody/pull/1954
+PR: https://github.com/LodyAI/Lody/pull/2131
 
 [English](2026-10-27-e2ee-epoch-receive-barrier.md)
 
 ## 摘要
 
 新内容由原生 host 在内部选择已验证的当前 epoch 封装。已封装旧密文和历史读取保持可用，但旧 provider 提示不能授权生成新的旧 epoch 密文。
+
+本次修正此前 [#1954](https://github.com/LodyAI/Lody/pull/1954) 的接收与选择策略。
 
 ## 权限与选择
 
