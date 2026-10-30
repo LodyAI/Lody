@@ -4,7 +4,7 @@ import { appendClassName } from '../internal/class-name';
 import { feedbackSurface as surface } from './surface';
 
 /** What has not arrived: a line of text, a block of something, or a face. */
-export type SkeletonShape = 'line' | 'block' | 'circle';
+export type SkeletonShape = 'line' | 'block' | 'circle' | 'ring';
 
 export interface SkeletonProps extends Omit<
   ComponentProps<'div'>,
@@ -14,6 +14,8 @@ export interface SkeletonProps extends Omit<
   /** How much room it holds. A number is pixels; a string is a CSS length. */
   width?: string | number;
   height?: string | number;
+  /** Ring contour thickness. A number is pixels; omission keeps the 2px contour. */
+  strokeWidth?: string | number;
   className?: string;
 }
 
@@ -21,6 +23,7 @@ const SHAPES = {
   line: surface.skeletonLine,
   block: surface.skeletonBlock,
   circle: surface.skeletonCircle,
+  ring: surface.skeletonRing,
 } as const;
 
 /**
@@ -32,6 +35,7 @@ const SHAPES = {
 const dyn = stylex.create({
   width: (width: string | number) => ({ width }),
   height: (height: string | number) => ({ height }),
+  strokeWidth: (strokeWidth: string | number) => ({ borderWidth: strokeWidth }),
 });
 
 /**
@@ -49,14 +53,15 @@ const dyn = stylex.create({
  * hidden from a screen reader for the same reason.
  */
 export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
-  { shape = 'line', width, height, className, ...rest },
+  { shape = 'line', width, height, strokeWidth, className, ...rest },
   ref
 ) {
   const sx = stylex.props(
     surface.skeleton,
     SHAPES[shape],
     width != null && dyn.width(width),
-    height != null && dyn.height(height)
+    height != null && dyn.height(height),
+    shape === 'ring' && strokeWidth != null && dyn.strokeWidth(strokeWidth)
   );
   return (
     <div

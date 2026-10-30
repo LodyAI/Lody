@@ -666,6 +666,13 @@ width-only line keeps its text-line height; an explicit `0` is applied. Updating
 either prop replaces that dimension; removing it clears the previous size and
 restores the shape's default sizing.
 
+`shape="ring"` keeps a transparent centre, square aspect ratio and round contour.
+Its optional `strokeWidth` accepts pixels or a CSS length; omission uses 2px,
+explicit zero removes the contour and removal restores the default. It has no
+effect on other shapes. The contour reads the existing feedback Skeleton pigment;
+a local override inherits into descendants, so review every child reader before
+using it. The group is exported at `@lody/ui/feedback/feedback.tokens.stylex`.
+
 A `Spinner` is drawn in `currentColor`, so the one inside a ghost button takes
 the button's ink; it is called a spinner rather than a loading, because it is the
 mark and not the state, and where it goes is the surface's decision.

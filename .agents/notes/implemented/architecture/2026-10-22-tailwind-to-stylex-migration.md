@@ -1957,7 +1957,7 @@ negatives and real portal-gate calibration failures. Earlier OPENs stay unchange
 
 ### Control ownership and capture boundaries
 
-Batches74–93 move owned Tooltip, resize-edge, label, context and filled-action
+Batches74–95 move owned Tooltip, resize-edge, label, context and filled-action
 styles through existing primitives, preserving their actual caller contracts.
 The product adds no token group or dependency. Button gains CSS-typed `fontSize`
 and `lineHeight`, plus an explicit flat `solid` variant; ResizableHandle gains
@@ -1978,6 +1978,23 @@ Fixed Card titles also use existing size/leading atoms, preserving weight and
 tracking. Textareas use existing resize/min-height/background contracts and their
 existing physical `style` fields for size/leading, retaining placeholder, controlled
 value, pending and cancel behavior. These do not introduce a generic style API.
+
+Skeleton adds an opt-in `ring` shape with a transparent centre and a 2px contour.
+`strokeWidth` changes only that shape, accepts explicit zero, and restores the
+contour when removed; other shapes keep their sizing and paint. The fixed calendar
+ring uses its old local primary expression through the existing feedback token.
+Its unsupported-color-mix fallback is opaque `hsl(var(--primary))`, not a guessed
+10% HSL alpha. The current ring has no children; inherited-token overrides are not
+an arbitrary-descendant contract. Normal pulse endpoints and existing default/
+zero/removal sizing controls are separately rendered. No new token group is added.
+
+Fixed Avatar callers keep the medium context while overriding only its existing
+size token. Changing the named rung would also change fallback letters, glyphs
+and radius. The app-owned mobile `xs` keeps local `spacing * 5`, literal `.68rem`
+type and `.25rem` corners, inheriting its original line height. Protected
+UserAvatar source remains unchanged. Ten direct same-element size-token controls
+show the changed priority boundary and remain explicit negatives; the reviewed
+private callers expose no such writer.
 
 Accessible names remain mounted. Opt-in `visuallyHidden` composes the compiler's
 nine invariant fields inside the actual Dialog and Vaul Title/Description owners,
@@ -2046,6 +2063,7 @@ old timeout's exact cause.
 | `leaves82-84-acceptance.html` |                                306 / 305 / 12,854 | One disabled-button corner 10 / 7.                                          |
 | `leaves85-88-acceptance.html` |                                284 / 284 / 12,554 | No new formal OPEN; all historical OPEN retained.                           |
 | `leaves90-93-acceptance.html` |                                 164 / 164 / 8,068 | Original hover three pairs 5,602 / 5,534; native header one pair 473 / 402. |
+| `leaves94-95-acceptance.html` |                                152 / 152 / 27,218 | No new formal OPEN; ten known size-token negatives remain separate.         |
 
 The 85–88 group includes 36 actual stack pairs and 24 separately identified
 existing-API controls; controls add no utility count. Later matching controls
@@ -2091,6 +2109,10 @@ send/stop dispatch. Table's 78 unchanged Styleq warnings match through84. Earlie
 full runs retain their exact boundaries; the unrelated root ACP prerequisite
 still blocks root-check PASS.
 
+The shared UI-only run through95 additionally passes 25 files / 313 tests, with
+111 source/test/manifest hashes unchanged and the same 78 existing Styleq warnings.
+This does not extend the through93 full components/Electron boundary.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -2120,6 +2142,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 84, with partial visual acceptance    | v2             |       1,474 |   163 |        726 |
 | Exact source through 88, with partial visual acceptance    | v2             |       1,451 |   159 |        726 |
 | Exact source through 93, with partial visual acceptance    | v2             |       1,445 |   157 |        725 |
+| Exact source through 95, with partial visual acceptance    | v2             |       1,430 |   157 |        725 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2139,16 +2162,17 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through93 v2 split is components: 1,011 occurrences/141 files/632
+The published through95 v2 split is components: 996 occurrences/141 files/632
 unresolved, legacy UI: 429/14/93 and routes: 5/2/0, from 790 recorded source files.
 Shared UI source and export metadata are frozen outside that three-root count.
 Known StyleX templates remain unresolved expressions, not newly introduced
 Tailwind strings. Through88 remains a separate immutable inventory; eight source
 removals plus two newly visible retained margins produce the net decrease of six.
-Later batches are excluded.
+The 94–95 group removes fifteen further source occurrences. Later batches and
+other package hosts are excluded.
 
-The full product `src` audit through93, excluding stories, uses the same v2
-scanner and records 1,454 occurrences/159 files/729 unresolved across 1,396 frozen
+The full product `src` audit through95, excluding stories, uses the same v2
+scanner and records 1,439 occurrences/159 files/729 unresolved across 1,396 frozen
 JS/TS files. The through88 full-scope inventory remains unchanged at 1,460/161/730. The
 nine occurrences beyond the three roots belong to `conversation-layout.ts` and
 `use-keyboard-aware-scroll-into-view.ts`; four additional unresolved expressions

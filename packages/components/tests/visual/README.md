@@ -642,6 +642,7 @@ artifacts out of commits.
 | `artifacts/visual/leaves82-84-acceptance.html` | 15 utilities in seven sources: opt-in solid Button, fixed tab/menu typography and actual Stack Drawer width                                                   | 305/306 PNG pairs exact; 12,854 full standard records equal                                   | One original formal OPEN/10 raw/7 threshold pixels, inline-token/width negatives, wrong-theme and keyboard failures, partial native recovery and four Electron After-only images retained                                      |
 | `artifacts/visual/leaves85-88-acceptance.html` | 23 utilities in 19 sources: actual hidden-name owners, fixed Card title type and annotation Textareas                                                         | 284/284 PNG pairs exact; 12,554 full standard records equal                                   | 76 supplemental pairs including 16 known token negatives; 87 retained unpaired images; original Stack missing-description relation remains OPEN; 89 audit earns zero migration credit                                          |
 | `artifacts/visual/leaves90-93-acceptance.html` | Eight source utilities removed in eight product files; six runtime helper applications migrate separately; shared Header owner and type export are additional | 164/164 formal PNG pairs exact; 8,068 full standard records equal                             | Original 92 three OPENs/5,602 raw/5,534 threshold pixels and 93 native OPEN/473 raw/402 threshold pixels remain; font writer rejection, token negatives, 91 unpaired images and four actual Electron After-only pages retained |
+| `artifacts/visual/leaves94-95-acceptance.html` | Fifteen utilities in four app consumers, one app xs owner and two shared ring-owner sources: Skeleton ring and exact Avatar sizes                             | 152/152 formal PNG pairs exact; 27,218 complete standard records equal                        | 60 supplementary pairs include ten known token-priority negatives; twelve Gallery After-only states and two original calibration checkpoints remain separate; full regression remains through93 only                           |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -652,25 +653,33 @@ task-only patch. Local selector scopes do not establish a whole application pale
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
 The current scanner-v2 three-root timeline covers
-`packages/components/src/{components,ui,routes}` through batch 93:
-1,445 occurrences /157 files /725 unresolved expressions. Eight source utilities
-were removed, while batch 92 exposes two existing margin literals that were hidden
-inside runtime helper calls; the net count decreases by six. Its six runtime
-utility applications are a separate migration measure and earn zero source-deletion
-credit. Through 88 remains frozen at 1,451/159/726, through 84 at 1,474/163/726,
-through 81 at 1,489/163/724, and through 78 at 1,507/163/718.
+`packages/components/src/{components,ui,routes}` through batch 95:
+1,430 occurrences /157 files /725 unresolved expressions over 790 frozen sources.
+Batches 94–95 remove fifteen source utilities. Through 93 remains frozen at
+1,445/157/725: that group removes eight source utilities while exposing two existing
+margin literals inside runtime helper calls, a net decrease of six. Its six
+runtime utility applications earn no extra source-deletion credit. Through 88
+remains 1,451/159/726, through 84 is 1,474/163/726, through 81 is 1,489/163/724,
+and through 78 is 1,507/163/718.
 
-The broader frozen scan covers `packages/components/src`, excluding `stories`:
-1,454 occurrences /159 files /729 unresolved expressions across 1,396 scanned
-files. The additional lib/hooks boundary contributes nine occurrences in two files
-and four unresolved expressions. Compare it with the earlier full scan of that
-same package path, 1,460/161/730; it does not cover every package or Tailwind host
-in the monorepo. The three-root and broader totals must not be compared as one
-time series. The manual helper audit separately retains sixteen unconsumed public
-skip-link literals, three touch-helper literals and four remaining opaque caller
-arguments after batch 92. The historical six-argument audit stays unchanged.
-No new skip-link UI was installed to invent migration coverage, and no parser
-method was changed. These are lower bounds, not completion percentages.
+The broader package-src scan is historical through 93, not refreshed through 95:
+`packages/components/src`, excluding `stories`, has 1,454 occurrences /159 files
+/729 unresolved expressions across 1,396 scanned files. Its additional lib/hooks
+boundary is nine occurrences in two files and four unresolved expressions.
+Compare it with the earlier full scan of the same package path, 1,460/161/730;
+it does not cover every package or Tailwind host. Keep this separate from the
+three-root timeline. The through93 manual audit separately retains sixteen
+unconsumed skip-link literals, three touch-helper literals and four opaque caller
+arguments after batch 92; its older six-argument audit is unchanged. Later batch96
+helper work is outside this report and three-root snapshot. These static lower
+bounds are not completion percentages.
+
+The 94–95 report embeds every original screenshot and ten labelled masks derived
+from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
+same-element token-input negatives are separate. An original Gallery gate failure
+and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
+verify 203 unique original payloads, their previews, filtering, original-size
+keyboard/pointer zoom and 1280/390px layouts. The index links all 42 frozen reports.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its
 distinct harness identities. Retain raw xterm helper records and original corner

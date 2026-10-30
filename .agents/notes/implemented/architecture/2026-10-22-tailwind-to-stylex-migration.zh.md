@@ -1393,7 +1393,7 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 
 ### 控件归属与采集边界
 
-第 74–93 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
+第 74–95 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
 保留实际调用方合同，不新增 Token 组或依赖。Button 新增 CSS 类型的 `fontSize`、
 `lineHeight` 与平实 `solid` variant，ResizableHandle 新增显式 edge 外观；原默认不变。
 
@@ -1407,6 +1407,18 @@ Login 保留完整字号／leading，移动标签仅改字号；字重、trackin
 固定 Card 标题也写既有字号／leading Token，保留字重与 tracking。Textarea 使用既有
 resize／min-height／background 合同及已有 `style` 的实际字号／leading 字段，保留
 placeholder、受控值、pending 和取消行为，没有新增通用样式逃生 API。
+
+Skeleton 新增显式 `ring` 形状，中心透明、默认描边 2px。`strokeWidth` 仅影响该形状，
+显式零有效，移除后恢复默认描边；其他形状的尺寸和绘制不变。固定日历环通过已有 feedback
+Token 保留原元素局部 primary 表达式；不支持 color-mix 时的 fallback 是不透明
+`hsl(var(--primary))`，不能猜成 10% HSL alpha。当前环没有 children，继承 Token 覆盖
+不构成任意后代合同。正常 pulse 端点及已有默认／零／移除尺寸控制均分别真实渲染，未增加
+Token 组。
+
+固定 Avatar 调用保留 medium 上下文，只覆盖已有尺寸 Token；改命名 rung 会同时改变
+Fallback 字母、图标和圆角。应用自有移动 `xs` 保留局部 `spacing * 5`、字面 `.68rem`
+字号与 `.25rem` 圆角，行高继续继承。受保护 UserAvatar 源码未改。十组同元素尺寸 Token
+控制证明迁移后的优先级边界变化，作为明确负控保留；已审私有调用不暴露该 writer。
 
 无障碍名称继续挂载：显式 `visuallyHidden` 在实际 Dialog／Vaul Title／Description 及
 Popover Title 的归属层组合编译器原九字段，不更换上下文、DOM 或 ARIA 属性。
@@ -1456,6 +1468,7 @@ SessionDetail loading 分支，没有替换子组件或 runtime。已有全宽 A
 | `leaves82-84-acceptance.html` |                 306／305／12,854 | disabled Button 边角一对 10／7。                       |
 | `leaves85-88-acceptance.html` |                 284／284／12,554 | 无新增正式 OPEN；所有历史 OPEN 保留。                  |
 | `leaves90-93-acceptance.html` |                  164／164／8,068 | 原 hover 三对 5,602／5,534；native 页头一对 473／402。 |
+| `leaves94-95-acceptance.html` |                 152／152／27,218 | 无新增正式 OPEN；十组已知尺寸 Token 负控单列。         |
 
 85–88 组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
 后继匹配控制不关闭原未知栅格差异。实际主题门禁拒绝 light URL 错标的固定 dark 场景；
@@ -1487,6 +1500,9 @@ Electron 构建／四页冒烟通过，主 Agent 已看四张应用图。它们�
 的 local chat 不证明真实 agent send/stop 调度。Table 的七十八条既有 Styleq warning
 与截至 84 相同；更早全量回归保留准确边界，无关根 ACP 前置失败仍阻止将根检查称为通过。
 
+截至 95 的共享 UI 独立全量回归另通过 25 文件／313 测试，111 份源码／测试／manifest
+哈希不变，七十八条既有 Styleq warning 相同。这不扩展截至 93 的完整组件／Electron 边界。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1515,6 +1531,7 @@ Electron 构建／四页冒烟通过，主 Agent 已看四张应用图。它们�
 | 精确截至 84 的源码，视觉部分验收 | v2       |    1,474 |  163 |    726 |
 | 精确截至 88 的源码，视觉部分验收 | v2       |    1,451 |  159 |    726 |
 | 精确截至 93 的源码，视觉部分验收 | v2       |    1,445 |  157 |    725 |
+| 精确截至 95 的源码，视觉部分验收 | v2       |    1,430 |  157 |    725 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1527,14 +1544,14 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 93 的 v2 分项为 components 1,011 处／141 文件／632 未解析，旧 UI 429／14／93，
+已发布截至 95 的 v2 分项为 components 996 处／141 文件／632 未解析，旧 UI 429／14／93，
 routes 五处／两文件／零，来自三根 790 份冻结源码。共享 UI 源码与导出元数据位于该计数
 范围外单独冻结。已知 StyleX 模板继续作为未解析表达式，不代表新增 Tailwind 字符串。
 截至 88 仍是独立不可变库存；八处源码删除加两个新可见的保留 margin，使数字净减六。
-不含后续批次。
+94–95 再移除十五处源码出现次数；不含后续批次或其他包宿主。
 
-截至 93 的完整产品 `src` 审计排除 stories，仍用同一 v2 扫描器；1,396 份冻结 JS／TS 得到
-1,454 处／159 文件／729 未解析。截至 88 的全域库存 1,460／161／730 保持原样。三根外九处属于 `conversation-layout.ts` 与
+截至 95 的完整产品 `src` 审计排除 stories，仍用同一 v2 扫描器；1,396 份冻结 JS／TS 得到
+1,439 处／159 文件／729 未解析。截至 88 的全域库存 1,460／161／730 保持原样。三根外九处属于 `conversation-layout.ts` 与
 `use-keyboard-aware-scroll-into-view.ts`，另四个未解析单列。独立的截至 88 手工锁定编译器审计还发现 v2
 漏计十六个潜在 skip-link 工厂字面量、三个共享 touch-helper 字面量及六个调用方 margin
 参数；其中两个 margin 参数在 92 调用迁移后可静态识别，其余四个仍不透明。

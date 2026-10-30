@@ -547,15 +547,7 @@ function ProjectBucketHeading({
         />
       );
     } else {
-      mark = (
-        <MobileInitialLetterAvatar
-          name={label}
-          hashSeed={hashSeed ?? label}
-          size="sm"
-          /* Match 20px folder/avatar mark; `sm` defaults to 24px. */
-          className="h-5 w-5 rounded text-[0.68rem]"
-        />
-      );
+      mark = <MobileInitialLetterAvatar name={label} hashSeed={hashSeed ?? label} size="xs" />;
     }
   }
   const labelCluster = (

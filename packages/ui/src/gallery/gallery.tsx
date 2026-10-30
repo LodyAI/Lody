@@ -2118,6 +2118,27 @@ function HiddenDialogNames() {
   );
 }
 
+function HiddenDialogHeader() {
+  const [hidden, setHidden] = useState(true);
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger render={<Button variant="secondary" size="small" />}>
+        Dialog with accessible header
+      </Dialog.Trigger>
+      <Dialog.Content>
+        <Dialog.Header data-hidden-header-sample visuallyHidden={hidden || undefined}>
+          <Dialog.Title>Accessible header title</Dialog.Title>
+          <Dialog.Description>Accessible header description</Dialog.Description>
+        </Dialog.Header>
+        <p>The header keeps the panel's name and description mounted.</p>
+        <Button size="small" onClick={() => setHidden((value) => !value)}>
+          {hidden ? 'Show header' : 'Hide header'}
+        </Button>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
 /**
  * The modal panel, drawn from `dialog/surface.ts` on a stand-in: a dialog is
  * portalled and unmounted while it is closed, and opening one would cover the
@@ -2803,18 +2824,40 @@ function ProgressRow({ name, value }: { name: string; value: number | null }) {
   );
 }
 
+function SkeletonRingSample() {
+  const [step, setStep] = useState(0);
+  const stroke = [undefined, 6, 0, undefined][step];
+  return (
+    <div data-skeleton-ring-demo data-ring-step={step}>
+      <Skeleton shape="ring" width={48} strokeWidth={stroke} data-skeleton-ring-owner>
+        <Skeleton width={8} height={8} data-skeleton-ring-child />
+      </Skeleton>
+      <Button size="small" variant="secondary" onClick={() => setStep((value) => (value + 1) % 4)}>
+        Next ring stroke
+      </Button>
+      <span {...stylex.props(styles.readout)}>stroke {stroke ?? 'default 2'}px</span>
+    </div>
+  );
+}
+
 function SkeletonRow() {
   return (
-    <Row>
-      <LegendKey>skeleton</LegendKey>
-      <div {...stylex.props(styles.skeletonBlock)}>
-        <Skeleton shape="circle" width={32} height={32} />
-        <div {...stylex.props(styles.skeletonLines)}>
-          <Skeleton width="100%" />
-          <Skeleton width="60%" />
+    <>
+      <Row>
+        <LegendKey>skeleton</LegendKey>
+        <div {...stylex.props(styles.skeletonBlock)}>
+          <Skeleton shape="circle" width={32} height={32} />
+          <div {...stylex.props(styles.skeletonLines)}>
+            <Skeleton width="100%" />
+            <Skeleton width="60%" />
+          </div>
         </div>
-      </div>
-    </Row>
+      </Row>
+      <Row>
+        <LegendKey>skeleton ring</LegendKey>
+        <SkeletonRingSample />
+      </Row>
+    </>
   );
 }
 
@@ -4809,6 +4852,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>accessible name</LegendKey>
               <Cluster>
                 <HiddenDialogNames />
+                <HiddenDialogHeader />
               </Cluster>
             </Row>
             <DialogReplica />

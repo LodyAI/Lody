@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Alert } from '../src/feedback/alert';
@@ -92,6 +93,50 @@ describe('Progress', () => {
 describe('Skeleton', () => {
   test('it says nothing to a screen reader, because its shape says it all', () => {
     expect(attrOf(renderToStaticMarkup(<Skeleton />), 'div', 'aria-hidden')).toBe('true');
+  });
+
+  test('ring thickness resets without remounting content or leaking onto other shapes', async () => {
+    const ref = createRef<HTMLDivElement>();
+    const child = <span data-skeleton-child>Retained content</span>;
+    mounted = await mount(
+      <Skeleton ref={ref} shape="ring" width={96} height={48} strokeWidth={7}>
+        {child}
+      </Skeleton>
+    );
+    const element = ref.current!;
+    const content = element.querySelector('[data-skeleton-child]');
+    const values = () =>
+      Array.from(element.style).map((name) => element.style.getPropertyValue(name));
+    expect(values()).toEqual(expect.arrayContaining(['96px', '48px', '7px']));
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="ring" width={96} height={48} strokeWidth={0}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toEqual(expect.arrayContaining(['96px', '48px', '0px']));
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="ring" width={96} height={48}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toHaveLength(2);
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="circle" width={96} height={48} strokeWidth={7}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toHaveLength(2);
+    expect(ref.current).toBe(element);
+    expect(element.querySelector('[data-skeleton-child]')).toBe(content);
+    expect(element.hasAttribute('stroke-width')).toBe(false);
+    expect(element.hasAttribute('strokewidth')).toBe(false);
+    expect(element.getAttribute('aria-hidden')).toBe('true');
   });
 
   test('optional sizes can change without invalid style atoms or stale inline dimensions', async () => {

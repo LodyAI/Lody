@@ -5,6 +5,7 @@ import type { MachineId } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { UserAvatar } from '@/components/user-avatar';
+import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { SidebarHoverCard } from '@/components/session-info-hover-card';
 import {
   SessionRowStatusIndicator,
@@ -28,6 +29,10 @@ const OS_LABELS: Readonly<Record<string, string>> = {
 };
 
 const styles = stylex.create({
+  ownerAvatar: {
+    [avatarTokens.sizeMedium]: 'calc(var(--spacing) * 3.5)',
+    fontSize: '7px',
+  },
   /** The pill that names an offline machine. */
   offlinePill: {
     display: 'inline-flex',
@@ -210,7 +215,7 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
       key: 'owner',
       icon:
         !machine.isOwn && machine.owner ? (
-          <UserAvatar user={machine.owner} className="h-3.5 w-3.5 text-[7px]" />
+          <UserAvatar user={machine.owner} className={stylex.props(styles.ownerAvatar).className} />
         ) : (
           <User {...stylex.props(styles.glyph)} aria-hidden="true" />
         ),

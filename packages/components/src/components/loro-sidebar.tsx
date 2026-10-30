@@ -86,6 +86,7 @@ import {
 } from './sidebar-updated-session-list';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
+import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -107,8 +108,8 @@ const shellStyles = stylex.create({
     alignItems: 'center',
     gap: 'calc(var(--spacing) * 1.5)',
   },
-  switcherAvatar: { fontSize: '9px' },
-  switcherMenuAvatar: { fontSize: '10px' },
+  switcherAvatar: { fontSize: '9px', [avatarTokens.sizeMedium]: 'calc(var(--spacing) * 4)' },
+  switcherMenuAvatar: { fontSize: '10px', [avatarTokens.sizeMedium]: 'calc(var(--spacing) * 5)' },
   switcherMenu: { width: 'calc(var(--spacing) * 64)' },
   switcherMenuHeading: { fontWeight: 'var(--font-weight-medium)' },
   switcherMenuChoice: {
@@ -1537,7 +1538,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             name: workspaceName,
             logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
           }}
-          className={clsx(stylex.props(shellStyles.switcherAvatar).className, 'h-4 w-4')}
+          className={stylex.props(shellStyles.switcherAvatar).className}
         />
       </span>
       <span {...stylex.props(shellStyles.identityRow)}>
@@ -1678,10 +1679,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
-                            className={clsx(
-                              stylex.props(shellStyles.switcherMenuAvatar).className,
-                              'h-5 w-5'
-                            )}
+                            className={stylex.props(shellStyles.switcherMenuAvatar).className}
                           />
                         }
                         className={clsx(

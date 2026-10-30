@@ -13,7 +13,7 @@ function stringToHue(value: string): number {
   return Math.abs(hash) % 360;
 }
 
-export type MobileInitialLetterAvatarSize = 'sm' | 'md' | 'lg';
+export type MobileInitialLetterAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const styles = stylex.create({
   base: {
@@ -23,6 +23,13 @@ const styles = stylex.create({
     justifyContent: 'center',
     fontWeight: themeFontWeight.semibold,
     color: '#ffffff',
+  },
+  /* Project list mark; the box reads spacing locally, while type and corner follow rem. */
+  xs: {
+    width: 'calc(var(--spacing) * 5)',
+    height: 'calc(var(--spacing) * 5)',
+    borderRadius: '0.25rem',
+    fontSize: '0.68rem',
   },
   /* Header chip — paired with `text-base` titles. */
   sm: {

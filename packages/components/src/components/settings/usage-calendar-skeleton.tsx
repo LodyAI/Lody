@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Skeleton } from '@lody/ui/skeleton';
+import { feedback as feedbackTokens } from '@lody/ui/feedback/feedback.tokens.stylex';
 import { withClassName } from '@/lib/stylex';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
@@ -16,6 +17,12 @@ const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
 
 const styles = stylex.create({
   linePillAlignment: { verticalAlign: 'middle' },
+  ringInk: {
+    [feedbackTokens.skeleton]: {
+      default: 'hsl(var(--primary))',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    },
+  },
   compositionBar: { marginTop: 'calc(var(--spacing) * 1.5)' },
   legendTrailingValue: { marginLeft: 'auto' },
   calendarCellShape: { aspectRatio: '1 / 1' },
@@ -427,14 +434,7 @@ function RingSkeleton() {
       <div {...stylex.props(styles.ringBox)}>
         {/* Ring, not a filled disc: border carries the pulse so the centre stays
            open like the real donut (RING_VIEWBOX 168 / RING_STROKE 26). */}
-        {/* The primitive has no prop for this pre-existing ring appearance.
-            Keep the original override as a documented holdout until its API can
-            represent the same border and transparent fill. */}
-        <Skeleton
-          shape="circle"
-          width="100%"
-          className="aspect-square border-[26px] border-primary/10 bg-transparent"
-        />
+        <Skeleton shape="ring" width="100%" strokeWidth={26} {...stylex.props(styles.ringInk)} />
         <div {...stylex.props(styles.ringOverlay)}>
           <Skeleton width={48} height={16} />
           <Skeleton width={36} height={8} />

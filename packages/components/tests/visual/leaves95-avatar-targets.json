@@ -1,0 +1,419 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "components-ownedworkspaceshellmigration--default",
+    "components-ownedworkspaceshellmigration--root-variable-scope",
+    "components-ownedworkspaceshellmigration--subtree-variable-scope",
+    "components-ownedavatarglyphmigration--sidebar-machine-owner",
+    "components-ownedavatarglyphmigration--sidebar-machine-owner-scoped",
+    "mobile-mobilechatlist--group-by-project",
+    "components-ownedavatarglyphmigration--all-rungs",
+    "components-ownedavatarglyphmigration--parent-glyph-theme",
+    "components-ownedavatarglyphmigration--existing-mobile-rungs"
+  ],
+  "ready": {
+    "components-ownedworkspaceshellmigration--default": [
+      {
+        "action": "visible",
+        "selector": "[data-workspace-shell-surface] [data-size=medium][data-shape=tile]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--root-variable-scope": [
+      {
+        "action": "visible",
+        "selector": "[data-workspace-shell-surface] [data-size=medium][data-shape=tile]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--subtree-variable-scope": [
+      {
+        "action": "visible",
+        "selector": "[data-workspace-shell-surface] [data-size=medium][data-shape=tile]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "components-ownedavatarglyphmigration--sidebar-machine-owner": [
+      {
+        "action": "hover",
+        "role": "button",
+        "name": "Inspect machine owner"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-size=medium][data-shape=circle]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "components-ownedavatarglyphmigration--sidebar-machine-owner-scoped": [
+      {
+        "action": "hover",
+        "role": "button",
+        "name": "Inspect machine owner"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-size=medium][data-shape=circle]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "mobile-mobilechatlist--group-by-project": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const h=[...document.querySelectorAll('button')].find(e=>e.hasAttribute('aria-expanded')&&e.textContent.includes('loro-dev/lody')),e=h?.querySelector('span[aria-hidden=true]');if(!e)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect(),raw=s.getPropertyValue('--spacing').trim(),space=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),rootFont=parseFloat(getComputedStyle(document.documentElement).fontSize);return Math.abs(parseFloat(s.width)-space*5)<.001&&Math.abs(parseFloat(s.height)-space*5)<.001&&Math.abs(parseFloat(s.fontSize)-rootFont*.68)<.001&&Math.abs(parseFloat(s.borderRadius)-rootFont*.25)<.001&&r.width>0&&r.height>0&&document.fonts.status==='loaded'; }"
+      }
+    ],
+    "components-ownedavatarglyphmigration--all-rungs": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'"
+      }
+    ],
+    "components-ownedavatarglyphmigration--parent-glyph-theme": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'"
+      }
+    ],
+    "components-ownedavatarglyphmigration--existing-mobile-rungs": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedworkspaceshellmigration--default": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-shell-surface] button:has([data-shape=tile])"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "selected-workspace-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitemradio]",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]') && document.querySelector('[data-workspace-shell-result]')?.dataset.workspace?.endsWith('two')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      }
+    ],
+    "components-ownedworkspaceshellmigration--root-variable-scope": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-shell-surface] button:has([data-shape=tile])"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "selected-workspace-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitemradio]",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]') && document.querySelector('[data-workspace-shell-result]')?.dataset.workspace?.endsWith('two')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      }
+    ],
+    "components-ownedworkspaceshellmigration--subtree-variable-scope": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-shell-surface] button:has([data-shape=tile])"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      },
+      {
+        "name": "selected-workspace-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitemradio]",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]') && document.querySelector('[data-workspace-shell-result]')?.dataset.workspace?.endsWith('two')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const targets=[...document.querySelectorAll('[data-size=medium][data-shape=tile]')];if(!targets.length)return false;return targets.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),menu=!!e.closest('[role=menu]'),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=spacing*(menu?5:4),fallback=e.querySelector('span');return Math.abs(parseFloat(c.width)-expected)<.001&&Math.abs(parseFloat(c.height)-expected)<.001&&c.fontSize===(menu?'10px':'9px')&&fallback&&getComputedStyle(fallback).fontSize==='11px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      }
+    ],
+    "components-ownedavatarglyphmigration--sidebar-machine-owner": [
+      {
+        "name": "cjk-initials",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cycle owner initials"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-size=medium][data-shape=circle]')?.textContent==='\u667a\u80fd'"
+          }
+        ]
+      },
+      {
+        "name": "empty-name-glyph",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cycle owner initials"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-size=medium][data-shape=circle] svg')"
+          }
+        ]
+      },
+      {
+        "name": "loaded-owner-image",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle owner image"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const i=document.querySelector('[data-size=medium][data-shape=circle] img');return !!i&&i.complete&&i.naturalWidth>0;}"
+          }
+        ]
+      }
+    ],
+    "components-ownedavatarglyphmigration--sidebar-machine-owner-scoped": [
+      {
+        "name": "cjk-initials",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cycle owner initials"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-size=medium][data-shape=circle]')?.textContent==='\u667a\u80fd'"
+          }
+        ]
+      },
+      {
+        "name": "empty-name-glyph",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cycle owner initials"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-size=medium][data-shape=circle] svg')"
+          }
+        ]
+      },
+      {
+        "name": "loaded-owner-image",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle owner image"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Inspect machine owner"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const e=document.querySelector('[data-size=medium][data-shape=circle]');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);if(Math.abs(parseFloat(c.width)-spacing*3.5)>.001||Math.abs(parseFloat(c.height)-spacing*3.5)>.001||c.fontSize!=='7px'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const i=document.querySelector('[data-size=medium][data-shape=circle] img');return !!i&&i.complete&&i.naturalWidth>0;}"
+          }
+        ]
+      }
+    ],
+    "mobile-mobilechatlist--group-by-project": [
+      {
+        "name": "project-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "loro-dev/lody"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('button')].find(e=>e.hasAttribute('aria-expanded')&&e.textContent.includes('loro-dev/lody'))?.getAttribute('aria-expanded')==='false'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const h=[...document.querySelectorAll('button')].find(e=>e.hasAttribute('aria-expanded')&&e.textContent.includes('loro-dev/lody')),e=h?.querySelector('span[aria-hidden=true]');if(!e)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect(),raw=s.getPropertyValue('--spacing').trim(),space=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),rootFont=parseFloat(getComputedStyle(document.documentElement).fontSize);return Math.abs(parseFloat(s.width)-space*5)<.001&&Math.abs(parseFloat(s.height)-space*5)<.001&&Math.abs(parseFloat(s.fontSize)-rootFont*.68)<.001&&Math.abs(parseFloat(s.borderRadius)-rootFont*.25)<.001&&r.width>0&&r.height>0&&document.fonts.status==='loaded'; }"
+          }
+        ]
+      },
+      {
+        "name": "project-reexpanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "loro-dev/lody"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('button')].find(e=>e.hasAttribute('aria-expanded')&&e.textContent.includes('loro-dev/lody'))?.getAttribute('aria-expanded')==='true'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; const h=[...document.querySelectorAll('button')].find(e=>e.hasAttribute('aria-expanded')&&e.textContent.includes('loro-dev/lody')),e=h?.querySelector('span[aria-hidden=true]');if(!e)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect(),raw=s.getPropertyValue('--spacing').trim(),space=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),rootFont=parseFloat(getComputedStyle(document.documentElement).fontSize);return Math.abs(parseFloat(s.width)-space*5)<.001&&Math.abs(parseFloat(s.height)-space*5)<.001&&Math.abs(parseFloat(s.fontSize)-rootFont*.68)<.001&&Math.abs(parseFloat(s.borderRadius)-rootFont*.25)<.001&&r.width>0&&r.height>0&&document.fonts.status==='loaded'; }"
+          }
+        ]
+      }
+    ]
+  }
+}

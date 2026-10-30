@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
+import { Provider, createStore } from 'jotai';
+import type { MachineId } from '@lody/shared';
+import { SidebarMachineHoverCard } from '@/components/sidebar-machine-card';
+import {
+  MobileInitialLetterAvatar,
+  type MobileInitialLetterAvatarSize,
+} from '@/components/mobile/mobile-initial-letter-avatar';
 import * as stylex from '@stylexjs/stylex';
 import { type AvatarSize } from '@lody/ui/avatar';
 import { avatar } from '@lody/ui/avatar/avatar.tokens.stylex';
@@ -99,3 +106,73 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const AllRungs: Story = {};
 export const ParentGlyphTheme: Story = { args: { initialThemed: true } };
+
+const ownerImage = new URL('../assets/lody-icon.png', import.meta.url).href;
+
+function MachineOwnerFixture({ scoped = false }: { scoped?: boolean }) {
+  const [store] = useState(createStore);
+  const [image, setImage] = useState(false);
+  const [name, setName] = useState('Wide Word');
+  return (
+    <Provider store={store}>
+      <div
+        {...stylex.props(styles.frame)}
+        data-avatar-machine-fixture
+        style={
+          scoped ? ({ '--spacing': '5px', '--ui-font-size': '18px' } as CSSProperties) : undefined
+        }
+      >
+        <div {...stylex.props(styles.row)}>
+          <Button onClick={() => setImage(!image)}>Toggle owner image</Button>
+          <Button onClick={() => setName(name === 'Wide Word' ? '智 能' : name ? '' : 'Wide Word')}>
+            Cycle owner initials
+          </Button>
+        </div>
+        <SidebarMachineHoverCard
+          machine={{
+            machineId: 'avatar-migration-machine' as MachineId,
+            name: 'Synthetic remote machine',
+            owner: { name, image: image ? ownerImage : null },
+            isOwn: false,
+            isCurrent: false,
+            os: 'linux',
+            projectCount: 7,
+          }}
+        >
+          <Button>Inspect machine owner</Button>
+        </SidebarMachineHoverCard>
+      </div>
+    </Provider>
+  );
+}
+
+function ExistingMobileAvatarRungs() {
+  const rungs = [undefined, 'sm', 'md', 'lg'] as const satisfies readonly (
+    | MobileInitialLetterAvatarSize
+    | undefined
+  )[];
+  return (
+    <div {...stylex.props(styles.frame)} data-existing-mobile-avatar-rungs>
+      <div {...stylex.props(styles.row)}>
+        {rungs.map((size) => (
+          <div
+            key={size ?? 'omitted'}
+            {...stylex.props(styles.cell)}
+            data-existing-mobile-avatar-size={size ?? 'omitted'}
+          >
+            <MobileInitialLetterAvatar
+              name="Synthetic"
+              hashSeed="avatar-existing-rungs"
+              {...(size ? { size } : {})}
+            />
+            <span {...stylex.props(styles.caption)}>{size ?? 'omitted'}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export const SidebarMachineOwner: Story = { render: () => <MachineOwnerFixture /> };
+export const SidebarMachineOwnerScoped: Story = { render: () => <MachineOwnerFixture scoped /> };
+export const ExistingMobileRungs: Story = { render: () => <ExistingMobileAvatarRungs /> };
