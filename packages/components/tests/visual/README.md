@@ -738,9 +738,11 @@ from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
 same-element token-input negatives are separate. An original Gallery gate failure
 and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
 verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 55 frozen reports, including the separately scoped helper
-continuations through 115. Those later reports preserve every earlier OPEN rather than closing
-issues through a new successful subset.
+keyboard/pointer zoom and 1280/390px layouts. The index now links 66 frozen reports through131 and explicitly withdraws the
+111 unsafe Sidebar runtime mappings in110/113/114/116/120. Correction127 restores
+32 original PNG/full-record pairs; old reports keep their original hashes. New
+successful subsets do not close historical OPENs. Two real Chrome cycles verify
+index search, relative links and 1280/390px layouts.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its
 distinct harness identities. Retain raw xterm helper records and original corner
@@ -833,6 +835,38 @@ tests, 25 UI files /312 tests and the actual Electron build/smoke. The 78 existi
 styleq warnings remain, and root `pnpm check` is not claimed PASS because of the
 existing ACP SDK prerequisite failure. Batch 94 and other Tailwind hosts are
 outside that validation boundary.
+
+## Current corrected boundary
+
+The public Sidebar's empty-caller guard did not isolate ancestor utility precedence.
+Batch127 restores the actual Before110 cascade; no source-removal credit is claimed.
+The earlier bounded reports remain historical evidence, with their runtime migration
+credit withdrawn. The qualified core inventory through128 is1,404 occurrences /
+157 used files /725 unresolved expressions across790 production source files,
+including DEV125 but excluding concurrent131/130. See
+`artifacts/visual/inventory-source-through128-proof.json`; this is not a percentage
+or a claim of production visual coverage.
+
+| Report                          | Accepted scope                                                       | Remaining limits                                                                    |
+| ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `leaves117-119-acceptance.html` | 27 annotation utilities;54 positive pairs                            | 15 raster OPENs;119 Checkbox rejected                                               |
+| `leaves118-acceptance.html`     | 10 fixed Input/Tooltip utilities;56 exact positive pairs             | Two radius utilities retained; six direct token negatives; old12 candidate rejected |
+| `leaves123-acceptance.html`     | No accepted migration                                                | Offscreen color/partial capture failure; source restored                            |
+| `leaves124-acceptance.html`     | Two dimensions in real Electron navigation;18 complete records match | Two target PNG OPENs; context is supplemental, not extra pairs                      |
+| `leaves125-acceptance.html`     | Two dimensions in actual DEV email branch;22 exact pairs             | No production branch coverage                                                       |
+| `leaves126-acceptance.html`     | No accepted migration                                                | Inherited typography/scroll geometry failure; source restored                       |
+| `leaves127-acceptance.html`     | 32 exact restoration pairs/752 full nodes                            | Withdraws111 runtime mappings; old OPENs remain                                     |
+| `leaves128-acceptance.html`     | Six private glyph ink utilities;68 exact pairs including4 normal     | Two intentional token carriers differ; four direct token negatives                  |
+| `leaves129-acceptance.html`     | 14 real error-fallback utilities;26 exact primary pairs              | One recovery OPEN; caught React errors expected; one redundant cleanup separate     |
+| `leaves131-acceptance.html`     | Two fixed plain-text ink utilities;76 exact positive pairs           | Four token negatives; four normal frames have interrupted cleanup                   |
+
+Root independently reopens original compressed records and decodes PNG RGBA;
+128/131 comparisons exclude only the two named intentional carrier values, keeping
+all other token/physical/geometry/state fields in the comparison. Their raw full
+objects are not claimed equal. The stable root regression through128 passes620
+files/6,209 tests with3,149 inputs unchanged; modern UI passes25/313 with114 stable
+inputs. Later131 is outside that full-suite boundary. The root check still fails
+at the existing ACP SDK prerequisite; no backend/submodule workaround is included.
 
 ## Real desktop smoke
 

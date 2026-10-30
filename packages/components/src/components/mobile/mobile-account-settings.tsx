@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { button } from '@lody/ui/button/button.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
   UserPlus,
@@ -47,6 +48,22 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  // These private ghost actions contain only currentColor glyphs. Keep every other
+  // control token inherited; the semantic label supplies their existing hover ink.
+  workspaceActionInk: {
+    [button.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+    },
+  },
+  workspaceDestructiveActionInk: {
+    [button.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--destructive) / 1)',
+    },
+  },
   actionSpacing: {
     [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
   },
@@ -822,7 +839,7 @@ export function MobileAccountSettings({
                       aria-label={t('workspace.removeMember.title')}
                       height="calc(var(--spacing) * 9)"
                       width="calc(var(--spacing) * 9)"
-                      className="text-muted-foreground hover:text-destructive"
+                      className={stylex.props(styles.workspaceDestructiveActionInk).className}
                       onClick={() => {
                         setUserToDelete(member.id);
                         setDeleteUserDialogOpen(true);
@@ -868,7 +885,7 @@ export function MobileAccountSettings({
                     aria-label={t('workspace.invitations.copyLink')}
                     height="calc(var(--spacing) * 9)"
                     width="calc(var(--spacing) * 9)"
-                    className="text-muted-foreground hover:text-foreground"
+                    className={stylex.props(styles.workspaceActionInk).className}
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
                     }}
@@ -882,7 +899,7 @@ export function MobileAccountSettings({
                       aria-label={t('common.cancel')}
                       height="calc(var(--spacing) * 9)"
                       width="calc(var(--spacing) * 9)"
-                      className="text-muted-foreground hover:text-destructive"
+                      className={stylex.props(styles.workspaceDestructiveActionInk).className}
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
                         void (async () => {

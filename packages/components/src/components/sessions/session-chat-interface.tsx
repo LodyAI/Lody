@@ -235,6 +235,8 @@ import {
 import { Drawer } from '@lody/ui/drawer';
 import { Badge } from '@lody/ui/badge';
 import { Input } from '@lody/ui/input';
+import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
+import { tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
@@ -687,6 +689,21 @@ const styles = stylex.create({
   searchCountNoResults: { color: 'hsl(var(--destructive) / 0.9)' },
   searchActions: { display: 'flex', alignItems: 'center', gap: '1px' },
   searchInputLayout: { minWidth: 0, flex: '1 1 0%' },
+  searchInputTokens: {
+    [searchFieldTokens.background]: 'transparent',
+    [searchFieldTokens.paddingXMedium]: 'calc(var(--spacing) * 1.5)',
+    [searchFieldTokens.text]: '13px',
+    [searchFieldTokens.placeholder]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+    },
+  },
+  searchTooltipTokens: {
+    [searchTooltipTokens.paddingX]: 'calc(var(--spacing) * 2)',
+    [searchTooltipTokens.paddingY]: 'calc(var(--spacing) * 1)',
+    [searchTooltipTokens.text]: '11px',
+  },
   searchTooltipLayout: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
   searchSeparatorLayout: { height: themeSpace[4] },
   forkWorktreeGlyph: { width: '100%', height: '100%' },
@@ -2105,10 +2122,7 @@ export function SessionSearchBar({
         <Tooltip.Trigger delay={400} render={button} />
         <Tooltip.Content
           side="bottom"
-          className={cn(
-            stylex.props(styles.searchTooltipLayout).className,
-            'px-2 py-1 text-[11px]'
-          )}
+          className={stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className}
         >
           <span>{label}</span>
           <span {...stylex.props(styles.searchShortcut)}>{shortcut}</span>
@@ -2145,8 +2159,8 @@ export function SessionSearchBar({
           aria-label={t('sessions.findInConversation', 'Find in session')}
           controlHeight="calc(var(--spacing) * 7)"
           className={cn(
-            stylex.props(styles.searchInputLayout).className,
-            'border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden'
+            stylex.props(styles.searchInputLayout, styles.searchInputTokens).className,
+            'border-0 py-0 tracking-tight shadow-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden'
           )}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -2217,10 +2231,9 @@ export function SessionSearchBar({
             />
             <Tooltip.Content
               side="bottom"
-              className={cn(
-                stylex.props(styles.searchTooltipLayout).className,
-                'px-2 py-1 text-[11px]'
-              )}
+              className={
+                stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className
+              }
             >
               <span>{t('common.close', 'Close')}</span>
               <span {...stylex.props(styles.searchShortcut)}>Esc</span>

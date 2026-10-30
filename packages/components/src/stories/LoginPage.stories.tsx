@@ -287,6 +287,16 @@ export const ElectronRenderer: Story = {
   ),
 };
 
+export const ElectronRendererSessionPending: Story = {
+  render: (args) => (
+    <LoginPageStoryHarness
+      {...args}
+      isElectronRenderer
+      sessionValue={createStableSessionValue({ hasLocalToken: true, isPending: true })}
+    />
+  ),
+};
+
 export const ExpiredSession: Story = {
   render: (args) => (
     <WithSearchParam search="?expired=1">

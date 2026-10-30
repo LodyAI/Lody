@@ -1757,7 +1757,8 @@ export function LoginPage({
           type="button"
           variant="secondary"
           onClick={handleEnterEmailView}
-          className="h-10 w-full"
+          width="100%"
+          height="calc(var(--spacing) * 10)"
           disabled={isButtonsDisabled}
         >
           <SocialLoginButtonContent

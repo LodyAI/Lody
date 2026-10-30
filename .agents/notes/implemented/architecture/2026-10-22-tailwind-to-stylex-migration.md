@@ -2359,8 +2359,11 @@ unresolved expressions**, including255 in ReviewRenderer. Through112 remains
 456/8/18;115 removes22 scanner occurrences and five separately audited defaults.
 Three new unresolved entries are private StyleX blockClassName references, not new
 Tailwind. Through109 remains historical620/8/18; cleanup/runtime mappings are not
-migration credit. The core source inventory remains separate at1,424/157/726 through 110. Later116–121 sources and unvisited states are excluded. Full components remain
-verified through99, Electron through93; the root ACP prerequisite failure remains.
+migration credit. At that helper cut, the separate core inventory was
+1,424/157/726 through 110; later helper 117/119 and unvisited states are excluded.
+Those helper-only checks did not advance full components or Electron coverage;
+current integration checks are recorded with the product continuation below.
+The root ACP prerequisite failure remains.
 
 ### Legacy Sidebar compatibility and correction
 
@@ -2392,6 +2395,68 @@ their historical raster OPENs are closed. The task-only Git blob excludes the
 user's Tooltip whitespace; its browser source differs only at that exact byte.
 The isolated Storybook tree's 25 untouched user-file differences remain explicit.
 
+### Closed consumer controls and integration evidence
+
+SessionSearchBar118 moves ten fixed Input/Tooltip utilities through existing owner
+tokens. Its 30 formal pairs/984 standard records and 26 positive native pairs/690
+nodes plus 3,328 geometry records match. All 73 non-target tokens match on nodes
+and three pseudos; seven intended target-token changes are explicitly separate.
+Six direct DOM token-write negatives remain outside the fixed private call graph.
+The original 12-utility candidate is rejected: all 30 formal PNGs matched while
+button radii changed 6→10px, or 13→29px under inherited stress. A same-element
+message-action theme outranked the radius atom. Two physical rounded-md classes
+therefore remain, without a new radius API or specificity patch.
+
+ChatLanding124 migrates two navigation-button dimensions through existing owner
+width/height props. This uses real Electron local-chat UI, not a copied action:
+12 default target crops match; six variable/inline controls retain two target OPENs
+(146 raw/128 threshold). All 18 full captured target/pseudo/ancestor/state records
+match. The 18 context views are attached views of those cells, not additional pairs.
+A bounded same-After diagnostic reproduces the old Before crops, without proving
+or closing the original paint cause. Both builds share their complete input graph
+except the consumer; emitted CSS, OSS main and bundled CLI stay byte-identical.
+Their fixed environment included the later-rejected 122 source, which the actual
+app Sidebar does not consume; it is not accepted integration of that candidate.
+
+Login125 moves two dimensions only in the existing DEV Electron email-button
+branch. Independent immutable DEV source snapshots verify the real served DEV flag;
+22 target and context views, full captured fields and email/back callbacks match.
+Production does not render this branch, so it earns no production UI coverage.
+MobileAccount128 moves six ink utilities in three private Workspace action glyph
+buttons. Its 48 formal, 16 legacy-variable and four normal-motion pairs match;
+51 non-target tokens remain equal. Two intended token carriers and four direct
+primitive-token negatives remain separate. These fixed glyph-only consumers do
+not authorize the same token override on an arbitrary public primitive.
+
+Long-user131 replaces two ink utilities on the fixed plain-text Show more/less
+control. Its 48 formal, 12 actual-stream and 16 ancestor/element-local legacy
+variable pairs are PNG-exact with equal rendered fields and 51 non-target tokens.
+Two target carriers intentionally change; four direct token-write negatives remain
+outside the private call graph. Four normal-motion frames match, but their collector
+did not close normally; they remain diagnostics, not a completed acceptance run.
+
+The helper's accepted117 annotation migration removes 27 utilities while retaining
+literal font, numeric registration and private reader/writer semantics. Its 54
+positive pairs include 15 raster OPENs (401 raw/zero threshold). Helper129 removes
+14 fallback utilities plus one redundant cleanup, using an actual React error and
+ErrorBoundary rather than a mock fallback. Fourteen formal and twelve full native
+pairs match; four real reload/valid-story recovery pairs retain one OPEN (six raw).
+Caught React errors are expected evidence, not zero-console-error acceptance.
+Actual host light palette controls are distinguished from browser preference; the
+viewer defaults to Vesper. Candidates119/123/126 remain rejected and rolled back:
+offscreen checkbox colors and inherited typography/scroll geometry fail complete
+contracts even where screenshots or default records match. No compiler, layer,
+specificity or production lifecycle patch hides those failures.
+
+A stable actual-root regression through this corrected product cut passes 620
+component files/6,209 tests with 3,149 recorded inputs unchanged. This cut includes
+128, but excludes later131 and130. Shared UI's latest
+run passes 25 files/313 tests with 114 inputs unchanged. The earlier root renderer
+rebuild and four real Electron onboarding/setup/Explore/local-chat screenshots are
+After-only; the later124 consumer has its own real Before/After above. These checks
+neither accept helper119/123/126 candidates nor clear the known root ACP prerequisite
+failure. The source inventory below is independent of browser coverage.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -2399,30 +2464,32 @@ validates AST-discovered candidates with the locked Tailwind compiler. Counts
 are source-occurrence lower bounds, not runtime coverage, emitted CSS size or a
 completion percentage. Unresolved expressions remain a separate work list.
 
-| Source boundary                                            | Scanner method | Occurrences | Files | Unresolved |
-| ---------------------------------------------------------- | -------------- | ----------: | ----: | ---------: |
-| Frozen 29–30                                               | v1             |       1,736 |   175 |        721 |
-| Frozen 31–33                                               | v1             |       1,715 |   175 |        717 |
-| Same pre31 source snapshot                                 | v2             |       1,741 |   176 |        725 |
-| Frozen source through 35                                   | v2             |       1,705 |   175 |        721 |
-| Frozen source through 40                                   | v2             |       1,676 |   175 |        721 |
-| Frozen source through 43                                   | v2             |       1,664 |   173 |        721 |
-| Frozen source through 45                                   | v2             |       1,656 |   171 |        721 |
-| Frozen source through 47                                   | v2             |       1,646 |   169 |        721 |
-| Exact source through 49                                    | v2             |       1,637 |   169 |        721 |
-| Exact source through 54, visual limits recorded separately | v2             |       1,620 |   168 |        721 |
-| Exact source through 59, excluding later candidates        | v2             |       1,602 |   168 |        722 |
-| Exact source through 63, with partial visual acceptance    | v2             |       1,594 |   167 |        722 |
-| Exact source through 67, with partial visual acceptance    | v2             |       1,572 |   166 |        718 |
-| Exact source through 71, with partial visual acceptance    | v2             |       1,554 |   165 |        718 |
-| Exact source through 73, with partial visual acceptance    | v2             |       1,542 |   165 |        718 |
-| Exact source through 78, with partial visual acceptance    | v2             |       1,507 |   163 |        718 |
-| Exact source through 81, with partial visual acceptance    | v2             |       1,489 |   163 |        724 |
-| Exact source through 84, with partial visual acceptance    | v2             |       1,474 |   163 |        726 |
-| Exact source through 88, with partial visual acceptance    | v2             |       1,451 |   159 |        726 |
-| Exact source through 93, with partial visual acceptance    | v2             |       1,445 |   157 |        725 |
-| Exact source through 95, with partial visual acceptance    | v2             |       1,430 |   157 |        725 |
-| Exact source through 99, with partial visual acceptance    | v2             |       1,424 |   157 |        725 |
+| Source boundary                                              | Scanner method | Occurrences | Files | Unresolved |
+| ------------------------------------------------------------ | -------------- | ----------: | ----: | ---------: |
+| Frozen 29–30                                                 | v1             |       1,736 |   175 |        721 |
+| Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
+| Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
+| Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
+| Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
+| Frozen source through 43                                     | v2             |       1,664 |   173 |        721 |
+| Frozen source through 45                                     | v2             |       1,656 |   171 |        721 |
+| Frozen source through 47                                     | v2             |       1,646 |   169 |        721 |
+| Exact source through 49                                      | v2             |       1,637 |   169 |        721 |
+| Exact source through 54, visual limits recorded separately   | v2             |       1,620 |   168 |        721 |
+| Exact source through 59, excluding later candidates          | v2             |       1,602 |   168 |        722 |
+| Exact source through 63, with partial visual acceptance      | v2             |       1,594 |   167 |        722 |
+| Exact source through 67, with partial visual acceptance      | v2             |       1,572 |   166 |        718 |
+| Exact source through 71, with partial visual acceptance      | v2             |       1,554 |   165 |        718 |
+| Exact source through 73, with partial visual acceptance      | v2             |       1,542 |   165 |        718 |
+| Exact source through 78, with partial visual acceptance      | v2             |       1,507 |   163 |        718 |
+| Exact source through 81, with partial visual acceptance      | v2             |       1,489 |   163 |        724 |
+| Exact source through 84, with partial visual acceptance      | v2             |       1,474 |   163 |        726 |
+| Exact source through 88, with partial visual acceptance      | v2             |       1,451 |   159 |        726 |
+| Exact source through 93, with partial visual acceptance      | v2             |       1,445 |   157 |        725 |
+| Exact source through 95, with partial visual acceptance      | v2             |       1,430 |   157 |        725 |
+| Exact source through 99, with partial visual acceptance      | v2             |       1,424 |   157 |        725 |
+| Exact product source through 120, including final Search118  | v2             |       1,414 |   157 |        726 |
+| Qualified product source through 128, excluding later131/130 | v2             |       1,404 |   157 |        725 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain

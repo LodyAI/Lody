@@ -1,0 +1,89 @@
+{
+  "viewports": [
+    {
+      "name": "390",
+      "width": 390,
+      "height": 420
+    },
+    {
+      "name": "640",
+      "width": 640,
+      "height": 420
+    },
+    {
+      "name": "1280",
+      "width": 1280,
+      "height": 420
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedsessionsearchtokens--empty",
+    "migration-ownedsessionsearchtokens--results",
+    "migration-ownedsessionsearchtokens--no-results",
+    "migration-ownedsessionsearchtokens--many-results",
+    "migration-ownedsessionsearchtokens--interactive"
+  ],
+  "ready": {
+    "migration-ownedsessionsearchtokens--empty": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-search-token-fixture]'),i=f?.querySelector('input[type=search]');return f?.dataset.searchOpen==='true'&&i&&getComputedStyle(i).visibility==='visible'&&i.getBoundingClientRect().width>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedsessionsearchtokens--results": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-search-token-fixture]'),i=f?.querySelector('input[type=search]');return f?.dataset.searchOpen==='true'&&i&&getComputedStyle(i).visibility==='visible'&&i.getBoundingClientRect().width>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedsessionsearchtokens--no-results": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-search-token-fixture]'),i=f?.querySelector('input[type=search]');return f?.dataset.searchOpen==='true'&&i&&getComputedStyle(i).visibility==='visible'&&i.getBoundingClientRect().width>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedsessionsearchtokens--many-results": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-search-token-fixture]'),i=f?.querySelector('input[type=search]');return f?.dataset.searchOpen==='true'&&i&&getComputedStyle(i).visibility==='visible'&&i.getBoundingClientRect().width>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedsessionsearchtokens--interactive": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme: dark)').matches"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-search-token-fixture]'),i=f?.querySelector('input[type=search]');return f?.dataset.searchOpen==='true'&&i&&getComputedStyle(i).visibility==='visible'&&i.getBoundingClientRect().width>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "fill",
+        "selector": "input[type=search]",
+        "value": "typed needle"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-search-token-fixture]')?.dataset.searchQuery==='typed needle'"
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "scope": "Three fixed private ghost glyph Buttons in MobileAccountSettings Workspace: Remove Member, Copy Link, Cancel invitation. No className prop is forwarded to these Buttons. Fixed currentColor SVG subtree; no tokens/API/variant added.",
+  "selectors": [
+    "button[aria-label=\"Remove Member\"]",
+    "button[aria-label=\"Copy Link\"]",
+    "button[aria-label=\"Cancel\"]"
+  ],
+  "stories": ["workspace", "workspace-subtree-variables"],
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000,
+      "hover": true
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000,
+      "touch": true,
+      "hover": false
+    }
+  ],
+  "themes": ["light", "dark"],
+  "states": ["rest", "hover-remove", "hover-copy", "hover-cancel"],
+  "baseOnlyExtraStates": ["focus-copy", "copy-click", "cancel-pending", "remove-dialog"],
+  "nativeLegacyInlineStates": ["rest", "hover-remove", "hover-copy", "hover-cancel"],
+  "primitiveInlineNegative": ["rest", "hover-copy"],
+  "expectedFormal": 48,
+  "expectedNativeLegacyPositive": 16,
+  "expectedPrivatePrimitiveInlineNegative": 4,
+  "captureAnimation": "Real CSS infinite spinner paused at400ms; finite effects settled. Actual theme/media/target rect and raw pre/post gates."
+}

@@ -113,6 +113,12 @@ that owner instead of stacking themes or increasing selector specificity. Preser
 element-local variable reads and compare every non-target token, not just the
 changed padding or gap.
 
+The search action's complete message-action theme uses a repeated class selector.
+Its radius token can therefore override a new single-class radius atom even when
+every default PNG looks equal. Keep the physical compatibility radius where this
+owner has no equivalent supported override; do not increase specificity or add a
+new public API solely to remove that class.
+
 Token writes also inherit into descendants. Audit every reader under the owned
 part before replacing a physical property with a public-token override. A panel
 accepting arbitrary children cannot safely publish a transparent background token

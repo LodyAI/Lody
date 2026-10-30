@@ -821,3 +821,17 @@ export const MarkdownAndDiagnosticsCoverage: Story = {
     storageKey: 'storybook-markdown-diagnostics-coverage',
   },
 };
+
+// Only this synthetic fixture is malformed; reconciliation reaches the real boundary.
+export const RenderingErrorFallback: Story = {
+  args: {
+    bundle: {
+      ...groupedRefactorBundle,
+      document: {
+        ...groupedRefactorBundle.document,
+        title: { syntheticMalformedTitle: true } as unknown as string,
+      },
+    },
+    storageKey: 'storybook-rendering-error-fallback',
+  },
+};

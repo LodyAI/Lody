@@ -3,6 +3,8 @@ import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import {
   messageActionButtonTheme,
@@ -375,6 +377,14 @@ const TRANSITION_COLORS = {
 } as const;
 
 const viewStyles = stylex.create({
+  // This private action contains plain text; no descendant reads the semantic label.
+  userTextToggleInk: {
+    [buttonTokens.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+    },
+  },
   turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
   forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
@@ -8357,8 +8367,8 @@ const UserPlainTextBlock = ({
               size="small"
               height="calc(var(--spacing) * 7)"
               className={cn(
-                stylex.props(activityTypography.footnote).className,
-                'px-2 text-muted-foreground hover:text-foreground'
+                stylex.props(activityTypography.footnote, viewStyles.userTextToggleInk).className,
+                'px-2'
               )}
               onClick={() => setIsExpanded((prev) => !prev)}
             >

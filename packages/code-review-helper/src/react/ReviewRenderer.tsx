@@ -1627,14 +1627,41 @@ export function ReviewRenderer({
   );
 }
 
+const renderErrorStyles = stylex.create({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground))',
+  },
+  content: { maxWidth: 'var(--container-md)', textAlign: 'center' },
+  title: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  description: {
+    marginTop: 'calc(var(--spacing) * 1.5)',
+    fontSize: '13px',
+    '--tw-leading': 'var(--leading-relaxed)',
+    lineHeight: 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
 // Last-resort fallback if anything in the review subtree throws, so the viewer shows a
 // message instead of a blank white page.
 function ReviewRenderError() {
   return (
-    <div className="crh-shell dark flex min-h-screen items-center justify-center bg-background p-8 text-foreground">
-      <div className="max-w-md text-center">
-        <p className="text-sm font-semibold">Something went wrong rendering this review.</p>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+    <div className={cn('crh-shell dark', stylex.props(renderErrorStyles.root).className)}>
+      <div {...stylex.props(renderErrorStyles.content)}>
+        <p {...stylex.props(renderErrorStyles.title)}>
+          Something went wrong rendering this review.
+        </p>
+        <p {...stylex.props(renderErrorStyles.description)}>
           Try reloading the page. If it keeps happening, the <code>.review.md</code> may reference
           lines that no longer exist in the diff.
         </p>
@@ -4087,6 +4114,55 @@ function FileStatusBadge({
   );
 }
 
+const annotationStyles = stylex.create({
+  marker: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+    borderRadius: '0.25rem',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    '--crh-annotation-font-literal':
+      'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif',
+    fontFamily: 'var(--crh-annotation-font-literal)',
+    fontSize: '10px',
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-leading': '1.4',
+    lineHeight: '1.4',
+  },
+  markerGlyph: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  count: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
+  },
+  note: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '13px',
+    '--tw-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground))',
+  },
+  noteGlyph: {
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  question: { color: 'hsl(var(--primary))' },
+  minor: {
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 70%, transparent)',
+    },
+  },
+});
+
 // Annotation content rendered below a diff line via @pierre/diffs slots.
 // Info-level review notes are shown inline so they keep their line context;
 // warnings/errors and user comments are kept in the right panel and reachable
@@ -4144,27 +4220,29 @@ function InlineAnnotation({
           title="View in review thread"
           aria-label="View in review thread"
           className={cn(
-            'crh-anno inline-flex items-center gap-0.5 rounded border px-1 font-sans text-[10px] font-semibold leading-[1.4] shadow-sm transition-colors',
-            stylex.props(SEVERITY_MARKER[markerSeverity]).className
+            'crh-anno shadow-sm transition-colors',
+            stylex.props(annotationStyles.marker, SEVERITY_MARKER[markerSeverity]).className
           )}
         >
           {markerSeverity === 'info' ? (
-            <MessageSquare className="size-3" />
+            <MessageSquare {...stylex.props(annotationStyles.markerGlyph)} />
           ) : (
-            <AlertTriangle className="size-3" />
+            <AlertTriangle {...stylex.props(annotationStyles.markerGlyph)} />
           )}
-          {panelCount > 1 ? <span className="tabular-nums">{panelCount}</span> : null}
+          {panelCount > 1 ? (
+            <span {...stylex.props(annotationStyles.count)}>{panelCount}</span>
+          ) : null}
         </button>
       )}
       {inlineNotes.map((note) => (
         <div
           key={note.id}
-          className="crh-inline-note flex items-start gap-1.5 text-[13px] leading-6 text-foreground"
+          className={cn('crh-inline-note', stylex.props(annotationStyles.note).className)}
         >
           {note.severity === 'question' ? (
-            <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-primary" />
+            <HelpCircle {...stylex.props(annotationStyles.noteGlyph, annotationStyles.question)} />
           ) : note.severity === 'p2' ? (
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning/70" />
+            <AlertTriangle {...stylex.props(annotationStyles.noteGlyph, annotationStyles.minor)} />
           ) : null}
           {note.body}
         </div>

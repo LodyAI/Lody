@@ -36,6 +36,15 @@ this local value independent of the ancestor font variable; changing compiler
 targets would affect unrelated styles. Direct writes to the new private property
 are outside the component API.
 
+Annotation markers use their own literal font property for the same compiler
+reason; numeric feature writers and registrations remain part of the contract.
+Inherited typography candidates that change offscreen color or scroll geometry
+are rejected even when default frames match. The last-resort fallback is exercised
+through an actual React render error and ErrorBoundary, including real reload and
+return to a valid review. Its existing unlayered `.crh-shell` owns viewport minimum
+height; do not add an ineffectual StyleX duplicate underneath it. Caught errors
+are expected in this fixture, not a zero-console-error claim.
+
 When the last consuming utility disappears, Tailwind can prune its `@property`
 registration and compatibility initialization. The stylesheet explicitly retains
 the original `--tw-space-y-reverse` registration and fallback. Compare full computed

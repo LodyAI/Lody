@@ -1,0 +1,28 @@
+{
+  "scope": "Only the real DEV Electron email-entry Button at login-page.tsx:1760; production/handoff-link branches are not migrated or counted.",
+  "story": "components-loginpage--electron-renderer",
+  "disabledStory": "components-loginpage--electron-renderer-session-pending",
+  "buttonName": "Continue with email",
+  "viewports": [1280, 390],
+  "height": 900,
+  "themes": ["light", "dark"],
+  "states": ["rest", "hover", "focus", "disabled"],
+  "dimensionControlsAt1280": ["root-spacing-5", "element-spacing-5", "inline-size"],
+  "expectedPositivePairs": 22,
+  "expectedOriginalDimensions": {
+    "height": 40,
+    "heightAtSpacing5": 50,
+    "width": "100%"
+  },
+  "realFlows": [
+    "click opens email form",
+    "Back restores entry",
+    "Enter opens email form",
+    "Back restores entry"
+  ],
+  "environment": "Two isolated standard Storybook DEV source snapshots; actual served import.meta.env.DEV true; no production constant/config substitution, no live source HMR edits.",
+  "branchGate": {
+    "data-variant": "secondary",
+    "data-size": "medium"
+  }
+}

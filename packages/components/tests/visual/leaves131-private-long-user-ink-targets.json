@@ -1,0 +1,32 @@
+{
+  "scope": "Two resting/hover text utilities on the fixed private UserPlainTextBlock Show more/less ghost Button. Keep px-2, activity typography, content slicing, state, DOM and handlers unchanged.",
+  "primaryStory": "migration-ownedmessageactionbuttondimensions--long-user",
+  "actualStreamStory": "sessions-assistantturnalignment--conversation-rhythm-long-user",
+  "primaryViewports": [
+    { "name": "phone", "width": 390, "touch": true },
+    { "name": "mobile-edge", "width": 767, "touch": true },
+    { "name": "desktop-edge", "width": 768, "touch": false },
+    { "name": "desktop", "width": 1280, "touch": false }
+  ],
+  "height": 1000,
+  "themes": ["light", "dark"],
+  "primaryStates": [
+    "collapsed-rest",
+    "collapsed-hover",
+    "collapsed-focus",
+    "expanded-focus",
+    "expanded-hover",
+    "recollapsed"
+  ],
+  "actualStreamStates": ["collapsed-rest", "expanded", "recollapsed"],
+  "legacyControls": ["ancestor-legacy", "element-legacy"],
+  "primitiveInlineNegative": ["rest", "hover"],
+  "expectedPrimaryPairs": 48,
+  "expectedActualStreamPairs": 12,
+  "expectedLegacyPairs": 16,
+  "expectedPrimitiveInlineNegativePairs": 4,
+  "normalMotionSupplementPairs": 4,
+  "disabledScope": "Unreachable through this private component: it never supplies disabled or forwards caller styling/props. No artificial disabled state is counted as accepted coverage.",
+  "mediaScope": "Real Chrome desktop and touch-capable coarse contexts. Hover and keyboard/click probes exercise browser interaction; no native touch gesture or WebKit claim.",
+  "capture": "Real production components and existing stories; loaded fonts, settled finite effects, stable actual toggle/bubble rectangles, actual target hit-test, complete raw pre/post rendering gate. Per-frame gzip records retain both intended target Token value changes and all non-target values."
+}

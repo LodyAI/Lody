@@ -1,0 +1,51 @@
+{
+  "viewports": [
+    {
+      "name": "320",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "390",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "511",
+      "width": 511,
+      "height": 900
+    },
+    {
+      "name": "512",
+      "width": 512,
+      "height": 900
+    },
+    {
+      "name": "513",
+      "width": 513,
+      "height": 900
+    },
+    {
+      "name": "768",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "1280",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--rendering-error-fallback"],
+  "ready": {
+    "code-review-helper-reviewrenderer--rendering-error-fallback": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('.crh-shell');return e?.textContent.includes('Something went wrong rendering this review.')&&getComputedStyle(e).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded';}"
+      }
+    ]
+  }
+}

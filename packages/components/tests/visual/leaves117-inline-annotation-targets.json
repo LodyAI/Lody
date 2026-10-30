@@ -1,0 +1,220 @@
+{
+  "viewports": [
+    {
+      "name": "390",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "767",
+      "width": 767,
+      "height": 1000
+    },
+    {
+      "name": "768",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "1280",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--severity-marker-coverage"],
+  "ready": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll('[data-block-path]')],q=window.__117Warm??{i:0};window.__117Warm=q;if(q.i>=a.length)return document.querySelectorAll('.crh-anno').length===3&&document.querySelectorAll('.crh-inline-note').length===7;const e=a[q.i];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(!e.querySelector('.crh-diff-placeholder')&&(!h||h.shadowRoot?.querySelector('[data-line]')))q.i++;return false;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\".crh-anno\");if(!e||!(true))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "name": "marker-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".crh-anno",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-anno\");if(!e||!(e.matches(\":hover\")))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "marker-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": ".crh-anno",
+            "index": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-anno",
+            "index": 0,
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": ".crh-anno",
+            "index": 1,
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-anno\");if(!e||!(document.activeElement===e&&e.matches(\":focus-visible\")))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "marker-click-thread",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-anno",
+            "index": 0
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-thread-focused\");if(!e||!(document.querySelector(\".crh-anno-focused\")?.dataset.anno===e.getAttribute(\"data-anchor\")))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "inline-p2-question",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-inline-note:has(svg)\");if(!e||!(true))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "real-comment-count-two",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] diffs-container [data-line=\"9\"][data-line-type=\"change-addition\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.matches(\"textarea\")&&document.activeElement.getAttribute(\"aria-label\")===\"Comment on index.ts line 9\""
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic second annotation count comment."
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save comment"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-anno:has(span)\");if(!e||!(e.querySelector(\"span\").textContent===\"2\"&&!document.querySelector(\".crh-panel textarea\")))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "count-two-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".crh-anno:has(span)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-anno:has(span)\");if(!e||!(e.matches(\":hover\")&&e.querySelector(\"span\").textContent===\"2\"))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "count-two-click-thread",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-anno:has(span)"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-thread-focused\");if(!e||!(document.querySelector(\".crh-anno-focused\")?.dataset.anno===e.getAttribute(\"data-anchor\")))return false;e.scrollIntoView({block:'center',behavior:'instant'});const s=JSON.stringify([...document.querySelector('.crh-shell').querySelectorAll('*')].map(e=>{const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__117stable??{s:'',n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__117stable=q;const b=e.getBoundingClientRect();return q.n>=3&&b.width>0&&b.bottom>0&&b.top<innerHeight&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}
