@@ -11,6 +11,7 @@ import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { SessionDocument } from '@/lib/loro/doc';
 import {
   createSessionBackend,
+  disposeSessionBackend,
   registerSessionBackendFactory,
   SessionBackendUnavailableError,
   resolveSessionBackendKind,
@@ -451,4 +452,31 @@ describe('Loro queue promotion', () => {
 
     await expect(backend.getMessageQueue()).resolves.toEqual([otherQueueItem]);
   });
+});
+
+// A failed release must keep the original backend reachable for the next attempt.
+it('retries the same backend after release failure without creating a second writer', async () => {
+  let held = true;
+  let fail = true;
+  const backend = {
+    kind: 'roost',
+    initialize: async () => undefined,
+    dispose: async () => {
+      if (fail) throw new Error('retained writer');
+      held = false;
+    },
+  } as unknown as SessionBackend;
+  const doc = { sessionId: 'release-retry' } as SessionDocument;
+  const unregister = registerSessionBackendFactory('roost', async () => backend);
+  try {
+    expect(await createSessionBackend(doc, { historyBackend: 'roost' })).toBe(backend);
+    await expect(disposeSessionBackend(doc)).rejects.toThrow('retained writer');
+    expect(held).toBe(true);
+    expect(await createSessionBackend(doc, { historyBackend: 'roost' })).toBe(backend);
+    fail = false;
+    await disposeSessionBackend(doc);
+    expect(held).toBe(false);
+  } finally {
+    unregister();
+  }
 });

@@ -15,6 +15,11 @@ import { HomeRoute } from '../src/routes/index';
 import { BootShellBoundary } from '../src/components/boot-shell-boundary';
 import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
 
+const getSnapshot = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/electron-ipc-client', () => ({
+  getIpcServices: () => ({ localPlatform: { getSnapshot } }),
+}));
+
 const state = vi.hoisted(() => ({
   local: false,
   hasLocalToken: true,
@@ -203,4 +208,44 @@ describe('default app entry', () => {
     expect(container.querySelector('[data-lody-boot-shell]')).toBeNull();
     expect(container.querySelector('img, div')).toBeNull();
   });
+});
+
+it('recovers the same local provider after validation errors with capped retries and manual retry', async () => {
+  state.local = true;
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const { getLocalPlatformProvider, retryLocalPlatformSnapshot } = await vi.importActual<
+    typeof import('../src/providers/local-platform-provider')
+  >('../src/providers/local-platform-provider');
+  getSnapshot.mockRejectedValue(new Error('invalid local catalog'));
+  const provider = getLocalPlatformProvider();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(provider.workspaces.state.get().status).toBe('error');
+  for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+    const before = getSnapshot.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(getSnapshot.mock.calls.length).toBe(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getSnapshot.mock.calls.length).toBe(before + 1);
+    expect(provider.workspaces.state.get().status).toBe('error');
+  }
+  retryLocalPlatformSnapshot();
+  retryLocalPlatformSnapshot();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(provider.workspaces.state.get().status).toBe('error');
+  getSnapshot.mockResolvedValue({
+    userId: 'local:user',
+    workspace: { workspaceId: 'local:workspace', name: 'Local', slug: 'local', role: 'owner' },
+  });
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(provider.workspaces.state.get()).toMatchObject({
+    status: 'ready',
+    activeWorkspaceId: 'local:workspace',
+  });
+  expect(provider.identity.session.get()).toMatchObject({
+    status: 'authenticated',
+    user: { id: 'local:user' },
+  });
+  expect(getLocalPlatformProvider()).toBe(provider);
+  expect(vi.getTimerCount()).toBe(0);
+  error.mockRestore();
 });

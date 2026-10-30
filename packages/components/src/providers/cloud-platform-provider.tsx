@@ -26,6 +26,7 @@ import {
   type PlatformProvider,
   type MutableStore,
   type E2eeWorkspaceRuntime,
+  type E2eeRuntimeFactory,
   type PlatformSessionState,
   type WorkspaceSummary,
   type WorkspacesState,
@@ -83,7 +84,13 @@ function toWorkspaceSummary(
  * Convex remain behind this component in Phase 0; Phase 1 moves this file to
  * the closed `platform-cloud` package without changing open UI consumers.
  */
-export function CloudPlatformProvider({ children }: { children: ReactNode }) {
+export function CloudPlatformProvider({
+  children,
+  createE2eeRuntime,
+}: {
+  children: ReactNode;
+  createE2eeRuntime?: E2eeRuntimeFactory;
+}) {
   const electron = isElectronRenderer();
   const cloudClient = useCloudPlatformClient();
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
@@ -225,6 +232,18 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
   const signOutRef = useRef(signOut);
   signOutRef.current = signOut;
 
+  // Borrow the application's port; never acquire host resources during render.
+  // Standalone anonymous login has no authenticated context or host dependency.
+  const portableRuntime = useMemo(() => {
+    if (electron || !hasAuthenticatedConvex || !createE2eeRuntime) return undefined;
+    return createE2eeRuntime({
+      session: {
+        get: () => sessionStore.get(),
+        subscribe: (listener) => sessionStore.subscribe(listener),
+      },
+    });
+  }, [createE2eeRuntime, electron, hasAuthenticatedConvex, sessionStore]);
+
   const e2eeWorkspaces = useMemo(() => {
     const native = electron ? getIpcServices()?.e2ee : undefined;
     return createCloudE2eeWorkspaces({
@@ -308,7 +327,9 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               ledgerView: (workspaceId) => native.ledgerView(workspaceId),
             },
           }
-        : {}),
+        : portableRuntime
+          ? { runtime: portableRuntime }
+          : {}),
       remote: {
         memberProfiles: (request) =>
           cloudClient.query(cloudOperations.e2eeWorkspaces.memberProfiles, request),
@@ -320,7 +341,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         await readOrganization().refetchOrganizations();
       },
     });
-  }, [cloudClient, electron, readOrganization, sessionStore]);
+  }, [cloudClient, electron, portableRuntime, readOrganization, sessionStore]);
 
   const provider = useMemo<PlatformProvider>(
     () => ({

@@ -420,6 +420,23 @@ describe('CliSupervisor lifecycle actor', () => {
     expect(supervisor.getActiveChild()).toBe(second.child);
   });
 
+  it('finishes quit immediately when the CLI exits at three seconds of a ten second grace', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table);
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 10_000,
+      processOptions: { nodeProcess: table.api },
+    });
+    await supervisor.start();
+    const stopped = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(3_000);
+    table.exitOnItsOwn(run.pid);
+    await vi.advanceTimersByTimeAsync(20);
+    await stopped;
+    expect(supervisor.getState().phase).toBe('stopped');
+    expect(table.isAlive(run.pid)).toBe(false);
+  });
+
   it('escalates an unanswered graceful shutdown to SIGKILL and waits for the real exit', async () => {
     const table = new FakeProcessTable();
     const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });

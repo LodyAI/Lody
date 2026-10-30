@@ -431,16 +431,21 @@ export class CodeCollabV2Service {
     return service;
   }
 
-  private async refreshOtherRoots(sessionId: SessionId, afterTurn: boolean): Promise<void> {
+  private async refreshOtherRoots(
+    sessionId: SessionId,
+    afterTurn: boolean,
+    signal?: AbortSignal
+  ): Promise<void> {
     if (this.deps.rootId) return;
     const workspace = await this.deps.resolveWorkspace(sessionId);
+    signal?.throwIfAborted();
     if (!workspace.ok) return;
     const results = await Promise.allSettled(
       (workspace.fileRoots ?? [])
         .filter((root) => root.id !== 'main')
         .map(async (root) => {
           const service = this.serviceForRoot(root.id);
-          if (afterTurn) await service.refreshSharedStateAfterTurn({ sessionId });
+          if (afterTurn) await service.refreshSharedStateAfterTurn({ sessionId, signal });
           else await service.refreshSharedState({ sessionId });
         })
     );
@@ -832,7 +837,24 @@ export class CodeCollabV2Service {
     });
   }
 
-  async refreshSharedStateAfterTurn(request: { readonly sessionId: SessionId }): Promise<void> {
+  async refreshSharedStateAfterTurn(request: {
+    readonly sessionId: SessionId;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    if (request.signal) {
+      return this.runTask(
+        request.sessionId,
+        async (signal) => {
+          await this.refreshOtherRoots(request.sessionId, true, signal);
+          const resolved = await waitForCodeCollabTask(
+            this.resolveRequestDirectoryPath(request.sessionId, ROOT_DIRECTORY_REQUEST_PATH),
+            signal
+          );
+          await this.refreshSharedStateAfterTurnNow(resolved, signal);
+        },
+        request.signal
+      );
+    }
     await this.refreshOtherRoots(request.sessionId, true);
     const resolved = await this.runTask(request.sessionId, (signal) =>
       waitForCodeCollabTask(

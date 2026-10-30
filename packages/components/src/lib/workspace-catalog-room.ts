@@ -57,6 +57,9 @@ export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
 
 type SharedCatalogRoom = {
   refCount: number;
+  inFlight: boolean;
+  retryDelay: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
   cancelled: boolean;
   rows: WorkspaceFlockRowMap;
   snapshot: WorkspaceCatalogSnapshot;
@@ -138,6 +141,9 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
 }
 
 function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {
+  if (room.cancelled || room.inFlight) return;
+  clearTimeout(room.retryTimer);
+  room.inFlight = true;
   void (async () => {
     try {
       const handle = await runtime.repo.openFlockDoc(getWorkspaceFlockDocId(runtime.workspaceId));
@@ -170,9 +176,21 @@ function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {
       console.error('Failed to sync workspace catalog', error);
       // Only a document that was never read is a failure to resolve defaults: a
       // read snapshot stays usable while the remote room is unavailable.
-      if (!room.snapshot.loaded) emit(room, { ...room.snapshot, failed: true });
+      if (!room.snapshot.loaded) {
+        emit(room, { ...room.snapshot, failed: true });
+        room.retryTimer = setTimeout(() => startRoom(runtime, room), room.retryDelay);
+        room.retryDelay = Math.min(room.retryDelay * 2, 30_000);
+      }
+    } finally {
+      room.inFlight = false;
     }
   })();
+}
+
+/** Retry an unread catalog without opening a second room for its consumers. */
+export function retryWorkspaceCatalog(runtime: WorkspaceRuntime): void {
+  const room = ROOMS.get(runtime);
+  if (room?.snapshot.failed) startRoom(runtime, room);
 }
 
 /**
@@ -187,6 +205,8 @@ export function acquireWorkspaceCatalog(
   if (!room) {
     room = {
       refCount: 0,
+      inFlight: false,
+      retryDelay: 1_000,
       cancelled: false,
       rows: EMPTY_ROWS,
       snapshot: EMPTY_WORKSPACE_CATALOG,
@@ -211,6 +231,7 @@ export function acquireWorkspaceCatalog(
       joined.refCount -= 1;
       if (joined.refCount > 0) return;
       joined.cancelled = true;
+      clearTimeout(joined.retryTimer);
       if (ROOMS.get(runtime) === joined) {
         ROOMS.delete(runtime);
       }

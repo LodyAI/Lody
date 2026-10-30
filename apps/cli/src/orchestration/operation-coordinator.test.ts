@@ -6,7 +6,7 @@ import type { CoordinatorPorts } from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
 import { operationRepositoryLayer } from './platform/operations';
 import Database from 'better-sqlite3';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
@@ -41,6 +41,9 @@ const roots = new Set<string>();
 const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 const makeHarness = async (options?: {
+  beforeStoreOpen?: () => void;
+  beforeActivate?: () => void;
+  onAvailabilityChange?: (message: string | undefined) => void;
   deadlineAt?: string;
   author?: import('@lody/shared').AgentMessageAuthor;
   requesterArchived?: boolean;
@@ -272,7 +275,7 @@ const makeHarness = async (options?: {
       options?.afterTurnComplete?.();
     }
   );
-  const logger = { warn: vi.fn(), debug: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
   const syncMachineFlockDoc = vi.fn(
     async () =>
       await (options?.configurationSync?.() ??
@@ -285,9 +288,18 @@ const makeHarness = async (options?: {
     if (synced?.meta) metas.set(targetSessionId, synced.meta);
   });
   const storeLifecycle = { opened: 0, closed: 0 };
+  const openedStores: LodyOperationStore[] = [];
+  let attachedInbox: unknown;
   const storeFactory = () => {
+    options?.beforeStoreOpen?.();
     storeLifecycle.opened += 1;
     const factoryStore = new LodyOperationStore(storePath, options?.now ?? (() => TEST_NOW_MS));
+    openedStores.push(factoryStore);
+    const activate = factoryStore.inbox.activate.bind(factoryStore.inbox);
+    factoryStore.inbox.activate = (activatedWorkspaceId, owner) => {
+      options?.beforeActivate?.();
+      activate(activatedWorkspaceId, owner);
+    };
     const close = factoryStore.close.bind(factoryStore);
     factoryStore.close = () => {
       storeLifecycle.closed += 1;
@@ -350,6 +362,12 @@ const makeHarness = async (options?: {
       syncMachineFlockDoc,
     } as never,
     executionService: {
+      quiesceInboxExecutions: () => {
+        busy = false;
+      },
+      setOperationInbox: (inbox: unknown) => {
+        attachedInbox = inbox;
+      },
       getExecutionSnapshot: () => ({
         hasActiveTurn: busy,
         ...(busy && options?.activeTurnId ? { activeTurnId: options.activeTurnId } : {}),
@@ -359,6 +377,7 @@ const makeHarness = async (options?: {
     dispatchWatcher: { hasPendingDispatch: () => pendingUser } as never,
     logger: logger as never,
     storeFactory,
+    onAvailabilityChange: options?.onAvailabilityChange,
     storePath,
     now: options?.now ?? (() => TEST_NOW_MS),
     ...(options?.workerBootId ? { workerBootId: options.workerBootId } : {}),
@@ -408,6 +427,9 @@ const makeHarness = async (options?: {
     targetSessionId,
     storePath,
     storeLifecycle,
+    openedStores,
+    getAttachedInbox: () => attachedInbox,
+    isBusy: () => busy,
     syncMachineFlockDoc,
     syncRemoteDocOrThrow,
     flockScan,
@@ -440,6 +462,152 @@ afterEach(async () => {
 });
 
 describe('LodyOperationCoordinator', () => {
+  it.each(['open', 'activate', 'watch'])(
+    'degrades after %s failure and recovers without restarting',
+    async (boundary) => {
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
+      let failed = true;
+      const warnings: (string | undefined)[] = [];
+      const fault = () => {
+        if (failed) throw Object.assign(new Error('disk full'), { code: 'SQLITE_FULL' });
+      };
+      const h = await makeHarness({
+        targetInputDurable: false,
+        ...(boundary === 'open'
+          ? { beforeStoreOpen: fault }
+          : boundary === 'activate'
+            ? { beforeActivate: fault }
+            : {}),
+        onAvailabilityChange: (message) => warnings.push(message),
+      });
+      if (boundary === 'watch') {
+        h.setBusy(true);
+        const watch = h.coordinatorOptions.operationStoreWatchFactory;
+        h.coordinatorOptions.operationStoreWatchFactory = (directory, onChange) => {
+          fault();
+          return watch(directory, onChange);
+        };
+      }
+      try {
+        expect(() => h.coordinator.start()).not.toThrow();
+        expect(warnings.at(-1)).toContain('SQLITE_FULL');
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        await expect(h.coordinator.wake('dependent-call')).rejects.toThrow('INBOX_UNAVAILABLE');
+        await h.coordinator.idle();
+        expect(h.coordinator.hasPendingWorkForRequester(h.requesterSessionId)).toBe(false);
+        expect(h.histories.get(h.targetSessionId)).toEqual([]);
+        expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
+        expect(h.getAttachedInbox()).toBeUndefined();
+        if (boundary === 'watch') expect(h.isBusy()).toBe(true);
+        for (const store of h.openedStores)
+          expect(() => store.get(h.requesterSessionId, 'review-round-1')).toThrow();
+        await vi.advanceTimersByTimeAsync(30_000);
+        failed = false;
+        await vi.advanceTimersByTimeAsync(59_999);
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        await vi.advanceTimersByTimeAsync(1);
+        await h.coordinator.idle();
+        expect(() => h.coordinator.assertInboxAvailable()).not.toThrow();
+        expect(warnings.at(-1)).toBeUndefined();
+        expect(h.getAttachedInbox()).toBeDefined();
+        expect(h.histories.get(h.targetSessionId)?.[0]?.id).toBe('turn-1');
+      } finally {
+        await h.coordinator.stop();
+      }
+      expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
+    }
+  );
+
+  it('bounds startup backoff and cancels it on stop', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
+    let failing = true;
+    let attempts = 0;
+    const h = await makeHarness({
+      beforeStoreOpen: () => {
+        attempts++;
+        if (failing) throw new Error('storage unavailable');
+      },
+    });
+    h.coordinator.start();
+    for (const [index, delay] of [
+      30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000,
+    ].entries()) {
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(attempts).toBe(index + 2);
+      expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+    }
+    await h.coordinator.recoverStop();
+    expect(vi.getTimerCount()).toBe(0);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(h.storeLifecycle).toEqual({ opened: 0, closed: 0 });
+    expect(attempts).toBe(8);
+    try {
+      h.coordinator.start();
+      await h.coordinator.idle();
+      expect(() => h.coordinator.assertInboxAvailable()).not.toThrow();
+    } finally {
+      await h.coordinator.stop();
+    }
+    expect(h.storeLifecycle).toEqual({ opened: 1, closed: 1 });
+  });
+
+  it('keeps a newer database byte-for-byte unchanged while degraded', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const h = await makeHarness();
+    const db = new Database(h.storePath);
+    db.prepare("UPDATE orchestration_meta SET value='99' WHERE key='schema_version'").run();
+    db.close();
+    const before = await readFile(h.storePath);
+    try {
+      h.coordinator.start();
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(await readFile(h.storePath)).toEqual(before);
+    } finally {
+      await h.coordinator.recoverStop();
+    }
+  });
+
+  it.each(['INBOX_SCHEMA_UNSUPPORTED', 'INBOX_PROTOCOL_REQUIRED'])(
+    'does not retry or write after %s',
+    async (reason) => {
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
+      const h = await makeHarness({
+        beforeActivate: () => {
+          throw new Error(reason);
+        },
+      });
+      const readModes = () => {
+        const db = new Database(h.storePath, { readonly: true });
+        try {
+          return db.prepare('SELECT * FROM inbox_modes').all();
+        } finally {
+          db.close();
+        }
+      };
+      const before = readModes();
+      try {
+        expect(() => h.coordinator.start()).not.toThrow();
+        await vi.advanceTimersByTimeAsync(3_600_000);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(h.storeLifecycle).toEqual({ opened: 1, closed: 1 });
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        expect(readModes()).toEqual(before);
+      } finally {
+        await h.coordinator.stop();
+      }
+    }
+  );
+
   it.each([
     undefined,
     {

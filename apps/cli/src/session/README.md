@@ -220,9 +220,9 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
-A failed release remains `releaseBlocked`, and the next waiting input drives a single-flight
-recovery. The [release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md)
-explains why slow finalization alone is not a release failure.
+Workspace-reading diff/gap-fill, Git flags, branch/PR statistics and Code Collab scans finish before release under one 20-second budget shared by normal, error, cancellation and yielded finalization; Stop cannot restart it. Generated-image waits use this deadline and shutdown signal too; uploads continue as owned work and write only to their captured turn. Shutdown also skips error-path diff/usage. After six seconds, shutdown alone directly writes failed Inbox receipts for remaining owners and clears live IDs, without waiting for finalization or replaying input. Timeout or shutdown cancels the attempt and skips remaining steps; late results cannot publish into a successor.
+Presentation, batch-history projection, completion analytics and owned image uploads may follow release; yielded bookkeeping retains its 30-second upper wait. Failed release detaches the old Agent and admits fresh input without replay.
+The [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md) owns the current policy; the [original release fix](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md) explains unconditional release after failure classification.
 
 Stop reports a rejected provider cancellation, expiration of that five-second drain, and
 failed process termination through durable `agent_warning` notices. The execution runtime

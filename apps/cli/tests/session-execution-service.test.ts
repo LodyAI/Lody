@@ -1,3 +1,5 @@
+import { LodyOperationCoordinator } from '../src/orchestration/operation-coordinator';
+import { MessageHandler } from '../src/lib/message-handler';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
@@ -73,7 +75,10 @@ import {
   type SessionStatus,
   type WorkspaceId,
 } from '@lody/shared';
+import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
+import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
 import Database from 'better-sqlite3';
+import { MessageHandler } from '../src/lib/message-handler';
 import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
 import { execFileSync } from 'node:child_process';
@@ -4517,8 +4522,10 @@ describe('SessionExecutionService', () => {
   });
 
   it.each(['pending', 'rejecting'] as const)(
-    'releases the turn and runs the next input while Code Collab refresh is %s',
+    'bounds a workspace-reading Code Collab refresh and recovers (%s)',
     async (refreshOutcome) => {
+      vi.useFakeTimers();
+      try {
       let history: Array<Record<string, unknown>> = [
         {
           id: 'turn-user-1',
@@ -4566,7 +4573,9 @@ describe('SessionExecutionService', () => {
       const refreshGate = new Promise<void>((resolve) => {
         releaseRefresh = resolve;
       });
+      const refreshStarted = createDeferred<void>();
       const refreshCodeCollabSharedState = async () => {
+        refreshStarted.resolve();
         if (refreshOutcome === 'rejecting') throw new Error('Synthetic refresh failure');
         await refreshGate;
       };
@@ -4606,7 +4615,7 @@ describe('SessionExecutionService', () => {
       });
 
       const service = new SessionExecutionService(deps);
-      await service.continueSession({
+      const first = service.continueSession({
         type: 'session/chat',
         sessionId: 'session-1' as SessionId,
         machineId: 'machine-1',
@@ -4619,6 +4628,10 @@ describe('SessionExecutionService', () => {
         userEmail: 'user@example.com',
       });
 
+      await refreshStarted.promise;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await first;
+      releaseRefresh();
       expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
         'session-1',
         activeSession,
@@ -4645,6 +4658,8 @@ describe('SessionExecutionService', () => {
       expect(history.find((entry) => entry.id === 'turn-user-2')?.status).toBe('handled');
       expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
       releaseRefresh();
+      await service.drainInboxExecutions();
+      } finally { vi.useRealTimers(); }
     }
   );
 
@@ -9235,7 +9250,8 @@ describe('SessionExecutionService', () => {
     // so this route has to refresh the flags that raise Commit & Push.
     expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-prompt-cancel',
-      expect.anything()
+      expect.anything(),
+      expect.any(AbortSignal)
     );
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
     expect(history[1]).toMatchObject({
@@ -9564,6 +9580,8 @@ describe('SessionExecutionService', () => {
   );
 
   it('flushes cancellation when a cancelled prompt resolves before finalization starts', async () => {
+    vi.useFakeTimers();
+    try {
     let meta: Record<string, unknown> = {};
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
@@ -9649,9 +9667,10 @@ describe('SessionExecutionService', () => {
     const refresh = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    deps.turnFinalization.refreshCodeCollabSharedState = () => refresh;
+    const refreshing = createDeferred<void>();
+    deps.turnFinalization.refreshCodeCollabSharedState = () => { refreshing.resolve(); return refresh; };
     service = new SessionExecutionService(deps);
-    await service.continueSession({
+    const execution = service.continueSession({
       type: 'session/chat',
       sessionId: 'session-prompt-cancel-resolved' as SessionId,
       machineId: 'machine-1',
@@ -9664,6 +9683,9 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
+    await refreshing.promise;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await execution;
     expect(
       service.getExecutionSnapshot('session-prompt-cancel-resolved' as SessionId).hasActiveTurn
     ).toBe(false);
@@ -9680,6 +9702,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'turn-prompt-cancel-resolved',
       processingUserMsgId: undefined,
     });
+    } finally { vi.useRealTimers(); }
   });
 
   it('accepts a stop request during turn finalization and skips completion follow-up', async () => {
@@ -9807,7 +9830,8 @@ describe('SessionExecutionService', () => {
     expect(publishedBranch).toBe('feature/after-cancel');
     expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-finalizing-cancel',
-      expect.anything()
+      expect.anything(),
+      expect.any(AbortSignal)
     );
     expect(deps.turnFinalization.updateSessionDiffStats).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-finalizing-cancel', {
@@ -12010,12 +12034,12 @@ describe('Operation Inbox execution boundary', () => {
   function inboxExecutionFixture(
     prompt: (blocks: ContentBlock[]) => Promise<unknown>,
     build?: (blocks: SessionInputBlock[]) => Promise<ContentBlock[]>,
-    automaticFinished?: () => void
+    automaticFinished?: () => void,
+    sessionId = 'inbox-session' as SessionId
   ) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-inbox-execution-'));
     const now = () => Date.parse('2026-10-12T00:00:00Z');
     const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'), now);
-    const sessionId = 'inbox-session' as SessionId;
     let meta: Partial<SessionMeta> = {
       id: sessionId,
       machineId: 'machine-1',
@@ -12101,7 +12125,7 @@ describe('Operation Inbox execution boundary', () => {
       buildAcpPromptBlocks: async (args) =>
         build ? build(args.inputBlocks) : (args.inputBlocks as ContentBlock[]),
       createAssistantEntryForTurn: async (_sid, _doc, turnId, _model, parentId) => {
-        await doc.sessionData.commands.applyHistoryAction({
+        await _doc.sessionData.commands.applyHistoryAction({
           kind: 'upsert-turn',
           turn: {
             id: turnId,
@@ -12229,6 +12253,59 @@ describe('Operation Inbox execution boundary', () => {
       storePath: path.join(root, 'operations.sqlite3'),
     };
   }
+
+  it('starts dispatch and executes ordinary human input when the Inbox database cannot open', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    let watching = false;
+    const dispatchWatcher = {
+      start: async () => {
+        watching = true;
+      },
+    };
+    const coordinator = new LodyOperationCoordinator({
+      workspaceId: f.message.workspaceId,
+      machineId: f.message.machineId as MachineId,
+      userId: f.message.userId,
+      workspaceDocument: f.deps.workspaceDocument,
+      executionService: f.service,
+      dispatchWatcher: dispatchWatcher as never,
+      logger: createSilentLogger(),
+      storeFactory: () => {
+        throw new Error('SQLITE_FULL');
+      },
+      materializeTarget: async () => {
+        throw new Error('must not materialize while degraded');
+      },
+    });
+    try {
+      await MessageHandler.prototype.startSessionDispatchWatcher.call({
+        sessionDispatchWatcher: dispatchWatcher,
+        operationCoordinator: coordinator,
+      } as never);
+      expect(watching).toBe(true);
+      await f.accept();
+      await f.service.continueSession(f.message);
+      expect(
+        received
+          .flat()
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+      ).toEqual(['CURRENT_REQUEST']);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      const history = await (await createSessionBackend(f.doc)).readHistory();
+      expect(history.find((turn) => turn.id === 'human-input')?.status).toBe('handled');
+      expect(
+        history.some((turn) => turn.role === 'assistant' && turn.userTurnId === 'human-input')
+      ).toBe(true);
+    } finally {
+      await coordinator.stop();
+      await f.close();
+    }
+  });
 
   it('preserves a live execution while a later input waits', async () => {
     const started = createDeferred<void>();
@@ -12534,7 +12611,7 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('rechecks Stop after awaiting batch history settlement', async () => {
+  it('releases before a stalled batch history projection and keeps the committed outcome', async () => {
     const settling = createDeferred<void>();
     const settle = createDeferred<void>();
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
@@ -12559,6 +12636,8 @@ describe('Operation Inbox execution boundary', () => {
         notificationAudience: { kind: 'user' },
       });
       await settling.promise;
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
       await f.service.cancelSession({
         sessionId: f.message.sessionId,
         turnId: 'assistant:human-input',
@@ -12567,8 +12646,8 @@ describe('Operation Inbox execution boundary', () => {
       });
       settle.resolve();
       await running;
-      expect(facts.map((fact) => fact.outcome)).toEqual([{ kind: 'cancelled' }]);
-      expect(facts.flatMap((fact) => projectTurnAttention(fact) ?? [])).toEqual([]);
+      expect(facts.map((fact) => fact.outcome)).toEqual([{ kind: 'succeeded' }]);
+      expect(facts.flatMap((fact) => projectTurnAttention(fact) ?? [])).toHaveLength(1);
     } finally {
       settle.resolve();
       await f.close();
@@ -13169,8 +13248,226 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('waits for a slow yielded finalization instead of treating it as a release failure', async () => {
+  async function finishFirstThenRunNext(
+    f: ReturnType<typeof inboxExecutionFixture>, first: Promise<unknown>,
+    gate: ReturnType<typeof createDeferred<void>>, next: typeof f.message, published?: Promise<void>
+  ) {
+    await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId,
+      userId: 'user-1', config: next.acpSessionConfig });
+    // Exercise a successor immediately if admission has already been returned.
+    const released = !f.service.getExecutionSnapshot(next.sessionId).hasActiveTurn;
+    if (released) { await f.service.continueSession(next); await published; }
+    gate.resolve();
+    await first;
+    if (!released) await f.service.continueSession(next);
+  }
+
+  it.each(['edit evidence', 'Git fallback'])('keeps turn-one results before release (%s)', async (kind) => {
+    const root = createGitLocalProject(), file = path.join(root, 'one.txt');
+    const entered = createDeferred<void>(), finish = createDeferred<void>();
+    let n = 0, captured: unknown;
+    const f = inboxExecutionFixture(async () => {
+      fs.writeFileSync(file, ++n === 1 ? 'TURN_ONE\n' : 'TURN_TWO\n');
+      if (n === 2) fs.writeFileSync(path.join(root, 'two.txt'), 'second turn\n');
+      return { stopReason: 'end_turn' };
+    });
+    f.session.getWorkdir = () => root;
+    f.session.exec = async (_cmd, args) => execFileSync('/usr/bin/git', args, { cwd: root, encoding: 'utf8' });
+    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
+      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
+    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+    f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
+      if (turn === 'assistant:human-input') {
+        entered.resolve(); await finish.promise;
+        if (kind === 'edit evidence') captured = await pendingEventFromAgentEditEvidence({ workspaceRoot: root,
+          edit: { path: file, changeType: 'update', contentOldText: 'BASE\n' }, latestText: { status: 'untracked' } });
+      }
+      return kind === 'edit evidence';
+    };
+    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
+    try {
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(message.sessionId), { project: message.project });
+      await f.accept(); const first = f.service.continueSession(message); await entered.promise;
+      await finishFirstThenRunNext(f, first, finish, { ...message, userTurnId: 'next' });
+      await f.service.drainInboxExecutions();
+      expect(n).toBe(2);
+      if (kind === 'edit evidence') {
+        expect(captured).toMatchObject({ newText: 'TURN_ONE\n' });
+        expect(JSON.stringify(captured)).not.toContain('TURN_TWO');
+      } else {
+        const history = await (await createSessionBackend(f.doc)).readHistory();
+        expect(history.find((turn) => turn.id === 'assistant:human-input')?.fileDiff?.map((diff) => diff.filePath)).toEqual(['one.txt']);
+      }
+    } finally { finish.resolve(); await f.close(); fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([false, true])('keeps newer dirty/unpushed flags after old stats (deadline=%s)', async (expires) => {
+    if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const started = createDeferred<void>(), finishOld = createDeferred<void>(), newerWritten = createDeferred<void>();
+    let dirty = false, firstMerge = true, n = 0;
+    const f = inboxExecutionFixture(async () => { if (++n === 2) dirty = true; return { stopReason: 'end_turn' }; });
+    const repo = f.deps.workspaceDocument.repo;
+    const upsert = repo.upsertDocMeta.bind(repo);
+    repo.upsertDocMeta = async (id, patch) => {
+      await upsert(id, patch);
+      if (patch.workspaceDirty === true) newerWritten.resolve();
+    };
+    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
+      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
+    f.session.exec = async (_cmd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
+      if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify')) return 'a'.repeat(40)+'\n';
+      if (args[0] === 'merge-base') {
+        if (firstMerge) { firstMerge = false; started.resolve(); await finishOld.promise; }
+        return 'a'.repeat(40)+'\n';
+      }
+      if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
+      if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
+      return '';
+    };
+    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
+    try {
+      await upsert(getSessionRoomId(message.sessionId), { project: message.project, workspaceDirty: false, workspaceUnpushed: false });
+      await f.accept(); const first = f.service.continueSession(message); await started.promise;
+      if (expires) {
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeDefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeUndefined();
+      }
+      const next = { ...message, userTurnId: 'newer' };
+      await finishFirstThenRunNext(f, first, finishOld, next, newerWritten.promise); await newerWritten.promise;
+      expect(n).toBe(2);
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+      finishOld.resolve(); await f.service.drainInboxExecutions();
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+    } finally { finishOld.resolve(); await f.close(); if (expires) vi.useRealTimers(); }
+  });
+
+  it.each([
+    { stage: 'diff', action: 'shutdown' },
+    { stage: 'usage', action: 'shutdown' },
+    { stage: 'diff', action: 'Stop' },
+    { stage: 'usage', action: 'Stop' },
+  ] as const)('releases interrupted $stage persistence after $action within the original deadline', async ({ stage, action }) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const shutdown = action === 'shutdown';
+    const entered = createDeferred<void>(), raw = createDeferred<void>();
+    const signals: Array<AbortSignal | undefined> = [];
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    if (stage === 'diff') f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, _turn, signal) => {
+      signals.push(signal); entered.resolve(); await raw.promise; return true;
+    };
+    else f.deps.turnFinalization.flushSessionUsage = async () => { entered.resolve(); await raw.promise; };
+    let run: Promise<unknown> | undefined;
+    try {
+      await f.accept();
+      run = f.service.continueSession(f.message);
+      await entered.promise;
+      if (shutdown) f.service.quiesceInboxExecutions();
+      else {
+        await vi.advanceTimersByTimeAsync(19_000);
+        await f.service.cancelSession({ ...f.message, type: 'session/cancel', turnId: 'assistant:human-input' });
+      }
+      const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(shutdown ? 7_000 : 1_000);
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const db = new Database(f.storePath, { readonly: true });
+      try {
+        expect(db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)).toEqual([{ outcome: 'user_stop' }]);
+      } finally { db.close(); }
+      if (stage === 'diff') expect(signals.every((signal) => signal?.aborted)).toBe(true);
+      await released;
+    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
+  });
+
+  it.each(['normal', 'shutdown', 'observation'])('bounds pending generated-image uploads (%s)', async (mode) => {
+    const shutdown = mode === 'shutdown';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const entered = createDeferred<void>(), raw = createDeferred<void>(), nextStarted = createDeferred<void>();
+    const uploads = new Map<string, Promise<void>>(); let prompts = 0;
+    const f = inboxExecutionFixture(async () => { if (++prompts === 1) uploads.set('image', raw.promise); else nextStarted.resolve(); return { stopReason: 'end_turn' }; });
+    const handler = Object.create(MessageHandler.prototype) as any;
+    handler.store = { has: () => true, get: () => ({ permissionWaitMs: 0, acpUpdateBuffer: [], imageGenerationUploads: uploads, turn: { phase: 'active', turnId: 'assistant:human-input', turnEpoch: 1, hasVisibleOutput: false } }), getTurnId: () => undefined, getCurrentACPUpdateTarget: () => undefined };
+    Object.assign(handler, { executionService: f.service, workspaceDocument: f.deps.workspaceDocument, logger: f.deps.logger,
+      getSessionBackend: async (doc: typeof f.doc) => createSessionBackend(doc), flushSessionContextWindowUsage: async () => {}, flushACPUpdatesNow: async () => {}, flushThreadGoalHistoryPersists: async () => {} });
+    const drain = handler.flushCodexGeneratedImageUploads.bind(handler);
+    handler.flushCodexGeneratedImageUploads = async (...args: unknown[]) => { entered.resolve(); await drain(...args); };
+    f.deps.turnFinalization.finalizeACPState = (id, turn) => handler.finalizeACPState(id, turn);
+    if (mode === 'observation') f.deps.observePromptContentForTurn = (id, turn) => handler.observePromptContentForTurn(id, turn);
+    let run: Promise<unknown> | undefined, next: Promise<unknown> | undefined, drainWork: Promise<void> | undefined;
+    try {
+      await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
+      if (shutdown) {
+        f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
+        await vi.advanceTimersByTimeAsync(7_000); await released;
+      } else { await vi.advanceTimersByTimeAsync(19_999); expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined(); await vi.advanceTimersByTimeAsync(1); }
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toHaveLength(1); } finally { db.close(); }
+      let drained = false; drainWork = f.service.drainInboxExecutions().then(() => { drained = true; });
+      await vi.advanceTimersByTimeAsync(0); expect(drained).toBe(false);
+      if (!shutdown) {
+        await run;
+        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'next', userId: 'user-1', config: f.message.acpSessionConfig });
+        next = f.service.continueSession({ ...f.message, userTurnId: 'next' }); await nextStarted.promise;
+      }
+    } finally { uploads.clear(); raw.resolve(); await run; await next; await drainWork; await f.close(); vi.useRealTimers(); }
+  });
+  it('forces a failed receipt only during shutdown when the finalization chain never settles', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const entered = createDeferred<void>(), raw = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    f.deps.turnFinalization.finalizeACPState = async () => { entered.resolve(); await raw.promise; };
+    let run: Promise<unknown> | undefined;
+    try {
+      f.add('shutdown-result'); await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
+      const ordinary = f.service.waitForInboxReleases(); await vi.advanceTimersByTimeAsync(7_000); await ordinary;
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined();
+      f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(7_000); await released;
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect((f.service as any).liveInboxExecutionIds.size).toBe(0);
+      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toEqual([{ outcome: 'failed' }]); expect(db.prepare('SELECT state FROM inbox_batches').all()).toEqual([{ state: 'unknown' }]); } finally { db.close(); }
+    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
+  });
+  it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const started = [createDeferred<void>(), createDeferred<void>()];
+    const raw = [createDeferred<void>(), createDeferred<void>()];
+    const slow = createDeferred<void>();
+    const fixtures = raw.map((work, i) => inboxExecutionFixture(async () => {
+      started[i]?.resolve(); await work.promise; return { stopReason: 'end_turn' };
+    }, undefined, undefined, `shutdown-${i}` as SessionId));
+    const [f, other] = fixtures as [typeof fixtures[number], typeof fixtures[number]];
+    f.deps.workspaceDocument.getOrCreateSessionDoc = async (id) => id === f.message.sessionId ? f.doc : other.doc;
+    f.deps.sessionManager.getSession = (id) => (id === f.message.sessionId ? f.session : other.session) as never;
+    let statisticsStarted = false;
+    f.deps.turnFinalization.syncWorkspaceGitState = async () => { statisticsStarted = true; await slow.promise; };
+    fixtures.forEach((fixture, i) => { fixture.session.terminate = async () => { raw[i]?.resolve(); }; });
+    try {
+      for (const fixture of fixtures) await f.service.acceptInboxHumanInput({ sessionId: fixture.message.sessionId,
+        inputId: 'human-input', userId: 'user-1', config: fixture.message.acpSessionConfig });
+      const turns = fixtures.map((fixture) => f.service.continueSession(fixture.message));
+      await Promise.all(started.map((signal) => signal.promise));
+      f.service.quiesceInboxExecutions();
+      await vi.advanceTimersByTimeAsync(0);
+      await f.service.waitForInboxReleases();
+      await Promise.all(turns);
+      expect(statisticsStarted).toBe(false);
+      for (const fixture of fixtures) {
+        expect(f.store.inbox.inputEnded('workspace-1', fixture.message.sessionId, 'human-input')).toBe(true);
+        expect(f.store.inbox.activeExecution('workspace-1', fixture.message.sessionId)).toBeUndefined();
+      }
+    } finally { raw.forEach((work) => work.resolve()); slow.resolve(); await Promise.all(fixtures.map((fixture) => fixture.close())); vi.useRealTimers(); }
+  });
+
+  it('bounds a slow yielded finalization, retains its raw work and releases the next input', async () => {
     const finalization = createDeferred<void>();
+    const registered = createDeferred<void>();
     let service: SessionExecutionService | undefined;
     const f = inboxExecutionFixture(async () => {
       // A yielded turn's ancillary finalization outlives the old 5 s bound while
@@ -13181,6 +13478,7 @@ describe('Operation Inbox execution boundary', () => {
         }
       ).turnRuntimeBySession.get('inbox-session' as SessionId);
       if (runtime) runtime.yieldedFinalization = finalization.promise;
+      registered.resolve();
       throw new Error('agent crashed');
     });
     service = f.service;
@@ -13188,21 +13486,30 @@ describe('Operation Inbox execution boundary', () => {
     try {
       await f.accept();
       const turn = f.service.continueSession(f.message);
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
-        hasActiveTurn: true,
-      });
-      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
-
-      finalization.resolve();
+      await registered.promise;
+      await vi.advanceTimersByTimeAsync(30_000);
       await turn.catch(() => undefined);
       expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
         hasActiveTurn: false,
       });
       expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      let drained = false;
+      const drain = f.service.drainInboxExecutions().then(() => { drained = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(drained).toBe(false);
+      finalization.resolve();
+      await drain;
+      expect(drained).toBe(true);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: false,
+      });
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
     } finally {
-      vi.useRealTimers();
+      finalization.resolve();
       await f.close();
+      vi.useRealTimers();
     }
   });
 

@@ -258,6 +258,11 @@ export class MachineRuntime {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    this.messageProcessor.stop();
+    await this.handler?.prepareForShutdown();
+  }
+
   async cleanup(): Promise<void> {
     this.options.workspaceDocument.clearMachineMonitorProvider();
     this.resourceMonitor = null;
@@ -269,6 +274,7 @@ export class MachineRuntime {
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
     this.handler?.cancelPendingHistoryWatches();
+    await this.prepareForShutdown();
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {

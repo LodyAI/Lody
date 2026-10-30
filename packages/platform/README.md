@@ -5,6 +5,18 @@ This package contains platform-neutral composition contracts. The optional
 inspection with persistent host custody. It never enables document transports;
 see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
 
+Hosted entries may pass `createE2eeRuntime: E2eeRuntimeFactory` to the shared
+`createRouter`. Its cloud provider borrows the returned `E2eeWorkspaceRuntime`
+without changing optional methods or reader labels. Standalone login without
+an authenticated context skips the factory; local and Electron keep their existing
+owners. The callback is synchronous and pure, receiving only a read-only live
+session store. Acquire the host's Layers outside render or lazily in its methods,
+and retain the application executor/resources through confirmed retirement.
+Account routing never replaces desktop approval or per-operation host admission.
+Returning `undefined` leaves the optional runtime absent; no host is enabled by default.
+[Personal-host composition](../e2ee-client/README.md#shared-platform-runtime)
+explains the owned implementation.
+
 The separate `./host-keys` entry adds
 an unconnected host identity lifecycle seam using the workspace's Effect version.
 It does not enable encrypted workspaces or register IPC handlers.

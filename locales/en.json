@@ -1008,6 +1008,7 @@
   "chat.runConfig.title": "Run configuration",
   "chat.promptPlaceholder": "",
   "chat.repoPlaceholder": "Select Repo",
+  "chat.sendWithoutMcp": "Send without MCP",
   "chat.send": "Send",
   "chat.submitting": "Starting...",
   "chat.validation.goToSettings": "Configure",
@@ -1015,7 +1016,7 @@
   "chat.validation.missingBranch": "Choose a branch before starting.",
   "chat.validation.missingContext": "Workspace context is missing, please retry.",
   "chat.validation.mcpDefaultsLoading": "Loading this project’s default MCP servers…",
-  "chat.validation.mcpDefaultsFailed": "Default MCP servers couldn’t be read, so this conversation can’t be created yet.",
+  "chat.validation.mcpDefaultsFailed": "Default MCP servers couldn’t be read. Retry or send this message without MCP.",
   "chat.validation.missingMachine": "Selected agent is missing a machine.",
   "chat.validation.missingProject": "Please select a project.",
   "chat.validation.missingPrompt": "Please enter something to discuss.",
@@ -5775,6 +5776,8 @@
   "scheduledMessage.attachmentLimit": "The message has reached its attachment limit.",
   "scheduledMessage.reference": "Reference",
   "scheduledMessage.failed": "Scheduled message not sent",
+  "scheduledMessage.editTitle": "Edit scheduled message",
+  "scheduledMessage.loadError": "Could not load this scheduled message.",
   "scheduledMessage.removeTime": "Remove time",
   "scheduledMessage.cancelHelp": "Stop this scheduled message. Messages already sent are kept.",
   "scheduledMessage.upgrade": "Update the target machine’s CLI to schedule complete messages.",
@@ -5924,5 +5927,7 @@
   "e2ee.machineSharing.enable": "enable",
   "e2ee.machineSharing.disable": "disable",
   "e2ee.machineSharing.state.pending": "Pending confirmation",
-  "e2ee.machineSharing.lastVersion": "Last verified version"
+  "e2ee.machineSharing.lastVersion": "Last verified version",
+  "Lody could not fully quit. Please restart Lody.": "Lody could not fully quit. Please restart Lody.",
+  "Retry quit": "Retry quit"
 }

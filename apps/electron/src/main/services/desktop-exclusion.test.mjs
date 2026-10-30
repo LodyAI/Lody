@@ -8,7 +8,7 @@ import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion
 import { toPortableDesktopDeepLink } from './desktop-deep-link-handoff.ts'
 import { createDesktopLaunchAdmission } from './desktop-launch-admission.ts'
 import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
-import { createDesktopQuitBarrier } from './desktop-shutdown.ts'
+import { createDesktopQuitBarrier, waitForQuitRecovery } from './desktop-shutdown.ts'
 
 const loopback = { host: '127.0.0.1', port: 0 }
 
@@ -455,4 +455,58 @@ void test('quit reports cancellation for Stay and for failed cleanup, but not fo
   await handler({ preventDefault() {} })
   await quit.promise
   assert.equal(cancelled, 2)
+})
+
+void test('failed quit restores services before reporting and later quit still completes', async () => {
+  const events = []
+  let failed = true
+  const handler = createDesktopQuitBarrier({
+    stop: async () => {
+      events.push('stop')
+      if (failed) throw new Error('local failure')
+    },
+    recover: async () => {
+      events.push('restore relay', 'restore shell')
+      return true
+    },
+    reportFailure: (_error, recovered) => {
+      assert.equal(recovered, true)
+      events.push('reopen')
+    },
+    quit: () => events.push('quit')
+  })
+  await handler({ preventDefault() {} })
+  assert.deepEqual(events, ['stop', 'restore relay', 'restore shell', 'reopen'])
+  failed = false
+  await handler({ preventDefault() {} })
+  assert.equal(events.at(-1), 'quit')
+})
+
+void test('unreleased owner keeps quit retryable without reopening ordinary windows', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const pending = Promise.withResolvers()
+  const recovering = Promise.withResolvers()
+  let failed = true
+  const surfaces = []
+  const handler = createDesktopQuitBarrier({
+    stop: async () => {
+      if (failed) throw new Error('owner still alive')
+    },
+    recover: async () => {
+      recovering.resolve()
+      return (await waitForQuitRecovery(pending.promise)) !== null
+    },
+    reportFailure: (_error, recovered) => surfaces.push(recovered ? 'ordinary' : 'restart dialog'),
+    quit: () => surfaces.push('quit')
+  })
+  const attempt = handler({ preventDefault() {} })
+  await recovering.promise
+  t.mock.timers.tick(30_000)
+  await attempt
+  pending.resolve(true)
+  await pending.promise
+  assert.deepEqual(surfaces, ['restart dialog'])
+  failed = false
+  await handler({ preventDefault() {} })
+  assert.deepEqual(surfaces, ['restart dialog', 'quit'])
 })

@@ -128,14 +128,14 @@ describe('queued message editing commits', () => {
           scheduledItems: [
             {
               scheduleId: 'later',
-              title: 'Later scheduled message',
+              content: 'Later scheduled message',
               at: 30,
               timeZone: 'UTC',
               state: 'pending',
             },
             {
               scheduleId: 'earlier',
-              title: 'Earlier scheduled message',
+              content: 'Earlier scheduled message',
               at: 10,
               timeZone: 'UTC',
               state: 'failed',
@@ -198,7 +198,7 @@ describe('queued message editing commits', () => {
             scheduledItems: [
               {
                 scheduleId: 'mobile',
-                title: 'Send the weekly summary',
+                content: 'Send the weekly summary',
                 at: Date.parse('2026-10-27T09:00:00Z'),
                 timeZone: 'UTC',
                 state: 'pending',
@@ -264,7 +264,7 @@ describe('queued message editing commits', () => {
             scheduledItems: [
               {
                 scheduleId: 'narrow',
-                title: 'Send the weekly summary',
+                content: 'Send the weekly summary',
                 at: Date.parse('2026-10-27T09:00:00Z'),
                 timeZone: 'UTC',
                 state: 'pending',
@@ -313,7 +313,7 @@ describe('queued message editing commits', () => {
           scheduledItems: [
             {
               scheduleId: 'scheduled-only',
-              title: 'Send the weekly summary',
+              content: 'Send the weekly summary',
               at: Date.parse('2026-10-27T09:00:00Z'),
               timeZone: 'UTC',
               state: 'pending',

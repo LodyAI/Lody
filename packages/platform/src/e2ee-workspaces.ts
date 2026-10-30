@@ -9,6 +9,17 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
+import type { ReadonlyStore } from './store';
+import type { PlatformSessionState } from './provider';
+
+/** Synchronous, pure assembly of a borrowed runtime port. The application owns
+ * resource acquisition, its executor and retirement (including unfinished close).
+ * Do not acquire custody or perform I/O during this factory call. The live session
+ * supplies account routing only; the runtime must verify every operation itself. */
+export type E2eeRuntimeFactory = (input: {
+  readonly session: ReadonlyStore<PlatformSessionState>;
+}) => E2eeWorkspaceRuntime | undefined;
+
 /** Public creation intent. The host verifies accountId against its signed-in account. */
 export interface E2eeWorkspacePrepareInput {
   readonly accountId: string;

@@ -661,6 +661,7 @@ async function startAgentService(
     await lease?.close();
   };
   const stopDaemonAndApplication = async () => {
+    await fleet.prepareForShutdown();
     const failures: unknown[] = [];
     for (const stop of [
       () => startupTimeSync?.stop(),

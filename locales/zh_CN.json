@@ -1008,6 +1008,7 @@
   "chat.runConfig.title": "运行设置",
   "chat.promptPlaceholder": "",
   "chat.repoPlaceholder": "选择 GitHub 仓库（可选）",
+  "chat.sendWithoutMcp": "不使用 MCP 发送",
   "chat.send": "发送",
   "chat.submitting": "启动中...",
   "chat.validation.goToSettings": "去配置",
@@ -1015,7 +1016,7 @@
   "chat.validation.missingBranch": "开始前请先选择分支。",
   "chat.validation.missingContext": "工作区信息缺失，请重试。",
   "chat.validation.mcpDefaultsLoading": "正在读取此项目的默认 MCP 服务器…",
-  "chat.validation.mcpDefaultsFailed": "无法读取默认 MCP 服务器，暂时无法创建此对话。",
+  "chat.validation.mcpDefaultsFailed": "无法读取默认 MCP 服务器。请重试，或仅本次不使用 MCP 发送。",
   "chat.validation.missingMachine": "所选 Agent 缺少可用机器。",
   "chat.validation.missingProject": "请选择一个项目。",
   "chat.validation.missingPrompt": "请输入想要讨论的内容。",
@@ -5766,6 +5767,8 @@
   "scheduledMessage.attachmentLimit": "消息附件数量已达到上限。",
   "scheduledMessage.reference": "引用",
   "scheduledMessage.failed": "定时消息未发送",
+  "scheduledMessage.editTitle": "编辑定时消息",
+  "scheduledMessage.loadError": "无法加载这条定时消息。",
   "scheduledMessage.removeTime": "取消定时",
   "scheduledMessage.cancelHelp": "停止此定时消息；已经发送的消息会保留。",
   "scheduledMessage.upgrade": "请升级目标机器的 CLI，以支持完整消息定时发送。",
@@ -5915,5 +5918,7 @@
   "e2ee.machineSharing.enable": "开启",
   "e2ee.machineSharing.disable": "关闭",
   "e2ee.machineSharing.state.pending": "等待确认",
-  "e2ee.machineSharing.lastVersion": "上次验证版本"
+  "e2ee.machineSharing.lastVersion": "上次验证版本",
+  "Lody could not fully quit. Please restart Lody.": "Lody 未能完全退出，请重新启动。",
+  "Retry quit": "重试退出"
 }

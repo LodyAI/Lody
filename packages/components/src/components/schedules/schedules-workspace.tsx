@@ -45,6 +45,7 @@ import { mobileHomeReturnTabAtom } from '@/atoms/mobile-home-state';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { onlineMachineIdsAtom, lodyPresenceSyncStateAtom } from '@/atoms/presence';
 import { useScheduleDocument, useSchedules } from '@/hooks/use-schedules';
+import { useScheduledMessageContents } from './use-scheduled-message-content';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useOpenSettings } from '@/hooks/use-open-settings';
@@ -60,7 +61,12 @@ import {
   type ScheduleFormValue,
   type ScheduleRowContext,
 } from './schedule-view';
-import { describeScheduleState, formatUpcoming, triggerTimeZone } from './schedule-format';
+import {
+  describeScheduleState,
+  formatUpcoming,
+  scheduleRowTimeZone,
+  triggerTimeZone,
+} from './schedule-format';
 import {
   ScheduleDetailFrame,
   ScheduleDetailHeader,
@@ -176,6 +182,14 @@ function SupportedSchedulesWorkspace({
   const navigate = useNavigate();
   const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
   const registry = useSchedules();
+  const scheduledMessageRows = useMemo(
+    () => registry.rows.filter((row) => row.scheduledMessage),
+    [registry.rows]
+  );
+  const scheduledMessageContents = useScheduledMessageContents(scheduledMessageRows);
+  const displayTitle = (item: ScheduleRegistryRow) =>
+    (item.scheduledMessage ? scheduledMessageContents.get(item.scheduleId)?.trim() : undefined) ||
+    item.title;
   const agents = useAtomValue(getAllAgentConfigAtom);
   const localProjects = useVisibleLocalProjects({ includeMachineFlock: true });
   const onlineMachines = useAtomValue(onlineMachineIdsAtom);
@@ -313,7 +327,7 @@ function SupportedSchedulesWorkspace({
     });
   const confirmDelete = (item: ScheduleRegistryRow) =>
     setConfirmation({
-      title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: item.title }),
+      title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: displayTitle(item) }),
       description: item.scheduledMessage
         ? t(
             'schedules.deleteMessageHelp',
@@ -431,7 +445,7 @@ function SupportedSchedulesWorkspace({
   const status =
     row && rowContext
       ? describeScheduleState(t, row, rowRuntime, {
-          timeZone: triggerTimeZone(row.trigger, rowContext.timeZone),
+          timeZone: scheduleRowTimeZone(row, rowContext.timeZone),
           now: getServerNow(),
           locale: i18n.language,
         })
@@ -483,7 +497,9 @@ function SupportedSchedulesWorkspace({
   const header = (
     <ScheduleDetailHeader
       kind={row?.scheduledMessage ? 'message' : 'task'}
-      title={row?.title ?? (scheduleId === 'new' ? t('schedules.new', 'New schedule') : '')}
+      title={
+        row ? displayTitle(row) : scheduleId === 'new' ? t('schedules.new', 'New schedule') : ''
+      }
       status={status}
       enabled={
         !row || row.scheduledMessage || row.trigger.kind === 'manual'
@@ -598,6 +614,7 @@ function SupportedSchedulesWorkspace({
       hideHeader={hideHeader}
       query={query}
       contextForRow={contextForRow}
+      contentForRow={(item) => scheduledMessageContents.get(item.scheduleId)}
     />
   );
   return (
@@ -638,7 +655,7 @@ function SupportedSchedulesWorkspace({
       {mobile ? null : (
         <ScheduleDetailModal
           open={!!scheduleId}
-          title={row?.title ?? t('schedules.new', 'New schedule')}
+          title={row ? displayTitle(row) : t('schedules.new', 'New schedule')}
           onClose={() => open()}
         >
           {body}

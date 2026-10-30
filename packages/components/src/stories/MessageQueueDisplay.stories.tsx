@@ -121,21 +121,21 @@ const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const scheduledItems = [
   {
     scheduleId: 'scheduled-tomorrow',
-    title: 'Review these files tomorrow morning',
+    content: 'Review these files tomorrow morning',
     at: at(1, 9),
     timeZone,
     state: 'pending' as const,
   },
   {
     scheduleId: 'scheduled-week',
-    title: 'Send the weekly summary to the team channel with the release notes',
+    content: 'Send the weekly summary to the team channel with the release notes',
     at: at(3, 17),
     timeZone,
     state: 'pending' as const,
   },
   {
     scheduleId: 'scheduled-failed',
-    title: 'Re-run the nightly benchmark',
+    content: 'Re-run the nightly benchmark',
     at: at(0, 23),
     timeZone,
     state: 'failed' as const,

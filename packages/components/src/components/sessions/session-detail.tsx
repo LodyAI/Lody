@@ -2691,6 +2691,7 @@ const SessionDetail = ({
           payload.attachments
         );
         accepted = true;
+        payload.onAccepted?.();
         // Marks the first message read for the sender and bubbles activity to
         // the parent session, matching the ordinary send path. The child's own
         // lastMessageAt is already durable inside the startSession accept unit.

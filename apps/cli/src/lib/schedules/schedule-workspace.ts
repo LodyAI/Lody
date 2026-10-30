@@ -65,7 +65,10 @@ export async function createScheduleWorkspace(args: {
   localOnly: boolean;
   authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   logger: Logger;
+  /** Run completion: the chat's own Turns plus delegated Operations it still awaits. */
   hasSessionWork: (sessionId: SessionId) => boolean;
+  /** Message admission: only work that occupies the chat's own Turns. */
+  hasSessionTurnWork: (sessionId: SessionId) => boolean;
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
@@ -132,7 +135,8 @@ export async function createScheduleWorkspace(args: {
       if (problem || (run.message && (sessionRecord?.meta as SessionMeta | undefined)?.isArchived))
         throw new ScheduleConfigurationError(problem ?? 'SESSION_UNAVAILABLE');
       // A timed message waits for this chat rather than interrupting its active turn.
-      if (run.message && args.hasSessionWork(destinationSessionId))
+      // Delegated Operations still running elsewhere do not occupy this chat.
+      if (run.message && args.hasSessionTurnWork(destinationSessionId))
         throw new ScheduleConfigurationError('SESSION_BUSY');
     }
     return buildScheduleRunTarget({
