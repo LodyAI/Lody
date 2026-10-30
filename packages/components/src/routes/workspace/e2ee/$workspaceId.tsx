@@ -174,7 +174,7 @@ function WorkspaceControlRoute() {
                   if (personalHostFailureCode(error) !== 'unsupported') throw error;
                 }
               }
-              if (disposed) return;
+              if (disposed) return undefined;
               readerOwner =
                 runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
               if (readerOwner) hostOpened = true;
