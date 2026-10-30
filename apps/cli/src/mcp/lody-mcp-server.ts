@@ -95,10 +95,10 @@ import {
   syncWorkspaceMetaForRead,
   withWorkspaceManager,
   getCommandSessionSharingPort,
-  WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   WorkspaceSyncUnavailableError,
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
   bindAgentRoleCreateOptions,
@@ -1886,7 +1886,6 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_list:${ctx.sessionId}`);
     const fingerprint = sessionListFingerprint(input, ctx);
     const cursor = parseSessionListCursor(input.cursor, fingerprint);
     const presence = manager.getPresenceStates() ?? {};
@@ -1991,7 +1990,6 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_status_many:${ctx.sessionId}`);
     const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
       readCurrentSessionMeta(manager, id)
     );
@@ -2185,49 +2183,22 @@ const filterAuthorizedLocalProjectsForOptions = async (
 };
 
 /**
- * Catalog reads try Streams, then the local replica. A failed attempt is not
- * proof that a present row is missing, and a missing row is not proof that the
- * selection is invalid.
+ * Daemon-hosted catalog reads use the replica the daemon is already syncing.
+ * They do not start a request-scoped Streams round trip. A ready baseline makes
+ * absence a local fact; an unready baseline cannot prove a missing row is invalid.
  */
-const syncWorkspaceMetaForLocalRead = async (
+const readDaemonCatalogFreshness = async (
   manager: LoroDocumentManager,
-  reason: string
+  docId: string | undefined
 ): Promise<MachineFlockFreshness> => {
-  try {
-    await manager.syncMetaOrThrow({ reason, requireRemoteConfirmation: true });
-    return { confirmed: true };
-  } catch (error) {
-    getLogger('mcp').warn(
-      `Workspace metadata sync was not confirmed (${reason}); continuing from the local replica: ${formatMcpErrorMessage(error)}`
-    );
-    return {
-      confirmed: false,
-      error: new WorkspaceSyncUnavailableError({
-        message: WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
-        cause: error,
-      }),
-    };
-  }
-};
-
-const syncMachineFlockDocForLocalRead = async (
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  reason: string
-): Promise<MachineFlockFreshness> => {
-  try {
-    await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
-      reason,
-      requireRemoteConfirmation: true,
-    });
-    return { confirmed: true };
-  } catch (error) {
-    getLogger('mcp').warn(
-      `Machine Flock freshness sync was not confirmed (${reason}); continuing from the local replica: ${formatMcpErrorMessage(error)}`
-    );
-    return { confirmed: false, error };
-  }
+  if (await manager.catalogBaselineReady(docId, 0)) return { confirmed: true };
+  return {
+    confirmed: false,
+    error: new FlockSyncUnavailableError({
+      message: 'The daemon catalog baseline is not ready.',
+      reason: 'no-route',
+    }),
+  };
 };
 
 const readCurrentSessionMeta = async (
@@ -2517,10 +2488,7 @@ const buildSessionWorkContext = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
   session: SessionMeta,
-  /**
-   * Freshness for `session.machineId` when the caller already attempted that
-   * Machine Flock sync. A second attempt would wait out another Streams timeout.
-   */
+  /** Freshness for `session.machineId` when the caller already observed that catalog. */
   knownMachineFreshness?: MachineFlockFreshness
 ): Promise<
   | { kind: 'chat' }
@@ -2538,11 +2506,9 @@ const buildSessionWorkContext = async (
   if (project?.kind === 'local') {
     const freshness =
       knownMachineFreshness ??
-      (await syncMachineFlockDocForLocalRead(
+      (await readDaemonCatalogFreshness(
         manager,
-        workspaceId,
-        session.machineId,
-        `mcp.session_current.local_project:${session.machineId}`
+        getMachineFlockDocId(workspaceId, session.machineId)
       ));
     const localProjects = await readMachineLocalProjects(
       manager.repo,
@@ -2652,13 +2618,13 @@ const buildSessionCreateOptions = async (
   const workspace = await resolveWorkspaceOrThrow(auth, ctx.workspaceId);
   const workspaceId = workspace.id as WorkspaceId;
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const metaFreshness = await syncWorkspaceMetaForLocalRead(
-      manager,
-      `mcp.session_create_options:${workspaceId}`
-    );
+    const metaFreshness = await readDaemonCatalogFreshness(manager, undefined);
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
-      if (!metaFreshness.confirmed) throw metaFreshness.error;
+      assertMachineFlockCacheSufficient(
+        metaFreshness,
+        `Requester session is absent from the local replica: ${ctx.sessionId}.`
+      );
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
@@ -2667,11 +2633,11 @@ const buildSessionCreateOptions = async (
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
     const requestedMachineId = normalizeCliValue(input.machineId);
     const machineIdToResolve = (requestedMachineId ?? currentSession.machineId) as MachineId;
-    if (
-      !metaFreshness.confirmed &&
-      !machineEntries.some((entry) => entry.meta.id === machineIdToResolve)
-    ) {
-      throw metaFreshness.error;
+    if (!machineEntries.some((entry) => entry.meta.id === machineIdToResolve)) {
+      assertMachineFlockCacheSufficient(
+        metaFreshness,
+        `Machine is absent from the local replica: ${machineIdToResolve}.`
+      );
     }
     // Null here is "presence unavailable", so liveness is UNKNOWN for every remote
     // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
@@ -2699,11 +2665,9 @@ const buildSessionCreateOptions = async (
       input.machineId,
       currentSession.machineId
     );
-    const flockFreshness = await syncMachineFlockDocForLocalRead(
+    const flockFreshness = await readDaemonCatalogFreshness(
       manager,
-      workspaceId,
-      selectedMachine.id,
-      `mcp.session_create_options:${selectedMachine.id}`
+      getMachineFlockDocId(workspaceId, selectedMachine.id)
     );
     const allAgentConfigs = await listMergedAgentConfigs(manager.repo, workspaceId, [
       selectedMachine.id,

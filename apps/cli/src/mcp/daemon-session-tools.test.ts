@@ -650,27 +650,26 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       executeDaemonSessionTool(context(), 'lody_session_create_options', args)
     );
 
-  it('returns local create options when Streams sync fails and the replica can answer', async () => {
-    const projectId = 'synthetic-project' as LocalProjectId;
-    const agentConfigId = await seedCreateOptionsCatalog(projectId);
-    stubCreateOptionsReaders();
-    const timeout = new FlockSyncTimeoutError('Synthetic Streams timeout');
+  function rejectStreamsSync() {
     const metaSync = vi
       .spyOn(manager, 'syncMetaOrThrow')
       .mockRejectedValue(new Error('ECONNRESET'));
-    const flockSync = vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(timeout);
+    const flockSync = vi
+      .spyOn(manager, 'syncFlockDocOrThrow')
+      .mockRejectedValue(new FlockSyncTimeoutError('Synthetic Streams timeout'));
+    return { metaSync, flockSync };
+  }
+
+  it('returns local create options without starting Streams sync', async () => {
+    const projectId = 'synthetic-project' as LocalProjectId;
+    const agentConfigId = await seedCreateOptionsCatalog(projectId);
+    stubCreateOptionsReaders();
+    const { metaSync, flockSync } = rejectStreamsSync();
 
     const result = await readCreateOptions();
 
-    expect(metaSync).toHaveBeenCalledWith({
-      reason: `mcp.session_create_options:${workspaceId}`,
-      requireRemoteConfirmation: true,
-    });
-    expect(flockSync).toHaveBeenCalledTimes(1);
-    expect(flockSync).toHaveBeenCalledWith(getMachineFlockDocId(workspaceId, machineId), {
-      reason: `mcp.session_create_options:${machineId}`,
-      requireRemoteConfirmation: true,
-    });
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
     expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
       ok: true,
@@ -687,13 +686,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
-  it('returns retryable SYNC_UNAVAILABLE when Streams fails and the local catalog cannot validate', async () => {
+  it('returns retryable SYNC_UNAVAILABLE when the unready local replica cannot validate create options', async () => {
     stubCreateOptionsReaders();
-    const timeout = new FlockSyncTimeoutError('Synthetic Streams timeout');
-    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('ECONNRESET'));
-    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(timeout);
+    vi.spyOn(manager, 'catalogBaselineReady').mockResolvedValue(false);
+    const { metaSync, flockSync } = rejectStreamsSync();
 
     const missingCatalog = JSON.parse((await readCreateOptions()).content[0]?.text ?? '{}');
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
     expect(missingCatalog).toMatchObject({
       ok: false,
       error: { code: 'SYNC_UNAVAILABLE', retryable: true },
@@ -713,13 +713,15 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(missingProject.error.message).toContain('missing-project');
   });
 
-  it('returns the local catalog when Streams confirms an empty agent list', async () => {
+  it('returns an empty agent catalog once the daemon baseline is ready', async () => {
     stubCreateOptionsReaders();
-    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue(undefined);
-    vi.spyOn(manager, 'syncFlockDocOrThrow').mockResolvedValue(undefined);
+    vi.spyOn(manager, 'catalogBaselineReady').mockResolvedValue(true);
+    const { metaSync, flockSync } = rejectStreamsSync();
 
     const result = await readCreateOptions();
 
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
     expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
       ok: true,
@@ -729,20 +731,41 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
-  it('keeps an unauthorized machine denied when create-option sync fails', async () => {
+  it('keeps an unauthorized machine denied without starting create-option sync', async () => {
     await seedCreateOptionsCatalog('synthetic-project' as LocalProjectId);
     stubCreateOptionsReaders({ allowed: false, reason: 'not_visible' });
-    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('ECONNRESET'));
-    const flockSync = vi
-      .spyOn(manager, 'syncFlockDocOrThrow')
-      .mockRejectedValue(new FlockSyncTimeoutError('Synthetic Streams timeout'));
+    const { metaSync, flockSync } = rejectStreamsSync();
 
     const result = await readCreateOptions();
 
+    expect(metaSync).not.toHaveBeenCalled();
     expect(flockSync).not.toHaveBeenCalled();
     expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
       ok: false,
       error: { code: 'INTERNAL_ERROR', retryable: false },
+    });
+  });
+
+  it('lists and reads session status from the daemon replica without starting Streams sync', async () => {
+    stubCreateOptionsReaders();
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const listed = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_list', {})
+    );
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: [expect.objectContaining({ id: sessionId })],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId, ok: true }],
     });
   });
 

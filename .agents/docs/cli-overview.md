@@ -166,14 +166,17 @@ request and Operation id, and stop after three total calls. This is bounded agen
 not an enforced counter or a change to the daemon recovery budget. An active Operation
 handle means recovery is already owned by the daemon; callers must not resubmit it.
 
-`syncMachineFlockDocsForRead` and MCP `lody_session_create_options` opt into strict
-freshness confirmation, then continue from the local replica. For cloud-enabled managers
+`syncMachineFlockDocsForRead` opts into strict freshness confirmation for Session create
+and chat validation, then continues from the local replica. For cloud-enabled managers
 this requires an attached, unchanged Streams generation and a successful Streams report.
 A resolved no-route or partial report is not confirmation; a genuinely local-only manager
-retains its authoritative local path. Create options return the local rows when they can
-answer, and retryable `SYNC_UNAVAILABLE` when the agent-config catalog is empty or the
-current or queried selection is absent. Ordinary Flock sync callers, including Role
-creation and discovery, keep their existing best-effort report semantics. Route absence is
+retains its authoritative local path. Daemon-hosted MCP reads, including create options,
+session list, and session status, do not start that request-scoped sync. They read the
+daemon replica. Create options return local rows when they can answer, and retryable
+`SYNC_UNAVAILABLE` when the baseline is not ready and the agent-config catalog is empty
+or the current or queried selection is absent. A ready baseline may return an empty
+catalog. Role creation and explicit fresh discovery keep their sync requirements. Ordinary
+Flock sync callers keep their existing best-effort report semantics. Route absence is
 application-level sync unavailability, not a fabricated Repo conflict.
 The [decision note](../notes/implemented/bug-fix/2026-10-10-machine-flock-cache-insufficient.md)
 records the fallback and regression coverage.
