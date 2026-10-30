@@ -40,10 +40,9 @@ its bundled CLI cannot attach to the normal local daemon. Teardown first asks
 Electron to quit through its production shutdown barrier, then verifies the
 port can be rebound before deleting temporary state.
 
-Fresh test profiles use English. On macOS the launch also sets the process-local
-`AppleLanguages` preference because Chromium's `--lang` does not change the native
-system-language list used by the application. Saved language choices still take
-precedence, including across a profile restart.
+Fresh test profiles use English. On macOS the process-local `AppleLanguages`
+preference supplies the application's native language list. Saved language choices
+take precedence, including across a profile restart.
 
 The harness keeps E2E windows hidden and disables Chromium background throttling,
 so regression and CI runs do not activate or focus Lody while preserving renderer

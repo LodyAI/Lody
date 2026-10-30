@@ -1083,8 +1083,8 @@ const createNodeServicesForLease = async (
       const host = historyHost;
       const generation = readGeneration;
       const cursor = await source.observedEventCursor();
-      // An idle owner's projection is certified only at its freshly observed
-      // cursor. Otherwise read the persisted index, never a writer's staged goal.
+      // Reuse an idle owner's projection at the freshly observed cursor;
+      // otherwise inspect the persisted projection at that cursor.
       let latest =
         operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
       if (latest === undefined)
@@ -1099,8 +1099,7 @@ const createNodeServicesForLease = async (
         let newerStart = count;
         for (;;) {
           if (closing || disposed) throw new Error('Roost session backend is disposed');
-          // Inspection does not retain state/permission bodies. Only the
-          // selected goal is detached on return.
+          // Keep scanned pages transient; detach the selected goal on return.
           const projected = await projectBranchPage(branch, decodeMessages(branch.messages), false);
           if (branch.state.revision !== revision || branch.totalCount !== count) throw staleRead();
           if (branch.startPosition + projected.length !== newerStart)
