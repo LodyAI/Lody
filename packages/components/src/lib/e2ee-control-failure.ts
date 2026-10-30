@@ -18,6 +18,9 @@ import {
 export type E2eeControlFailureKind =
   | 'approval-required'
   | 'local-identity'
+  | 'custody-locked'
+  | 'custody-indeterminate'
+  | 'custody-unavailable'
   | 'network'
   | 'auth'
   | 'server'
@@ -26,6 +29,18 @@ export type E2eeControlFailureKind =
   | 'identity-conflict'
   | 'progress-conflict'
   | 'local-corrupt';
+
+/** Content-free custody guidance shared by opening and pairing surfaces. */
+export const custodyFailureMessages = {
+  'custody-locked': 'e2ee.custody.locked.help',
+  'custody-indeterminate': 'e2ee.custody.indeterminate.help',
+  'custody-unavailable': 'e2ee.custody.unavailable.help',
+} as const;
+export function custodyFailureMessage(kind: E2eeControlFailureKind): string | undefined {
+  return kind in custodyFailureMessages
+    ? custodyFailureMessages[kind as keyof typeof custodyFailureMessages]
+    : undefined;
+}
 
 /** Project only the portable host's single typed failure, never a mixed cleanup cause. */
 export function personalHostFailureCode(error: unknown): string | undefined {
@@ -63,6 +78,21 @@ function serverCode(error: unknown): string | null {
 
 /** Classify a control-page failure. Unknown errors are treated as transport failures. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
+  // Inspect only a direct typed custody failure. A mixed close/operation Cause
+  // retains its owner and cannot be flattened into a recoverable display hint.
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'ClientCustodyError' &&
+    'reason' in error
+  ) {
+    const reason = error.reason;
+    if (reason === 'identity-lost') return { kind: 'approval-required', code: reason };
+    if (reason === 'corrupt') return { kind: 'custody-indeterminate', code: reason };
+    if (reason === 'locked' || reason === 'indeterminate' || reason === 'unavailable')
+      return { kind: `custody-${reason}`, code: reason };
+  }
   const portable = personalHostFailureCode(error);
   if (portable === 'identity-lost' || portable === 'approval-required')
     return { kind: 'approval-required', code: portable };

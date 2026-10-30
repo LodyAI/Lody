@@ -272,6 +272,12 @@ describe('encrypted workspace settings', () => {
     expect(writes[1]?.requestId).not.toBe(writes[0]?.requestId);
     expect(shared).toBe(true);
   });
+  it('explains missing mobile policy support without pretending that a sharing host exists', async () => {
+    await renderSharing();
+    expect(container.textContent).toContain('e2ee.machineSharing.issue.unsupported');
+    expect(container.querySelector('[role="switch"]')).toBeNull();
+    expect(container.textContent).not.toContain('e2ee.machineSharing.issue.unavailable');
+  });
   it('does not open sharing ports for an ordinary workspace', async () => {
     platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => {
       throw new Error('ordinary settings opened a crypto port');
