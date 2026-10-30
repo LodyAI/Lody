@@ -219,7 +219,7 @@ function Sidebar({
           }
           side={side === 'left' ? 'start' : 'end'}
         >
-          <Drawer.Header className="sr-only">
+          <Drawer.Header visuallyHidden>
             <Drawer.Title>Sidebar</Drawer.Title>
             <Drawer.Description>Displays the mobile sidebar.</Drawer.Description>
           </Drawer.Header>

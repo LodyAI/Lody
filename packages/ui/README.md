@@ -353,8 +353,11 @@ continues to own its separate safe-area spacing.
 The same owner composes the clipped 1px box with its normal styles, including
 clearing the title's logical close-control inset. Text, IDs, refs and Base UI
 labeling remain present; changing the option preserves the existing node.
-`AlertDialog` and the package's Base UI `Drawer` do not expose this option. The
-application's Vaul-backed `ui/drawer` provides its own opt-in on `DrawerTitle` and
+Their Title/Description counterparts in `AlertDialog` and Base UI `Drawer` do not
+expose this option. All three families share `Header visuallyHidden`, which clips
+the entire mounted name block while preserving child IDs, refs and focus across
+updates. `Footer` keeps its existing interface. The application's Vaul-backed
+`ui/drawer` provides its own opt-in on `DrawerTitle` and
 `DrawerDescription`, retaining the Vaul/Radix labeling context and inline styles.
 
 ```tsx

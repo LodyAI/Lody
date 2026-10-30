@@ -21,6 +21,7 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  spinnerMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   fallback: {
     display: 'flex',
     minHeight: 0,
@@ -346,7 +347,7 @@ export function PublicBrowserSurface({
     >
       {phase === 'loading' ? (
         <div {...stylex.props(styles.overlay)}>
-          <Spinner diameter="calc(var(--spacing) * 5)" className="text-muted-foreground" />
+          <Spinner diameter="calc(var(--spacing) * 5)" {...stylex.props(styles.spinnerMuted)} />
         </div>
       ) : null}
       {localError ? (

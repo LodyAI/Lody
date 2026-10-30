@@ -1393,7 +1393,7 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 
 ### 控件归属与采集边界
 
-第 74–88 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
+第 74–93 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
 保留实际调用方合同，不新增 Token 组或依赖。Button 新增 CSS 类型的 `fontSize`、
 `lineHeight` 与平实 `solid` variant，ResizableHandle 新增显式 edge 外观；原默认不变。
 
@@ -1412,6 +1412,8 @@ placeholder、受控值、pending 和取消行为，没有新增通用样式逃�
 Popover Title 的归属层组合编译器原九字段，不更换上下文、DOM 或 ARIA 属性。
 1px／-1px、`inset(50%)` 是固定物理值，不随主题 spacing。Dialog Title 在同次归属层组合
 清除原 logical-end padding；默认 parts 的旧字段、ID、ref、render 元素合并不变。
+共享 Dialog／AlertDialog／Base UI Drawer 的 Header 也支持同一显式选项，
+隐藏整个名称块；Footer 不支持。Sidebar 调用仅改该属性，原用户 diff 字节不变。
 Gallery 图仅为 After。Stack 原 dangling `aria-describedby` 两侧同样缺失，不能称所有
 ARIA 均有效。
 
@@ -1447,14 +1449,15 @@ SessionDetail loading 分支，没有替换子组件或 runtime。已有全宽 A
 注入的已知负控不属于 Stack props。原 native Escape 超时与可信 content 按键控制、明确
 补缺来源并列，缺失原 DOM 时不追认原超时原因。
 
-| 冻结报告                      | 正式对数／字节相同／完整标准记录 | 保留原 OPEN，原始／阈值像素                |
-| ----------------------------- | -------------------------------: | ------------------------------------------ |
-| `leaves74-78-acceptance.html` |                 310／305／30,303 | 正式五对 13／0；侧栏补充两对 882／829。    |
-| `leaves79-81-acceptance.html` |                 296／292／14,056 | 正式四对 1,075／0；native 补充一对 22／0。 |
-| `leaves82-84-acceptance.html` |                 306／305／12,854 | disabled Button 边角一对 10／7。           |
-| `leaves85-88-acceptance.html` |                 284／284／12,554 | 无新增正式 OPEN；所有历史 OPEN 保留。      |
+| 冻结报告                      | 正式对数／字节相同／完整标准记录 | 保留原 OPEN，原始／阈值像素                            |
+| ----------------------------- | -------------------------------: | ------------------------------------------------------ |
+| `leaves74-78-acceptance.html` |                 310／305／30,303 | 正式五对 13／0；侧栏补充两对 882／829。                |
+| `leaves79-81-acceptance.html` |                 296／292／14,056 | 正式四对 1,075／0；native 补充一对 22／0。             |
+| `leaves82-84-acceptance.html` |                 306／305／12,854 | disabled Button 边角一对 10／7。                       |
+| `leaves85-88-acceptance.html` |                 284／284／12,554 | 无新增正式 OPEN；所有历史 OPEN 保留。                  |
+| `leaves90-93-acceptance.html` |                  164／164／8,068 | 原 hover 三对 5,602／5,534；native 页头一对 473／402。 |
 
-最后一组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
+85–88 组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
 后继匹配控制不关闭原未知栅格差异。实际主题门禁拒绝 light URL 错标的固定 dark 场景；
 Archive hover 与 Monaco tokenizer 失败有有界同源证据、明确修正 cell，原数据全部保留。
 被拒字体候选、没有伪造 After 图的 selector 源码、inline 负控、Gallery After-only 图及更早
@@ -1466,11 +1469,23 @@ focus 使其归零，没有赋值滚动位置或改产品 CSS。十八对可见 
 后停滞且已无 Chrome 子进程，已仅终止自己的 Node；原 `complete:false` 保留，末
 label-click／cleanup 仍 UNKNOWN，不称正常关闭或末行为通过。
 
-截至 84 的完整工作区回归冻结 1,867 份 UI 源码、146 份 Electron 源码与五份元数据，
-期间哈希不变。components 620 文件／6,207 测试、UI 25／307、真实 Electron 构建／四页
-冒烟通过，主 Agent 已看四张应用图。它们仅为 After，未配置 agent 的 local chat 不证明
-真实 agent send/stop 调度。Table 的七十八条既有 Styleq warning 与前次相同；更早全量
-回归保留截至 78 的准确边界，无关根 ACP 前置失败仍阻止将根检查称为通过。
+90–93 通过局部 Spinner 颜色、固定文本菜单 caption Token 与 Header 选项移除八处源码
+utility。两个真实移动文件查看器 Button 使用已有 width／height API，保留边缘 margin。
+六个迁移的运行时 utility 应用不删除 helper 字面量；两个已有 margin 参数变得可静态识别，
+因此统计净减六。菜单保留 `font-normal`：被拒私有字重 writer 被编到 CSS 层外，使真实
+`font-semibold` 控制从 600 变为 400，没有提高 specificity 掩盖。Integration Spinner
+原样保留：本地 identity snapshot 使真实 pending 分支无法挂载。
+
+明确的视口外指针／hover 门禁通过最终文件查看器矩阵，但原三对 hover 差异仍 OPEN。
+未改 Before 在 fresh context 之间也变化，不证明 Chromium 的精确触发原因。另有一对
+native 项目页头差异位于迁移 Spinner 外，目标 CSS 相同及同源栅格控制不能关闭它。
+被拒字重图、Token 负控和失败采集继续分列。
+
+截至 93 的完整工作区回归冻结 1,867 份 UI 源码、146 份 Electron 源码、五份元数据与
+733 份测试源码，期间哈希不变。components 620 文件／6,208 测试、UI 25／312、真实
+Electron 构建／四页冒烟通过，主 Agent 已看四张应用图。它们仅为 After，未配置 agent
+的 local chat 不证明真实 agent send/stop 调度。Table 的七十八条既有 Styleq warning
+与截至 84 相同；更早全量回归保留准确边界，无关根 ACP 前置失败仍阻止将根检查称为通过。
 
 ## 后续工作
 
@@ -1499,6 +1514,7 @@ label-click／cleanup 仍 UNKNOWN，不称正常关闭或末行为通过。
 | 精确截至 81 的源码，视觉部分验收 | v2       |    1,489 |  163 |    724 |
 | 精确截至 84 的源码，视觉部分验收 | v2       |    1,474 |  163 |    726 |
 | 精确截至 88 的源码，视觉部分验收 | v2       |    1,451 |  159 |    726 |
+| 精确截至 93 的源码，视觉部分验收 | v2       |    1,445 |  157 |    725 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1511,16 +1527,18 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 88 的 v2 分项为 components 1,016 处／143 文件／633 未解析，旧 UI 430／14／93，
+已发布截至 93 的 v2 分项为 components 1,011 处／141 文件／632 未解析，旧 UI 429／14／93，
 routes 五处／两文件／零，来自三根 790 份冻结源码。共享 UI 源码与导出元数据位于该计数
-范围外单独冻结。六个 Field.Label 与两个 action-theme 模板仍是已知 StyleX 未解析表达式，
+范围外单独冻结。已知 StyleX 模板继续作为未解析表达式，不代表新增 Tailwind 字符串。
+截至 88 仍是独立不可变库存；八处源码删除加两个新可见的保留 margin，使数字净减六。
 不含后续批次。
 
-同一未改扫描器审计完整产品 `src`、排除 stories，1,396 份冻结 JS／TS 得到 1,460 处／
-161 文件／730 未解析。三根外九处属于 `conversation-layout.ts` 与
-`use-keyboard-aware-scroll-into-view.ts`，另四个未解析单列。手工锁定编译器审计还发现 v2
+截至 93 的完整产品 `src` 审计排除 stories，仍用同一 v2 扫描器；1,396 份冻结 JS／TS 得到
+1,454 处／159 文件／729 未解析。截至 88 的全域库存 1,460／161／730 保持原样。三根外九处属于 `conversation-layout.ts` 与
+`use-keyboard-aware-scroll-into-view.ts`，另四个未解析单列。独立的截至 88 手工锁定编译器审计还发现 v2
 漏计十六个潜在 skip-link 工厂字面量、三个共享 touch-helper 字面量及六个调用方 margin
-参数。skip-link 工厂仓内没有调用，安装新 link 不能证明迁移了原 UI。已知解析缺口与已发布
+参数；其中两个 margin 参数在 92 调用迁移后可静态识别，其余四个仍不透明。
+skip-link 工厂仓内没有调用，安装新 link 不能证明迁移了原 UI。已知解析缺口与已发布
 下界分开，审计不给迁移 credit，也不重写历史统计。真实 touch 调用需要已有 Button 尺寸
 API 和各自视觉证据，不能用 opaque caller class 与 primitive 争优先级。
 此前截至 67 时，五个 Usage 模板表达式和一个 Archive
@@ -1530,10 +1548,16 @@ StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一�
 回归。比较这部分后续工作前，应明确扩展 inventory 范围。34–39 批视觉差异与被拒校准保持各自状态，
 源码统计不构成验收。
 
+以上库存总数均针对 `packages/components/src`，不是整个 monorepo。Electron 渲染入口
+导入该包的 Tailwind 样式；开发面板的普通 CSS hook 不计作 utility 删除。独立的
+`packages/code-review-helper` 渲染器与 `site-docs` 各自拥有 Tailwind 编译管线，尚未纳入
+这些库存与视觉结论。它们需要独立编译配置和真实浏览器基线，不能由组件截图隐式验收。
+隔离 ACP demo／编辑器应用不在本次迁移范围，也不需要子模块操作。
+
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。
 
-未使用的 `src/ui/sidebar.tsx` 保留 304 处，`src/ui/index.ts` 没有重导出它；
+未使用的 `src/ui/sidebar.tsx` 保留 303 处，`src/ui/index.ts` 没有重导出它；
 公开通配路径仍可能被外部直接导入。其公开适配层现有真实渲染夹具，包含移动打开及桌面折叠。
 未使用的 `src/components/task-list.tsx` 保留 14 处，
 `src/components/sidebar-updated-task-list.tsx` 保留 22 处；两者现有真实渲染及原生输入夹具。

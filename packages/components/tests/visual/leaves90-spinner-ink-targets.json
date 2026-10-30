@@ -1,0 +1,161 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "blockedHosts": ["github.com", "avatars.githubusercontent.com"],
+  "ids": [
+    "chat-machinepairingdialog--claimed",
+    "mobile-ownedmobileprojectsettingsmigration--pending",
+    "sessions-sessionusagepopover--compacting",
+    "sessions-ownedpublicbrowserloadingmigration--default",
+    "sessions-ownedpublicbrowserloadingmigration--subtree-spacing"
+  ],
+  "ready": {
+    "chat-machinepairingdialog--claimed": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[role=dialog] [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--pending": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] div:has(> [role=switch]) > [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-mobile-project-settings] [role=switch]')].some(e=>e.disabled)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-mobile-project-settings] div:has(> [role=switch]) > [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-sessionusagepopover--compacting": [
+      {
+        "action": "click",
+        "selector": "#storybook-root button"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=dialog] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[role=dialog] [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-ownedpublicbrowserloadingmigration--default": [
+      {
+        "action": "visible",
+        "selector": "[data-public-browser-surface] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[data-public-browser-surface]'),s=h?.querySelector('[data-slot=spinner]'),o=document.querySelector('[data-testid=public-browser-fixture-state]');if(!h||!s||!o)return false;const c=getComputedStyle(s),r=s.getBoundingClientRect(),hr=h.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),u=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return window.__LODY_ELECTRON__===true&&o.textContent==='loading; consumed=true; pending=true'&&Math.abs(u-4)<.01&&Math.abs(parseFloat(c.width)-4*5)<.01&&Math.abs(parseFloat(c.height)-4*5)<.01&&r.width>0&&r.height>0&&Math.abs(r.x+r.width/2-hr.x-hr.width/2)<.1&&Math.abs(r.y+r.height/2-hr.y-hr.height/2)<.1&&Number(c.opacity)===1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-public-browser-surface] [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-ownedpublicbrowserloadingmigration--subtree-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-public-browser-surface] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[data-public-browser-surface]'),s=h?.querySelector('[data-slot=spinner]'),o=document.querySelector('[data-testid=public-browser-fixture-state]');if(!h||!s||!o)return false;const c=getComputedStyle(s),r=s.getBoundingClientRect(),hr=h.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),u=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return window.__LODY_ELECTRON__===true&&o.textContent==='loading; consumed=true; pending=true'&&Math.abs(u-5)<.01&&Math.abs(parseFloat(c.width)-5*5)<.01&&Math.abs(parseFloat(c.height)-5*5)<.01&&r.width>0&&r.height>0&&Math.abs(r.x+r.width/2-hr.x-hr.width/2)<.1&&Math.abs(r.y+r.height/2-hr.y-hr.height/2)<.1&&Number(c.opacity)===1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-public-browser-surface] [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionusagepopover--compacting": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=dialog]') && document.querySelectorAll('[data-slot=spinner]').length===1"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#storybook-root button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=dialog] [data-slot=spinner]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const marks=[...document.querySelectorAll(\"[role=dialog] [data-slot=spinner]\")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(!marks.length)return false;const dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.querySelector('svg'),r=e.getBoundingClientRect();if(!g||s.color!==getComputedStyle(g).color||[...g.children].some(x=>getComputedStyle(x).stroke!==s.color)||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;})&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedpublicbrowserloadingmigration--default": [
+      {
+        "name": "completed-ready",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic navigation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const h=document.querySelector('[data-public-browser-surface]'),o=document.querySelector('[data-testid=public-browser-fixture-state]');if(!h||!o)return false;const r=h.getBoundingClientRect();return o.textContent==='ready; consumed=true; pending=false'&&!h.querySelector('[data-slot=spinner]')&&r.width>100&&r.height>100&&h.textContent.trim()===''&&getComputedStyle(h).backgroundColor==='rgb(255, 255, 255)'&&document.fonts.status==='loaded';}"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedpublicbrowserloadingmigration--subtree-spacing": [
+      {
+        "name": "completed-ready",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic navigation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const h=document.querySelector('[data-public-browser-surface]'),o=document.querySelector('[data-testid=public-browser-fixture-state]');if(!h||!o)return false;const r=h.getBoundingClientRect();return o.textContent==='ready; consumed=true; pending=false'&&!h.querySelector('[data-slot=spinner]')&&r.width>100&&r.height>100&&h.textContent.trim()===''&&getComputedStyle(h).backgroundColor==='rgb(255, 255, 255)'&&document.fonts.status==='loaded';}"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["chat-machinepairingdialog--claimed"]
+}

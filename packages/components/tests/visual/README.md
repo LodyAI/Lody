@@ -630,17 +630,18 @@ artifacts out of commits.
 
 ## Frozen continuation reports
 
-| Local report                                   | Accepted source scope                                                                                                        | Formal visual result                                                                          | Separate boundaries                                                                                                                                                                       |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                   | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance                                           |
-| `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                               | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained    | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                                                                  |
-| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                          | 191/192 PNG pairs exact; 48,356 full standard records equal                                   | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                                                            |
-| `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                      | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                                                           |
-| `artifacts/visual/leaves72-73-acceptance.html` | 12 utilities in six files: exact local title typography and closed command backdrop/layout                                   | 111/112 PNG pairs exact; 9,748 full standard records equal                                    | Original429raw/0thresholdOPEN retained; rejected fallback/descendant-token candidates, known negatives and legacy-label correction explicit                                               |
-| `artifacts/visual/leaves74-78-acceptance.html` | 35 utilities in 16 sources plus the Button typography API owner: Tooltip values, edge handles and DiffNotice header          | 305/310 PNG pairs exact; 30,303 full standard records equal                                   | Five formal OPENs/13 raw pixels, two supplemental sidebar OPENs/882 raw pixels, rejected CSS-wide semantics, original failures and four Electron After-only images retained               |
-| `artifacts/visual/leaves79-81-acceptance.html` | 18 utilities in five sources: composer resize/hint, private DiffViewer header and fixed Field labels                         | 292/296 PNG pairs exact; 14,056 full standard records equal                                   | Four formal OPENs/1,075 raw pixels, one native OPEN/22 raw pixels, same-element negatives, unpainted calibration and unknown final native process closure retained                        |
-| `artifacts/visual/leaves82-84-acceptance.html` | 15 utilities in seven sources: opt-in solid Button, fixed tab/menu typography and actual Stack Drawer width                  | 305/306 PNG pairs exact; 12,854 full standard records equal                                   | One original formal OPEN/10 raw/7 threshold pixels, inline-token/width negatives, wrong-theme and keyboard failures, partial native recovery and four Electron After-only images retained |
-| `artifacts/visual/leaves85-88-acceptance.html` | 23 utilities in 19 sources: actual hidden-name owners, fixed Card title type and annotation Textareas                        | 284/284 PNG pairs exact; 12,554 full standard records equal                                   | 76 supplemental pairs including 16 known token negatives; 87 retained unpaired images; original Stack missing-description relation remains OPEN; 89 audit earns zero migration credit     |
+| Local report                                   | Accepted source scope                                                                                                                                         | Formal visual result                                                                          | Separate boundaries                                                                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header                                  | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                   | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance                                                                                |
+| `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                                                                | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained    | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                                                                                                       |
+| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                                                           | 191/192 PNG pairs exact; 48,356 full standard records equal                                   | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                                                                                                 |
+| `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                                                       | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                                                                                                |
+| `artifacts/visual/leaves72-73-acceptance.html` | 12 utilities in six files: exact local title typography and closed command backdrop/layout                                                                    | 111/112 PNG pairs exact; 9,748 full standard records equal                                    | Original429raw/0thresholdOPEN retained; rejected fallback/descendant-token candidates, known negatives and legacy-label correction explicit                                                                                    |
+| `artifacts/visual/leaves74-78-acceptance.html` | 35 utilities in 16 sources plus the Button typography API owner: Tooltip values, edge handles and DiffNotice header                                           | 305/310 PNG pairs exact; 30,303 full standard records equal                                   | Five formal OPENs/13 raw pixels, two supplemental sidebar OPENs/882 raw pixels, rejected CSS-wide semantics, original failures and four Electron After-only images retained                                                    |
+| `artifacts/visual/leaves79-81-acceptance.html` | 18 utilities in five sources: composer resize/hint, private DiffViewer header and fixed Field labels                                                          | 292/296 PNG pairs exact; 14,056 full standard records equal                                   | Four formal OPENs/1,075 raw pixels, one native OPEN/22 raw pixels, same-element negatives, unpainted calibration and unknown final native process closure retained                                                             |
+| `artifacts/visual/leaves82-84-acceptance.html` | 15 utilities in seven sources: opt-in solid Button, fixed tab/menu typography and actual Stack Drawer width                                                   | 305/306 PNG pairs exact; 12,854 full standard records equal                                   | One original formal OPEN/10 raw/7 threshold pixels, inline-token/width negatives, wrong-theme and keyboard failures, partial native recovery and four Electron After-only images retained                                      |
+| `artifacts/visual/leaves85-88-acceptance.html` | 23 utilities in 19 sources: actual hidden-name owners, fixed Card title type and annotation Textareas                                                         | 284/284 PNG pairs exact; 12,554 full standard records equal                                   | 76 supplemental pairs including 16 known token negatives; 87 retained unpaired images; original Stack missing-description relation remains OPEN; 89 audit earns zero migration credit                                          |
+| `artifacts/visual/leaves90-93-acceptance.html` | Eight source utilities removed in eight product files; six runtime helper applications migrate separately; shared Header owner and type export are additional | 164/164 formal PNG pairs exact; 8,068 full standard records equal                             | Original 92 three OPENs/5,602 raw/5,534 threshold pixels and 93 native OPEN/473 raw/402 threshold pixels remain; font writer rejection, token negatives, 91 unpaired images and four actual Electron After-only pages retained |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -650,25 +651,26 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 88 inventory is 1,451 occurrences/159 files/726 unresolved
-expressions across components, legacy UI and routes. The 790-file snapshot includes
-fifteen verified root-source updates; four shared UI sources and the Card export
-are separately identified. Batches 90+ are excluded. Through 84 remains frozen at
-1,474/163/726, through 81 at 1,489/163/724, and through 78 at 1,507/163/718.
-The read-only 89 audit uses the same scanner over product src excluding stories:
-1,460 occurrences/161 files/730 unresolved, including nine additional lib/hooks
-occurrences and four unresolved expressions. A manual helper audit separately
-records sixteen unconsumed public skip-link tokens, three touch-helper tokens and
-six opaque caller arguments. It changes neither scanner method nor canonical
-counts and earns no migration credit. No new skip-link UI is installed to invent
-an existing production baseline. The actual touch consumers and public layout/
-keyboard contracts need their own compatibility matrices.
-Earlier inventories remain frozen. Later source-locked through 63 components (620 files / 6,207 tests) and
-UI (25 / 307) test results are supplemental regression, not exact-through59 visual proof.
-Previous OPENs remain in their frozen reports. Batch 60's failed candidate does not block
-all public classes permanently: migrate complete owners with their real caller
-contracts and verify the resulting winners, rather than hiding a rule under retained
-Tailwind or increasing specificity.
+The current scanner-v2 three-root timeline covers
+`packages/components/src/{components,ui,routes}` through batch 93:
+1,445 occurrences /157 files /725 unresolved expressions. Eight source utilities
+were removed, while batch 92 exposes two existing margin literals that were hidden
+inside runtime helper calls; the net count decreases by six. Its six runtime
+utility applications are a separate migration measure and earn zero source-deletion
+credit. Through 88 remains frozen at 1,451/159/726, through 84 at 1,474/163/726,
+through 81 at 1,489/163/724, and through 78 at 1,507/163/718.
+
+The broader frozen scan covers `packages/components/src`, excluding `stories`:
+1,454 occurrences /159 files /729 unresolved expressions across 1,396 scanned
+files. The additional lib/hooks boundary contributes nine occurrences in two files
+and four unresolved expressions. Compare it with the earlier full scan of that
+same package path, 1,460/161/730; it does not cover every package or Tailwind host
+in the monorepo. The three-root and broader totals must not be compared as one
+time series. The manual helper audit separately retains sixteen unconsumed public
+skip-link literals, three touch-helper literals and four remaining opaque caller
+arguments after batch 92. The historical six-argument audit stays unchanged.
+No new skip-link UI was installed to invent migration coverage, and no parser
+method was changed. These are lower bounds, not completion percentages.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its
 distinct harness identities. Retain raw xterm helper records and original corner
@@ -749,6 +751,18 @@ rejected import-shadow source remain reviewable without fabricated images.
 The earlier native Textarea matrix lacks placeholder fields and contributes only
 its sixteen actual Before-only PNGs. Gallery samples are After-only. Through84's
 full suite/Electron evidence is historical, not a through88 full-regression claim.
+
+The 90–93 report preserves all 40 earlier report hashes and keeps their history
+table collapsed by default. Its 136 supplementary pairs include 118 byte-exact
+pairs and 18 non-exact pairs; this is not an OPEN-issue count because it includes
+known negatives, rejected candidates and controls using unchanged source. The 91
+unpaired images include readiness failures, invalid premature captures and four
+actual Electron pages. The original 92 hover trigger and 93 Header raster trigger
+remain unproven. Through 93, the stable full run passes 620 component files /6,208
+tests, 25 UI files /312 tests and the actual Electron build/smoke. The 78 existing
+styleq warnings remain, and root `pnpm check` is not claimed PASS because of the
+existing ACP SDK prerequisite failure. Batch 94 and other Tailwind hosts are
+outside that validation boundary.
 
 ## Real desktop smoke
 

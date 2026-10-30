@@ -1957,7 +1957,7 @@ negatives and real portal-gate calibration failures. Earlier OPENs stay unchange
 
 ### Control ownership and capture boundaries
 
-Batches74–88 move owned Tooltip, resize-edge, label, context and filled-action
+Batches74–93 move owned Tooltip, resize-edge, label, context and filled-action
 styles through existing primitives, preserving their actual caller contracts.
 The product adds no token group or dependency. Button gains CSS-typed `fontSize`
 and `lineHeight`, plus an explicit flat `solid` variant; ResizableHandle gains
@@ -1984,7 +1984,10 @@ nine invariant fields inside the actual Dialog and Vaul Title/Description owners
 and Popover Title, without changing contexts, DOM or ARIA attributes. The physical
 1px/-1px and `inset(50%)` values do not follow theme spacing. Dialog Title also
 clears its existing logical-end padding in the same owner composition. Default
-parts retain their old fields, IDs, refs and render-element merging. Gallery
+parts retain their old fields, IDs, refs and render-element merging. The shared
+Dialog/AlertDialog/Base UI Drawer Header supports the same opt-in for the whole
+name block; Footer does not. Its Sidebar consumer changes only that attribute,
+preserving the pre-existing user diff byte-for-byte. Gallery
 images are After-only. The stack's original dangling `aria-describedby` remains
 an equal missing reference on both sources, not a claim that all ARIA is valid.
 
@@ -2036,14 +2039,15 @@ Original native Escape timeout evidence stays beside a trusted content-key
 control and explicit recovery sources; missing original DOM cannot prove the
 old timeout's exact cause.
 
-| Frozen report                 | Formal pairs / byte-exact / full standard records | Original OPEN retained, raw / threshold pixels         |
-| ----------------------------- | ------------------------------------------------: | ------------------------------------------------------ |
-| `leaves74-78-acceptance.html` |                                310 / 305 / 30,303 | Five formal 13 / 0; two sidebar supplements 882 / 829. |
-| `leaves79-81-acceptance.html` |                                296 / 292 / 14,056 | Four formal 1,075 / 0; one native supplement 22 / 0.   |
-| `leaves82-84-acceptance.html` |                                306 / 305 / 12,854 | One disabled-button corner 10 / 7.                     |
-| `leaves85-88-acceptance.html` |                                284 / 284 / 12,554 | No new formal OPEN; all historical OPEN retained.      |
+| Frozen report                 | Formal pairs / byte-exact / full standard records | Original OPEN retained, raw / threshold pixels                              |
+| ----------------------------- | ------------------------------------------------: | --------------------------------------------------------------------------- |
+| `leaves74-78-acceptance.html` |                                310 / 305 / 30,303 | Five formal 13 / 0; two sidebar supplements 882 / 829.                      |
+| `leaves79-81-acceptance.html` |                                296 / 292 / 14,056 | Four formal 1,075 / 0; one native supplement 22 / 0.                        |
+| `leaves82-84-acceptance.html` |                                306 / 305 / 12,854 | One disabled-button corner 10 / 7.                                          |
+| `leaves85-88-acceptance.html` |                                284 / 284 / 12,554 | No new formal OPEN; all historical OPEN retained.                           |
+| `leaves90-93-acceptance.html` |                                 164 / 164 / 8,068 | Original hover three pairs 5,602 / 5,534; native header one pair 473 / 402. |
 
-The final group includes 36 actual stack pairs and 24 separately identified
+The 85–88 group includes 36 actual stack pairs and 24 separately identified
 existing-API controls; controls add no utility count. Later matching controls
 never close an original unexplained raster difference. Theme gates reject
 fixed-dark stories falsely labelled by light URL globals. Archive hover-state
@@ -2061,13 +2065,31 @@ all twenty-four rows then stalled after the last checkpoint without a Chrome
 child. Their own Nodes were terminated; original `complete:false` remains and
 the last label-click/cleanup is UNKNOWN, not normal closure or final-behavior PASS.
 
-The complete working-tree regression through84 freezes 1,867 UI sources, 146
-Electron sources and five metadata files. Hashes stay unchanged while components
-pass 620 files / 6,207 tests, UI passes 25 / 307, and actual Electron build/four-page
-smoke pass. The primary agent views all four app images. They are After-only;
-unconfigured local chat does not establish real-agent send/stop dispatch. Table's
-78 unchanged Styleq warnings match the prior run. Earlier full runs retain their
-through78 boundary; the unrelated root ACP prerequisite still blocks root-check PASS.
+The 90–93 continuation removes eight source utilities through local Spinner
+inks, fixed-text menu caption tokens and the Header option. Two actual mobile
+file-viewer Buttons use the existing width/height API, preserving edge margins.
+Their six migrated runtime utility applications delete no helper literals; making
+two existing margin arguments statically visible explains the inventory delta.
+The menu retains `font-normal`: a rejected private-weight writer compiled outside
+CSS layers and changed a real `font-semibold` control from 600 to 400. No
+specificity patch hides that failure. The Integration Spinner stays unchanged:
+its local identity snapshot prevents the real pending branch from mounting.
+
+Explicit outside-pointer/hover gates pass the final file-viewer matrix, but the
+three original hover differences stay OPEN. An unchanged Before source also
+varies between fresh contexts; that does not identify Chromium's exact trigger.
+One native project-header pair remains OPEN outside the migrated Spinner;
+matching target CSS and bounded same-source raster controls do not close it.
+Rejected weight images, token negatives and unsuccessful captures remain distinct.
+
+The complete working-tree regression through93 freezes 1,867 UI sources, 146
+Electron sources, five metadata files and 733 test sources. Hashes stay unchanged
+while components pass 620 files / 6,208 tests, UI passes 25 / 312, and actual
+Electron build/four-page smoke pass. The primary agent views all four app images.
+They are After-only; unconfigured local chat does not establish real-agent
+send/stop dispatch. Table's 78 unchanged Styleq warnings match through84. Earlier
+full runs retain their exact boundaries; the unrelated root ACP prerequisite
+still blocks root-check PASS.
 
 ## Remaining work
 
@@ -2097,6 +2119,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 81, with partial visual acceptance    | v2             |       1,489 |   163 |        724 |
 | Exact source through 84, with partial visual acceptance    | v2             |       1,474 |   163 |        726 |
 | Exact source through 88, with partial visual acceptance    | v2             |       1,451 |   159 |        726 |
+| Exact source through 93, with partial visual acceptance    | v2             |       1,445 |   157 |        725 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2116,19 +2139,23 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through88 v2 split is components: 1,016 occurrences/143 files/633
-unresolved, legacy UI: 430/14/93 and routes: 5/2/0, from 790 recorded source files.
+The published through93 v2 split is components: 1,011 occurrences/141 files/632
+unresolved, legacy UI: 429/14/93 and routes: 5/2/0, from 790 recorded source files.
 Shared UI source and export metadata are frozen outside that three-root count.
-The six Field.Label and two action-theme templates remain known StyleX unresolved
-expressions. Later batches are excluded.
+Known StyleX templates remain unresolved expressions, not newly introduced
+Tailwind strings. Through88 remains a separate immutable inventory; eight source
+removals plus two newly visible retained margins produce the net decrease of six.
+Later batches are excluded.
 
-The same unchanged scanner on the full product `src`, excluding stories, records
-1,460 occurrences/161 files/730 unresolved across 1,396 frozen JS/TS files. The
+The full product `src` audit through93, excluding stories, uses the same v2
+scanner and records 1,454 occurrences/159 files/729 unresolved across 1,396 frozen
+JS/TS files. The through88 full-scope inventory remains unchanged at 1,460/161/730. The
 nine occurrences beyond the three roots belong to `conversation-layout.ts` and
 `use-keyboard-aware-scroll-into-view.ts`; four additional unresolved expressions
-are recorded separately. A manual compiler audit also identifies sixteen latent
+are recorded separately. The separate through88 manual compiler audit identifies sixteen latent
 skip-link factory literals, three shared touch-helper literals and six call-site
-margin arguments omitted by v2. The skip-link factory has no in-repository caller;
+margin arguments omitted by v2. Two of those margin arguments become visible in
+the 92 consumer migration; four remain opaque. The skip-link factory has no in-repository caller;
 installing a new link would not prove a migrated existing UI. These known parser
 gaps remain separate from published lower bounds, with zero migration credit for
 the audit; historical inventories are not rewritten. Existing touch callers need
@@ -2143,10 +2170,19 @@ folded into the same-boundary through59 total nor called a new product regressio
 Expand the inventory scope explicitly before comparing that additional work. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
+All inventory totals above concern `packages/components/src`, not the entire
+monorepo. The Electron renderer imports that package's Tailwind sheet; its
+development-panel CSS hooks are not utility-removal credit. The standalone
+`packages/code-review-helper` renderer and `site-docs` have separate Tailwind
+pipelines and remain outside these inventories and visual claims. Their own
+compiler setup and real browser baselines are follow-up UI work, not implicitly
+accepted by component screenshots. Isolated ACP demo/editor apps are excluded
+from this migration; no submodule operation is needed.
+
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.
 
-The unconsumed `src/ui/sidebar.tsx` retains 304 occurrences and is not re-exported
+The unconsumed `src/ui/sidebar.tsx` retains 303 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible. Its public
 adapter now has real rendering fixtures, including mobile open and desktop collapse.
 The unconsumed `src/components/task-list.tsx` retains 14 occurrences,

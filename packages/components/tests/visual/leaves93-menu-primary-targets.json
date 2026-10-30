@@ -1,0 +1,214 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-recentrunconfigs--three-recents",
+    "sessions-recentrunconfigs--single-recent",
+    "sessions-recentrunconfigs--long-labels",
+    "sessions-recentrunconfigs--no-recents",
+    "mobile-mobileprojectscreen--ios-git-hub",
+    "mobile-mobileprojectscreen--ios-local"
+  ],
+  "ready": {
+    "sessions-recentrunconfigs--three-recents": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Run configuration"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menu]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(false)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "sessions-recentrunconfigs--single-recent": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Run configuration"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menu]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(false)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "sessions-recentrunconfigs--long-labels": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Run configuration"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menu]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(false)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "sessions-recentrunconfigs--no-recents": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Run configuration"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menu]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(true)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+      }
+    ],
+    "mobile-mobileprojectscreen--ios-git-hub": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll('[data-slot=spinner]:has(> svg[aria-label=running])')],dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!marks.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.firstElementChild,r=e.getBoundingClientRect();return s.width==='16px'&&s.height==='16px'&&s.color===getComputedStyle(g).color&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded';} "
+      }
+    ],
+    "mobile-mobileprojectscreen--ios-local": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll('[data-slot=spinner]:has(> svg[aria-label=running])')],dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!marks.length||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false;return marks.every(e=>{const s=getComputedStyle(e),g=e.firstElementChild,r=e.getBoundingClientRect();return s.width==='16px'&&s.height==='16px'&&s.color===getComputedStyle(g).color&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})&&document.fonts.status==='loaded';} "
+      }
+    ]
+  },
+  "states": {
+    "sessions-recentrunconfigs--three-recents": [
+      {
+        "name": "recent-selected-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitem]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Run configuration"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Run configuration",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(false)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      }
+    ],
+    "sessions-recentrunconfigs--single-recent": [
+      {
+        "name": "recent-selected-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitem]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      }
+    ],
+    "sessions-recentrunconfigs--long-labels": [
+      {
+        "name": "recent-selected-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=menu] [role=menuitem]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Run configuration"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Run configuration",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const menu=document.querySelector('[role=menu]'),e=[...document.querySelectorAll('[role=menu] div')].find(e=>e.children.length===0&&e.textContent.trim()==='Recently used'),dark=new URLSearchParams(location.search).get('globals')?.includes('theme:dark');if(!menu||document.documentElement.classList.contains('dark')!==dark||getComputedStyle(document.documentElement).colorScheme!==(dark?'dark':'light'))return false; if(false)return !e; if(!e||e.childElementCount)return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.fontSize!=='12px'||s.lineHeight!=='16px'||s.fontWeight!=='400'||s.getPropertyValue('--tw-font-weight').trim()!=='400'||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;for(let x=e;x;x=x.parentElement){const c=getComputedStyle(x);if(c.visibility==='hidden'||c.display==='none'||Number(c.opacity)!==1)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')); }"
+          }
+        ]
+      }
+    ],
+    "sessions-recentrunconfigs--no-recents": [
+      {
+        "name": "escape-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=menu]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      }
+    ]
+  }
+}

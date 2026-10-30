@@ -176,7 +176,10 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 {t('sessions.usage.context', 'Context')}
               </div>
               <div {...stylex.props(styles.compacting)}>
-                <Spinner diameter="calc(var(--spacing) * 3.5)" className="text-muted-foreground" />
+                <Spinner
+                  diameter="calc(var(--spacing) * 3.5)"
+                  {...stylex.props(styles.spinnerMuted)}
+                />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
             </div>
@@ -359,6 +362,7 @@ function UsageMeter({
 }
 
 const styles = stylex.create({
+  spinnerMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   trigger: { userSelect: 'none' },
   content: { width: 'min(17rem, calc(100vw - 1rem))' },
   tiny: { fontSize: '11px' },

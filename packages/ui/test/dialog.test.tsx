@@ -3,6 +3,7 @@ import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/por
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
+import { Drawer } from '../src/drawer/drawer';
 import { Select } from '../src/field/select';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, mount, one, press, step, type Mounted } from './dom';
@@ -23,6 +24,58 @@ const buttonNamed = (label: string) => {
 };
 
 describe('Dialog', () => {
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['AlertDialog', AlertDialog],
+    ['Drawer', Drawer],
+  ] as const) {
+    test(`${name} retains its named children and focus when a hidden header is shown`, async () => {
+      const title = { current: null as HTMLHeadingElement | null };
+      const description = { current: null as HTMLParagraphElement | null };
+      const view = (visuallyHidden?: boolean) => (
+        <Modal.Root defaultOpen>
+          <Modal.Content data-header-owner-panel>
+            <Modal.Header visuallyHidden={visuallyHidden} className="retained-header-class">
+              <Modal.Title ref={title}>Retained header name</Modal.Title>
+              <Modal.Description ref={description}>Retained header description</Modal.Description>
+            </Modal.Header>
+            <input aria-label="Retained header input" defaultValue="Original value" />
+          </Modal.Content>
+        </Modal.Root>
+      );
+      mounted = await mount(view(true));
+      const popup = one('[data-header-owner-panel]');
+      const titleNode = title.current!;
+      const descriptionNode = description.current!;
+      const header = titleNode.parentElement!;
+      const titleId = titleNode.id;
+      const descriptionId = descriptionNode.id;
+      const input = one('input') as HTMLInputElement;
+      await step(() => input.focus());
+      input.value = 'Edited value';
+      for (const hidden of [false, undefined, true]) {
+        await step(() => mounted!.root.render(view(hidden)));
+        expect(title.current).toBe(titleNode);
+        expect(description.current).toBe(descriptionNode);
+        expect(titleNode.parentElement).toBe(header);
+        expect(descriptionNode.parentElement).toBe(header);
+        expect(header.classList.contains('retained-header-class')).toBe(true);
+        expect(header.hasAttribute('visuallyHidden')).toBe(false);
+        expect(header.hasAttribute('aria-hidden')).toBe(false);
+        expect(titleNode.id).toBe(titleId);
+        expect(descriptionNode.id).toBe(descriptionId);
+        expect(popup.getAttribute('aria-labelledby')).toBe(titleId);
+        expect(popup.getAttribute('aria-describedby')).toBe(descriptionId);
+        expect(titleNode.textContent).toBe('Retained header name');
+        expect(descriptionNode.textContent).toBe('Retained header description');
+        expect(titleNode.hasAttribute('aria-hidden')).toBe(false);
+        expect(descriptionNode.hasAttribute('aria-hidden')).toBe(false);
+        expect(document.activeElement).toBe(input);
+        expect(input.value).toBe('Edited value');
+      }
+    });
+  }
+
   test('hidden names retain their nodes, refs, ids and accessible relationships when shown again', async () => {
     const title = { current: null as HTMLHeadingElement | null };
     const description = { current: null as HTMLParagraphElement | null };

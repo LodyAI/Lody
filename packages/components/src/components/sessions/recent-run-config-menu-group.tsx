@@ -1,4 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { ListChecks, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentConfigMeta } from '@lody/shared';
@@ -9,6 +11,11 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  recentHeading: {
+    [textScale.captionSize]: 'var(--text-xs)',
+    [textScale.captionLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [uiColors.secondaryLabel]: 'hsl(var(--muted-foreground) / 1)',
+  },
   rowDot: {
     flexShrink: 0,
     userSelect: 'none',
@@ -129,10 +136,8 @@ export function RecentRunConfigMenuGroup({
 
   return (
     <>
-      {/* The heading keeps its Tailwind classes: it overrides the shared menu
-          heading's own StyleX tokens, and a StyleX class here would lose to
-          them (both land in the same stylesheet). */}
-      <Menu.GroupLabel className="text-xs font-normal text-muted-foreground">
+      {/* The private font-weight writer keeps its original utilities-layer precedence. */}
+      <Menu.GroupLabel className={`font-normal ${stylex.props(styles.recentHeading).className}`}>
         {t('chat.runConfig.recentLabel', 'Recently used')}
       </Menu.GroupLabel>
       {items.map((item) => (

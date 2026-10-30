@@ -18,14 +18,19 @@ export interface DialogSectionProps {
   className?: string;
 }
 
+export interface DialogHeaderProps extends DialogSectionProps {
+  /** Keeps the named block mounted without a visible footprint. */
+  visuallyHidden?: boolean;
+}
+
 /**
  * The heading block. A Dialog, an AlertDialog and a Drawer all open with a title
  * and, usually, one sentence about it; the pair is one block with one gap, so
  * the panel's own `gap` separates it from the body rather than from the
  * sentence it belongs to.
  */
-export function DialogHeader({ children, className }: DialogSectionProps) {
-  const sx = stylex.props(modal.header);
+export function DialogHeader({ children, className, visuallyHidden = false }: DialogHeaderProps) {
+  const sx = stylex.props(modal.header, visuallyHidden && modal.srOnly);
   return (
     <div className={appendClassName(sx.className, className)} style={sx.style}>
       {children}

@@ -85,6 +85,7 @@ const darkColors = {
 } as const;
 
 const styles = stylex.create({
+  statusRunning: { color: 'hsl(var(--primary) / 1)' },
   /** A react-icon, sized to fill its box. */
   reactIcon: {
     display: 'inline-flex',
@@ -858,7 +859,11 @@ function StatusIndicator({
   }
   if (isWorking) {
     return (
-      <Spinner diameter="calc(var(--spacing) * 4)" className="text-primary" aria-label="running" />
+      <Spinner
+        diameter="calc(var(--spacing) * 4)"
+        {...stylex.props(styles.statusRunning)}
+        aria-label="running"
+      />
     );
   }
   if (hasUnreadMessages) {

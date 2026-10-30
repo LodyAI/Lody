@@ -10,7 +10,6 @@ import {
   type MobileSessionMenuInfoRow,
 } from '@/components/mobile/mobile-session-menu-sheet';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
-import { getSessionDetailTouchIconButtonClassName } from '@/lib/session-detail-a11y';
 import { getBasename } from '@/lib';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
@@ -25,6 +24,7 @@ import {
 import { sheetSurface } from './sheet-surface';
 
 const MOBILE_FILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
+const MOBILE_FILE_DRAWER_TOUCH_SIZE = 'calc(var(--spacing) * 11)';
 
 const styles = stylex.create({
   /** The drawer's column. */
@@ -172,7 +172,9 @@ export function MobileFileViewerDrawer({
                   type="button"
                   variant="ghost"
                   icon
-                  className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                  width={MOBILE_FILE_DRAWER_TOUCH_SIZE}
+                  height={MOBILE_FILE_DRAWER_TOUCH_SIZE}
+                  className="-ml-1"
                   onClick={() => onOpenChange(false)}
                   aria-label={t('common.back', 'Back')}
                 >
@@ -189,7 +191,9 @@ export function MobileFileViewerDrawer({
                   type="button"
                   variant="ghost"
                   icon
-                  className={getSessionDetailTouchIconButtonClassName('-mr-1')}
+                  width={MOBILE_FILE_DRAWER_TOUCH_SIZE}
+                  height={MOBILE_FILE_DRAWER_TOUCH_SIZE}
+                  className="-mr-1"
                   onClick={() => setMenuOpen(true)}
                   aria-label={t('sessions.fileViewer.moreActions', 'File actions')}
                 >

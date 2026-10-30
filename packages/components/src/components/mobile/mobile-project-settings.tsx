@@ -36,6 +36,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  spinnerMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   multiRepoIdentity: {
     display: 'flex',
     minWidth: 'calc(var(--spacing) * 0)',
@@ -623,7 +624,7 @@ function MobileProjectRow({
   const shareControl = (
     <div {...stylex.props(styles.shareControl)}>
       {row.isUpdating ? (
-        <Spinner diameter="calc(var(--spacing) * 3.5)" className="text-muted-foreground" />
+        <Spinner diameter="calc(var(--spacing) * 3.5)" {...stylex.props(styles.spinnerMuted)} />
       ) : null}
       <Switch
         checked={row.sharedWithTeam}

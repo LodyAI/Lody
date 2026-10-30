@@ -32,6 +32,7 @@ import {
 const LODY_DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
 const styles = stylex.create({
+  spinnerMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
   connectedTitle: {
     display: 'flex',
     alignItems: 'center',
@@ -421,7 +422,7 @@ export function MachinePairingDialog({
                 </div>
                 <Spinner
                   diameter="calc(var(--spacing) * 4)"
-                  className="text-muted-foreground"
+                  {...stylex.props(styles.spinnerMuted)}
                   aria-hidden="true"
                 />
               </div>
