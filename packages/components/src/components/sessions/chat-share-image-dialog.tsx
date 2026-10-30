@@ -25,6 +25,8 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } fr
 import { Button } from '@lody/ui/button';
 import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
+import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
+import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import {
   ChatShareCard,
@@ -594,6 +596,8 @@ export interface ChatShareImageDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Session the card is captured from; drives the card's caption band. */
   session: SessionMeta | null;
+  /** Runtime that supplied this snapshot; never relabel an old selection on route changes. */
+  sourceRuntime?: WorkspaceRuntime | null;
   /**
    * Messages to render, already filtered by the caller. Round selection is a
    * chat-surface interaction (IM-style multi-select), not part of this dialog.
@@ -638,11 +642,13 @@ export function ChatShareImageDialog({
   open,
   onOpenChange,
   session,
+  sourceRuntime = null,
   messages,
   agentName,
   initialDestination,
   onCompleted,
 }: ChatShareImageDialogProps) {
+  const plaintextCopy = usePlaintextCopy(sourceRuntime, messages, open);
   const { t, i18n } = useTranslation();
   const postHog = usePostHog();
   const isMobile = useIsMobile();
@@ -705,12 +711,11 @@ export function ChatShareImageDialog({
     setOperation('export');
     setExportError(false);
     try {
-      const { saved } = await exportShareImage(
-        exportRef.current,
-        session?.title,
-        'lody-conversation'
+      const element = exportRef.current;
+      const result = await plaintextCopy.run((assertCurrent, admitOutput) =>
+        exportShareImage(element, session?.title, 'lody-conversation', assertCurrent, admitOutput)
       );
-      if (saved) {
+      if (result?.saved) {
         capturePostHogEvent(postHog, 'export/chat_png_created', {
           message_count: messages.length,
         });
@@ -733,7 +738,12 @@ export function ChatShareImageDialog({
     setExportError(false);
     setCopied(false);
     try {
-      await copyShareImage(exportRef.current);
+      const element = exportRef.current;
+      const copyCompleted = await plaintextCopy.run(async (assertCurrent, admitOutput) => {
+        await copyShareImage(element, assertCurrent, admitOutput);
+        return true;
+      });
+      if (!copyCompleted) return;
       capturePostHogEvent(postHog, 'export/chat_png_copied', { message_count: messages.length });
       setCopied(true);
       onCompleted?.('copied');
@@ -878,6 +888,7 @@ export function ChatShareImageDialog({
       <Drawer open={open} onOpenChange={requestOpenChange}>
         {/* The sheet's height is a layout constraint over the primitive's own cap. */}
         <DrawerContent style={{ height: '92dvh', maxHeight: '92dvh' }}>
+          {plaintextCopy.confirmation}
           <div {...stylex.props(styles.drawerBody)}>
             <header {...stylex.props(styles.drawerHeader)}>
               <DrawerTitle className={stylex.props(styles.drawerTitle).className}>
@@ -931,6 +942,7 @@ export function ChatShareImageDialog({
       {/* The preview is the card at a readable scale, so the panel is wider than a
           dialog's column of prose. */}
       <Dialog.Content width="720px">
+        {plaintextCopy.confirmation}
         <Dialog.Header>
           <Dialog.Title>{dialogTitle}</Dialog.Title>
           <Dialog.Description>

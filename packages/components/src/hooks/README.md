@@ -4,6 +4,26 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Explicit plaintext copies
+
+`use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
+transcript and PNG exports. Each encrypted export asks again before capture. Its
+one in-memory choice binds the account, routed workspace, runtime, genesis and
+selected source; guards recheck before output after asynchronous reads/capture.
+The final output also re-enters the captured runtime's admission gate, preserving
+C1 even when retirement precedes publication of the replacement UI state.
+Export reads verify that the selected history is the view owned by the captured
+runtime's current Session store. A loading replacement may still display an old
+view, which cannot be relabeled as a source in the replacement workspace. PNG
+snapshots carry the runtime returned by their actual reader through selection.
+Cancellation or scope changes retire only that export, retain selection and never
+clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
+the existing Blob, Electron or native byte-save path; native staging cleanup and
+OS cancellation stay with that adapter, with no new key or file-path bridge.
+An abandoned UI waiter does not await obsolete capture/reads or prevent a new
+copy. The raw operation still observes rejection and drains its own cleanup;
+late continuations must pass the retired source guard before any further output.
+
 ## Session submission
 
 `use-session-actions.ts` binds admission, analytics, and Jotai observations to

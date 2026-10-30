@@ -136,6 +136,7 @@ import {
   runtimeInitializingAtom,
 } from '@/atoms';
 import { lodyControlConnectionStateAtom } from '@/atoms/control-connection';
+import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import {
   sessionMetaAtomFamily,
@@ -3125,6 +3126,7 @@ const SessionDetail = ({
   // Share-as-image preview target: the selected tab's session plus the plain-text
   // conversation snapshot pulled from its chat surface when the menu item fires.
   const [shareImageTarget, setShareImageTarget] = useState<{
+    runtime: WorkspaceRuntime;
     session: SessionMeta;
     messages: ConversationMessage[];
     agentName?: string;
@@ -3295,7 +3297,7 @@ const SessionDetail = ({
       { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
       'export'
     );
-    if (activeDraftTab) {
+    if (activeDraftTab || !runtime) {
       return;
     }
     const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
@@ -3315,12 +3317,13 @@ const SessionDetail = ({
     }
     activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
       setShareImageTarget({
+        runtime: shareData.sourceRuntime,
         session: activeTabSession,
         messages,
         agentName: shareData.agentName,
       });
     });
-  }, [runtime?.contentMode, activeDraftTab, activeTabSession, activeTabSessionId, t]);
+  }, [runtime, activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
   // The share is finished, so the whole flow ends: the preview closes and the
   // chat drops the selection behind it. Resolve the surface by the session the
@@ -6823,6 +6826,7 @@ const SessionDetail = ({
           }}
           onCompleted={handleShareImageCompleted}
           session={shareImageTarget?.session ?? null}
+          sourceRuntime={shareImageTarget?.runtime ?? null}
           messages={shareImageTarget?.messages ?? []}
           agentName={shareImageTarget?.agentName}
         />
@@ -7303,6 +7307,7 @@ const SessionDetail = ({
         }}
         onCompleted={handleShareImageCompleted}
         session={shareImageTarget?.session ?? null}
+        sourceRuntime={shareImageTarget?.runtime ?? null}
         messages={shareImageTarget?.messages ?? []}
         agentName={shareImageTarget?.agentName}
       />
