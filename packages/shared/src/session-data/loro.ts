@@ -1,4 +1,5 @@
 import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
+import { selectHistoryActionRows } from './history-selection';
 import type { SubagentRunItem } from '../ai';
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import type { SessionSubagentRun } from './types';
@@ -609,7 +610,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       if (action.kind === 'user-status') writer.updateCopies(action.turnId, apply);
       else if (target !== undefined)
         writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
-      else writer.update(apply);
+      else writer.updateSelected((rows) => selectHistoryActionRows(rows, action), apply);
       return { matched };
     },
     async appendTurn(turn) {
@@ -631,14 +632,25 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       try {
         // The shared planner runs inside the writer's conditional commit, so the
         // eligibility/goal re-check and the write are one atomic step.
-        restoreRange = writer.updateWithRollback((turns) => {
-          const next = planEditableTailReplacement(
-            turns as unknown as readonly SessionTurn[],
-            input
-          );
-          plan = next;
-          return next.turns as unknown as SessionHistoryInput[];
-        });
+        restoreRange = writer.updateSelectedWithRollback(
+          (rows) => {
+            let start = rows.length;
+            for (let i = rows.length - 1; i >= 0; i--)
+              if (rows[i]?.role === 'user') {
+                start = i;
+                break;
+              }
+            return rows.slice(start).map((_, offset) => start + offset);
+          },
+          (turns) => {
+            const next = planEditableTailReplacement(
+              turns as unknown as readonly SessionTurn[],
+              input
+            );
+            plan = next;
+            return next.turns as unknown as SessionHistoryInput[];
+          }
+        );
       } catch (error) {
         // A domain refusal proves nothing was written; a `HistoryWriteError` is a
         // validated pre-write refusal. Both are safe to report as `rejected`.

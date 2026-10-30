@@ -69,6 +69,83 @@ describe('single history writer', () => {
       revived.dispose();
     }
   });
+
+  it('updates and compensates a selected range while preserving an unread prefix and later appends', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append({
+      ...entry('prefix'),
+      items: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }],
+    });
+    writer.append(entry('tail'));
+    const before = writer.readStored();
+    const original = LoroMap.prototype.toJSON;
+    const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+      if (this.get('id') === 'prefix') throw new Error('Unrelated prefix body read');
+      return original.call(this);
+    });
+    try {
+      const rollback = writer.updateSelectedWithRollback(
+        (rows) => rows.flatMap((row, index) => (row.id === 'tail' ? [index] : [])),
+        (rows) =>
+          rows.map((row) =>
+            row.id === 'tail' ? { ...entry('replacement'), status: 'pending', read: false } : row
+          )
+      );
+      writer.setField('replacement', 'status', 'seen');
+      writer.setField('replacement', 'read', true);
+      writer.append(entry('later'));
+      rollback();
+    } finally {
+      guard.mockRestore();
+    }
+    expect(writer.readStored()).toEqual([...before, entry('later')]);
+  });
+
+  it('selected compensation retains the complete pre-write ID and membership conditions', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append(entry('reused'));
+    writer.append(entry('tail'));
+    const rollback = writer.updateSelectedWithRollback(
+      (rows) => rows.flatMap((row, index) => (row.id === 'tail' ? [index] : [])),
+      (rows) =>
+        rows.map((row) =>
+          row.id === 'tail' ? { ...entry('reused'), status: 'pending', read: false } : row
+        )
+    );
+    writer.setField('reused', 'status', 'seen');
+    writer.setField('reused', 'read', true);
+    const after = writer.readStored();
+    expect(rollback).toThrow();
+    expect(writer.readStored()).toEqual(after);
+    const another = writer.updateSelectedWithRollback(
+      (rows) => rows.flatMap((row, index) => (index === rows.length - 1 ? [index] : [])),
+      (rows) => [...rows.slice(0, -1), entry('new-tail')]
+    );
+    (doc.getList('history').get(0) as LoroMap).set('id', 'renamed-prefix');
+    doc.commit();
+    const renamed = writer.readStored();
+    expect(another).toThrow();
+    expect(writer.readStored()).toEqual(renamed);
+  });
+
+  it('refuses a mutation outside the selected bodies before changing storage', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append(entry('kept'));
+    const before = writer.readStored();
+    expect(() =>
+      writer.updateSelected(
+        () => [],
+        (rows) => {
+          rows[0]!.timestamp = '2026-10-31T00:00:00Z';
+          return rows;
+        }
+      )
+    ).toThrow();
+    expect(writer.readStored()).toEqual(before);
+  });
   it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
     'drops unused tool bytes for kind %s while preserving audio and download references',
     (kind) => {
