@@ -30,6 +30,8 @@ import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   AgentConfigDialog,
+  buildPresetCreateForm,
+  MINIMAX_CLAUDE_PRESET_ID,
   type AgentConfigDialogMode,
   type AgentConfigSubmitPayload,
 } from '../src/components/settings/agent-config-dialog';
@@ -260,6 +262,43 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  it('uses the current MiniMax model for every preset model alias', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: {
+          ...buildPresetCreateForm(MINIMAX_CLAUDE_PRESET_ID),
+          presetToken: 'test-token',
+        },
+      },
+      createMachine('Workstation'),
+      onSubmit
+    );
+
+    const createButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Create'
+    );
+    expect(createButton?.disabled).toBe(false);
+
+    await act(async () => {
+      createButton?.click();
+    });
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            ANTHROPIC_MODEL: 'MiniMax-M3.1-Flash',
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3.1-Flash',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3.1-Flash',
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3.1-Flash',
+          }),
+        })
+      );
+    });
+  });
 
   it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
