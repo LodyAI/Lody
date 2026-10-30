@@ -329,6 +329,10 @@ export class LodyOperationCoordinator {
   }
 
   hasTurnWorkForRequester(sessionId: SessionId): boolean {
+    // A degraded Inbox runs no turn work; reporting it busy would hold every scheduled
+    // message until the database recovers, or forever for an incompatible schema.
+    // Before startup settles, absence stays conservative.
+    if (this.startupFailure !== undefined) return false;
     return this.store?.hasTurnWorkForRequester(this.options.workspaceId, sessionId) ?? true;
   }
 

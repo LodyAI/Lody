@@ -497,6 +497,8 @@ describe('LodyOperationCoordinator', () => {
         await expect(h.coordinator.wake('dependent-call')).rejects.toThrow('INBOX_UNAVAILABLE');
         await h.coordinator.idle();
         expect(h.coordinator.hasPendingWorkForRequester(h.requesterSessionId)).toBe(false);
+        // Degraded Inbox runs no turn work, so scheduled messages are not held as busy.
+        expect(h.coordinator.hasTurnWorkForRequester(h.requesterSessionId)).toBe(false);
         expect(h.histories.get(h.targetSessionId)).toEqual([]);
         expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
         expect(h.getAttachedInbox()).toBeUndefined();

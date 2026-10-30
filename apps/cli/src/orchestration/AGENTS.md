@@ -38,8 +38,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   watch events are hints; startup/lease acquisition scans active Operations and
   durable Inbox intents and unsettled progress once. The watcher never carries result data.
 - Synchronous Inbox startup failure disables only Inbox orchestration. Keep ordinary
-  dispatch available, reject Inbox-dependent tools before storage access, and report
-  a runtime warning. Coordinator owns capped startup retry and cancels it on stop;
+  dispatch available, reject Inbox-dependent tools before storage access, report no
+  Inbox turn work (schedules must not wait on it), and report a runtime warning. Coordinator owns capped startup retry and cancels it on stop;
   incompatible schema/protocol never auto-retries or receives degraded writes.
 - Coordinator owns ONE connection from start to stop. Watch wakes are
   leading-edge coalesced; never do store work per raw fs event.
