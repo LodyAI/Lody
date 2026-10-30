@@ -1,6 +1,7 @@
 import type { Logger } from '@/utils/logger';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
 
-export const START_SHUTDOWN_TIMEOUT_MS = 7_000;
+export const START_SHUTDOWN_TIMEOUT_MS = TURN_BUDGETS.cliShutdownMs;
 
 type ShutdownExit = (code: number) => void;
 export type StartShutdownRequest =

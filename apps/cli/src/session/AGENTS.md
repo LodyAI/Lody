@@ -73,6 +73,7 @@
 ## Lifecycle
 
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
+  Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
 
 - [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;

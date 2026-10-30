@@ -7,6 +7,7 @@ import { makeExecutionOwner, type ExecutionResource } from './execution-owner';
 import type { InboxBatch, InboxInput, InboxRelease, InboxScope } from './model';
 import { InboxExecution, InboxRepository, OperationInbox } from './service';
 import type { InboxSqlite } from './sqlite';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
 
 export type OperationInboxLegacy = ReturnType<typeof operationInboxLegacy>;
 /** One host-lease bridge. Consumers: coordinator; dispatch, Stop, prompt and release hooks. */
@@ -117,7 +118,7 @@ export const operationInboxLegacy = (options: {
                 Effect.tryPromise({ try: prepare, catch: (cause) => cause }),
                 Effect.tryPromise({ try: beforeRelease, catch: (cause) => cause })
               )
-              .pipe(Effect.timeout('5 seconds'))
+              .pipe(Effect.timeout(TURN_BUDGETS.agentCleanupMs))
           ),
       };
     },
