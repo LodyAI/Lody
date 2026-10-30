@@ -3,6 +3,7 @@
 Status: implemented
 Type: architecture
 Translation: current
+PR: [#2104](https://github.com/LodyAI/Lody/pull/2104)
 
 [English](2026-10-30-mcp-request-allocation.md)
 
