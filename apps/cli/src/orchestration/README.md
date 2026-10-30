@@ -52,7 +52,7 @@ the original cause and a busy/storage/invariant classification. Reopen and multi
 behavior still require disk tests. Session configuration is frozen in intents/batches;
 the unused session-row configuration read/write is removed without a schema migration.
 
-`inbox/execution-owner.ts` hides input/batch identity, resource registration, raw
+`inbox/execution-owner.ts` hides input/batch identity, cleanup terminate handles, raw
 requests, submission, settlement and release recovery. Session callers use this
 handle rather than SQL. Its `submit` starts transport and records the submitted
 receipt; callers cannot manually interleave begin/prepare/submit/settle through the
@@ -65,13 +65,13 @@ retry first recovers retained resources, then starts a replacement.
 ## Completion consumption
 
 `inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
-watermarks and persists input/batch/resource receipts. `inbox/service.ts` owns coalesced
+watermarks and persists input/batch/release receipts. `inbox/service.ts` owns coalesced
 signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
-single host runtime and the unfinished Session adapter. Interrupted executions retire without replay; `inbox/recovery.ts` retains only the resource identity type. Startup retires old active inputs and clears legacy
-blocks; missing identities and unsupported platforms never gate admission. Restart retirement
+single host runtime and the unfinished Session adapter. Interrupted executions retire without replay. Startup retires old active inputs and clears legacy
+blocks; `blocked` and `inbox_resources` are otherwise neither read nor written. Restart retirement
 currently emits a warning rather than a history notice because activation owns SQLite only.
 
-Unconfirmed release returns the slot, preserves its diagnostic journal and detaches the old
+Unconfirmed release returns the slot and detaches the old
 Agent before waking a successor. Cleanup gets one background attempt with a five-second
 budget; cleanup failure is logged and cannot gate input or shutdown. Cleanup completion
 always retries the old execution's release write. Admission retries retirement once for a
@@ -82,7 +82,7 @@ always drops its matching runtime/current-turn registration and any owned live e
 even if the compensating release rolls back; later admission can retry that stale database slot.
 Cleanup addresses only the
 retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
-intent, but later wakeable receipts can proceed. Resource registration remains unchanged;
+intent, but later wakeable receipts can proceed. Process identities are not journaled;
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID
 proof are removed. See the [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
 

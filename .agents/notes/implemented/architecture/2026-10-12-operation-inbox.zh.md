@@ -25,11 +25,11 @@ Translation: current
 
 ## 所有权、恢复与兼容
 
-Effect 保持锁定 4.0.2。`inbox/service.ts`拥有存储、信号和 scoped fiber；`operationInboxLegacy` 桥接 Session 输入；`operation-coordinator.ts` 与 `workspace-cleanup-legacy.ts` 是登记的应用入口，platform 资源观察器同步桥接创建前的登记回调。整个 Session／ACP／历史迁移尚未完成，边界见 [Effect 台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账)。
+Effect 保持锁定 4.0.2。`inbox/service.ts`拥有存储、信号和 scoped fiber；`operationInboxLegacy` 桥接 Session 输入；`operation-coordinator.ts` 与 `workspace-cleanup-legacy.ts` 是登记的应用入口。整个 Session／ACP／历史迁移尚未完成，边界见 [Effect 台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账)。
 
 `40ef5c29cbe496f28f17ab10297cf37c3c48030f` 的审核发现三个 adapter 缺口，修订落实以下契约：
 
-1. 每次资源创建前持久登记“不完整”，持续合入后来的终端／进程 roots，保留全部 Session 所有者和发起 host PID。资源登记保留；[可用性决定](../bug-fix/2026-10-29-inbox-no-durable-block.zh.md) 取代释放证明准入，重启退役未知输入且不重放，释放失败移除旧 Agent，不阻塞后继。不能向可能被复用的 PID 发信号。
+1. 保留每个已挂接 Session 所有者的终止句柄，供后台清理使用。[可用性决定](../bug-fix/2026-10-29-inbox-no-durable-block.zh.md) 取代了最初的资源登记和释放证明准入：重启退役未知输入且不重放，释放失败移除旧 Agent、不阻塞后继，进程身份不再持久登记。不能向可能被复用的 PID 发信号。
 2. 可信 renderer／非委派 CLI 在激活或入队前持久保存 `humanInputReceipts`。RPC 丢失或输入过大时，历史兜底恢复匹配授权；普通历史、用户不符的回执、已取消／已结束输入不能解除暂停。
 3. 协调器 `recoverStop()` 调用独立的 `recoverClose()`，只补写结算／释放／暂停回执。保留原失败回执和恢复所有者，不重发 transport，也不把再次关闭 Scope 当成恢复。
 

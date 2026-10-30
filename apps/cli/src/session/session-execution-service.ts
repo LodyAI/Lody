@@ -1124,11 +1124,6 @@ export class SessionExecutionService {
             `[${sessionId}] Retired execution release write failed: ${formatErrorMessage(cause)}`
           );
         }
-        try {
-          runtime.inboxOwner?.detach();
-        } catch (cause) {
-          this.deps.logger.warn(`Cleanup observer detach failed: ${formatErrorMessage(cause)}`);
-        }
         this.releaseRecoveryBySession.delete(sessionId);
       }
     })();
@@ -1151,7 +1146,7 @@ export class SessionExecutionService {
                 'Execution acquisition remains owned'
               )
             : runtime.session;
-          if (session) runtime.inboxOwner!.retain(sessionExecutionResource(session));
+          if (session) runtime.inboxOwner!.register(sessionExecutionResource(session));
         },
         () =>
           withTimeout(
@@ -3047,10 +3042,7 @@ export class SessionExecutionService {
   private releaseTurnRuntime(sessionId: SessionId, turnId: string): void {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const releasedOwner = runtime?.turnId === turnId;
-    if (releasedOwner) {
-      runtime.inboxOwner?.detach();
-      this.turnRuntimeBySession.delete(sessionId);
-    }
+    if (releasedOwner) this.turnRuntimeBySession.delete(sessionId);
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
     if (releasedOwner || this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId) {
@@ -4898,11 +4890,7 @@ export class SessionExecutionService {
                   { type: 'text', text: batchPreview(inboxBatch, members) },
                 ];
               }
-              if (runtime.inboxOwner) {
-                yield* self.tryPromise(() =>
-                  runtime.inboxOwner!.register(sessionExecutionResource(activeSession))
-                );
-              }
+              runtime.inboxOwner?.register(sessionExecutionResource(activeSession));
               runtime.terminateSessionOnCancel = false;
               self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
 

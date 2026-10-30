@@ -31,7 +31,7 @@ so later messages queued behind it: one Session retried a single turn 19 times.
 - **Root fix: withdraw instead of release.** When access is `indeterminate`, the prepared dispatch
   marks the turn runtime. At turn end, an execution that never started a prompt and was not
   cancelled calls the new `ExecutionOwner.withdraw`. SQLite `withdraw` clears the active execution
-  only if no release receipt, journaled resource, or fenced/submitted batch exists for it. It writes
+  only if no release receipt or fenced/submitted batch exists for it; the execution owner also refuses once it holds a Session cleanup handle. It writes
   no receipt and leaves the input unfinished. The retry reuses the fixed execution ID
   `assistant:<userTurnId>`, so a receipt would have made it a conflicting release. A prepared
   human-plus-results batch keeps its claims and is reused by the retry.
@@ -66,7 +66,7 @@ so later messages queued behind it: one Session retried a single turn 19 times.
 `allowed` dispatch sends the prompt exactly once. A pre-existing ended input is retired, and the
 next message runs. Both tests fail without the change, with the production error.
 `apps/cli/src/orchestration/inbox/inbox.test.ts` covers withdraw eligibility: it is refused after
-resource journaling, fencing, or release, and the same ID begins again after a withdraw.
+fencing or release, and the same ID begins again after a withdraw.
 `operation-model.test.ts` traces the new event.
 
 A daemon crash while access is pending still leaves an active execution without a receipt, as

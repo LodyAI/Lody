@@ -1,5 +1,5 @@
 import { Effect, Exit, Layer, ManagedRuntime } from 'effect';
-import { executionJournalLayer } from '../platform/execution-journal';
+import { executionMembersLayer } from '../platform/execution-members';
 import { makeInboxQueries } from '../platform/inbox-queries';
 import { inboxRepositoryLayer, recoveryRepositoryLayer } from '../platform/inbox-repository';
 import { makeInboxCloseOwner } from './close-owner';
@@ -26,7 +26,7 @@ export const operationInboxLegacy = (options: {
   const dependencies = Layer.merge(
     Layer.merge(
       inboxRepositoryLayer(options.sql, options.ownsConnection !== false),
-      executionJournalLayer(options.sql)
+      executionMembersLayer(options.sql)
     ),
     Layer.succeed(InboxExecution, {
       ready: options.ready,
@@ -100,7 +100,7 @@ export const operationInboxLegacy = (options: {
         members: () => runtime.runPromise(owner.members),
         adopt: (next: InboxInput, update: () => void) =>
           runtime.runPromise(owner.adopt(next, update)),
-        register: (resource: ExecutionResource) => runtime.runPromise(owner.register(resource)),
+        register: (resource: ExecutionResource) => runtime.runSync(owner.register(resource)),
         track: (raw: Promise<void>) =>
           runtime.runSync(
             owner.track(Effect.tryPromise({ try: () => raw, catch: (cause) => cause }))
@@ -110,8 +110,6 @@ export const operationInboxLegacy = (options: {
         finish: (outcome: InboxRelease['outcome'], cause?: unknown) =>
           runtime.runPromise(owner.finish(outcome, cause)),
         withdraw: () => runtime.runPromise(owner.withdraw),
-        detach: () => runtime.runSync(owner.detach),
-        retain: (resource: ExecutionResource) => runtime.runSync(owner.retain(resource)),
         recover: (prepare: () => Promise<void>, beforeRelease: () => Promise<void>) =>
           runtime.runPromise(
             owner

@@ -12974,53 +12974,6 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('journals later resources through the active Session adapter before releasing execution', async () => {
-    const started = createDeferred<void>();
-    const finish = createDeferred<void>();
-    let persist!: (identity: { roots: readonly number[]; complete: boolean }) => void;
-    let attached = true;
-    const f = inboxExecutionFixture(async () => {
-      persist({ roots: [123, 456], complete: false });
-      persist({ roots: [123, 456], complete: true });
-      started.resolve();
-      await finish.promise;
-      return { stopReason: 'end_turn' };
-    });
-    Object.assign(f.session, {
-      watchInboxRecoveryResources: async (record: typeof persist) => {
-        persist = record;
-        persist({ roots: [123], complete: true });
-        return () => {
-          attached = false;
-        };
-      },
-    });
-    try {
-      await f.accept();
-      const running = f.service.continueSession(f.message);
-      await started.promise;
-      const db = new Database(f.storePath);
-      try {
-        const row = db.prepare('SELECT identity_json FROM inbox_resources').get() as {
-          identity_json: string;
-        };
-        expect(JSON.parse(row.identity_json)).toMatchObject({
-          roots: [process.pid, 123, 456],
-          complete: true,
-        });
-        expect(attached).toBe(true);
-      } finally {
-        db.close();
-      }
-      finish.resolve();
-      await running;
-      expect(attached).toBe(false);
-    } finally {
-      finish.resolve();
-      await f.close();
-    }
-  });
-
   it.each(['cleanup-ok', 'cleanup-failed', 'admission-retry', 'persistent'] as const)(
     'retires a rolled-back release without replaying old input (%s)',
     async (mode) => {
