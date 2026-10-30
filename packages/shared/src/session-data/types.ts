@@ -170,6 +170,10 @@ export interface SessionModelSummaryReader {
 /** Authoritative reads. In-process storage returns synchronously; the display
  * cache also accepts delayed reads and fences their results against events. */
 export interface SessionHistoryReader {
+  /** One coherent metadata observation, including compatibility with older owners. */
+  readMetadata?():
+    | readonly import('./domain').SessionHistoryMetadata[]
+    | Promise<readonly import('./domain').SessionHistoryMetadata[]>;
   /** Raw slot count, including slots no domain turn owns. */
   count(): number | Promise<number>;
   /** Authoritative read of one raw slot. */

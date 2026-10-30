@@ -135,7 +135,9 @@ function createHarness(
     getMetaState: vi.fn(async () => meta),
     getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
     sessionData: {
+      ...realDoc.sessionData,
       commands: {
+        ...realDoc.sessionData.commands,
         replaceEditableTail: vi.fn(async (input: ReplaceEditableTailInput) => {
           events.push('history');
           await options.beforeReplace?.(realDoc);

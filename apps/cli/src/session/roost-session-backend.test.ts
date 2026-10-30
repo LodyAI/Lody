@@ -10,6 +10,8 @@ import { SessionHistoryReadQuerySchema, type SessionHistoryReadResponse } from '
 import { createRoostRpcSessionServices } from './roost-rpc-session';
 import {
   createRoostHistoryReader,
+  historyQueryRow,
+  readSessionHistoryMetadata,
   type RoostHistoryChange,
   type RoostHistorySegment,
   type RoostSessionData,
@@ -337,4 +339,122 @@ describe('Roost owner RPC reader', () => {
     );
     await services.dispose?.();
   });
+});
+
+it.each(['body', 'generation'] as const)(
+  'fences query selection and streamed folds across an owner %s change',
+  async (change) => {
+    const doc = { sessionId: 'selective-owner' } as SessionDocument;
+    let revision = 1,
+      scope = 1,
+      raced = false;
+    const rows = [
+      { ...entry, id: 'old', userId: 'author', items: [{ type: 'text' as const, text: 'before' }] },
+      { ...entry, id: 'target' },
+    ];
+    const querySnapshot = () =>
+      rows.map((row) =>
+        historyQueryRow(row, {
+          field: (value, key) =>
+            value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+          scalar: (value) => value,
+          length: (value) => (Array.isArray(value) ? value.length : 0),
+          at: (value, index) => (value as unknown[])[index],
+        })
+      );
+    const services = createRoostRpcSessionServices(doc, {
+      inspection: true,
+      read: async (input) => {
+        const parsed = SessionHistoryReadQuerySchema.parse(input);
+        let result: unknown;
+        if (parsed.kind === 'count')
+          result = parsed.withCheckpoint
+            ? { count: rows.length, checkpoint: `scope-${scope}` }
+            : rows.length;
+        else if (parsed.kind === 'readQuery')
+          result = querySnapshot().slice(parsed.from, parsed.to);
+        else if (parsed.kind === 'readRange') {
+          if (!raced) {
+            raced = true;
+            scope++;
+            if (change === 'body') revision++;
+            rows[0]!.items = [{ type: 'text', text: 'after' }];
+          }
+          if (parsed.atCheckpoint !== `scope-${scope}`)
+            return {
+              type: 'session/history-read_response',
+              sessionId: doc.sessionId,
+              success: false,
+              retryReason: 'superseded',
+              error: 'superseded',
+            };
+          result = rows.slice(parsed.from, parsed.to).map((turn) => ({ state: 'ready', turn }));
+        } else throw new Error('Unexpected whole-history or body query');
+        return {
+          type: 'session/history-read_response',
+          sessionId: doc.sessionId,
+          success: true,
+          historyRevision: revision,
+          result,
+        };
+      },
+      write: async () => {
+        throw new Error('read-only');
+      },
+    });
+    const selected = await services.readHistorySelection?.((query) =>
+      query.flatMap((row, index) => (row.id === 'old' ? [index] : []))
+    );
+    expect(selected).toEqual([rows[0]]);
+    expect(raced).toBe(true);
+    const folded = await services.foldHistory?.(
+      () => [] as string[],
+      (state, row) => state.push(row.id)
+    );
+    expect(folded).toEqual(['old', 'target']);
+    await services.dispose?.();
+  }
+);
+
+it('retains older-owner attribution, configuration and schedule metadata without a whole array', async () => {
+  const doc = { sessionId: 'older-selective-owner' } as SessionDocument;
+  const row = {
+    ...entry,
+    userId: 'older-author',
+    scheduleRun: { scheduleId: 'schedule' },
+    inputConfig: { modelId: 'selected-model' },
+  };
+  const services = createRoostRpcSessionServices(doc, {
+    read: async (input) => {
+      let result: unknown;
+      if (input.kind === 'count') result = 1;
+      else if (input.kind === 'readLatestPage')
+        result = { totalCount: 1, checkpoint: 'older-owner:1' };
+      else if (input.kind === 'readDirectory')
+        result = [
+          {
+            position: 0,
+            state: 'ready',
+            turnId: row.id,
+            scalars: { id: row.id, role: row.role, timestamp: row.timestamp },
+          },
+        ];
+      else if (input.kind === 'readRange') result = [{ state: 'ready', turn: row }];
+      else throw new Error('Unsupported old-owner query');
+      return {
+        type: 'session/history-read_response',
+        sessionId: doc.sessionId,
+        success: true,
+        historyRevision: 1,
+        result,
+      };
+    },
+    write: async () => {
+      throw new Error('read-only');
+    },
+  });
+  expect(await readSessionHistoryMetadata(services.sessionData.history)).toMatchObject([
+    { id: row.id, userId: 'older-author', scheduleRun: { scheduleId: 'schedule' } },
+  ]);
+  await services.dispose?.();
 });

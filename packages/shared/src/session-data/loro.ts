@@ -1,3 +1,4 @@
+import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
 import type { SubagentRunItem } from '../ai';
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import type { SessionSubagentRun } from './types';
@@ -29,7 +30,11 @@ import {
   parseHistoryWrite,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
-import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
+import {
+  SESSION_DIRECTORY_SCALAR_KEYS,
+  pickDirectoryInputConfig,
+  pickDirectoryScalars,
+} from './directory';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import type { SessionSnapshotService } from './snapshot';
 import {
@@ -225,12 +230,35 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
    * Shallow send config source for a user turn: small collections only, never
    * the body. The container crossings here are cheap; the projection is not.
    */
+  const metadataScalars = (map: LoroMap, names: readonly string[]): Record<string, unknown> => {
+    const source: Record<string, unknown> = {};
+    for (const name of names) {
+      const value = map.get(name);
+      if (value !== undefined)
+        source[name] = isContainer(value)
+          ? value.kind() === 'Text'
+            ? value.toString()
+            : value.kind() === 'List'
+              ? []
+              : {}
+          : value;
+    }
+    return source;
+  };
   const shallowInputConfigSource = (map: LoroMap): unknown => {
     const config = map.get('inputConfig');
-    if (!isContainer(config)) return config;
+    if (!isContainer(config)) {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+      const source = config as Record<string, unknown>;
+      return Object.fromEntries(
+        SESSION_DIRECTORY_INPUT_CONFIG_KEYS.filter((key) => source[key] !== undefined).map(
+          (key) => [key, source[key]]
+        )
+      );
+    }
     if (config.kind() !== 'Map') return undefined;
     const configMap = config as LoroMap;
-    const value = { ...configMap.getShallowValue() } as Record<string, unknown>;
+    const value = metadataScalars(configMap, SESSION_DIRECTORY_INPUT_CONFIG_KEYS);
     for (const key of ['memory', 'mcpServerIds', 'configOptionValues'] as const) {
       if (value[key] === undefined) continue;
       const field = configMap.get(key);
@@ -269,9 +297,22 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     if (isContainer(value)) {
       if (value.kind() !== 'Map') return { position, state: 'invalid' };
       const map = value as LoroMap;
-      const scalars = pickDirectoryScalars(map.getShallowValue());
+      const scalars = pickDirectoryScalars(metadataScalars(map, SESSION_DIRECTORY_SCALAR_KEYS));
       if (!scalars) return { position, state: 'invalid' };
-      const row: SessionDirectoryRow = { position, state: 'ready', turnId: scalars.id, scalars };
+      const row: SessionDirectoryRow = {
+        metadataVersion: 1,
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+      };
+      const userId = readString(map.get('userId'));
+      if (userId !== undefined) Object.assign(row, { userId });
+      const scheduleRun = map.get('scheduleRun');
+      if (scheduleRun !== undefined)
+        Object.assign(row, {
+          scheduleRun: isContainer(scheduleRun) ? scheduleRun.toJSON() : scheduleRun,
+        });
       // Send config is present for user turns but projected on first read;
       // counts are deliberately omitted here (one container crossing each) and
       // arrive with a summary or a hydration read.
@@ -286,10 +327,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const itemCount = Array.isArray(record.items) ? record.items.length : undefined;
       const planCount = Array.isArray(record.plan) ? record.plan.length : undefined;
       const row: SessionDirectoryRow = {
+        metadataVersion: 1,
         position,
         state: 'ready',
         turnId: scalars.id,
         scalars,
+        ...(typeof record.userId === 'string' ? { userId: record.userId } : {}),
+        ...(record.scheduleRun !== undefined ? { scheduleRun: record.scheduleRun } : {}),
         ...(itemCount !== undefined ? { itemCount } : {}),
         ...(planCount !== undefined ? { planCount } : {}),
       };
@@ -714,5 +758,24 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     return null;
   };
 
-  return { sessionId, history, commands, writer, snapshots, readLatestGoal, dispose };
+  const readLatestUserId = (): string | undefined => {
+    for (let position = list.length - 1; position >= 0; position--) {
+      const entry = list.get(position);
+      if (readString(readField(entry, 'role')) !== 'user') continue;
+      const userId = readString(readField(entry, 'userId'));
+      if (userId?.trim()) return userId;
+    }
+    return undefined;
+  };
+
+  return {
+    sessionId,
+    history,
+    commands,
+    writer,
+    snapshots,
+    readLatestGoal,
+    readLatestUserId,
+    dispose,
+  };
 }

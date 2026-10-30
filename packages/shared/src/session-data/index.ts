@@ -54,7 +54,26 @@ export {
   type OperationProgressStatusByTarget,
 } from './operation-progress';
 
-export { readLatestTurn, readSessionHistory, selectTurnOutput } from './read';
+export {
+  readLatestTurn,
+  readLatestUserId,
+  readSessionHistory,
+  readSessionHistoryMetadata,
+  selectTurnOutput,
+} from './read';
+export {
+  SESSION_DIRECTORY_SCALAR_KEYS,
+  pickDirectoryScalars,
+  pickDirectoryInputConfig,
+} from './directory';
 
 export { markAssistantTurnFinished } from './assistant-finalize';
 export * from './token-usage';
+
+export {
+  summarizeHistoryQuery,
+  historyQueryRow,
+  selectHistoryActionRows,
+  selectAgentHistoryRows,
+  type HistoryQueryRow,
+} from './history-selection';

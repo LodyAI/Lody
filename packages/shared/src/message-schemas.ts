@@ -140,11 +140,17 @@ export const SessionImagePayloadSchema = z
     height: OptionalPositiveIntegerSchema,
     storageSessionId: SessionIdSchema.optional(),
   })
-  .strict().superRefine((image, ctx) => {
+  .strict()
+  .superRefine((image, ctx) => {
     const manifest = image.encryption;
-    if (manifest && (manifest.kind !== 'image' || manifest.parts[0] !== image.imageId ||
-      manifest.sizeBytes !== image.sizeBytes || manifest.mimeType !== image.mimeType ||
-      manifest.fileName !== (image.fileName ?? ''))) {
+    if (
+      manifest &&
+      (manifest.kind !== 'image' ||
+        manifest.parts[0] !== image.imageId ||
+        manifest.sizeBytes !== image.sizeBytes ||
+        manifest.mimeType !== image.mimeType ||
+        manifest.fileName !== (image.fileName ?? ''))
+    ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Encrypted image reference mismatch' });
     }
   });
@@ -187,10 +193,20 @@ const refineSessionFileBlock = (
   ctx: z.RefinementCtx,
   basePath: PropertyKey[] = []
 ): void => {
-  if (block.encryption && (block.encryption.kind !== 'file' || block.fileId !== block.encryption.parts[0] ||
-    block.sizeBytes !== block.encryption.sizeBytes || block.fileName !== block.encryption.fileName ||
-    block.mimeType !== block.encryption.mimeType || block.transport !== 'r2')) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: basePath, message: 'Encrypted attachment reference mismatch' });
+  if (
+    block.encryption &&
+    (block.encryption.kind !== 'file' ||
+      block.fileId !== block.encryption.parts[0] ||
+      block.sizeBytes !== block.encryption.sizeBytes ||
+      block.fileName !== block.encryption.fileName ||
+      block.mimeType !== block.encryption.mimeType ||
+      block.transport !== 'r2')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: basePath,
+      message: 'Encrypted attachment reference mismatch',
+    });
   }
   // transport='local' means the bytes only exist on a specific machine pending
   // backfill; without machineId other devices can't render the honest
@@ -2096,7 +2112,16 @@ export const SessionHistoryReadQuerySchema = z
         waitMs: z.number().int().nonnegative().max(15_000),
       })
       .strict(),
-    z.object({ kind: z.literal('count') }).strict(),
+    z
+      .object({
+        kind: z.literal('readQuery'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+        transcriptVisibility: z.boolean().optional(),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
+      })
+      .strict(),
+    z.object({ kind: z.literal('count'), withCheckpoint: z.literal(true).optional() }).strict(),
     z.object({ kind: z.literal('readAt'), position: z.number().int().nonnegative() }).strict(),
     z
       .object({
@@ -2117,6 +2142,7 @@ export const SessionHistoryReadQuerySchema = z
     z
       .object({
         kind: z.literal('readDirectory'),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
         from: z.number().int().nonnegative(),
         to: z.number().int().nonnegative(),
       })
@@ -2148,7 +2174,8 @@ export const SessionHistoryReadQuerySchema = z
     z.object({ kind: z.literal('readTurnOutput'), userTurnId: z.string().trim().min(1) }).strict(),
   ])
   .superRefine((value, ctx) => {
-    if (value.kind !== 'readRange' && value.kind !== 'readDirectory') return;
+    if (value.kind !== 'readRange' && value.kind !== 'readDirectory' && value.kind !== 'readQuery')
+      return;
     if (value.to < value.from) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

@@ -810,7 +810,7 @@ export type SessionHistoryReadQuery =
       readonly waitMs: number;
     }
   | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
-  | { readonly kind: 'count' }
+  | { readonly kind: 'count'; readonly withCheckpoint?: true }
   | { readonly kind: 'readAt'; readonly position: number }
   | { readonly kind: 'readTurn'; readonly turnId: string; readonly atCheckpoint?: string }
   | {
@@ -819,7 +819,19 @@ export type SessionHistoryReadQuery =
       readonly to: number;
       readonly atCheckpoint?: string;
     }
-  | { readonly kind: 'readDirectory'; readonly from: number; readonly to: number }
+  | {
+      readonly kind: 'readDirectory';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
+  | {
+      readonly kind: 'readQuery';
+      readonly from: number;
+      readonly to: number;
+      readonly transcriptVisibility?: boolean;
+      readonly atCheckpoint?: string;
+    }
   | { readonly kind: 'readLatestPage'; readonly limit: number; readonly withCheckpoint?: boolean }
   | {
       readonly kind: 'readOlderPage';

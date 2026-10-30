@@ -39,8 +39,10 @@ export type TurnHistoryGateArgs = {
   logger: Logger;
   sessionId: SessionId;
   userTurnId: string;
-  /** Read the CLI-local session history (mirror state; cheap). */
-  readHistory: () => Promise<SessionHistoryInput[]>;
+  /** Check the selected identity without materializing the transcript. */
+  hasUserTurn?: (turnId: string) => Promise<boolean>;
+  /** Compatibility for existing gate owners. */
+  readHistory?: () => Promise<SessionHistoryInput[]>;
   /** Subscribe to local doc changes (remote imports included); returns unsubscribe. */
   subscribeHistory: (listener: () => void) => (() => void) | undefined;
   /**
@@ -140,10 +142,11 @@ export class TurnHistoryGate {
           if (this.open) {
             return;
           }
-          const history = await args.readHistory();
-          const present = history.some(
-            (entry) => entry.role === 'user' && entry.id === args.userTurnId
-          );
+          const present = args.hasUserTurn
+            ? await args.hasUserTurn(args.userTurnId)
+            : (await args.readHistory!()).some(
+                (entry) => entry.role === 'user' && entry.id === args.userTurnId
+              );
           if (present) {
             await this.openGate('user-turn-synced');
             return;
