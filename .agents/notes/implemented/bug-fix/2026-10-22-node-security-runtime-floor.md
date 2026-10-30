@@ -12,9 +12,10 @@ release, despite downloading and unpacking remote artifacts and making HTTPS
 requests. Standalone Node now requires 22.23.4+ within 22.x, 24.22.1+ within 24.x,
 or 26.12.1+ within 26.x; installation and CLI startup enforce the same boundaries.
 CI uses exact repaired versions, while SQLite's Node-API 10 and architecture checks
-remain. Electron is evaluated separately: its Chromium Brotli already contains the
-relevant decoder fix, but its Node TLS hostname checks remain an unresolved release
-qualification item; this change does not claim to remediate the packaged desktop.
+remain. Electron is evaluated separately from the standalone Node floors. The
+2026-10-30 update pins Electron 44.10.0, whose embedded Node is 24.22.1.
+That pin is the desktop runtime remediation for the October Node fixes. It
+does not claim that installed apps or production releases have been replaced.
 
 ## Decision
 
@@ -27,7 +28,7 @@ The root dependency-free preinstall and the first-import CLI guard enforce the
 range before installation and CLI application initialization. The production
 bundler can evaluate static external imports before the inlined entry guard, so
 source import order is not a promise that every dependency module loads afterward.
-Manifests guide package managers but do not replace executable checks. No package versions or artifact pins change.
+Manifests guide package managers but do not replace executable checks. The October 22 decision changes no package versions or artifact pins.
 
 Managed Node-package adapters inherit the CLI's `process.execPath`; the CLI gate
 therefore covers standalone child launches without changing artifact manifests.
@@ -59,17 +60,37 @@ Electron [44.9.3 release notes](https://github.com/electron/electron/releases/ta
 only identify ANGLE/Chromium/PDFium/Skia/V8 backports; its
 [DEPS](https://github.com/electron/electron/blob/v44.9.3/DEPS) still pins Node 24.22.0.
 The Node patch list has no identified hostname-validation backport. Electron 45.0.0
-also lists Node 24.22.0 and introduces breaking changes. Neither is established here
-as a safe TLS remediation, so no speculative Electron upgrade is included.
+also lists Node 24.22.0 and introduces breaking changes. The October 22 decision
+therefore did not treat either release as the TLS remediation.
 
-Before closing the desktop finding, obtain an upstream release containing the
-[105483](https://github.com/nodejs/node/commit/de49c913f232fd9c216bf164818c87c0cb645b7b)
-and [106069](https://github.com/nodejs/node/commit/935918e3427911f2bef315638d68308dfecc61ba)
-fixes or equivalent documented backports, inspect its actual sources, run upstream
-hostname regression cases in the shipped binary, and validate embedded CLI/native
-loading and packaged desktop startup on each supported target. Updating system
-Node does not replace an already shipped Electron runtime. Production deployment
-and installer delivery remain separate owner-controlled operations.
+## Update 2026-10-30
+
+Electron [44.10.0](https://github.com/electron/electron/releases/tag/v44.10.0) is
+the newest stable 44.x release and the first 44.x release whose notes update
+Node to 24.22.1. Node's October security release fixes CVE-2026-111497 in the
+bundled Brotli decoder and the numeric-hostname TLS checks CVE-2026-105483,
+CVE-2026-106069, and CVE-2026-106072. `apps/electron` now depends on Electron
+44.10.0. The same major stays in place; Electron 45 is a separate line.
+
+An offline `tls.checkServerIdentity` probe with synthetic SANs is the hostname
+evidence: 44.9.3 accepts five non-canonical aliases, and 44.10.0 rejects the
+ten-case set, including valid DNS and IP controls. That probe is not a TLS
+handshake, product login, or network exploit. Brotli evidence is the upstream
+fix plus the embedded runtime's real `node:zlib` decoder, not a reproduced
+Lody RCE. `process.versions.brotli` can stay 1.2.0 on the fixed runtime.
+System Node and npm `undici` do not replace Electron's embedded decoder.
+A valid Brotli buffer also decodes on 44.9.3, so that call does not by itself
+show the out-of-bounds fix. A local macOS arm64 package built by
+`scripts/package-electron.mjs` with `--publish never` reports Electron 44.10.0
+and embedded Node 24.22.1. afterPack checked the embedded CLI, native SQLite,
+node-pty including its spawn-helper, and the synthetic E2EE storage probe.
+`codesign --verify --deep --strict` passed for the local Developer ID signature.
+Notarization did not run. The packaged app ignores the dev-only plaintext
+auth-storage switch, so the desktop smoke used the unpacked OSS build, an
+isolated profile, and `LODY_ELECTRON_PLAINTEXT_AUTH_STORAGE=1`. That smoke
+passed the six P0 scenarios. Cloud login, the real OS keychain, Windows, and
+Linux were not accepted. Production deployment remains a separate
+owner-controlled operation.
 
 ## Verification limits
 

@@ -19,11 +19,23 @@ function fixture(server = new McpServer({ name: 'test', version: '1' })) {
   const program = serveStdioMcp.pipe(
     Effect.provide(stdioMcpConnectionLayer({ createServer: () => server, stdin, stdout, signals }))
   );
-  const expectReleased = () => {
+  const expectReleased = (options?: { readonly started?: boolean }) => {
     expect(stdin.listenerCount('data')).toBe(0);
     expect(stdin.listenerCount('end')).toBe(0);
     expect(stdin.listenerCount('error')).toBe(0);
-    expect(stdout.listenerCount('error')).toBe(0);
+    // SDK 2.1.0 close() keeps exactly one tagged stdout error listener
+    // (`swallowsErrorsAfterClose`) after start(), so a late write is not an
+    // unhandled 'error'. A transport that never started adds nothing.
+    // Command-owned listeners must still be gone in both cases.
+    const stdoutErrors = stdout.listeners('error');
+    const commandOwned = stdoutErrors.filter(
+      (listener) =>
+        !Object.getOwnPropertySymbols(listener).some(
+          (symbol) => symbol.description === 'swallowsErrorsAfterClose'
+        )
+    );
+    expect(commandOwned).toEqual([]);
+    expect(stdoutErrors).toHaveLength(options?.started === false ? 0 : 1);
     expect(signals.listenerCount('SIGINT')).toBe(0);
     expect(signals.listenerCount('SIGTERM')).toBe(0);
     expect(server.server.transport).toBeUndefined();
@@ -231,6 +243,6 @@ describe('stdio MCP command lifetime', () => {
     const f = fixture();
     f.stdin.destroy();
     await Effect.runPromise(f.program);
-    f.expectReleased();
+    f.expectReleased({ started: false });
   });
 });

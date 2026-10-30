@@ -125,13 +125,13 @@ minimumReleaseAgeExclude:
   # Mermaid renderer for chat diagrams; reviewed: no dependencies or install scripts.
   - pele@1.6.0
   - '@peculiar/asn1-schema@2.10.0'
-  # Electron 44.9.3 adds the compromised eMudhra certificate block; keep major 44.
+  # Electron 44.10.0 embeds Node 24.22.1 (CVE-2026-111497 Brotli and numeric-host TLS). Keep major 44.
   # electron-vite 6.0.0-beta.2+ is the first release
   # with Electron 42-44 build targets. rolldown and magic-string come with it.
   # Every rolldown platform binding is listed: a quarantined optional binding is
   # dropped from the lockfile without an error, and rolldown then loads another
   # version's binding and fails while bundling electron.vite.config.ts.
-  - 'electron@44.9.3'
+  - 'electron@44.10.0'
   - 'electron-vite@6.0.0-beta.5'
   - 'magic-string@1.4.2'
   - 'rolldown@1.2.11'
@@ -263,6 +263,18 @@ overrides:
   'undici@>=6.23.0 <6.29.1': 6.29.1
   'undici@>=7.18.0 <7.30.1': 7.30.1
   'undici@>=8.0.0 <8.12.2': 8.12.2
+  # GHSA-f897-62hf-6gxq is fixed by the direct MCP pins (sdk 1.30.1, server/node/client 2.1.0).
+  # Seroval advisories through 1.6.11. TanStack resolves 1.5 and 1.6; keep one patched 1.6 line.
+  'seroval@>=1.5.0 <1.6.11': 1.6.11
+  # GHSA-fx2h-pf6j-xcff on the Vite 7 line. Catalog Vite 8 is unchanged.
+  'vite@>=7.0.0 <7.3.7': 7.3.7
+  # Same-major patches with a real importer. Do not force a new major.
+  'dompurify@>=3.0.0 <3.4.17': 3.4.17
+  'body-parser@>=1.0.0 <1.20.9': 1.20.9
+  'body-parser@>=2.0.0 <2.4.0': 2.4.0
+  'fast-uri@>=3.0.0 <3.1.9': 3.1.9
+  'ip-address@>=10.0.0 <10.7.4': 10.7.4
+  'qs@>=6.7.0 <=6.16.0': 6.16.1
   # The local Lab server shares the approved Node-API 10 SQLite runtime.
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   # ASN.1 decorators and consumers must share one schema registry for WebRTC DTLS certificates.
@@ -271,7 +283,7 @@ overrides:
   electron-builder-squirrel-windows: ^26.15.3
   '@loro-dev/loro-cli>loro-crdt': 1.16.3
   tsx@4.21.0>esbuild: 0.27.0
-  vite@7.3.1>esbuild: 0.27.0
+  vite@7.3.7>esbuild: 0.27.0
   # Keep a single zod major graph so better-auth/better-call peer types do not
   # fork (TanStack router-generator otherwise pulls 4.4.x next to catalog 4.3.x).
   zod: 4.3.6
