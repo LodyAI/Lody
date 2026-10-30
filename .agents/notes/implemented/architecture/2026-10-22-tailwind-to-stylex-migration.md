@@ -2362,38 +2362,35 @@ Tailwind. Through109 remains historical620/8/18; cleanup/runtime mappings are no
 migration credit. The core source inventory remains separate at1,424/157/726 through 110. Later116–121 sources and unvisited states are excluded. Full components remain
 verified through99, Electron through93; the root ACP prerequisite failure remains.
 
-### Default legacy Sidebar controls
+### Legacy Sidebar compatibility and correction
 
-The legacy Sidebar remains publicly exported even though repository consumers are
-migration stories. Its303 source occurrences cannot be deleted as unused. Batch110
-moves eleven ordinary SidebarMenuButton layout mappings to StyleX while retaining
-every utility literal for `asChild` and nonempty direct `className` callers. A single
-CVA declaration supplies both paths; size defaults/null/unknown behavior and the
-remaining private/state/group/important/SVG rules keep their original order.
-This bounded split is verified against the earlier27 wildcard, outer icon/offcanvas
-and opaque-callsite counterexamples; it does not erase or universally solve those
-broader contracts. Eighty-eight paired PNGs/full records match:64formal/3,836 standard
-records and24native/600 complete nodes, including local spacing/radius/RTL, direct
-opaque/utility/inline callers, actual Slot and ancestor-targeted rules. The real
-component output gate checks240 inputs:180 legacy byte-exact and60 normal branch/
-attribute cases. Two original hover failures were caused by a real action covering
-the intended target; the corrected no-action sibling uses actual `:hover`, while
-the original failure images remain. The11 mappings earn zero source-removal credit.
+The public legacy Sidebar retains its original 303 utility occurrences. An empty
+caller-class guard protects neither ancestor selectors nor their layer priority.
+A real compiler-accepted zero-specificity ancestor utility loses to the old direct
+utility class, but wins after that default moves into the earlier StyleX layer.
+This changed Header gap from 8px to 48px, MenuButton width from 239px to 40px, and
+GroupLabel height from 32px to 48px. The button's used width is limited by its
+retained padding; it is not evidence of a 40px min-width. Slot behavior staying
+correct did not establish ordinary-element compatibility.
 
-The compiled Sidebar snapshot preserves the user's existing Tooltip JSX whitespace.
-The proposed Git blob applies only owned task hunks to HEAD and leaves that user
-hunk unstaged. Root verifies the two snapshots differ only at that exact whitespace
-sequence and independently checks every original PNG/full record and decoded pixel.
-The isolated visual tree differs from the root at25 untouched pre-existing user
-paths; those are recorded in `leaves110-build-root-boundary-audit.json`. The evidence
-establishes this module delta, not a new whole-root application run.
+Correction 127 withdraws all 111 default-runtime mappings from 110/113/114/116/120
+and restores the actual Before110 source byte for byte. The earlier three internal
+27 migrations remain. Disabled-state 121 and typography 122 candidates are also
+rejected with zero credit; the former allowed blocked ARIA mouse callbacks to fire.
+No specificity, compiler/layer, event or styling-engine workaround is added.
+The original class strings, CVA variants and public caller composition remain
+available. Future work must preserve the complete supported caller contract;
+retaining compatibility classes is preferable to a misleading normal-only route.
 
-A fresh exact-root snapshot validates all790 production files in the three scanner
-roots. Only Sidebar changes from the through99 snapshot. It remains1,424 occurrences/
-157used files; unresolved expressions become726 because the static scanner treats
-the new known StyleX class-map alias as another property lookup, not because a new
-Tailwind utility was added. Its48-file legacy UI subscan remains429 occurrences/
-14used files, with94 unresolved expressions. Helper counts remain independent.
+Original→restored127 has 32 exact PNG/full-record pairs: eight ancestor/default
+cases with 152 nodes and 24 existing native cases with 600 nodes. The six actual
+ancestor counterexamples retain 197,149 raw/195,018 informational threshold pixels;
+reverse correction images describe the same six cases, not another issue count.
+All old reports stay immutable. Their bounded matching matrices did not establish
+public equivalence; their 111 runtime migration credits are withdrawn, and none of
+their historical raster OPENs are closed. The task-only Git blob excludes the
+user's Tooltip whitespace; its browser source differs only at that exact byte.
+The isolated Storybook tree's 25 untouched user-file differences remain explicit.
 
 ## Remaining work
 

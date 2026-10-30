@@ -1679,29 +1679,26 @@ blockClassName 引用，没有新增 Tailwind。109 的 620／8／18 保持历�
 映射不算迁移。主产品源码库存仍独立为截至 110 的 1,424／157／726，不含后续 116–121
 与未访问状态。components 全套仍截至 99，Electron 截至 93，根 ACP 前置失败未解除。
 
-### 默认 legacy Sidebar 控件
+### legacy Sidebar 兼容与纠错
 
-legacy Sidebar 虽然仓库中只被迁移 stories 使用，仍通过公开出口提供，不能按闲置删除
-303 处源码。110 批把 SidebarMenuButton 十一处普通布局映射迁入 StyleX；`asChild` 与非空
-直接 `className` 调用者保留全部原 utility，一个 CVA 声明提供两条路径。size 的默认／
-null／未知值与私有 writer、state／group／important／SVG 原规则顺序不变。有界分流真实
-复验此前 27 批 wildcard、外层 icon／offcanvas 和 opaque 调用反例，不抹去或宣称普遍
-解决这些更广合同。八十八对 PNG／完整记录相同：六十四对正式帧／3,836 条标准记录、
-二十四对 native／600 节点，覆盖局部 spacing／radius／RTL、直接 opaque／utility／inline、
-实际 Slot 与祖先定向规则。真实组件输出门禁覆盖 240 输入：180 个 legacy 字节相同、
-60 个 normal 分支／属性情境。原两个 hover 失败来自真实 action 遮挡目标；改用无 action
-兄弟并验证实际 `:hover`，原失败图仍保留。十一处映射的源码删除计数为零。
+公开 legacy Sidebar 保留原有 303 处 utility。空 caller-class 守卫既不能隔离祖先选择器，
+也不能保持其 layer 优先级。真实编译器接受的零特异性祖先 utility 原本输给直接 utility，
+默认样式移到更早的 StyleX 层后却胜出：Header gap 8→48px、MenuButton 宽度 239→40px、
+GroupLabel 高度 32→48px。按钮 used width 受保留 padding 限制，不是存在 40px min-width；
+Slot 正确也不能证明普通元素兼容。
 
-用于浏览器的 Sidebar 快照保留用户既有 Tooltip JSX 空格；Git 候选只把任务 hunk 应用到
-HEAD，用户 hunk 不进暂存。主 Agent 验证两快照仅该精确空白序列不同，并独立核对每张
-原 PNG、完整记录与解码像素。隔离视觉树另有二十五份未触及的既有用户文件与根工作区
-不同，记录在 `leaves110-build-root-boundary-audit.json`；证据只建立该模块差量，不代表
-再次运行当前完整根应用。
+127 纠错撤回 110／113／114／116／120 的全部 111 处默认运行路径映射，逐字节恢复真实
+Before110；此前 27 批三个内部迁移保留。禁用状态 121 和字号 122 候选均拒绝、计数为零；
+前者让本来拦截的 ARIA 鼠标回调实际执行。没有加特异性、编译器／layer、事件或样式引擎
+补丁。原 class 字符串、CVA 变体与公共 caller 组合合同保留；后续方案必须保持完整受支持
+caller 合同，保留兼容类优于误导的仅默认路径迁移。
 
-新的精确根快照核对三扫描根全部 790 份生产文件，较截至 99 仅 Sidebar 改变。下界仍为
-1,424 处／157 使用文件，未解析表达式为 726：静态扫描把新增已知 StyleX class map 别名
-视作另一属性查询，不是新增 Tailwind utility。四十八文件的 legacy UI 子扫描仍为 429 处／
-十四使用文件／九十四未解析表达式；helper 库存保持独立。
+原版→恢复版 127 共三十二对 PNG／完整记录相同：八个祖先／默认场景 152 节点，加二十四
+个既有 native 场景 600 节点。六个真实祖先反例保留 197,149 原始／195,018 参考阈值像素，
+反向纠错图描述同六例，不重复计问题。旧报告不可改写：其有界匹配矩阵不足以证明公开等价，
+111 处运行路径信用已撤回，任何历史栅格 OPEN 都未关闭。task-only Git blob 排除用户的
+Tooltip 空格，浏览器快照仅该精确字节不同；隔离 Storybook 树二十五份未动用户文件的差异
+仍明确保留。
 
 ## 后续工作
 

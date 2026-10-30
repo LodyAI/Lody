@@ -131,5 +131,5 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 ## Legacy Sidebar
 
-- Keep Slot and nonempty caller classes on the original utility cascade; only
-  verified default native branches use StyleX. See [migration](../style/MIGRATION.md).
+- Preserve Slot, caller and ancestor utility precedence. An empty caller-class
+  guard does not isolate ancestors. See [migration](../style/MIGRATION.md).

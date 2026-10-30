@@ -33,18 +33,20 @@ caller utility. The old attribute selector may have beaten a plain caller
 class within the utilities layer. Preserve that variant until caller precedence
 is verified, including public adapter callers beyond the current app.
 
-Default native branches of a legacy public primitive can migrate independently
-when compatibility callers retain the complete original cascade. SidebarMenuButton
-uses one CVA declaration for two static selectors: ordinary elements with no direct
-caller class use StyleX for the verified layout fields; `asChild` and nonempty
-`className` keep the original utilities. Keep state/group/important, font and SVG
-reader rules shared and unchanged. Verify ancestor wildcards, targeted selectors,
-opaque caller classes, Slot children and outer collapse states before accepting
-that split. A guard alone does not prove these contracts. Preserved literals earn
-zero source-removal credit even when the normal runtime route is genuinely StyleX;
-inspect the actual matching rules so the new styles are not masked by retained
-normal-path utilities. The independent helper controls apply their own verified
-ordinary/Slot split without importing product primitives or palette aliases.
+An empty caller-class guard does not isolate ancestor styling. A legal
+zero-specificity ancestor utility loses to an original direct utility in the same
+layer, but wins after that default moves into the earlier StyleX layer. Matching
+Slot and direct-callsite tests therefore cannot establish public compatibility.
+The legacy Sidebar keeps its original default, state and typography utility paths;
+do not add a normal-only StyleX route or infer safety from default screenshots.
+Keep public composition intact until its full supported caller contract has an
+equivalent replacement. Runtime mappings with retained source literals are not
+source-removal credit, and a counterexample withdraws the claimed mapping.
+
+The independent helper controls' reviewed internal call graph and original raw
+selectors are separate contracts. Their local ordinary/Slot split is not a recipe
+for public adapters. Check real parent selectors, token readers, layer order and
+actual input events before changing a consumer, and preserve explicit limits.
 
 Verify an override in every control state. The archive button becomes
 `position: relative` while confirming; its caller retains `absolute z-20` so
