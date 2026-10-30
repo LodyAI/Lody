@@ -15,6 +15,7 @@ const noop = () => {};
 export const desktopWindowId = () => '';
 export const readEncryptedLocalIdentity = () => null;
 export const isE2eeMemberRemoved = () => false;
+export const e2eeAccessLoss = () => null;
 export const retainEncryptedWorkspaceCleanup = noop;
 export const resumeEncryptedWorkspaceCleanup = async () => {};
 export const createFileRoute = () => (options: { component: () => ReactNode }) => ({
