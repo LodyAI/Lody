@@ -58,7 +58,10 @@ async function load(relative, dependencies, console = globalThis.console, env = 
               ? { E2eeMemberRemovedError }
               : id === '../../services/e2ee-personal-pairing.mjs'
                 ? { PersonalPairingOfferSchema }
-                : require(id)
+                : id === '../../services/e2ee-client-loss-probe'
+                  ? // Production default: the E2E probe is disabled and forwards work.
+                    { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
+                  : require(id)
     }
   )
   return exports
@@ -1933,7 +1936,7 @@ void test('real preload bridge admits only confirmed trusted reset IPC and archi
     electron: {
       ipcRenderer: { on: () => {}, invoke: (channel, input) => ipc[channel.split('.')[1]](input) }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   await ipc.open('workspace')
@@ -2198,7 +2201,7 @@ void test('remote commands use workspace custody and never create an account con
         invoke: (channel, ...args) => ipc[channel.split('.')[1]](...args)
       }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   for (const [workspaceId, expected] of [

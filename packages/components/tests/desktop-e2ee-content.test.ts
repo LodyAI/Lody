@@ -255,6 +255,53 @@ describe('desktop E2EE content epoch safety', () => {
     }
   });
 
+  it('reports E2E transport effects from the provider seal/open the live transport calls', async () => {
+    const reports: { workspaceId: string; effects: Record<string, unknown> }[] = [];
+    vi.stubGlobal('window', {
+      __LODY_E2E_CLIENT_LOSS__: true,
+      ipc: { send: (_channel: string, payload: (typeof reports)[number]) => reports.push(payload) },
+    });
+    let readable = true;
+    const access = createDesktopE2eeContent({
+      runtime: {
+        seal: async () => ({ header: new Uint8Array([3]), sealed: new Uint8Array([1]) }),
+        openContent: async () => {
+          if (!readable) throw new Error('e2ee_member_removed');
+          return new Uint8Array([7]);
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'effects-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    try {
+      if (access.content.mode !== 'protected') throw new Error('expected protected content');
+      const room = access.content.resolve({ kind: 'doc', docId: 'session' });
+      if (room.mode !== 'protected') throw new Error('expected protected room');
+      await room.config.provider.seal({
+        context,
+        plaintext: new Uint8Array([7]),
+        additionalData: (header: Uint8Array) => header,
+      });
+      const frame = {
+        context,
+        header: new Uint8Array([3]),
+        sealed: new Uint8Array([1]),
+        additionalData: new Uint8Array([2]),
+      };
+      await room.config.provider.open(frame);
+      readable = false;
+      await expect(room.config.provider.open(frame)).rejects.toThrow('e2ee_member_removed');
+      expect(reports.at(-1)).toMatchObject({
+        workspaceId: 'effects-workspace',
+        effects: { contentWrites: 1, contentReadEvents: 1, pendingWrites: 0 },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      await access.close();
+    }
+  });
   it('keeps one selected snapshot epoch across a concurrent key transition', async () => {
     const entered = Promise.withResolvers<void>(),
       release = Promise.withResolvers<void>();
