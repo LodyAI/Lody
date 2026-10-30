@@ -169,6 +169,66 @@ describe('Magpie runtime preparation', () => {
     }
     expect(await readdir(directory)).toEqual([]);
   });
+  it('treats missing or incomplete capability metadata as text-only', async () => {
+    const directory = await root();
+    const mixed: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({
+            data: [
+              { id: 'declared-text/model', modalities: { input: ['text'] } },
+              { id: 'output-only/model', modalities: { output: ['text'] } },
+              { id: 'bare/model' },
+              { id: 'vision/model', modalities: { input: ['text', 'image'] } },
+            ],
+          })
+        : fetcher(input, init);
+    expect((await readMagpieModels(gateway, undefined, mixed)).map((m) => m.id)).toEqual([
+      'declared-text/model',
+      'output-only/model',
+      'bare/model',
+      'vision/model',
+    ]);
+    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, mixed);
+    const catalog = JSON.parse(
+      await readFile(JSON.parse(codex.env.CODEX_CONFIG ?? '{}').model_catalog_json, 'utf8')
+    );
+    expect(catalog.models.map((m: { input_modalities: string[] }) => m.input_modalities)).toEqual([
+      ['text'],
+      ['text'],
+      ['text'],
+      ['text', 'image'],
+    ]);
+    const pi = await prepareMagpieRuntime('pi', gateway, undefined, directory, mixed);
+    const piCatalog = JSON.parse(
+      await readFile(join(pi.env.PI_CODING_AGENT_DIR ?? '', 'models.json'), 'utf8')
+    );
+    expect(piCatalog.providers.magpie.models.map((m: { input: string[] }) => m.input)).toEqual([
+      ['text'],
+      ['text'],
+      ['text'],
+      ['text', 'image'],
+    ]);
+    const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, mixed);
+    const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
+    expect(k).toMatchObject({
+      models: {
+        'magpie/output-only/model': { capabilities: ['tool_use'] },
+        'magpie/vision/model': { capabilities: ['tool_use', 'image_in'] },
+      },
+    });
+    const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, mixed);
+    const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
+    expect(g).toMatchObject({ models: { image_description: 'magpie/vision/model' } });
+  });
+  it('names the offending model and field instead of a generic catalog error', async () => {
+    const invalid: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({ data: [{ id: 'ok/model' }, { id: 'broken/model', context_window: 0 }] })
+        : fetcher(input, init);
+    await expect(readMagpieModels(gateway, undefined, invalid)).rejects.toThrow(
+      'data[1] broken/model: context_window'
+    );
+  });
   it('rejects an oversized response without accepting a partial catalog', async () => {
     const oversized: typeof fetch = async () => new Response('x'.repeat(2 * 1024 * 1024 + 1));
     await expect(readMagpieModels(gateway, undefined, oversized)).rejects.toThrow('too large');
