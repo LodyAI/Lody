@@ -1,8 +1,8 @@
 # 会话自动接续 UI：是一条便签，不是一个面板
 
 日期：2026-10-27
-状态：proposed
-翻译：current
+Status: proposed
+Translation: current
 
 [English](2026-10-27-session-continuation-note-ui.md)
 
@@ -43,11 +43,11 @@ UI 绝不能把“送达未知”说成成功；只有被 Stop 挡住的接续�
   都上报 `rateLimits.query`；Codex 必须是 ChatGPT profile。Grok 有资格判断分支，
   但当前 checkout 的扩展未初始化，仍属未验证。其他 builtin adapter 没有
   `rateLimits.query`；API-key、branded、Magpie 和凭据覆盖配置都不符合资格。
-  旧的 Claude 专用 `continue` 快捷方式已在同一次改动中退休；已有预约仍然是普通
-  定时消息。
+  Claude 专用定时 `continue` 快捷方式仍然可用；见[恢复决定](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.zh.md)。
 - 本机 Electron 通过限定范围的 IPC 列出、取消等待并读取、修改会话设置。会话可见时
   轮询 Host；读取失败显示不可用，切换会话时丢弃迟到的结果。返回 renderer 前过滤
-  Host 数据。远程机器、Web、能力发现和针对 Stop 的恢复操作仍未接入。
+  Host 数据。远程机器、Web 和能力发现仍未接入。针对 Stop 的显式恢复现已复用
+  已有协作控制，见[可靠性修正](../../implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.zh.md)。
 - 这个 worktree 没有安装 `node_modules`。三个新套件借用同仓库另一个 worktree 的
   已安装工具链跑过：18 个测试通过。package 级 typecheck 仍有跨 worktree 的既有错误，
   但新文件没有错误；Storybook 没有在这里启动。人工视觉审查仍然待做。

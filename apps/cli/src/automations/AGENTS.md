@@ -10,16 +10,25 @@
   outcomes; only proven unsubmitted input may be materialized again with the same ids.
 - Stage Session outcomes before Inbox release; recover only those staged identities.
   Never scan history for plausible work or replay a transcript for native continuation.
+  Scan pending outcomes by due time; hashes identify duplicates, never recovery progress.
+  Retain unconfirmed release and failed observations until a later successful check.
 - External JavaScript checks conditions and returns false or a resume result. Keep
   event-to-action mapping internal; registration binds the same Session once.
-- Commit a matched result and its continuation identity together. Retry interrupted
-  checks, reconcile accepted effects, and never use tool side effects as durable steps.
+- Commit a matched result and its continuation identity together. Never rerun a matched
+  program; recheck admission and captured source evidence. Retry interrupted checks,
+  reconcile accepted effects, and never use tool side effects as durable steps.
 - CodeMode exposes only scoped `ctx` reads. Credentials and network auth stay with
   resource owners. Scope close joins interpreter and owner reads; no ambient shell or env.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
+  Stop blocks continuation admission, not authorized condition reads; only explicit
+  user restoration clears it. A stopped target is blocked, never a check error.
+- Capacity recovery handles quota and structured Codex overload under one Session
+  setting. Overload retries are bounded and retain the same release and input checks.
+  Coordinate quota Schedule handoff and final acceptance under the Session Inbox gate;
+  leave provider queries outside it. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
 - Native Effect owns the loop and interpreter. `workspace-legacy.ts`,
   `actions/session-actions-legacy.ts`, and `sources/sessions-legacy.ts` are explicit
   bridges to unfinished Fleet/Repo/Session Promise APIs. Join raw adapter work;

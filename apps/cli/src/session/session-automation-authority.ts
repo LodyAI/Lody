@@ -60,9 +60,10 @@ export class SessionAutomationAuthority {
       turnId: string,
       origin: AutomationOrigin,
       binding: import('./automation-observations').ProviderBinding | null
-    ) => boolean
+    ) => boolean,
+    beforeAccept?: (args: AutomationSessionAdmission) => Promise<boolean>
   ): void {
-    this.deps.execution.setAutomationAdmission(admit, canSubmit);
+    this.deps.execution.setAutomationAdmission(admit, canSubmit, beforeAccept);
   }
   acceptInput(args: {
     sessionId: SessionId;
@@ -77,6 +78,12 @@ export class SessionAutomationAuthority {
   }
   inputDisposition(sessionId: SessionId, turnId: string) {
     return this.deps.execution.automationInputDisposition(sessionId, turnId);
+  }
+  inputAccepted(sessionId: SessionId, userId: string, turnId: string): boolean {
+    return this.deps.execution.automationInputAccepted(sessionId, userId, turnId);
+  }
+  guardInput<A>(sessionId: SessionId, userId: string, body: () => Promise<A>): Promise<A> {
+    return this.deps.execution.guardAutomationAction([sessionId], userId, body);
   }
   async cancelInput(sessionId: SessionId, turnId: string): Promise<boolean> {
     const doc = await this.deps.manager.getOrCreateSessionDoc(sessionId);

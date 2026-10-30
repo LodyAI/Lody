@@ -215,12 +215,13 @@ export class AutomationSessionActionsLegacy {
       )
         return { value: 'no', reason: 'guard:maintenance_input_changed' };
     }
-    if (meta.isArchived || meta.collaborationStopped)
+    if (meta.isArchived)
       return {
         value: 'no',
-        reason: 'target_stopped_or_archived',
+        reason: 'target_archived',
         ...(unavailableFails ? { terminalState: 'failed' } : {}),
       };
+    if (meta.collaborationStopped) return { value: 'no', reason: 'target_stopped' };
     return { value: 'yes', reason: 'authorized' };
   }
   async prepare(receipt: AutomationReceipt): Promise<ActionResult> {

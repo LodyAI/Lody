@@ -83,7 +83,7 @@ const policies = {
   },
   recoverCapacity: {
     policy: 'recover-capacity',
-    event: 'provider.quota.exhausted',
+    event: ['provider.quota.exhausted', 'provider.model.overloaded'],
     action: 'agent.invoke',
   },
   compactWhenIdle: {
@@ -109,7 +109,7 @@ export function configureSessionPolicies(
       id,
       name: policy.policy,
       scope: { workspaceId: ledger.workspaceId, sessionId },
-      selector: { types: [policy.event] },
+      selector: { types: typeof policy.event === 'string' ? [policy.event] : [...policy.event] },
       enabled: value !== false,
       handler: {
         kind: 'policy',
@@ -132,6 +132,31 @@ export function configureSessionPolicies(
       },
     };
     ledger.upsert(draft, userId, now, ledger.rule(id)?.revision ?? 0);
+  }
+}
+
+/** Preserve an enabled recovery setting created before overload observations existed. */
+export function upgradeCapacityPolicies(
+  ledger: AutomationLedger,
+  userId: string,
+  now: number
+): void {
+  for (const rule of ledger.rules()) {
+    if (
+      rule.ownerUserId === userId &&
+      rule.ownerMachineId === ledger.machineId &&
+      rule.handler.kind === 'policy' &&
+      rule.handler.policy === 'recover-capacity' &&
+      rule.scope.sessionId &&
+      !rule.selector.types.includes('provider.model.overloaded')
+    )
+      configureSessionPolicies(
+        ledger,
+        rule.scope.sessionId,
+        userId,
+        { recoverCapacity: rule.enabled },
+        now
+      );
   }
 }
 

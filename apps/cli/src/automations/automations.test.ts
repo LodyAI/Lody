@@ -1,6 +1,9 @@
 import { publicActivity } from './control/activities';
 import { observeCapacity } from './sources/capacity';
-import { hasUnresolvedToolEffects } from './sources/sessions-legacy';
+import { hasUnresolvedToolEffects, reconcileSessionTurnsLegacy } from './sources/sessions-legacy';
+import type { SessionAutomationObservation } from '@/session/automation-observations';
+import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { OrchestrationConnection } from '../orchestration/platform/database';
 import { classifyCapacityFailure } from '@/session/acp-error-classification';
 import type { RateLimitsSnapshot } from 'acp-extension-core';
 import { retainsAutomationGrant } from './actions/authorization';
@@ -14,12 +17,12 @@ import type {
   AutomationRuleDraft,
   CapacityObservation,
 } from '@lody/shared/automations';
-import { AutomationLedger } from './storage/ledger';
+import { AutomationLedger, automationIdentity } from './storage/ledger';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
-import { evaluateAutomationProgram as evaluate } from './programs/codemode';
+import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
 import { observePullRequests } from './sources/pull-requests';
-import type { SessionMeta } from '@lody/shared';
+import type { SessionId, SessionMeta } from '@lody/shared';
 
 function required<A>(value: A | undefined): A {
   if (value === undefined) throw new Error('Missing fixture value');
@@ -32,7 +35,10 @@ const evaluateAutomationProgram = (
   read: (
     input: import('@lody/shared/automations').AutomationReadRequest
   ) => Promise<import('@lody/shared/automations').AutomationReadResponse>
-) => Effect.runPromise(evaluate(program, context, (input) => Effect.tryPromise(() => read(input))));
+) =>
+  Effect.runPromise(
+    evaluateProgram(program, context, (input) => Effect.tryPromise(() => read(input)))
+  );
 
 const roots: string[] = [];
 const stores: AutomationLedger[] = [];
@@ -93,6 +99,96 @@ function fixture() {
 }
 
 describe('Automation durability', () => {
+  const fact = (index: number, released = true): SessionAutomationObservation => ({
+    sessionId: 'session' as SessionId,
+    turnId: `input-${index}`,
+    assistantTurnId: `assistant-${index}`,
+    userId: 'user',
+    inputConfig: {},
+    outcome: 'completed',
+    released,
+    finalized: true,
+    observedAt: index,
+  });
+  const manager = {
+    repo: { getDocMeta: async () => ({ meta: { machineId: 'machine', userId: 'user' } }) },
+  } as unknown as LoroDocumentManager;
+
+  it('consumes later observations with smaller hashes without restarting or an empty scan', async () => {
+    const { ledger } = fixture();
+    const facts = [fact(1), fact(2)].sort((a, b) =>
+      automationIdentity(b.sessionId, b.assistantTurnId).localeCompare(
+        automationIdentity(a.sessionId, a.assistantTurnId)
+      )
+    );
+    for (const outcome of facts) {
+      ledger.stageTurn(outcome);
+      await reconcileSessionTurnsLegacy(
+        ledger,
+        manager,
+        () => 'normal',
+        () => {},
+        100
+      );
+    }
+    expect(ledger.sessionEvents('session', -1, 200)).toHaveLength(2);
+    expect(ledger.stagedTurns(100)).toEqual([]);
+  });
+
+  it('retries pending release and failed reads across restart without starving the next batch', async () => {
+    const { ledger, open } = fixture();
+    for (let index = 0; index < 101; index++) ledger.stageTurn(fact(index, false));
+    const failures: unknown[] = [];
+    const report = (cause: unknown) => failures.push(cause);
+    await reconcileSessionTurnsLegacy(ledger, manager, () => 'unreleased', report, 100);
+    expect(ledger.stagedTurns(100).map((item) => item.fact.turnId)).toEqual(['input-100']);
+    await reconcileSessionTurnsLegacy(ledger, manager, () => 'normal', report, 100);
+    expect(ledger.sessionEvents('session', -1, 200).map((observed) => observed.subject)).toEqual([
+      'input-100',
+    ]);
+    ledger.close();
+    const recovered = open();
+    expect(recovered.stagedTurns(15_099)).toEqual([]);
+    const unavailable = {
+      repo: {
+        getDocMeta: async () => {
+          throw new Error('read unavailable');
+        },
+      },
+    } as unknown as LoroDocumentManager;
+    await reconcileSessionTurnsLegacy(recovered, unavailable, () => 'normal', report, 15_100);
+    expect(failures).toHaveLength(100);
+    expect(recovered.stagedTurns(30_099)).toEqual([]);
+    await reconcileSessionTurnsLegacy(recovered, manager, () => 'normal', report, 30_100);
+    expect(recovered.stagedTurns(30_100)).toEqual([]);
+    expect(recovered.sessionEvents('session', -1, 200)).toHaveLength(101);
+    expect(
+      recovered.sessionEvents('session', -1, 200).some((observed) => observed.subject === 'input-0')
+    ).toBe(true);
+  });
+
+  it('preserves staged outcomes when upgrading the ledger and wakes refreshed release evidence', () => {
+    const { ledger, open } = fixture();
+    const location = ledger.location;
+    ledger.close();
+    const database = new OrchestrationConnection(location);
+    database.raw.exec(`DROP TABLE turn_observations;
+      CREATE TABLE turn_observations (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      PRAGMA user_version = 1;`);
+    const outcome = fact(1, false);
+    const id = automationIdentity(outcome.sessionId, outcome.assistantTurnId);
+    database.raw
+      .prepare('INSERT INTO turn_observations VALUES (?,?)')
+      .run(id, JSON.stringify(outcome));
+    database.close();
+    const recovered = open();
+    expect(recovered.stagedTurns(0)).toEqual([{ id, fact: outcome }]);
+    recovered.deferTurn(id, 15_000);
+    recovered.stageTurn({ ...outcome, released: true });
+    recovered.stageTurn(outcome);
+    expect(recovered.stagedTurns(1)).toEqual([{ id, fact: { ...outcome, released: true } }]);
+  });
+
   it('commits a polling baseline without fabricating events and freezes later rule revisions', () => {
     const { ledger, open } = fixture();
     ledger.observe(event.source, { revision: 'baseline', observedAt: 10, data: {} }, [event]);
@@ -280,9 +376,9 @@ describe('JavaScript conditions', () => {
             currentTimeNanos: clock.currentTimeNanos,
             sleep: () => Effect.void,
           };
-          return yield* evaluate(program, context, () => Effect.fail('unexpected read')).pipe(
-            Effect.provideService(Clock.Clock, immediateClock)
-          );
+          return yield* evaluateProgram(program, context, () =>
+            Effect.fail('unexpected read')
+          ).pipe(Effect.provideService(Clock.Clock, immediateClock));
         })
       );
     await expect(expire('() => { while (true) {} }')).rejects.toThrow('timed out');
@@ -294,7 +390,7 @@ describe('JavaScript conditions', () => {
     const read = () => Effect.succeed({ value: null, observedAt: 100 });
     await expect(
       Effect.runPromise(
-        evaluate(
+        evaluateProgram(
           `async ({ctx}) => { for (let i = 0; i < 33; i++) await ctx.read('events'); return false; }`,
           context,
           read
@@ -303,8 +399,10 @@ describe('JavaScript conditions', () => {
     ).rejects.toThrow();
     await expect(
       Effect.runPromise(
-        evaluate(`async ({ctx}) => { await ctx.read('events'); return false; }`, context, () =>
-          Effect.succeed({ value: 'x'.repeat(128 * 1024), observedAt: 100 })
+        evaluateProgram(
+          `async ({ctx}) => { await ctx.read('events'); return false; }`,
+          context,
+          () => Effect.succeed({ value: 'x'.repeat(128 * 1024), observedAt: 100 })
         )
       )
     ).rejects.toThrow();
@@ -315,7 +413,7 @@ describe('JavaScript conditions', () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* evaluate(
+          const fiber = yield* evaluateProgram(
             `async ({ctx}) => { await ctx.read('events'); return false; }`,
             context,
             () =>
@@ -337,7 +435,7 @@ describe('JavaScript conditions', () => {
   });
   it('validates a registration without executing its condition or reads', async () => {
     const result = await Effect.runPromise(
-      evaluate(
+      evaluateProgram(
         `async ({ctx}) => { await ctx.read('events'); return false; }`,
         context,
         () => Effect.fail(new Error('unexpected read')),
@@ -346,7 +444,7 @@ describe('JavaScript conditions', () => {
     );
     expect(result).toBe(false);
     await expect(
-      Effect.runPromise(evaluate('this is invalid', context, () => Effect.never, true))
+      Effect.runPromise(evaluateProgram('this is invalid', context, () => Effect.never, true))
     ).rejects.toThrow();
   });
   it('does not accept a late result after cancellation or expiry', () => {

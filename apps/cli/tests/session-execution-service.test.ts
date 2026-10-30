@@ -1,5 +1,14 @@
 import { AutomationLedger } from '../src/automations/storage/ledger';
-import { reconcileSessionTurnsLegacy } from '../src/automations/sources/sessions-legacy';
+import { dispatchQuotaSchedule } from '../src/automations/compat/quota-schedule';
+import {
+  observeSessionTurnLegacy,
+  reconcileSessionTurnsLegacy,
+} from '../src/automations/sources/sessions-legacy';
+import {
+  configureSessionPolicies,
+  internalPolicy,
+  upgradeCapacityPolicies,
+} from '../src/automations/policies/session';
 import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
@@ -22,6 +31,7 @@ import {
   buildSessionTurnInputConfig,
   getMachineRoomId,
   getSessionRoomId,
+  quotaReservationIdentity,
   inputBlocksToHistoryItems,
   SessionStatusFactory,
   type AcpCapabilityCacheEntry,
@@ -11210,6 +11220,216 @@ describe('Operation Inbox execution boundary', () => {
     };
   }
 
+  it.each([
+    'automation-first',
+    'cancelled-accepted',
+    'schedule-first',
+    'concurrent',
+    'schedule-concurrent',
+    'unassociated',
+    'resumed',
+  ] as const)('accepts only the first associated quota continuation (%s)', async (first) => {
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace-1', 'machine-1');
+    const sessionId = f.message.sessionId;
+    const reset = Date.parse('2026-10-12T05:00:00Z');
+    const identity = quotaReservationIdentity('workspace-1', sessionId, reset, 'human-input');
+    const scheduleId = identity.scheduleId;
+    const run = {
+      workspaceId: 'workspace-1',
+      sessionId,
+      scheduleId,
+      manual: false,
+      message: { inputBlocks: [{ type: 'text', text: 'continue' }] },
+      definition: {
+        scheduleId,
+        activationId: first === 'resumed' ? 'resumed-activation' : identity.activationId,
+        activeFrom: reset + 1000,
+        trigger: { kind: 'once', at: new Date(reset + 1000).toISOString() },
+        destination: { kind: 'existing_session', sessionId },
+      },
+    } as unknown as import('../src/lib/schedules/schedule-store').ScheduleRun<
+      import('../src/lib/prepared-session-input').PreparedSessionInput
+    >;
+    const scheduledTurn = {
+      id: 'scheduled-turn',
+      role: 'user' as const,
+      userId: 'user-1',
+      status: 'prepared' as const,
+      timestamp: '2026-10-12T00:00:00Z',
+      items: [{ type: 'text' as const, text: 'continue' }],
+      inputConfig: f.message.acpSessionConfig,
+      finished: true,
+      fileDiff: [],
+    };
+    const prepared = {
+      sessionId,
+      userTurn: scheduledTurn,
+      meta: {},
+    } as unknown as import('../src/lib/prepared-session-input').PreparedSessionInput;
+    const workId = 'quota-work';
+    const admissionEntered = createDeferred();
+    const releaseAdmission = createDeferred();
+    const scheduleEntered = createDeferred();
+    const releaseSchedule = createDeferred();
+    try {
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+        latestUserMsgId: 'human-input',
+      });
+      await (await createSessionBackend(f.doc)).appendHistoryTurn(scheduledTurn);
+      configureSessionPolicies(ledger, sessionId, 'user-1', { recoverCapacity: true }, 1);
+      ledger.recordWork(
+        {
+          id: workId,
+          ownerUserId: 'user-1',
+          updatedAt: 2,
+          sessionId,
+          turnId: 'human-input',
+          nativeSessionId: 'acp-inbox',
+          bindingId: capabilityConfigId,
+          fingerprint: 'frozen-launch',
+          inputRef: 'human-input',
+          confirmedBoundary: 'assistant:human-input',
+          unresolvedEffects: false,
+          release: 'released',
+          state: 'blocked_on_capacity',
+          attempts: 0,
+        },
+        {
+          id: workId,
+          source: 'session/test',
+          type: 'provider.quota.exhausted',
+          version: 1,
+          subject: workId,
+          observedAt: 2,
+          scope: { workspaceId: 'workspace-1', sessionId },
+          data: { workId },
+          provenance: 'callback',
+          completeness: 'observed',
+          depth: 0,
+        }
+      );
+      const delivery = ledger.deliveries()[0];
+      if (!delivery) throw new Error('missing quota delivery');
+      const intent = internalPolicy(delivery)[0];
+      if (!intent) throw new Error('missing recovery intent');
+      const receipt = ledger.accept(delivery, intent, 3);
+      expect(ledger.claimWork(workId, receipt.id)).toBe(true);
+      const origin = {
+        invocationId: receipt.id,
+        ruleId: receipt.rule.id,
+        ruleRevision: receipt.rule.revision,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+        workIntentId: workId,
+      };
+      f.service.setAutomationAdmission(
+        async () => true,
+        () => true,
+        async () => {
+          if (first === 'concurrent') {
+            admissionEntered.resolve();
+            await releaseAdmission.promise;
+          }
+          return (await f.doc.getMetaState())?.latestUserMsgId === 'human-input';
+        }
+      );
+      const automatic = () =>
+        f.service.acceptAutomationInput({
+          sessionId,
+          turnId: receipt.turnId,
+          userId: 'user-1',
+          config: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+      const authority = {
+        guardInput: (
+          id: SessionId,
+          userId: string,
+          body: () => Promise<'dispatched' | 'discarded'>
+        ) => f.service.guardAutomationAction([id], userId, body),
+        inputAccepted: (id: SessionId, userId: string, turnId: string) =>
+          f.service.automationInputAccepted(id, userId, turnId),
+      } as unknown as import('../src/session/session-automation-authority').SessionAutomationAuthority;
+      const scheduled = () =>
+        dispatchQuotaSchedule({
+          run,
+          prepared,
+          userId: 'user-1',
+          ledger,
+          manager: f.deps.workspaceDocument,
+          authority,
+        });
+      if (first === 'automation-first' || first === 'cancelled-accepted') {
+        expect(await automatic()).toBe(true);
+        if (first === 'cancelled-accepted') {
+          f.store.inbox.abandonInput('workspace-1', sessionId, receipt.turnId);
+          expect(
+            f.store.inbox.inputKind(
+              { workspaceId: 'workspace-1', sessionId, userId: 'user-1' },
+              receipt.turnId
+            )
+          ).toBeUndefined();
+        }
+        const reopened = new LodyOperationStore(f.storePath);
+        try {
+          expect(
+            reopened.inbox.acceptedAutomationInput(
+              { workspaceId: 'workspace-1', sessionId, userId: 'user-1' },
+              receipt.turnId
+            )
+          ).toBe(true);
+        } finally {
+          reopened.close();
+        }
+        expect(await scheduled()).toBe('discarded');
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('human-input');
+      } else if (first === 'schedule-first' || first === 'resumed') {
+        expect(await scheduled()).toBe('dispatched');
+        expect(await automatic()).toBe(false);
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('scheduled-turn');
+      } else if (first === 'concurrent') {
+        const accepted = automatic();
+        await admissionEntered.promise;
+        const attempted = scheduled();
+        expect(
+          await f.service.guardAutomationAction(
+            ['other-session' as SessionId],
+            'user-1',
+            async () => 'independent'
+          )
+        ).toBe('independent');
+        releaseAdmission.resolve();
+        expect(await accepted).toBe(true);
+        expect(await attempted).toBe('discarded');
+      } else if (first === 'schedule-concurrent') {
+        const repo = f.deps.workspaceDocument.repo;
+        const upsert = repo.upsertDocMeta.bind(repo);
+        vi.spyOn(repo, 'upsertDocMeta').mockImplementation(async (...args) => {
+          scheduleEntered.resolve();
+          await releaseSchedule.promise;
+          return upsert(...args);
+        });
+        const attempted = scheduled();
+        await scheduleEntered.promise;
+        const accepted = automatic();
+        releaseSchedule.resolve();
+        expect(await attempted).toBe('dispatched');
+        expect(await accepted).toBe(false);
+      } else {
+        await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          latestUserMsgId: 'newer-user-input',
+        });
+        expect(await scheduled()).toBe('discarded');
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('newer-user-input');
+      }
+    } finally {
+      releaseAdmission.resolve();
+      releaseSchedule.resolve();
+      ledger.close();
+      await f.close();
+    }
+  });
+
   it.each([true, false])(
     'checks the live private provider binding at final automation admission (match=%s)',
     async (matches) => {
@@ -11233,7 +11453,8 @@ describe('Operation Inbox execution boundary', () => {
         (_session, _turn, _origin, binding) => {
           observed.push(binding?.fingerprint);
           return matches && binding?.fingerprint === 'frozen-launch';
-        }
+        },
+        async () => true
       );
       try {
         await f.service.continueSession({
@@ -11331,72 +11552,169 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('recovers a quota result staged before release after its delivery acknowledgement is lost', async () => {
-    const submitted: ContentBlock[][] = [];
-    const f = inboxExecutionFixture(async (blocks) => {
-      submitted.push(blocks);
-      throw new RequestError(-32603, 'quota exhausted', { codexErrorInfo: 'usageLimitExceeded' });
-    });
-    const filename = path.join(path.dirname(f.storePath), 'automations.sqlite');
-    let ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
-    const scope = { workspaceId: 'workspace-1', sessionId: f.message.sessionId, userId: 'user-1' };
-    let stagedBeforeRelease = false;
+  it('upgrades an existing capacity setting without changing its enabled state', () => {
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace-1', 'machine-1');
     try {
-      f.service.setAutomationObservations({
-        stage: (fact) => {
-          ledger.stageTurn(fact);
-          stagedBeforeRelease =
-            f.store.inbox.executionRelease(scope, fact.assistantTurnId) === undefined;
-        },
-        turn: async () => {
-          throw new Error('lost post-release delivery');
-        },
-        capacity: async () => {},
-      });
-      await f.accept();
-      await f.service.continueSession(f.message);
-      expect(stagedBeforeRelease).toBe(true);
-      const staged = ledger.stagedTurns();
-      expect(staged).toHaveLength(1);
-      expect(staged[0]?.fact).toMatchObject({
-        capacityFailure: 'quota_exhausted',
-        released: false,
-        finalized: true,
-        nativeSessionId: 'acp-inbox',
-        outcome: 'failed',
-      });
-      ledger.close();
-      ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
-      const failures: unknown[] = [];
-      await reconcileSessionTurnsLegacy(
-        ledger,
-        f.deps.workspaceDocument,
-        (fact) => f.store.inbox.executionRelease(scope, fact.assistantTurnId),
-        (cause) => failures.push(cause)
+      configureSessionPolicies(ledger, 'session-1', 'user-1', { recoverCapacity: true }, 1);
+      const rule = ledger.rules()[0];
+      if (!rule) throw new Error('missing recovery rule');
+      const {
+        revision,
+        ownerUserId: _ownerUserId,
+        ownerMachineId: _ownerMachineId,
+        activationSequence: _activationSequence,
+        createdAt: _createdAt,
+        updatedAt: _updatedAt,
+        ...draft
+      } = rule;
+      ledger.upsert(
+        { ...draft, selector: { types: ['provider.quota.exhausted'] } },
+        'user-1',
+        2,
+        revision
       );
-      expect(failures).toEqual([]);
-      expect(ledger.stagedTurns()).toEqual([]);
-      const workId = (await import('../src/automations/storage/ledger')).automationIdentity(
-        f.message.sessionId,
-        'human-input',
-        'assistant:human-input',
-        'pending-work'
-      );
-      expect(ledger.work(workId)).toMatchObject({
-        state: 'blocked_on_capacity',
-        release: 'released',
-        nativeSessionId: 'acp-inbox',
-        unresolvedEffects: false,
-        inputRef: 'human-input',
+      upgradeCapacityPolicies(ledger, 'user-1', 3);
+      expect(ledger.rule(rule.id)).toMatchObject({
+        enabled: true,
+        selector: { types: ['provider.quota.exhausted', 'provider.model.overloaded'] },
       });
-      expect(submitted).toHaveLength(1);
-      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
     } finally {
-      f.service.setAutomationObservations(undefined);
       ledger.close();
-      await f.close();
     }
   });
+
+  it.each([
+    { error: 'usageLimitExceeded', failure: 'quota_exhausted', event: 'provider.quota.exhausted' },
+    {
+      error: 'serverOverloaded',
+      failure: 'provider_overloaded',
+      event: 'provider.model.overloaded',
+    },
+  ])(
+    'recovers a staged $failure result after its delivery acknowledgement is lost',
+    async ({ error, failure, event }) => {
+      const submitted: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        submitted.push(blocks);
+        throw new RequestError(-32603, 'capacity unavailable', { codexErrorInfo: error });
+      });
+      const filename = path.join(path.dirname(f.storePath), 'automations.sqlite');
+      let ledger = new AutomationLedger(
+        { kind: 'disk', path: filename },
+        'workspace-1',
+        'machine-1'
+      );
+      configureSessionPolicies(ledger, f.message.sessionId, 'user-1', { recoverCapacity: true }, 0);
+      const scope = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+      };
+      let stagedBeforeRelease = false;
+      try {
+        f.service.setAutomationObservations({
+          stage: (fact) => {
+            ledger.stageTurn(fact);
+            stagedBeforeRelease =
+              f.store.inbox.executionRelease(scope, fact.assistantTurnId) === undefined;
+          },
+          turn: async () => {
+            throw new Error('lost post-release delivery');
+          },
+          capacity: async () => {},
+        });
+        await f.accept();
+        await f.service.continueSession(f.message);
+        expect(stagedBeforeRelease).toBe(true);
+        const staged = ledger.stagedTurns();
+        expect(staged).toHaveLength(1);
+        expect(staged[0]?.fact).toMatchObject({
+          capacityFailure: failure,
+          released: false,
+          finalized: true,
+          nativeSessionId: 'acp-inbox',
+          outcome: 'failed',
+        });
+        ledger.close();
+        ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
+        const failures: unknown[] = [];
+        await reconcileSessionTurnsLegacy(
+          ledger,
+          f.deps.workspaceDocument,
+          (fact) => f.store.inbox.executionRelease(scope, fact.assistantTurnId),
+          (cause) => failures.push(cause)
+        );
+        expect(failures).toEqual([]);
+        expect(ledger.stagedTurns()).toEqual([]);
+        const workId = (await import('../src/automations/storage/ledger')).automationIdentity(
+          f.message.sessionId,
+          'human-input',
+          'assistant:human-input',
+          'pending-work'
+        );
+        expect(ledger.work(workId)).toMatchObject({
+          state: 'blocked_on_capacity',
+          release: 'released',
+          nativeSessionId: 'acp-inbox',
+          unresolvedEffects: false,
+          inputRef: 'human-input',
+        });
+        const delivery = ledger.deliveries().find((item) => item.event.type === event);
+        if (!delivery) throw new Error('missing recovery delivery');
+        expect(internalPolicy(delivery)).toMatchObject([
+          { action: { kind: 'agent.invoke', parameters: { input: { ref: workId } } } },
+        ]);
+        if (failure === 'provider_overloaded') {
+          const fact = staged[0]?.fact;
+          if (!fact) throw new Error('missing staged observation');
+          let previousId = workId;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            const turnId = `retry-${attempt}`;
+            const invocationId = `invocation-${attempt}`;
+            expect(ledger.claimWork(previousId, invocationId)).toBe(true);
+            await f.deps.workspaceDocument.repo.upsertDocMeta('fixture', {
+              latestUserMsgId: turnId,
+            });
+            await observeSessionTurnLegacy(ledger, f.deps.workspaceDocument, {
+              ...fact,
+              turnId,
+              released: true,
+              observedAt: fact.observedAt + attempt * 1000,
+              inputConfig: {
+                ...fact.inputConfig,
+                _lodyAutomation: {
+                  invocationId,
+                  ruleId: 'rule',
+                  ruleRevision: 1,
+                  eventRef: 'event',
+                  authorizationUserId: 'user-1',
+                  workIntentId: previousId,
+                },
+              },
+            });
+            previousId = (await import('../src/automations/storage/ledger')).automationIdentity(
+              f.message.sessionId,
+              turnId,
+              fact.assistantTurnId,
+              'pending-work'
+            );
+            expect(ledger.work(previousId)).toMatchObject({
+              attempts: attempt,
+              state: attempt === 3 ? 'failed' : 'blocked_on_capacity',
+              notBefore: fact.observedAt + attempt * 1000 + 5_000 * 2 ** Math.min(attempt, 2),
+            });
+          }
+          expect(ledger.claimWork(previousId, 'extra')).toBe(false);
+        }
+        expect(submitted).toHaveLength(1);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        f.service.setAutomationObservations(undefined);
+        ledger.close();
+        await f.close();
+      }
+    }
+  );
 
   it.each(['missing_identity', 'missing_active_execution', 'other_requester'] as const)(
     'persists the exact manual recovery entry for a blocked send (%s) without starting transport',

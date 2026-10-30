@@ -24,7 +24,7 @@ Exact defaults and limits are in `skill://lody-automations/references/commands.s
 
 | Setting                   | Behavior                                                                                                                                                                                                                             |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `recoverCapacity: true`   | Preserve interrupted native work after a structured quota failure and attempt recovery when eligible. A reset time triggers a recheck, not assumed capacity. Original conversation, release and permission boundaries still apply.   |
+| `recoverCapacity: true`   | Preserve interrupted native work after a structured quota failure or Codex model overload and attempt recovery when eligible. A reset time triggers a recheck, not assumed capacity. Model overload permits up to three attempts with increasing delays. Original conversation, release and permission boundaries still apply.   |
 | `compactWhenIdle: {...}`  | After a completed turn reaches `contextTokens`, schedule native compaction before the configured cache estimate expires, provided the same turn remains idle and the adapter supports `/compact`. New input invalidates maintenance. |
 | `archiveAfterMerge: true` | After observing merge, wait for the Session group to settle and archive under existing admission rules.                                                                                                                              |
 

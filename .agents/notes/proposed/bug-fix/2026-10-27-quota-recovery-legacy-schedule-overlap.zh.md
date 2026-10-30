@@ -1,33 +1,19 @@
 # 额度恢复与保留的旧预约重叠
 
 日期：2026-10-27
-状态：proposed
-翻译：current
+Status: proposed
+Translation: current
 
 [English](2026-10-27-quota-recovery-legacy-schedule-overlap.md)
 
 ## 摘要
 
-旧额度快捷方式退休后，已有的一次性 `continue` 预约仍会保留。启用会话额度恢复后，
-自动化也可能提交继续操作，但两个执行方没有协调彼此已接受的工作。新输入可以取代
-尚未执行的恢复任务，但不能证明两种先后顺序都互斥。用户选择当前工作不处理旧
-Schedule，因此重叠仍可能发生；不应自动删除已有预约。
+Claude 的定时 `continue` 和 Session 自动恢复可能针对同一项中断工作。[已实现的交付流程](../../implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.zh.md)通过失败轮次识别新预约，并通过 Session Inbox 最多接收一项输入。没有该身份且尚未准备的旧快捷预约会被丢弃；已准备或已派发的旧工作仍由 Schedule 核对。实现已有合成测试，但真实 Provider 和跨设备行为仍需验证。
 
-## 证据与待定决策
+## 边界与剩余验证
 
-[退休决策](../../implemented/feature/2026-10-27-retire-quota-continue-shortcut.md)
-保留旧预约。原 helper 根据 Workspace、Session 和五小时重置时间生成 UUID，并在重置
-后一秒保存普通一次性消息。[自动化协调器](../architecture/2026-10-25-session-automation-coordinator.md)
-使用独立本地账本，保留原生未完成工作，并在额度与退避期限之后尝试恢复；它不查询
-Schedule 注册表。Session action 会检查是否有新输入，观察方也会取消较早的待处理工作；
-但恢复已经接受或执行后，Schedule 仍可能到期。同一 Session 的繁忙门控可以延后工作，
-不能证明两次效果不会发生。
+旧快捷预约的 ID 对应 Workspace、Session 和五小时重置时间，不包含失败轮次，不能单独证明它由哪次失败产生。不能仅凭 `continue` 文本丢弃普通或已编辑的 Schedule，也不能丢弃已接收的输入。
 
-以后若要处理，可在两个执行方的派发边界做精确仲裁，或明确提示用户取消保留的预约。提示
-本身不能保证互斥；单次查询也不能消除竞态。识别必须核实持久身份和当前预约状态，
-考虑编辑、取消、派发结果未知及重置时间变化，不能仅凭文本为 `continue` 就拦截普通
-消息；同时保留 Session 既有的释放、权限和所有权检查。
+新快捷预约 ID 包含失败轮次和重置时间。Schedule 交付与自动恢复接收使用同一把 Session 锁；一项输入被接收后，另一项会被丢弃或拒绝。已准备或派发的旧快捷预约只阻塞同一 Session 的 Claude 额度恢复，直到 Schedule 执行方解决。停止、取消、未确认提交和定时消息所有权仍由现有机制负责。启用恢复只作用于后续观察，不会重新触发以前的失败。
 
-设置只影响之后的观察。额度失败后才启用恢复，不会重新触发已经发布的事件。本地开发者
-开关下已有设置 UI，但尚未用真实 Provider 验证。本笔记仅依据代码检查：没有读取真实
-Schedule，也没有测试复现两种派发顺序或证明实际重复执行频率。
+测试覆盖两种接收顺序、明确的并发交错、其他 Session 独立推进，以及无法关联的旧快捷预约。真实 Provider、远端机器和端到端恢复仍未验证。

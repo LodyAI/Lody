@@ -30,19 +30,13 @@ export async function readAutomationContext(options: {
   wait: AutomationWait;
   input: AutomationReadRequest;
   now: number;
-  invocationId?: string;
 }): Promise<AutomationReadResponse> {
   const { ledger, manager, authority, wait, now } = options;
   const input = automationReadRequestSchema.parse(options.input);
   const current = ledger.wait(wait.id);
-  const active =
-    current?.state === 'checking' ||
-    (current?.state === 'matched' &&
-      !!options.invocationId &&
-      current.invocationId === options.invocationId);
   if (
     !current ||
-    !active ||
+    current.state !== 'checking' ||
     current.ownerUserId !== wait.ownerUserId ||
     current.sessionId !== wait.sessionId ||
     wait.ownerMachineId !== ledger.machineId ||
@@ -57,8 +51,7 @@ export async function readAutomationContext(options: {
     isLoroRepoDocDeleted(record) ||
     meta.userId !== wait.ownerUserId ||
     meta.machineId !== ledger.machineId ||
-    meta.isArchived ||
-    meta.collaborationStopped
+    meta.isArchived
   )
     throw new Error('AUTOMATION_SESSION_UNAVAILABLE');
   if (input.resource !== 'events') automationEmptyReadParametersSchema.parse(input.parameters);
@@ -77,7 +70,7 @@ export async function readAutomationContext(options: {
       };
       break;
     case 'session.group':
-      value = await authority.settled(meta.id, wait.ownerUserId, options.invocationId ?? wait.id);
+      value = await authority.settled(meta.id, wait.ownerUserId, wait.id);
       break;
     case 'github.pullRequests':
       value = resolveSessionPullRequests(meta).map((pr) => {

@@ -5,9 +5,8 @@ Translation: current
 
 [中文](2026-10-27-quota-continue.zh.md)
 
-> Superseded: the composer shortcut was removed on 2026-10-27 because
-> `recoverCapacity` now owns quota continuation. See the
-> [retirement note](../../implemented/feature/2026-10-27-retire-quota-continue-shortcut.md).
+> The shortcut remains available alongside experimental Session recovery; see the
+> [restoration decision](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.md).
 
 ## Abstract
 

@@ -1,6 +1,7 @@
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '@lody/shared';
 import { isScheduledMessageFile } from './scheduled-message-files';
+import { v5 as uuidv5 } from 'uuid';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -196,7 +197,10 @@ describe('Schedule worker handoff', () => {
     h.time(90_000);
     await h.engine.evaluate();
     expect(h.ports.prepare).toHaveBeenCalledTimes(1);
-    expect(h.ports.dispatch).toHaveBeenCalledWith({ prompt: 'original' });
+    expect(h.ports.dispatch).toHaveBeenCalledWith(
+      { prompt: 'original' },
+      expect.objectContaining({ runKey: run.runKey })
+    );
     expect(h.store.get(run.runKey)?.plannedAt).toBe(60_000);
   });
   it('retains only the newest unprepared run and waits for another slot occupant', async () => {
@@ -344,6 +348,124 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
     return d;
   }
+  function legacyQuotaMessage(version = 1) {
+    const d = message();
+    const reset = 59_000;
+    d.definition.scheduleId = uuidv5(
+      JSON.stringify([
+        version === 1 ? 'claude-quota-continue' : 'claude-quota-continue-v2',
+        'workspace',
+        'chat',
+        reset,
+      ]),
+      uuidv5.URL
+    );
+    d.definition.activationId = uuidv5('activation', d.definition.scheduleId);
+    d.definition.activeFrom = 60_000;
+    d.prompt = 'continue';
+    d.message = { inputBlocks: [{ type: 'text', text: 'continue' }] };
+    return d;
+  }
+  it.each([1, 2])(
+    'drops a version %s unassociated quota reservation without delivering it',
+    async (version) => {
+      const d = legacyQuotaMessage(version);
+      const h = harness(d);
+      await h.engine.evaluate();
+      expect(h.store.history('workspace', d.definition.scheduleId)).toMatchObject([
+        { state: 'skipped', errorCode: 'LEGACY_QUOTA_UNASSOCIATED' },
+      ]);
+      expect(h.ports.dispatch).not.toHaveBeenCalled();
+      expect(h.ports.publish).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          messageState: 'failed',
+          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
+        })
+      );
+      await new ScheduleEngine(h.ports).evaluate();
+      expect(h.ports.dispatch).not.toHaveBeenCalled();
+    }
+  );
+  it('preserves a legacy reservation with an already prepared or delivered input', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], {
+      state: 'claimed',
+      prepared: { prompt: 'continue' },
+    });
+    expect(h.store.unfinishedForSession('workspace', 'chat')).toHaveLength(1);
+    expect(h.store.unfinishedForSession('workspace', 'other-chat')).toEqual([]);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).toHaveBeenCalledOnce();
+  });
+  it('drops an unprepared legacy reservation waiting to retry', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], { state: 'retry_wait', retryAt: 90_000 });
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]).toMatchObject({
+      state: 'skipped',
+      errorCode: 'LEGACY_QUOTA_UNASSOCIATED',
+    });
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+  });
+  it('reconciles an already delivered legacy input without dispatching again', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], {
+      state: 'claimed',
+      prepared: { prompt: 'continue' },
+    });
+    h.accepted();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+  });
+  it('keeps ordinary and edited scheduled messages', async () => {
+    const d = legacyQuotaMessage();
+    d.prompt = 'different message';
+    d.message = { inputBlocks: [{ type: 'text', text: 'different message' }] };
+    const h = harness(d);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).toHaveBeenCalledOnce();
+  });
+  it('drops a resumed legacy quota shortcut without a failed Turn identity', async () => {
+    const d = legacyQuotaMessage();
+    d.definition.activationId = 'resumed';
+    const h = harness(d);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]).toMatchObject({
+      state: 'skipped',
+      errorCode: 'LEGACY_QUOTA_UNASSOCIATED',
+    });
+  });
+  it('records a discarded quota handoff without retrying after restart', async () => {
+    const h = harness(message());
+    h.ports.dispatch = async () => 'discarded';
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { state: 'skipped', errorCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED' },
+    ]);
+    await new ScheduleEngine(h.ports).evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageState: 'failed',
+        blockedCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED',
+      })
+    );
+  });
   it.each([
     ['message', 'message'],
     ['task', 'message'],

@@ -2,7 +2,8 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describeSessionContinuation } from '../src/components/sessions/session-continuation';
 import {
   developerModeEnabledAtom,
   sessionContinuationBetaEnabledAtom,
@@ -19,12 +20,84 @@ vi.mock('../src/lib/electron-ipc-client', () => ({
 const target = { workspaceId: 'workspace', machineId: 'machine', sessionId: 'session' };
 
 describe('local Session continuation', () => {
-  const container = document.createElement('div');
-  const root = createRoot(container);
-  const store = createStore();
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  let store: ReturnType<typeof createStore>;
+  beforeEach(() => {
+    container = document.createElement('div');
+    root = createRoot(container);
+    store = createStore();
+  });
   afterEach(() => {
     act(() => root.unmount());
     automation.mockReset();
+  });
+  it('exposes Resume only for a stopped continuation and refreshes the delivery after restore', async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(sessionContinuationBetaEnabledAtom, true);
+    let stopped = true;
+    automation.mockImplementation(async ({ command }) =>
+      command.type === 'list'
+        ? {
+            type: 'list',
+            waits: [
+              {
+                id: 'stopped',
+                state: 'matched',
+                nextCheckAt: 1,
+                continuation: stopped
+                  ? { state: 'blocked', reason: 'target_stopped' }
+                  : { state: 'queued' },
+              },
+              {
+                id: 'archived',
+                state: 'matched',
+                nextCheckAt: 1,
+                continuation: { state: 'blocked', reason: 'target_archived' },
+              },
+            ],
+          }
+        : { type: 'settings', settings: {} }
+    );
+    function View() {
+      const data = useLocalSessionContinuation(target, true);
+      return (
+        <>
+          {data.views.map((view) => {
+            const descriptor = describeSessionContinuation(view, 1);
+            return descriptor.visible ? (
+              <output key={view.id} data-id={view.id}>
+                {descriptor.detail}
+                {descriptor.actions.resume && (
+                  <button
+                    onClick={() => {
+                      stopped = false;
+                      data.refresh();
+                    }}
+                  >
+                    Resume
+                  </button>
+                )}
+              </output>
+            ) : null;
+          })}
+        </>
+      );
+    }
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <View />
+        </Provider>
+      )
+    );
+    expect(container.querySelector('[data-id="stopped"]')?.textContent).toBe(
+      'blockedStoppedResume'
+    );
+    expect(container.querySelector('[data-id="archived"]')?.textContent).toBe('blockedUnavailable');
+    await act(async () => container.querySelector('button')?.click());
+    expect(container.querySelector('[data-id="stopped"]')?.textContent).toBe('queued');
+    expect(container.querySelector('button')).toBeNull();
   });
   it('loads waits and settings, sends scoped changes, and stops when the flag is off', async () => {
     store.set(developerModeEnabledAtom, true);
@@ -46,7 +119,10 @@ describe('local Session continuation', () => {
         };
       if (command.type === 'settings' && settingsUnavailable) throw new Error('stopped');
       if (command.type === 'settings')
-        return { type: 'settings', settings: { archiveAfterMerge: false, compactWhenIdle: false } };
+        return {
+          type: 'settings',
+          settings: { recoverCapacity: true, archiveAfterMerge: false, compactWhenIdle: false },
+        };
       return { type: command.type };
     });
     function View() {
@@ -54,6 +130,7 @@ describe('local Session continuation', () => {
       return (
         <>
           <output>{JSON.stringify(data.views)}</output>
+          <span>{String(data.recoveryEnabled)}</span>
           <button onClick={() => data.cancel('one')}>Cancel</button>
           <button onClick={() => data.setTweak('archiveAfterMerge', true)}>Enable</button>
         </>
@@ -83,5 +160,6 @@ describe('local Session continuation', () => {
       store.set(sessionContinuationBetaEnabledAtom, false);
     });
     expect(container.querySelector('output')!.textContent).toBe('[]');
+    expect(container.querySelector('span')!.textContent).toBe('true');
   });
 });

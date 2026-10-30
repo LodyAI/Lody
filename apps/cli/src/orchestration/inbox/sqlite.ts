@@ -481,6 +481,15 @@ export class InboxSqlite {
       | undefined;
     return row?.kind;
   }
+  acceptedAutomationInput(scope: InboxScope, inputId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND user_id=? AND input_id=? AND kind='automation'"
+        )
+        .get(scope.workspaceId, scope.sessionId, scope.userId, inputId) !== undefined
+    );
+  }
   preferredHumanInput(workspaceId: string, sessionId: string): string | undefined {
     const row = this.db
       .prepare(

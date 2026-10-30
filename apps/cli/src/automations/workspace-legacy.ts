@@ -21,7 +21,11 @@ import {
   type SessionId,
   type AgentConfigId,
 } from '@lody/shared';
-import { configureSessionPolicies, sessionPolicySettings } from './policies/session';
+import {
+  configureSessionPolicies,
+  sessionPolicySettings,
+  upgradeCapacityPolicies,
+} from './policies/session';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
@@ -38,12 +42,16 @@ import { reconcileSessionTurnsLegacy } from './sources/sessions-legacy';
 import { providerBindingFingerprint } from '@/session/automation-observations';
 import { observePullRequests } from './sources/pull-requests';
 import type { PrPollerWorkspaceHandle } from '@/lib/pr-poller/pr-poller-workspace';
+import { dispatchQuotaSchedule } from './compat/quota-schedule';
+import type { ScheduleRun } from '@/lib/schedules/schedule-store';
+import type { PreparedSessionInput } from '@/lib/prepared-session-input';
 
 export type AutomationWorkspaceHandle = Awaited<ReturnType<typeof createAutomationWorkspaceLegacy>>;
 
 /** Workspace/Fleet application boundary. Dispose before Session owners or their repo. */
 export async function createAutomationWorkspaceLegacy(options: {
   lody: Lody;
+  hasUncertainLegacyQuota(sessionId: SessionId): boolean;
   auth: AuthContext;
   workspace: WorkspaceSummary;
   logger: Logger;
@@ -61,6 +69,12 @@ export async function createAutomationWorkspaceLegacy(options: {
     workspace.id,
     auth.machineId
   );
+  try {
+    upgradeCapacityPolicies(ledger, auth.userId, Date.now());
+  } catch (error) {
+    ledger.close();
+    throw error;
+  }
   const authority = lody.getAutomationSessionAuthority();
   let closing = false;
   const observationWork = new Set<Promise<unknown>>();
@@ -86,12 +100,7 @@ export async function createAutomationWorkspaceLegacy(options: {
           typeof parameters.waitId === 'string' ? ledger.wait(parameters.waitId) : undefined;
         if (!wait || wait.state !== 'matched' || wait.invocationId !== receipt.id)
           return { value: 'no', reason: 'wait_revoked' };
-        try {
-          const result = await Effect.runPromise(evaluateWait(wait, receipt.id));
-          return { value: result === false ? 'no' : 'yes', reason: 'program_rechecked' };
-        } catch {
-          return { value: 'unknown', reason: 'program_recheck_unavailable' };
-        }
+        return { value: 'yes', reason: 'wait_matched' };
       }
       case 'session.group.settled':
         if (typeof parameters.rootId !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
@@ -209,11 +218,10 @@ export async function createAutomationWorkspaceLegacy(options: {
       meta.machineId !== auth.machineId
     )
       throw new Error('AUTOMATION_SESSION_UNAVAILABLE');
-    if (meta.isArchived || meta.collaborationStopped)
-      throw new Error('AUTOMATION_SESSION_STOPPED_OR_ARCHIVED');
+    if (meta.isArchived) throw new Error('AUTOMATION_SESSION_ARCHIVED');
     return { sessionId, workspaceId: workspace.id, now: Date.now() };
   };
-  const evaluateWait = (wait: AutomationWait, invocationId?: string) =>
+  const evaluateWait = (wait: AutomationWait) =>
     Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
@@ -226,13 +234,11 @@ export async function createAutomationWorkspaceLegacy(options: {
               wait,
               input,
               now: Date.now(),
-              invocationId,
             })
           ).pipe(Effect.uninterruptible)
         )
       )
     );
-  let observationCursor = '';
   const host = Layer.effect(
     AutomationHost,
     Effect.gen(function* () {
@@ -242,12 +248,11 @@ export async function createAutomationWorkspaceLegacy(options: {
         Effect.tryPromise(body).pipe(Effect.uninterruptible);
       return AutomationHost.of({
         observe: sessionCall(async () => {
-          observationCursor = await reconcileSessionTurnsLegacy(
+          await reconcileSessionTurnsLegacy(
             ledger,
             lody.documentManager,
             (fact) => authority.executionRelease(fact.sessionId, fact.assistantTurnId, fact.userId),
-            (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause),
-            observationCursor
+            (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause)
           );
         }),
         authorize: (receipt) => sessionCall(() => actions.authorize(receipt)),
@@ -319,20 +324,47 @@ export async function createAutomationWorkspaceLegacy(options: {
           await runtime.runPromise(service.wake);
         }),
     });
-    authority.setAdmission(async ({ sessionId, turnId, userId, origin }) => {
-      const receipt = ledger.receipt(origin.invocationId);
-      if (
-        !receipt ||
-        receipt.sessionId !== sessionId ||
-        receipt.turnId !== turnId ||
-        receipt.rule.ownerUserId !== userId ||
-        receipt.rule.id !== origin.ruleId ||
-        receipt.rule.revision !== origin.ruleRevision ||
-        !canSubmit(sessionId, turnId, origin)
-      )
-        return false;
-      return (await recheck(receipt)).value === 'yes';
-    }, canSubmit);
+    authority.setAdmission(
+      async ({ sessionId, turnId, userId, origin }) => {
+        const receipt = ledger.receipt(origin.invocationId);
+        if (
+          !receipt ||
+          receipt.sessionId !== sessionId ||
+          receipt.turnId !== turnId ||
+          receipt.rule.ownerUserId !== userId ||
+          receipt.rule.id !== origin.ruleId ||
+          receipt.rule.revision !== origin.ruleRevision ||
+          !canSubmit(sessionId, turnId, origin)
+        )
+          return false;
+        return (await recheck(receipt)).value === 'yes';
+      },
+      canSubmit,
+      async ({ sessionId, turnId, userId, origin }) => {
+        const work = origin.workIntentId && ledger.work(origin.workIntentId);
+        if (!work || work.ownerUserId !== userId || !canSubmit(sessionId, turnId, origin))
+          return false;
+        const record = await lody.documentManager.repo.getDocMeta(getSessionRoomId(sessionId));
+        const meta = record?.meta as SessionMeta | undefined;
+        if (
+          meta?.agentType === 'claude' &&
+          ledger.receipt(origin.invocationId)?.event.type === 'provider.quota.exhausted' &&
+          options.hasUncertainLegacyQuota(sessionId)
+        )
+          return false;
+        return (
+          !!record &&
+          !!meta &&
+          !isLoroRepoDocDeleted(record) &&
+          meta.userId === userId &&
+          meta.machineId === auth.machineId &&
+          !meta.isArchived &&
+          !meta.collaborationStopped &&
+          meta.acpSessionId === work.nativeSessionId &&
+          (meta.latestUserMsgId === work.turnId || meta.latestUserMsgId === turnId)
+        );
+      }
+    );
     const assertReadable = (wait: AutomationWait, requesterSessionId?: string) => {
       if (
         wait.ownerUserId !== auth.userId ||
@@ -361,6 +393,20 @@ export async function createAutomationWorkspaceLegacy(options: {
     };
     return {
       ledger,
+      dispatchQuotaSchedule: (
+        run: ScheduleRun<PreparedSessionInput>,
+        prepared: PreparedSessionInput
+      ) =>
+        ownedCall(() =>
+          dispatchQuotaSchedule({
+            run,
+            prepared,
+            userId: auth.userId,
+            ledger,
+            manager: lody.documentManager,
+            authority,
+          })
+        ),
       wantsWorkflowObservations: (sessionId: string) =>
         ledger.wantsRead('github.workflowRuns', sessionId),
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>

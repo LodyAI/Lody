@@ -92,8 +92,8 @@ an already-ready wait. Active waits and undelivered continuations retain observa
 demand, including terminal PRs. Actions denial has its own repository cooldown and
 cannot disable ordinary PR observation. Out-of-order results cannot roll back attempts.
 
-Host-captured evidence commits separately from the JS result. Preparation and input
-acceptance reevaluate JS; source/authority checks continue for queued work. Changed
+Host-captured evidence commits separately from the JS result. A match is final;
+source/authority checks continue during preparation, admission and queued work. Changed
 HEAD, PR association or attempt supersedes stale work. Completion of another job in
 the same attempt does not itself invalidate the attempt identity. Immediately before
 native prompt submission, the Session owner verifies referenced checkout HEADs,

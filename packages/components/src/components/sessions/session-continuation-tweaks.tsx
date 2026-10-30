@@ -116,9 +116,9 @@ const ROWS = [
     key: 'recoverCapacity',
     icon: BatteryCharging,
     titleKey: 'sessions.continuation.tweaks.recover',
-    title: '额度恢复后继续',
+    title: '容量恢复后继续',
     descriptionKey: 'sessions.continuation.tweaks.recoverDescription',
-    description: '使用可用额度，遵循会话停止状态',
+    description: '额度耗尽或模型满载时自动重试，遵循会话停止状态',
   },
   {
     key: 'archiveAfterMerge',

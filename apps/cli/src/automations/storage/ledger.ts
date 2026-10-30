@@ -59,8 +59,8 @@ export class AutomationLedger {
     this.connection = new OrchestrationConnection(location);
     try {
       const db = this.connection.raw;
-      if (Number(db.pragma('user_version', { simple: true })) > 1)
-        throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
+      const version = Number(db.pragma('user_version', { simple: true }));
+      if (version > 2) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
       db.exec(`
         CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (
@@ -84,7 +84,12 @@ export class AutomationLedger {
         CREATE INDEX IF NOT EXISTS waits_due ON waits(state,next_check_at);
         CREATE TABLE IF NOT EXISTS turn_observations (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       `);
-      db.pragma('user_version = 1');
+      if (version < 2)
+        this.connection.withImmediate(() => {
+          db.exec('ALTER TABLE turn_observations ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0');
+          db.pragma('user_version = 2');
+        });
+      db.exec('CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at)');
     } catch (cause) {
       this.close();
       throw cause;
@@ -354,17 +359,25 @@ export class AutomationLedger {
         return;
       this.connection.raw
         .prepare(
-          'INSERT INTO turn_observations VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload'
+          `INSERT INTO turn_observations (id,payload) VALUES (?,?)
+          ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,retry_at=0`
         )
         .run(id, JSON.stringify(fact));
     });
   }
-  stagedTurns(after = ''): Array<{ id: string; fact: SessionAutomationObservation }> {
+  stagedTurns(now = Date.now()): Array<{ id: string; fact: SessionAutomationObservation }> {
     return (
       this.connection.raw
-        .prepare('SELECT id,payload FROM turn_observations WHERE id>? ORDER BY id LIMIT 100')
-        .all(after) as Array<JsonRow & { id: string }>
+        .prepare(
+          'SELECT id,payload FROM turn_observations WHERE retry_at<=? ORDER BY retry_at,rowid LIMIT 100'
+        )
+        .all(now) as Array<JsonRow & { id: string }>
     ).map(({ id, payload }) => ({ id, fact: JSON.parse(payload) as SessionAutomationObservation }));
+  }
+  deferTurn(id: string, retryAt: number): void {
+    this.connection.raw
+      .prepare('UPDATE turn_observations SET retry_at=? WHERE id=?')
+      .run(retryAt, id);
   }
   acknowledgeTurn(id: string): void {
     this.connection.raw.prepare('DELETE FROM turn_observations WHERE id=?').run(id);
@@ -802,6 +815,15 @@ export class AutomationLedger {
   }
   work(id: string): PendingWork | undefined {
     return this.read('work', id);
+  }
+  sessionWork(sessionId: string, userId: string): PendingWork[] {
+    return (
+      this.connection.raw
+        .prepare(
+          "SELECT payload FROM work WHERE json_extract(payload,'$.sessionId')=? AND json_extract(payload,'$.ownerUserId')=? ORDER BY json_extract(payload,'$.updatedAt') DESC"
+        )
+        .all(sessionId, userId) as JsonRow[]
+    ).map((row) => JSON.parse(row.payload) as PendingWork);
   }
   claimWork(id: string, invocationId: string): boolean {
     return this.connection.withImmediate(() => {

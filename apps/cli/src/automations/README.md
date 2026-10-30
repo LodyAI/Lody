@@ -106,13 +106,18 @@ prompt, resolving Project members through their existing scoped worktree paths.
 ## Completion and cancellation
 
 The Host commits the matched result, captured evidence and stable continuation identity atomically.
-The JS predicate is reevaluated before input acceptance; queued input retains its
-accepted result while current source and permission checks still apply at dispatch.
+The matched result is final: its JS program does not run again. The original result
+is delivered after current source, permission and Session admission checks pass.
 JavaScript cannot choose actions, grants, targets or dispatch policies. Resume text
 becomes the Session input; optional JSON payload is included as reference data.
 Existing Session/Inbox owners retain queueing, transport, permissions and Stop.
 Busy sessions enqueue the result. Unavailable or stopped targets remain inspectably
 blocked; automation never clears Stop or silently creates a replacement Session.
+Stop leaves authorized condition checks active. A match retains its original
+continuation as `blocked` with reason `target_stopped`, without increasing the
+condition error count. The local note offers explicit restoration through the
+existing collaboration control; admission then rechecks permissions, the Session and
+captured source evidence before submitting the same continuation. Cancel revokes that intent.
 
 A lost submission acknowledgement triggers reconciliation of the same turn, not
 another prompt. `matched` means the condition finished; the nested `continuation`
@@ -144,13 +149,18 @@ Lody code and is not a caller-authored rule graph.
 Settings apply to future observations. Set a boolean feature or `compactWhenIdle`
 to `false` to prevent new submissions. Use `cancel` for an already accepted input.
 
-- **Quota recovery:** structured quota failure, the original native conversation,
+- **Capacity recovery:** structured quota or Codex model-overload failure, the original native conversation,
   launch binding, input and tool boundary are retained before execution release.
   All reported quota windows participate. A reset estimate only schedules a recheck;
   missing or stale evidence never becomes an availability fact. Enabling recovery
   permits bounded normal continuation attempts after the retry time when readonly
   confirmation is unavailable. Confirmed exhaustion still blocks them. Unconfirmed
   release or tool effects block recovery; new input supersedes older recovery work.
+  Model overload uses up to three retries with increasing minimum delays of 5, 10,
+  and 20 seconds; the Host persists the work and applies the same admission checks.
+  New Claude scheduled continuations identify the failed Turn and share Session
+  admission with this policy. Unassociated unprepared old shortcuts are skipped;
+  prepared or dispatched legacy work retains its Schedule owner.
 - **Merge archive:** the existing PR poller records transitions and durable merged
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
@@ -163,6 +173,12 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
 Action deadlines remain in the accepted receipt across restart. Becoming due writes
 a deduplicated `timer.due` fact; it does not create a second invocation or establish
 provider capacity. Wait reevaluation deadlines are persisted with the wait itself.
+Staged turn outcomes remain in a durable pending table until observation succeeds.
+Each pass reads up to 100 due rows; unconfirmed release or failed reads retain a
+15-second retry deadline. Fresh release evidence makes its row due immediately.
+Hashes only deduplicate identities: recovery uses no scan cursor, so later facts
+and earlier unfinished rows stay eligible independently. The ledger upgrades
+existing rows in place with an initially due deadline.
 
 Existing recurring Schedules retain timezone, overlap, misfire and run-ledger
 semantics. They do not need another DSL or a replacement scheduler. The

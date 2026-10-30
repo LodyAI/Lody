@@ -51,14 +51,15 @@ Host; cross-device and Web access need a separate authorization contract.
   ChatGPT profile. Grok has an eligibility branch but its extension is not
   initialized in this checkout, so it remains unverified. Other builtin adapters
   have no `rateLimits.query` capability, and API-key, branded, Magpie and
-  credential-override configs are not eligible. The older Claude-only
-  `continue` shortcut was retired in the same change; existing reservations stay
-  ordinary scheduled messages.
+  credential-override configs are not eligible. The Claude-only scheduled
+  `continue` shortcut remains available; see the [restoration decision](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.md).
 - Local Electron uses a scoped IPC bridge to list and cancel waits and read or
   configure Session policies. While the Session is visible it polls the Host;
   rejected reads show unavailable state and Session switches discard late results.
   Host responses are filtered before reaching the renderer. Remote machines, Web,
-  capability discovery and a Stop-specific resume action are not connected.
+  and capability discovery are not connected. The explicit Stop restoration action
+  now uses existing collaboration control; see the
+  [reliability correction](../../implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.md).
 - This worktree has no installed `node_modules`. The three new suites were run
   with a sibling worktree's installed toolchain: 18 tests passed. A package-wide
   typecheck still reports pre-existing cross-worktree errors, but none in the new

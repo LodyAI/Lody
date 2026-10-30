@@ -97,6 +97,7 @@ import {
 import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import { Effect } from 'effect';
 import { AgentExecutionSlots } from './agent-execution-slots';
+import { ScheduleConfigurationError } from './schedules/schedule-engine';
 import {
   createScheduleWorkspace,
   type ScheduleWorkspaceHandle,
@@ -1003,7 +1004,11 @@ export class LodyFleet {
           { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
           'schedules'
         )
-          ? { evaluate: async () => {}, dispose: async () => {} }
+          ? {
+              evaluate: async () => {},
+              dispose: async () => {},
+              hasUncertainLegacyQuota: () => false,
+            }
           : await createScheduleWorkspace({
               manager: startedLody.documentManager,
               workspace,
@@ -1019,6 +1024,12 @@ export class LodyFleet {
               slots: executionSlots,
               logger: workspaceLogger,
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
+              dispatchQuotaSchedule: async (run, prepared) => {
+                const automation = this.runtimes.get(workspace.id)?.automations;
+                if (!automation)
+                  throw new ScheduleConfigurationError('AUTOMATION_OWNER_UNAVAILABLE');
+                return automation.dispatchQuotaSchedule(run, prepared);
+              },
             });
         stopSchedules = schedules.dispose;
         const automationsSupported = workspaceSupports(
@@ -1029,6 +1040,7 @@ export class LodyFleet {
           ? undefined
           : await createAutomationWorkspaceLegacy({
               lody: startedLody,
+              hasUncertainLegacyQuota: schedules.hasUncertainLegacyQuota,
               workspace,
               logger: workspaceLogger,
               auth: {
@@ -1192,6 +1204,7 @@ export class LodyFleet {
     if (state.automationsStart) return state.automationsStart;
     const pending = createAutomationWorkspaceLegacy({
       lody: state.lody,
+      hasUncertainLegacyQuota: state.schedules.hasUncertainLegacyQuota,
       workspace: state.workspace,
       logger: this.logger,
       auth: {

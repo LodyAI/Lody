@@ -84,6 +84,8 @@
   prompt-only projection. Published reservations retain staged local attachment
   bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
   a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- Skip unprepared legacy Claude quota-shortcut runs without a Turn association;
+  preserve prepared or dispatched work and ordinary or changed-message schedules. [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
 - A complete-message Schedule ID is consumed by durable dispatch across all later
   activations. Consult the persistent ledger before planning/processing another run;
   derive cross-activation sent state from that ledger, never a cached runtime row.

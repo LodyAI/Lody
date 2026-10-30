@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
+import { Effect, Layer } from 'effect';
+import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluate } from './programs/codemode';
 import { readAutomationContext } from './context/reads-legacy';
 import { observePullRequests } from './sources/pull-requests';
@@ -135,6 +136,79 @@ const evaluateAutomationProgram = (
 const allowed = async () => ({ value: 'yes' as const, reason: 'current' });
 
 describe('Automation Session authority', () => {
+  it('holds Stop at admission and queues the original continuation once after restore', async () => {
+    const f = groupFixture();
+    const meta = f.meta.get(f.rootId);
+    if (!meta) throw new Error('missing fixture');
+    meta.collaborationStopped = true;
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      condition: allowed,
+      capacity: allowed,
+    });
+    const wait = ledger.registerWait(
+      { program: '() => false', intervalMs: 1000 },
+      f.rootId,
+      'user',
+      0
+    );
+    const host = Layer.succeed(AutomationHost, {
+      evaluate: () => Effect.succeed({ resumeText: 'Continue after restore' }),
+      authorize: (receipt) => Effect.tryPromise(() => adapter.authorize(receipt)),
+      condition: () => Effect.succeed({ value: 'yes', reason: 'wait_matched' }),
+      prepare: (receipt) => Effect.tryPromise(() => adapter.prepare(receipt)),
+      submit: (receipt) => Effect.tryPromise(() => adapter.submit(receipt)),
+      reconcile: (receipt) => Effect.tryPromise(() => adapter.reconcile(receipt)),
+      cancel: (receipt) => Effect.tryPromise(() => adapter.cancel(receipt)),
+      report: () => Effect.void,
+    });
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const runtime = yield* Automations;
+            yield* runtime.pass;
+            const invocationId = ledger.wait(wait.id)?.invocationId;
+            if (!invocationId) throw new Error('missing continuation');
+            const retry = () => {
+              const receipt = ledger.receipt(invocationId);
+              if (!receipt) throw new Error('missing receipt');
+              ledger.update(receipt.id, receipt.state, { retryAt: 0 }, 0);
+              return runtime.pass;
+            };
+            for (let i = 0; i < 6; i++) yield* retry();
+            expect(ledger.receipt(invocationId)).toMatchObject({
+              state: 'blocked',
+              reason: 'target_stopped',
+              attempts: 0,
+            });
+            const backend = yield* Effect.tryPromise(async () =>
+              createSessionBackend(await f.manager.getOrCreateSessionDoc(f.rootId))
+            );
+            expect(yield* Effect.tryPromise(() => backend.getMessageQueue())).toEqual([]);
+            meta.collaborationStopped = false;
+            yield* retry();
+            yield* retry();
+            expect(ledger.wait(wait.id)).toMatchObject({ state: 'matched', invocationId });
+            expect(ledger.receipt(invocationId)).toMatchObject({ state: 'queued', attempts: 1 });
+            const queue = yield* Effect.tryPromise(() => backend.getMessageQueue());
+            expect(queue).toHaveLength(1);
+            expect(queue[0]).toMatchObject({ operationId: invocationId });
+          }).pipe(Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))))
+        )
+      );
+    } finally {
+      ledger.close();
+    }
+  });
   it('delivers a JS-selected CI failure through the existing Session queue with Host-owned evidence', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
     const f = groupFixture();

@@ -83,7 +83,8 @@ export async function observeSessionTurnLegacy(
   const quota =
     fact.capacityFailure === 'quota_exhausted' ||
     (fact.capacityFailure === 'rate_limited' && exhausted);
-  if (quota && fact.binding && fact.nativeSessionId && fact.outcome === 'failed') {
+  const overloaded = fact.capacityFailure === 'provider_overloaded';
+  if ((quota || overloaded) && fact.binding && fact.nativeSessionId && fact.outcome === 'failed') {
     const doc = await manager.getOrCreateSessionDoc(fact.sessionId);
     const backend = await createSessionBackend(doc, meta);
     const read = await backend.readTurn(fact.assistantTurnId);
@@ -100,6 +101,7 @@ export async function observeSessionTurnLegacy(
         .filter((window) => window.usedPercent >= 100)
         .map((window) => window.resetsAt)
         .filter((time): time is number => time !== undefined && time > fact.observedAt) ?? [];
+    const attempts = resumed ? resumed.attempts + 1 : 0;
     const work: PendingWork = {
       id: workId,
       ownerUserId: fact.userId,
@@ -113,20 +115,25 @@ export async function observeSessionTurnLegacy(
       confirmedBoundary: fact.assistantTurnId,
       unresolvedEffects,
       release: fact.released ? 'released' : 'unknown',
-      state: currentInput ? 'blocked_on_capacity' : 'cancelled',
-      notBefore: Math.max(
-        fact.observedAt +
-          Math.min(6 * 60 * 60_000, 60_000 * 2 ** Math.min(resumed ? resumed.attempts + 1 : 0, 9)),
-        ...resets
-      ),
-      attempts: resumed ? resumed.attempts + 1 : 0,
+      state: !currentInput
+        ? 'cancelled'
+        : overloaded && attempts >= 3
+          ? 'failed'
+          : 'blocked_on_capacity',
+      notBefore: overloaded
+        ? fact.observedAt + 5_000 * 2 ** Math.min(attempts, 2)
+        : Math.max(
+            fact.observedAt + Math.min(6 * 60 * 60_000, 60_000 * 2 ** Math.min(attempts, 9)),
+            ...resets
+          ),
+      attempts,
       origin,
     };
     if (!ledger.work(work.id))
       ledger.recordWork(work, {
         ...event,
         id: workId,
-        type: 'provider.quota.exhausted',
+        type: overloaded ? 'provider.model.overloaded' : 'provider.quota.exhausted',
         subject: workId,
         data: {
           workId,
@@ -149,10 +156,12 @@ export async function reconcileSessionTurnsLegacy(
     fact: SessionAutomationObservation
   ) => 'normal' | 'failed' | 'user_stop' | 'unreleased' | undefined,
   report: (cause: unknown) => void,
-  cursor = ''
-): Promise<string> {
-  const staged = ledger.stagedTurns(cursor);
+  now = Date.now()
+): Promise<void> {
+  const staged = ledger.stagedTurns(now);
   for (const { id, fact } of staged) {
+    // Unconfirmed release and failed reads remain pending without starving later outcomes.
+    ledger.deferTurn(id, now + 15_000);
     try {
       const outcome = fact.released ? undefined : release(fact);
       if (!fact.released && (!outcome || outcome === 'unreleased')) continue;
@@ -166,5 +175,4 @@ export async function reconcileSessionTurnsLegacy(
       report(cause);
     }
   }
-  return staged.at(-1)?.id ?? '';
 }

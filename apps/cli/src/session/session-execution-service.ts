@@ -926,13 +926,16 @@ export class SessionExecutionService {
         binding: import('./automation-observations').ProviderBinding | null
       ) => boolean)
     | undefined;
+  private automationBeforeAccept: SessionExecutionService['automationAdmission'];
 
   setAutomationAdmission(
     admit: SessionExecutionService['automationAdmission'],
-    canSubmit?: SessionExecutionService['automationSubmissionGuard']
+    canSubmit?: SessionExecutionService['automationSubmissionGuard'],
+    beforeAccept?: SessionExecutionService['automationAdmission']
   ): void {
     this.automationAdmission = admit;
     this.automationSubmissionGuard = canSubmit;
+    this.automationBeforeAccept = beforeAccept;
   }
   async guardAutomationAction<A>(
     sessionIds: readonly SessionId[],
@@ -976,6 +979,14 @@ export class SessionExecutionService {
       return 'unknown';
     return 'unsubmitted';
   }
+  automationInputAccepted(sessionId: SessionId, userId: string, turnId: string): boolean {
+    return (
+      this.operationInbox?.acceptedAutomationInput(
+        { workspaceId: this.deps.workspaceId, sessionId, userId },
+        turnId
+      ) === true
+    );
+  }
   async cancelAutomationInput(sessionId: SessionId, turnId: string): Promise<boolean> {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (runtime?.invocation?.sourceTurnId === turnId) {
@@ -1002,21 +1013,22 @@ export class SessionExecutionService {
     config: SessionTurnInputConfig;
   }): Promise<boolean> {
     const origin = args.config._lodyAutomation;
-    if (
-      !origin ||
-      !this.operationInbox ||
-      !this.automationAdmission ||
-      !(await this.automationAdmission({ ...args, origin }))
-    )
-      return false;
-    return this.operationInbox.accept({
-      workspaceId: this.deps.workspaceId,
-      sessionId: args.sessionId,
-      userId: args.userId,
-      inputId: args.turnId,
-      kind: 'automation',
-      config: args.config,
-    });
+    const inbox = this.operationInbox;
+    const admission = this.automationAdmission;
+    const beforeAccept = this.automationBeforeAccept;
+    if (!origin || !inbox || !admission || !(await admission({ ...args, origin }))) return false;
+    if (origin.workIntentId && !beforeAccept) return false;
+    return inbox.accept(
+      {
+        workspaceId: this.deps.workspaceId,
+        sessionId: args.sessionId,
+        userId: args.userId,
+        inputId: args.turnId,
+        kind: 'automation',
+        config: args.config,
+      },
+      origin.workIntentId && beforeAccept ? () => beforeAccept({ ...args, origin }) : undefined
+    );
   }
   private onInboxReleased: ((sessionId: SessionId) => void) | undefined;
   setOperationInbox(

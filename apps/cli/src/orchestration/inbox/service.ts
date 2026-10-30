@@ -85,7 +85,10 @@ export class OperationInbox extends Context.Service<
       id: string,
       reason?: 'user_stop'
     ): Effect.Effect<boolean, unknown>;
-    accept(input: InboxInput): Effect.Effect<boolean, unknown>;
+    accept(
+      input: InboxInput,
+      beforeAccept?: Effect.Effect<boolean, unknown>
+    ): Effect.Effect<boolean, unknown>;
     guard<A, E, R>(
       scopes: readonly InboxScope[],
       body: Effect.Effect<A, E, R>
@@ -304,10 +307,14 @@ export class OperationInbox extends Context.Service<
             });
             return ordered.reduceRight((effect, s) => withGate(s, effect), guarded);
           },
-          accept: Effect.fn('OperationInbox.accept')(function* (i: InboxInput) {
+          accept: Effect.fn('OperationInbox.accept')(function* (
+            i: InboxInput,
+            beforeAccept?: Effect.Effect<boolean, unknown>
+          ) {
             return yield* withGate(
               i,
               Effect.gen(function* () {
+                if (beforeAccept && !(yield* beforeAccept)) return false;
                 for (const [key, receipt] of pauses) {
                   if (inboxScopeKey(receipt.scope) !== inboxScopeKey(i)) continue;
                   yield* repo.pause(receipt.scope, receipt.id, receipt.ids, receipt.cancelId);

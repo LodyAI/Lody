@@ -1,10 +1,12 @@
 # 退休 Claude quota-continue 快捷方式
 
 日期：2026-10-27
-状态：implemented
-翻译：current
+Status: implemented
+Translation: current
 
 [English](2026-10-27-retire-quota-continue-shortcut.md)
+
+> 已被[恢复快捷入口的决定](2026-10-30-restore-quota-continue-shortcut.zh.md)取代。
 
 ## 摘要
 

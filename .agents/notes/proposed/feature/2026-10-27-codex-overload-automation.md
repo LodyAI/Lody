@@ -8,23 +8,25 @@ Translation: current
 
 ## Abstract
 
-The existing Codex overload retry is owned by a mounted renderer, so it does not
-survive closing the Session. The requested direction moves that behavior into
-Session automations and permits removing the old retry UI. This migration is not
-complete: structured overload classification is recorded in Session observations,
-but no automation policy consumes it yet and the existing retry remains active.
+The `recoverCapacity` Session tweak handles both structured quota exhaustion and
+Codex `serverOverloaded` failures in the machine-local automation owner. Overload
+work retains its native Session and input and receives up to three attempts after
+5, 10 and 20 second minimum delays. The existing renderer retry remains available
+when the tweak is off; when it is on the Host owns automatic recovery. Claude
+scheduled continuations use the same Session admission boundary for deduplication.
 
 ## Boundary and verification
 
-Only the structured Codex `serverOverloaded` error is classified as overload;
-generic server errors and quota exhaustion remain distinct. A completed migration
-must specify opt-in, bounded retries and timing, exact native input and release
-evidence, cancellation and restart behavior, plus a user-visible state and a single
-dispatch owner. Removing the renderer retry before those paths work would lose
-the existing capability; enabling both would risk duplicate continuations.
+Only structured Codex `serverOverloaded` triggers the overload path. The Host
+persists the pending work before dispatch, requires release and tool boundaries,
+and rechecks the Session, binding and authorization at admission. Stop and newer
+input retain their existing semantics; interrupted work and uncertain submissions
+use the existing ledger recovery. Settings apply to future observations. The
+renderer reads this setting even when the beta UI is hidden, so it does not start
+a second automatic retry. Activities expose recovery status through CLI/MCP; the
+Session note currently displays condition waits rather than native recovery work.
 
 The [automation coordinator](../architecture/2026-10-25-session-automation-coordinator.md)
-owns the durable Session boundary. The user chose to leave
-[retained legacy schedules](../bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md)
-out of this work, so their overlap remains possible. Classification is tested with
-synthetic ACP errors; live Codex recovery and end-to-end migration are unverified.
+owns the durable Session boundary. [Scheduled continuations](../bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md)
+retain their Schedule owner. Synthetic tests exercise staged quota and overload observations
+across restart; live provider recovery remains unverified.

@@ -6,6 +6,7 @@ import {
 } from '@lody/shared';
 import type { AgentExecutionSlots } from '../agent-execution-slots';
 import type { ScheduleRun, ScheduleStore } from './schedule-store';
+import { isUnassociatedQuotaReservation } from './legacy-quota-reservation';
 
 export class ScheduleConfigurationError extends Error {
   readonly code: string;
@@ -31,7 +32,7 @@ export type ScheduleEnginePorts<Prepared> = {
   prepare: (run: ScheduleRun<Prepared>) => Promise<Prepared>;
   materialize: (prepared: Prepared) => Promise<void>;
   isDispatched: (prepared: Prepared) => Promise<boolean>;
-  dispatch: (prepared: Prepared) => Promise<void>;
+  dispatch: (prepared: Prepared, run: ScheduleRun<Prepared>) => Promise<void | 'discarded'>;
   isFinished: (run: ScheduleRun<Prepared>) => Promise<boolean>;
   publish: (runtime: ScheduleRuntimeRow) => Promise<void>;
   onError: (error: unknown) => void;
@@ -182,6 +183,14 @@ export class ScheduleEngine<Prepared> {
         this.skip(run, 'ACTIVATION_REVOKED');
         continue;
       }
+      if (run.prepared === undefined && isUnassociatedQuotaReservation(run)) {
+        this.skip(run, 'LEGACY_QUOTA_UNASSOCIATED');
+        await this.project(row, {
+          queueState: 'blocked',
+          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
+        });
+        continue;
+      }
       if (now - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
         this.skip(run, 'DISPATCH_EXPIRED');
         continue;
@@ -263,7 +272,15 @@ export class ScheduleEngine<Prepared> {
           this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
           continue;
         }
-        await p.dispatch(current.prepared!);
+        const result = await p.dispatch(current.prepared!, current);
+        if (result === 'discarded') {
+          this.skip(p.store.get(current.runKey)!, 'QUOTA_RECOVERY_ALREADY_ACCEPTED');
+          await this.project(row, {
+            queueState: 'blocked',
+            blockedCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED',
+          });
+          continue;
+        }
         p.store.transition(run.runKey, ['session_prepared'], {
           state: 'dispatched',
           dispatchedAt: p.now(),
@@ -341,6 +358,11 @@ export class ScheduleEngine<Prepared> {
     this.projections.set(row.scheduleId, {
       ...this.projections.get(row.scheduleId),
       ...(lastDispatch ? { lastDispatch } : {}),
+      ...(last?.activationId === row.activationId &&
+      (last.errorCode === 'LEGACY_QUOTA_UNASSOCIATED' ||
+        last.errorCode === 'QUOTA_RECOVERY_ALREADY_ACCEPTED')
+        ? { blockedCode: last.errorCode }
+        : {}),
       ...(row.scheduledMessage
         ? {
             messageState: lastDispatch

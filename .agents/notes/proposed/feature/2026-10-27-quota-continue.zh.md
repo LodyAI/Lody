@@ -5,8 +5,7 @@ Translation: current
 
 [English](2026-10-27-quota-continue.md)
 
-> 已取代：composer 快捷方式于 2026-10-27 移除，因为 `recoverCapacity` 现在拥有
-> 额度继续。见[退休笔记](../../implemented/feature/2026-10-27-retire-quota-continue-shortcut.md)。
+> 快捷入口与实验性的 Session 额度恢复并存；见[恢复决定](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.zh.md)。
 
 ## 摘要
 

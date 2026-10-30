@@ -3001,6 +3001,7 @@ export const SessionChatInterface = memo(
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
+      setTreeCollaborationStopped,
     } = useSessionActions();
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
@@ -4902,7 +4903,9 @@ export const SessionChatInterface = memo(
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionHistory,
+      hostRecoveryEnabled: isLocalSession && continuation.recoveryEnabled !== false,
       canRetry:
+        !continuation.recoveryEnabled &&
         sessionDocReady &&
         !isAgentBusy &&
         !isMachineRemoved &&
@@ -6761,6 +6764,7 @@ export const SessionChatInterface = memo(
                 recoverCapacity: {
                   supported:
                     continuation.value.recoverCapacity ||
+                    session.agentType === 'codex' ||
                     Boolean(
                       session.agentConfigId &&
                       sessionAgentConfig &&
@@ -7061,6 +7065,13 @@ export const SessionChatInterface = memo(
                                           now={continuationNow}
                                           compact={isMobile}
                                           onCancel={continuation.cancel}
+                                          onResume={() => {
+                                            void setTreeCollaborationStopped(session.id, false)
+                                              .then(continuation.refresh)
+                                              .catch(() =>
+                                                toast.error(t('sessions.relations.controlFailed'))
+                                              );
+                                          }}
                                         />
                                       ))}
                                       {continuation.error && (
@@ -7331,6 +7342,7 @@ export const SessionChatInterface = memo(
                           modelOptions={modelOptions}
                           rateLimits={sessionRateLimits}
                           quotaConfig={sessionAgentConfig}
+                          autoCapacityRecoveryEnabled={continuation.recoveryEnabled === true}
                           showCodexResetForecast={showCodexResetForecast}
                           isContextCompacting={isContextCompacting}
                           configOptionSelectors={configOptionSelectors}

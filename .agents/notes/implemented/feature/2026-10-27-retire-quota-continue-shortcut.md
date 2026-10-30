@@ -6,6 +6,8 @@ Translation: current
 
 [中文](2026-10-27-retire-quota-continue-shortcut.zh.md)
 
+> Superseded by the [restored shortcut decision](2026-10-30-restore-quota-continue-shortcut.md).
+
 ## Abstract
 
 The composer shortcut from #1935 let a person reserve a literal `continue` at the

@@ -43,6 +43,9 @@ function toView(wait: Wait): SessionContinuationView {
     nextCheckAt: wait.nextCheckAt,
     expiresAt: wait.expiresAt,
     ...(phase === 'matched' ? { continuation: delivery } : {}),
+    ...(state === 'blocked' && wait.continuation?.reason === 'target_stopped'
+      ? { block: 'stopped' as const }
+      : {}),
   };
 }
 
@@ -64,7 +67,7 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
   const sessionId = target?.sessionId;
 
   useEffect(() => {
-    if (!enabled || !visible || !workspaceId || !machineId || !sessionId) return;
+    if (!visible || !workspaceId || !machineId || !sessionId) return;
     const service = getIpcServices()?.sessionControl;
     if (!service) return;
     let active = true;
@@ -73,7 +76,9 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     const read = async () => {
       try {
         const [waits, settings] = await Promise.allSettled([
-          service.automation({ ...identity, command: { type: 'list' } }),
+          enabled
+            ? service.automation({ ...identity, command: { type: 'list' } })
+            : Promise.resolve({ type: 'list' as const, waits: [] }),
           service.automation({ ...identity, command: { type: 'settings' } }),
         ]);
         if (waits.status !== 'fulfilled' || waits.value.type !== 'list')
@@ -102,7 +107,7 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     };
   }, [enabled, visible, workspaceId, machineId, sessionId, key, revision]);
 
-  const current = enabled && target && snapshot?.key === key ? snapshot : null;
+  const current = target && snapshot?.key === key ? snapshot : null;
   const send = useCallback(
     async (
       command: { type: 'cancel'; id: string } | { type: 'configure'; settings: AutomationSettings }
@@ -126,13 +131,14 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     },
     [enabled, target, busy, refresh, key]
   );
-  const value: SessionContinuationTweaksValue | null = current?.settings
-    ? {
-        recoverCapacity: current.settings.recoverCapacity === true,
-        archiveAfterMerge: current.settings.archiveAfterMerge === true,
-        compactWhenIdle: typeof current.settings.compactWhenIdle === 'object',
-      }
-    : null;
+  const value: SessionContinuationTweaksValue | null =
+    enabled && current?.settings
+      ? {
+          recoverCapacity: current.settings.recoverCapacity === true,
+          archiveAfterMerge: current.settings.archiveAfterMerge === true,
+          compactWhenIdle: typeof current.settings.compactWhenIdle === 'object',
+        }
+      : null;
   const setTweak = useCallback(
     (name: keyof SessionContinuationTweaksValue, checked: boolean) => {
       const compact = current?.settings?.compactWhenIdle;
@@ -147,10 +153,12 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     [current, send]
   );
   return {
-    views: current?.views ?? [],
+    views: enabled ? (current?.views ?? []) : [],
     value,
+    recoveryEnabled: current?.settings ? current.settings.recoverCapacity === true : null,
     error: enabled && !!target && errorKey === key,
     busy,
+    refresh,
     setTweak,
     cancel: (id: string) => void send({ type: 'cancel', id }),
   };

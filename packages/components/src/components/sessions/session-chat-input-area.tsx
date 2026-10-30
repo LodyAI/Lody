@@ -1,3 +1,4 @@
+import { QuotaContinueAction } from '../schedules/quota-continue-action';
 import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -448,6 +449,7 @@ export interface SessionChatInputAreaProps {
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   isVisible?: boolean;
+  autoCapacityRecoveryEnabled?: boolean;
   sessionLocalProjectRootPath: string | null;
   isMachineRemoved: boolean;
   isAgentBusy: boolean;
@@ -606,6 +608,7 @@ export const SessionChatInputArea = memo(
       modelOptions,
       rateLimits,
       quotaConfig,
+      autoCapacityRecoveryEnabled,
       showCodexResetForecast = false,
       isContextCompacting = false,
       configOptionSelectors,
@@ -2440,6 +2443,11 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
+          <QuotaContinueAction
+            session={session}
+            visible={isVisible}
+            autoRecoveryEnabled={autoCapacityRecoveryEnabled}
+          />
           <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}

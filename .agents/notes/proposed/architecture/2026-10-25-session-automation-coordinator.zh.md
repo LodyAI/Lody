@@ -74,7 +74,7 @@ CI 复用现有 PR Poller、凭证解析器和额度/冷却 Owner，按当前 HE
 请求保留观察需求，包括已关闭 PR。Actions 拒绝有独立仓库冷却，不影响普通 PR 观察。
 乱序结果不能回退 attempt。
 
-Host 证据与 JS 结果分开提交。准备和接受输入前重新执行 JS，排队后仍检查来源和权限。
+Host 证据与 JS 结果分别保存，匹配后不再运行 JS；准备、接收输入及排队期间仍检查来源和权限。
 HEAD、当前 PR 关联或 attempt 改变会使旧工作失效；同 attempt 内其他任务完成本身不会
 使身份失效。原生 Prompt 提交前由 Session Owner 核验执行目录 HEAD，Project 成员使用
 既有且经过路径校验的工作树目录。Guest payload 不能伪造这些权限依据。

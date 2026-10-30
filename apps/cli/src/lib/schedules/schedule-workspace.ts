@@ -48,6 +48,10 @@ import {
 import { createScheduleSyncGate } from './schedule-sync-gate';
 import { ScheduleStore } from './schedule-store';
 import { ScheduleEngine, ScheduleConfigurationError } from './schedule-engine';
+import {
+  isQuotaReservationCandidate,
+  isUnassociatedQuotaReservation,
+} from './legacy-quota-reservation';
 
 // Ticks plan Schedules serially, so this wait delays every other Schedule. A
 // timeout blocks only this definition until the next tick retries it.
@@ -56,6 +60,7 @@ const DEFINITION_SYNC_TIMEOUT_MS = 8_000;
 export type ScheduleWorkspaceHandle = {
   evaluate: () => Promise<void>;
   dispose: () => Promise<void>;
+  hasUncertainLegacyQuota: (sessionId: SessionId) => boolean;
 };
 
 export async function createScheduleWorkspace(args: {
@@ -66,6 +71,10 @@ export async function createScheduleWorkspace(args: {
   slots: AgentExecutionSlots;
   logger: Logger;
   hasSessionWork: (sessionId: SessionId) => boolean;
+  dispatchQuotaSchedule: (
+    run: import('./schedule-store').ScheduleRun<PreparedSessionInput>,
+    prepared: PreparedSessionInput
+  ) => Promise<'dispatched' | 'discarded'>;
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth, slots } = args;
   const workspaceId = workspace.id as WorkspaceId;
@@ -227,7 +236,13 @@ export async function createScheduleWorkspace(args: {
     },
     materialize: (prepared) => materializePreparedSessionInput(manager, prepared),
     isDispatched: (prepared) => isPreparedSessionDispatched(manager, prepared),
-    dispatch: (prepared) => commitPreparedSessionDispatch(manager, prepared),
+    dispatch: async (prepared, run) => {
+      if (isQuotaReservationCandidate(run))
+        return args
+          .dispatchQuotaSchedule(run, prepared)
+          .then((result) => (result === 'discarded' ? result : undefined));
+      await commitPreparedSessionDispatch(manager, prepared);
+    },
     isFinished: async (run) => {
       const id = run.sessionId as SessionId;
       if (args.hasSessionWork(id)) return false;
@@ -380,6 +395,14 @@ export async function createScheduleWorkspace(args: {
   wake();
   return {
     evaluate,
+    hasUncertainLegacyQuota: (sessionId) =>
+      store
+        .unfinishedForSession(workspaceId, sessionId)
+        .some(
+          (run) =>
+            (run.prepared !== undefined || run.state === 'dispatched') &&
+            isUnassociatedQuotaReservation(run)
+        ),
     dispose: async () => {
       disposed = true;
       clearInterval(timer);

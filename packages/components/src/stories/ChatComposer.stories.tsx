@@ -1,5 +1,6 @@
 import { QueuedScheduledMessagePreview } from './queued-scheduled-message-preview';
 import { SessionInfoBar } from '../components/sessions/session-info-bar';
+import { QuotaContinueView } from '../components/schedules/quota-continue-action';
 import {
   ScheduledMessageInfoChip,
   ScheduledMessageTimeDialog,
@@ -616,6 +617,36 @@ export const ScheduledSendTimePicker: Story = {
 export const ScheduledSendDark: Story = {
   globals: { theme: 'dark' },
   render: () => <ScheduledSendPreview />,
+};
+
+function QuotaContinuePreview() {
+  const [saved, setSaved] = useState(false);
+  const [text, setText] = useState('Keep this draft while waiting for quota.');
+  return (
+    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
+      <div className="w-full max-w-2xl">
+        <QuotaContinueView saved={saved} pending={false} onClick={() => setSaved(true)} />
+        <ChatComposer
+          variant="session"
+          tone="light"
+          promptValue={text}
+          onPromptChange={setText}
+          onAttachmentAddClick={() => {}}
+          onScheduleSend={() => {}}
+          primaryAction={
+            <Button icon aria-label="Send">
+              <ArrowUp size={16} />
+            </Button>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+export const QuotaContinue: Story = { render: () => <QuotaContinuePreview /> };
+export const QuotaContinueDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <QuotaContinuePreview />,
 };
 
 export const ScheduledSendInfo: Story = {

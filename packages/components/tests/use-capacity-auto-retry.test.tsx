@@ -128,6 +128,33 @@ describe('capacity auto retry', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves automatic recovery to the Host while keeping manual retry available', async () => {
+    const onRetry = vi.fn().mockResolvedValue(true);
+    let history = [capacityFailure('capacity-1')];
+    let control: CapacityRetryControl | null = null;
+    function Consumer() {
+      control = useCapacityAutoRetry({
+        sessionId: 'session-1',
+        history,
+        canRetry: true,
+        onRetry,
+        hostRecoveryEnabled: true,
+      });
+      return null;
+    }
+    await act(async () => root.render(<Consumer />));
+    await act(async () => control?.retry());
+    history = [
+      capacityFailure('capacity-1'),
+      { id: 'continuation-1', role: 'user' },
+      capacityFailure('capacity-2'),
+    ];
+    await act(async () => root.render(<Consumer />));
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(control?.retryInSeconds).toBeNull();
+  });
+
   it('lets the user stop automatic retries during a countdown', async () => {
     const onRetry = vi.fn().mockResolvedValue(true);
     let history = [capacityFailure('capacity-1')];
