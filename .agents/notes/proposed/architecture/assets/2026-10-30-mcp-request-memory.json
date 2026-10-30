@@ -1,0 +1,78 @@
+{
+  "sourceCommit": "fc385258174e577aafcf7ce4c43511574e9de987",
+  "environment": {"platform": "macOS 27.2 arm64","electron": "44.9.3","driverNode": "24.22.1","sdkServer": "2.0.0","zod": "4.3.6","targetNode": "24.22.0","v8": "15.2.124.43-electron.0"},
+  "protocol": "2025-06-18",
+  "method": "tools/list",
+  "toolCount": 36,
+  "data": "Synthetic session/workspace context; isolated temporary data; no real model or conversation",
+  "sampling": "32 KiB, collected allocations included, independent 500-request run",
+  "samplingEstimatedAllocatedMiB": 1427.0557556152344,
+  "samplingEstimatedJsonSchemaConversionMiB": 936.27490234375,
+  "samplingJsonSchemaFraction": 0.6560885225820079,
+  "processSets": [
+    {"variant": "normal","rssMiBSum": 1749.96875,"groupFootprintMiB": 1030.8074035644531,"processes": [{"kind": "electron-main","rssMiB": 361.734375,"footprint": "209.3M"},{"kind": "gpu","rssMiB": 125.09375,"footprint": "112.0M"},{"kind": "utility","rssMiB": 47.953125,"footprint": "7361K"},{"kind": "renderer","rssMiB": 545.546875,"footprint": "294.6M"},{"kind": "bundled-cli","rssMiB": 321.296875,"footprint": "222.3M"},{"kind": "bundled-cli","rssMiB": 303.4375,"footprint": "209.6M"},{"kind": "utility","rssMiB": 44.90625,"footprint": "8113K"}]},
+    {"variant": "mcp-disabled","rssMiBSum": 1462.09375,"groupFootprintMiB": 822.5714492797852,"processes": [{"kind": "electron-main","rssMiB": 362.28125,"footprint": "209.6M"},{"kind": "gpu","rssMiB": 125.671875,"footprint": "113.1M"},{"kind": "utility","rssMiB": 48,"footprint": "7345K"},{"kind": "renderer","rssMiB": 558.859375,"footprint": "295.3M"},{"kind": "bundled-cli","rssMiB": 322.359375,"footprint": "223.4M"},{"kind": "utility","rssMiB": 44.921875,"footprint": "8113K"}]}
+  ],
+  "baselineA": [
+    {"requests": 0,"rssMiB": 315.15625,"postGcHeapMiB": 92.95234680175781,"heapTotalMiB": 163.640625,"oldSpaceReservedMiB": 82.25,"oldSpaceUsedMiB": 69.13774490356445},
+    {"requests": 100,"rssMiB": 353.59375,"postGcHeapMiB": 94.10850143432617,"heapTotalMiB": 184.140625,"oldSpaceReservedMiB": 97.5,"oldSpaceUsedMiB": 69.27411651611328},
+    {"requests": 500,"rssMiB": 501.1875,"postGcHeapMiB": 94.8372573852539,"heapTotalMiB": 279.890625,"oldSpaceReservedMiB": 193.0,"oldSpaceUsedMiB": 69.39945220947266},
+    {"requests": 1000,"rssMiB": 549.546875,"postGcHeapMiB": 95.17045974731445,"heapTotalMiB": 340.140625,"oldSpaceReservedMiB": 252.0,"oldSpaceUsedMiB": 69.4466438293457},
+    {"requests": 2000,"rssMiB": 625.609375,"postGcHeapMiB": 95.71681213378906,"heapTotalMiB": 308.890625,"oldSpaceReservedMiB": 221.5,"oldSpaceUsedMiB": 69.44822692871094}
+  ],
+  "baselineB": [
+    {"requests": 0,"rssMiB": 315.546875,"postGcHeapMiB": 92.98733901977539,"heapTotalMiB": 164.390625,"oldSpaceReservedMiB": 83.25,"oldSpaceUsedMiB": 69.15699005126953,"footprintLabel": "219.2M"},
+    {"requests": 100,"rssMiB": 353.921875,"postGcHeapMiB": 94.13666152954102,"heapTotalMiB": 183.890625,"oldSpaceReservedMiB": 97.5,"oldSpaceUsedMiB": 69.29272842407227,"footprintLabel": "255.8M"},
+    {"requests": 500,"rssMiB": 501.34375,"postGcHeapMiB": 94.86031341552734,"heapTotalMiB": 275.890625,"oldSpaceReservedMiB": 188.75,"oldSpaceUsedMiB": 69.41883087158203,"footprintLabel": "402.6M"},
+    {"requests": 1000,"rssMiB": 549.703125,"postGcHeapMiB": 95.19216918945312,"heapTotalMiB": 341.890625,"oldSpaceReservedMiB": 253.75,"oldSpaceUsedMiB": 69.46572494506836,"footprintLabel": "451.5M"},
+    {"requests": 2000,"rssMiB": 625.859375,"postGcHeapMiB": 95.73841857910156,"heapTotalMiB": 309.390625,"oldSpaceReservedMiB": 222.5,"oldSpaceUsedMiB": 69.46759796142578,"footprintLabel": "514.0M"}
+  ],
+  "schemaReuseOnly": [
+    {"requests": 0,"rssMiB": 313.828125,"postGcHeapMiB": 93.32828521728516,"heapTotalMiB": 162.390625,"oldSpaceReservedMiB": 83.0,"oldSpaceUsedMiB": 69.50783157348633,"footprintLabel": "217.9M"},
+    {"requests": 100,"rssMiB": 353.8125,"postGcHeapMiB": 94.47931289672852,"heapTotalMiB": 188.890625,"oldSpaceReservedMiB": 102.5,"oldSpaceUsedMiB": 69.64293670654297,"footprintLabel": "255.8M"},
+    {"requests": 500,"rssMiB": 501.171875,"postGcHeapMiB": 95.20918273925781,"heapTotalMiB": 283.890625,"oldSpaceReservedMiB": 196.5,"oldSpaceUsedMiB": 69.76840591430664,"footprintLabel": "402.3M"},
+    {"requests": 1000,"rssMiB": 549.609375,"postGcHeapMiB": 95.52185440063477,"heapTotalMiB": 338.640625,"oldSpaceReservedMiB": 250.75,"oldSpaceUsedMiB": 69.8151741027832,"footprintLabel": "451.3M"},
+    {"requests": 2000,"rssMiB": 625.59375,"postGcHeapMiB": 96.06441879272461,"heapTotalMiB": 310.390625,"oldSpaceReservedMiB": 224.0,"oldSpaceUsedMiB": 69.81713485717773,"footprintLabel": "513.4M"}
+  ],
+  "jsonCacheOnly": [
+    {"requests": 0,"rssMiB": 313.84375,"postGcHeapMiB": 93.39461517333984,"heapTotalMiB": 163.390625,"oldSpaceReservedMiB": 84.0,"oldSpaceUsedMiB": 69.58696365356445,"footprintLabel": "218.3M"},
+    {"requests": 100,"rssMiB": 346.34375,"postGcHeapMiB": 94.45359802246094,"heapTotalMiB": 176.640625,"oldSpaceReservedMiB": 92.0,"oldSpaceUsedMiB": 69.71387100219727,"footprintLabel": "244.8M"},
+    {"requests": 500,"rssMiB": 485.359375,"postGcHeapMiB": 95.16155242919922,"heapTotalMiB": 256.390625,"oldSpaceReservedMiB": 170.75,"oldSpaceUsedMiB": 69.83784866333008,"footprintLabel": "382.7M"},
+    {"requests": 1000,"rssMiB": 534.25,"postGcHeapMiB": 95.46170425415039,"heapTotalMiB": 318.140625,"oldSpaceReservedMiB": 232.0,"oldSpaceUsedMiB": 69.88828659057617,"footprintLabel": "430.7M"},
+    {"requests": 2000,"rssMiB": 628.03125,"postGcHeapMiB": 95.99454879760742,"heapTotalMiB": 266.140625,"oldSpaceReservedMiB": 184.25,"oldSpaceUsedMiB": 69.86175537109375,"footprintLabel": "511.7M"}
+  ],
+  "factoryReuseOnly": [
+    {"requests": 0,"rssMiB": 305.1875,"postGcHeapMiB": 93.40218734741211,"heapTotalMiB": 154.890625,"oldSpaceReservedMiB": 74.75,"oldSpaceUsedMiB": 69.61429595947266,"footprintLabel": "208.8M"},
+    {"requests": 100,"rssMiB": 313.640625,"postGcHeapMiB": 94.463623046875,"heapTotalMiB": 159.140625,"oldSpaceReservedMiB": 74.75,"oldSpaceUsedMiB": 69.76496124267578,"footprintLabel": "213.3M"},
+    {"requests": 500,"rssMiB": 319.765625,"postGcHeapMiB": 95.05232238769531,"heapTotalMiB": 163.390625,"oldSpaceReservedMiB": 77.25,"oldSpaceUsedMiB": 69.88554382324219,"footprintLabel": "218.1M"},
+    {"requests": 1000,"rssMiB": 322.984375,"postGcHeapMiB": 95.3513298034668,"heapTotalMiB": 165.640625,"oldSpaceReservedMiB": 78.75,"oldSpaceUsedMiB": 69.9313735961914,"footprintLabel": "220.9M"},
+    {"requests": 2000,"rssMiB": 332.234375,"postGcHeapMiB": 95.55506134033203,"heapTotalMiB": 163.890625,"oldSpaceReservedMiB": 76.5,"oldSpaceUsedMiB": 69.90868759155273,"footprintLabel": "224.5M"}
+  ],
+  "factoryReusePlusJsonCache": [
+    {"requests": 0,"rssMiB": 303.65625,"postGcHeapMiB": 93.44648742675781,"heapTotalMiB": 153.890625,"oldSpaceReservedMiB": 74.5,"oldSpaceUsedMiB": 69.64712524414062,"footprintLabel": "208.0M"},
+    {"requests": 100,"rssMiB": 325.34375,"postGcHeapMiB": 94.41972351074219,"heapTotalMiB": 157.390625,"oldSpaceReservedMiB": 74.75,"oldSpaceUsedMiB": 69.79188919067383,"footprintLabel": "211.0M"},
+    {"requests": 500,"rssMiB": 339.8125,"postGcHeapMiB": 94.98099899291992,"heapTotalMiB": 164.640625,"oldSpaceReservedMiB": 74.75,"oldSpaceUsedMiB": 69.91003799438477,"footprintLabel": "218.8M"},
+    {"requests": 1000,"rssMiB": 344.328125,"postGcHeapMiB": 95.26271438598633,"heapTotalMiB": 167.140625,"oldSpaceReservedMiB": 77.0,"oldSpaceUsedMiB": 69.95795822143555,"footprintLabel": "222.1M"},
+    {"requests": 2000,"rssMiB": 357.109375,"postGcHeapMiB": 95.80923461914062,"heapTotalMiB": 174.390625,"oldSpaceReservedMiB": 83.0,"oldSpaceUsedMiB": 70.14513397216797,"footprintLabel": "230.7M"}
+  ],
+  "limits": [
+    "Whole-server reuse variants are counterfactuals for one sequential client, not production designs. The static-catalog variant creates a fresh server/transport per request but uses private SDK fields to extract definitions only for this experiment.",
+    "Full tool catalog equal in every run; actual tool execution/concurrent-session isolation not validated by these ablations",
+    "RSS is not unique physical memory; group footprint is the macOS tool total",
+    "No bound on memory growth or long-running production frequency is established"
+  ],
+  "freshServerStaticCatalog": [
+    {"requests": 0,"rssMiB": 304.40625,"postGcHeapMiB": 93.4445915222168,"heapTotalMiB": 153.890625,"oldSpaceReservedMiB": 74.25,"oldSpaceUsedMiB": 69.60493087768555,"footprintLabel": "208.0M"},
+    {"requests": 100,"rssMiB": 314.40625,"postGcHeapMiB": 94.53484725952148,"heapTotalMiB": 160.890625,"oldSpaceReservedMiB": 75.5,"oldSpaceUsedMiB": 69.75940322875977,"footprintLabel": "215.4M"},
+    {"requests": 500,"rssMiB": 334.265625,"postGcHeapMiB": 95.1502799987793,"heapTotalMiB": 175.140625,"oldSpaceReservedMiB": 88.75,"oldSpaceUsedMiB": 69.8802261352539,"footprintLabel": "234.5M"},
+    {"requests": 1000,"rssMiB": 341.765625,"postGcHeapMiB": 95.46353530883789,"heapTotalMiB": 185.140625,"oldSpaceReservedMiB": 98.0,"oldSpaceUsedMiB": 69.93183135986328,"footprintLabel": "242.1M"},
+    {"requests": 2000,"rssMiB": 348.9375,"postGcHeapMiB": 95.73226165771484,"heapTotalMiB": 165.640625,"oldSpaceReservedMiB": 78.75,"oldSpaceUsedMiB": 69.84112930297852,"footprintLabel": "242.6M"}
+  ],
+  "freshServerStaticCatalogRepeat": [
+    {"requests": 0,"rssMiB": 304.625,"postGcHeapMiB": 93.44617080688477,"heapTotalMiB": 153.640625,"oldSpaceReservedMiB": 74.25,"oldSpaceUsedMiB": 69.6008071899414,"footprintLabel": "208.0M"},
+    {"requests": 100,"rssMiB": 313.578125,"postGcHeapMiB": 94.53852844238281,"heapTotalMiB": 159.890625,"oldSpaceReservedMiB": 74.75,"oldSpaceUsedMiB": 69.7563362121582,"footprintLabel": "214.7M"},
+    {"requests": 500,"rssMiB": 334.125,"postGcHeapMiB": 95.1551628112793,"heapTotalMiB": 177.390625,"oldSpaceReservedMiB": 91.0,"oldSpaceUsedMiB": 69.87777328491211,"footprintLabel": "234.4M"},
+    {"requests": 1000,"rssMiB": 341.6875,"postGcHeapMiB": 95.46166229248047,"heapTotalMiB": 185.140625,"oldSpaceReservedMiB": 98.25,"oldSpaceUsedMiB": 69.9268684387207,"footprintLabel": "241.6M"},
+    {"requests": 2000,"rssMiB": 348.078125,"postGcHeapMiB": 95.74419021606445,"heapTotalMiB": 169.640625,"oldSpaceReservedMiB": 82.75,"oldSpaceUsedMiB": 69.85550308227539,"footprintLabel": "242.4M"}
+  ]
+}
