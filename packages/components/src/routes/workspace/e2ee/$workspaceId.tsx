@@ -3,7 +3,7 @@ import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery'
 
 import { E2eeTeamSettingsHost } from '@/components/settings/e2ee-team-settings';
 import { desktopWindowId } from '@/lib/desktop-window';
-import { createWorkspaceRuntimeRetirements } from '@/providers/workspace-runtime-retirements';
+import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
   isE2eeMemberRemoved,
