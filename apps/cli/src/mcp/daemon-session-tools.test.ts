@@ -13,7 +13,9 @@ import {
   getMachineFlockDocId,
   getMachineRoomId,
   getMachineFlockAgentConfigs,
+  machineFlockKeys,
   writeAgentConfigToFlock,
+  writeMachineFlockRowToFlock,
   getWorkspaceFlockDocId,
   getProjectMcpKey,
   workspaceFlockKeys,
@@ -25,6 +27,7 @@ import {
   writeWorkspaceMcpServerToFlock,
   type AgentConfigId,
   type AgentRoleId,
+  type LocalProjectId,
   type MachineId,
   type McpServerId,
   type SessionId,
@@ -43,6 +46,7 @@ import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/o
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager } from '@/lib/loro/doc';
+import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import {
   createLocalSessionCommandEnvironment,
   runWithDaemonWorkspace,
@@ -607,6 +611,140 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       }
     }
   );
+
+  function stubCreateOptionsReaders(
+    access: { allowed: true } | { allowed: false; reason: 'not_visible' } = { allowed: true }
+  ) {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+      id: workspaceId,
+      name: 'Synthetic',
+      slug: 'synthetic',
+      role: 'owner',
+    });
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue(access);
+  }
+
+  async function seedCreateOptionsCatalog(projectId: LocalProjectId) {
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+    writeMachineFlockRowToFlock(handle.flock, {
+      key: machineFlockKeys.localProject(projectId),
+      value: {
+        id: projectId,
+        name: 'Synthetic project',
+        rootPath: tempDir,
+        createdAtMs: 1,
+      },
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      agentConfigId,
+      project: { kind: 'local', localProjectId: projectId },
+    } satisfies Partial<SessionMeta>);
+    await manager.repo.flush();
+    return agentConfigId;
+  }
+
+  const readCreateOptions = (args: Record<string, unknown> = {}) =>
+    runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create_options', args)
+    );
+
+  it('returns local create options when Streams sync fails and the replica can answer', async () => {
+    const projectId = 'synthetic-project' as LocalProjectId;
+    const agentConfigId = await seedCreateOptionsCatalog(projectId);
+    stubCreateOptionsReaders();
+    const timeout = new FlockSyncTimeoutError('Synthetic Streams timeout');
+    const metaSync = vi
+      .spyOn(manager, 'syncMetaOrThrow')
+      .mockRejectedValue(new Error('ECONNRESET'));
+    const flockSync = vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(timeout);
+
+    const result = await readCreateOptions();
+
+    expect(metaSync).toHaveBeenCalledWith({
+      reason: `mcp.session_create_options:${workspaceId}`,
+      requireRemoteConfirmation: true,
+    });
+    expect(flockSync).toHaveBeenCalledTimes(1);
+    expect(flockSync).toHaveBeenCalledWith(getMachineFlockDocId(workspaceId, machineId), {
+      reason: `mcp.session_create_options:${machineId}`,
+      requireRemoteConfirmation: true,
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      ok: true,
+      defaultAgentConfigId: agentConfigId,
+      agentConfigs: [{ id: agentConfigId }],
+      localProjects: [{ id: projectId, name: 'Synthetic project' }],
+      current: {
+        workContext: {
+          kind: 'local',
+          projectId,
+          localProjectName: 'Synthetic project',
+        },
+      },
+    });
+  });
+
+  it('returns retryable SYNC_UNAVAILABLE when Streams fails and the local catalog cannot validate', async () => {
+    stubCreateOptionsReaders();
+    const timeout = new FlockSyncTimeoutError('Synthetic Streams timeout');
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('ECONNRESET'));
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(timeout);
+
+    const missingCatalog = JSON.parse((await readCreateOptions()).content[0]?.text ?? '{}');
+    expect(missingCatalog).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      agentConfigId,
+      project: { kind: 'local', localProjectId: 'missing-project' as LocalProjectId },
+    } satisfies Partial<SessionMeta>);
+    await manager.repo.flush();
+    const missingProject = JSON.parse((await readCreateOptions()).content[0]?.text ?? '{}');
+    expect(missingProject).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+    expect(missingProject.error.message).toContain('missing-project');
+  });
+
+  it('returns the local catalog when Streams confirms an empty agent list', async () => {
+    stubCreateOptionsReaders();
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue(undefined);
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockResolvedValue(undefined);
+
+    const result = await readCreateOptions();
+
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      ok: true,
+      agentConfigs: [],
+      localProjects: [],
+      current: { workContext: { kind: 'chat' } },
+    });
+  });
+
+  it('keeps an unauthorized machine denied when create-option sync fails', async () => {
+    await seedCreateOptionsCatalog('synthetic-project' as LocalProjectId);
+    stubCreateOptionsReaders({ allowed: false, reason: 'not_visible' });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('ECONNRESET'));
+    const flockSync = vi
+      .spyOn(manager, 'syncFlockDocOrThrow')
+      .mockRejectedValue(new FlockSyncTimeoutError('Synthetic Streams timeout'));
+
+    const result = await readCreateOptions();
+
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'INTERNAL_ERROR', retryable: false },
+    });
+  });
 
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
     await seedRoles();

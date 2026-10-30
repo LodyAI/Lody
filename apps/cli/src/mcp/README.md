@@ -112,6 +112,14 @@ to select its project. See [session relations](../../../../specs/session-relatio
   and the local catalog could not validate a selection. It does not prove that an id is
   valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
   failures and explicit validation errors retain their existing non-retryable classification.
+- `lody_session_create_options` follows that rule for workspace meta and the selected
+  Machine Flock, including the current local-project work context. A failed or timed-out
+  Streams sync still returns local machines, agent configs, and projects when those rows
+  are present. It returns retryable `SYNC_UNAVAILABLE` when the local agent-config catalog
+  is empty, or when the current or queried agent config or local project is absent, so a
+  missing row is not reported as a definitive empty result. A confirmed sync may return an
+  empty catalog. Role validation, fresh-catalog discovery, and Operation acceptance keep
+  their existing freshness requirements. Authorization and three-state presence are unchanged.
 - Without an active Operation handle, an Agent must wait at least 5 seconds between calls
   and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
   Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.

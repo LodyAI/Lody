@@ -4,7 +4,11 @@ import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
 import { isSessionCollaborationStopped } from '@lody/shared';
-import { MACHINE_CATALOG_RETRY_GUIDANCE } from '@/commands/session-catalog-read';
+import {
+  assertMachineFlockCacheSufficient,
+  MACHINE_CATALOG_RETRY_GUIDANCE,
+  type MachineFlockFreshness,
+} from '@/commands/session-catalog-read';
 import { getMachineRoomId } from '@lody/shared';
 import { getLogger } from '@/utils/logger';
 import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
@@ -91,6 +95,7 @@ import {
   syncWorkspaceMetaForRead,
   withWorkspaceManager,
   getCommandSessionSharingPort,
+  WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   WorkspaceSyncUnavailableError,
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
@@ -2179,19 +2184,50 @@ const filterAuthorizedLocalProjectsForOptions = async (
   return rows.filter((row) => row.allowed).map((row) => row.project);
 };
 
-const syncMachineFlockDocsForOptions = async (
+/**
+ * Catalog reads try Streams, then the local replica. A failed attempt is not
+ * proof that a present row is missing, and a missing row is not proof that the
+ * selection is invalid.
+ */
+const syncWorkspaceMetaForLocalRead = async (
+  manager: LoroDocumentManager,
+  reason: string
+): Promise<MachineFlockFreshness> => {
+  try {
+    await manager.syncMetaOrThrow({ reason, requireRemoteConfirmation: true });
+    return { confirmed: true };
+  } catch (error) {
+    getLogger('mcp').warn(
+      `Workspace metadata sync was not confirmed (${reason}); continuing from the local replica: ${formatMcpErrorMessage(error)}`
+    );
+    return {
+      confirmed: false,
+      error: new WorkspaceSyncUnavailableError({
+        message: WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
+        cause: error,
+      }),
+    };
+  }
+};
+
+const syncMachineFlockDocForLocalRead = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  machines: readonly MachineMeta[]
-): Promise<void> => {
-  await Promise.all(
-    machines.map(
-      async (machine) =>
-        await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machine.id), {
-          reason: `mcp.session_create_options:${machine.id}`,
-        })
-    )
-  );
+  machineId: MachineId,
+  reason: string
+): Promise<MachineFlockFreshness> => {
+  try {
+    await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
+      reason,
+      requireRemoteConfirmation: true,
+    });
+    return { confirmed: true };
+  } catch (error) {
+    getLogger('mcp').warn(
+      `Machine Flock freshness sync was not confirmed (${reason}); continuing from the local replica: ${formatMcpErrorMessage(error)}`
+    );
+    return { confirmed: false, error };
+  }
 };
 
 const readCurrentSessionMeta = async (
@@ -2480,7 +2516,12 @@ const readMachineAcpCapabilities = async (
 const buildSessionWorkContext = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  session: SessionMeta
+  session: SessionMeta,
+  /**
+   * Freshness for `session.machineId` when the caller already attempted that
+   * Machine Flock sync. A second attempt would wait out another Streams timeout.
+   */
+  knownMachineFreshness?: MachineFlockFreshness
 ): Promise<
   | { kind: 'chat' }
   | { kind: 'github'; repo: string }
@@ -2495,15 +2536,27 @@ const buildSessionWorkContext = async (
 > => {
   const project = session.project;
   if (project?.kind === 'local') {
-    await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, session.machineId), {
-      reason: `mcp.session_current.local_project:${session.machineId}`,
-    });
+    const freshness =
+      knownMachineFreshness ??
+      (await syncMachineFlockDocForLocalRead(
+        manager,
+        workspaceId,
+        session.machineId,
+        `mcp.session_current.local_project:${session.machineId}`
+      ));
     const localProjects = await readMachineLocalProjects(
       manager.repo,
       workspaceId,
       session.machineId
     );
     const localProject = localProjects[project.localProjectId];
+    if (!localProject) {
+      assertMachineFlockCacheSufficient(
+        freshness,
+        `Local project is absent from the local replica: ${project.localProjectId}.`,
+        { kind: 'project', id: project.localProjectId }
+      );
+    }
     const githubRepo = resolveProjectGitHubRepo(project);
     return {
       kind: 'local',
@@ -2526,7 +2579,8 @@ const buildSessionWorkContext = async (
 const buildSessionCurrentInfo = async (
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  session: SessionMeta
+  session: SessionMeta,
+  knownMachineFreshness?: MachineFlockFreshness
 ): Promise<Record<string, unknown>> => {
   return {
     workspaceId,
@@ -2537,7 +2591,12 @@ const buildSessionCurrentInfo = async (
     ...(session.openedByRootSessionId
       ? { openedByRootSessionId: session.openedByRootSessionId }
       : {}),
-    workContext: await buildSessionWorkContext(manager, workspaceId, session),
+    workContext: await buildSessionWorkContext(
+      manager,
+      workspaceId,
+      session,
+      knownMachineFreshness
+    ),
     git: {
       ...(session.branchName ? { branchName: session.branchName } : {}),
       ...(session.baseBranch ? { baseBranch: session.baseBranch } : {}),
@@ -2593,15 +2652,27 @@ const buildSessionCreateOptions = async (
   const workspace = await resolveWorkspaceOrThrow(auth, ctx.workspaceId);
   const workspaceId = workspace.id as WorkspaceId;
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_create_options:${workspaceId}`);
+    const metaFreshness = await syncWorkspaceMetaForLocalRead(
+      manager,
+      `mcp.session_create_options:${workspaceId}`
+    );
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
+      if (!metaFreshness.confirmed) throw metaFreshness.error;
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
+    const requestedMachineId = normalizeCliValue(input.machineId);
+    const machineIdToResolve = (requestedMachineId ?? currentSession.machineId) as MachineId;
+    if (
+      !metaFreshness.confirmed &&
+      !machineEntries.some((entry) => entry.meta.id === machineIdToResolve)
+    ) {
+      throw metaFreshness.error;
+    }
     // Null here is "presence unavailable", so liveness is UNKNOWN for every remote
     // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
     // drop healthy Machines out of the candidate list with no warning at all.
@@ -2628,11 +2699,22 @@ const buildSessionCreateOptions = async (
       input.machineId,
       currentSession.machineId
     );
-    await syncMachineFlockDocsForOptions(manager, workspaceId, [selectedMachine]);
+    const flockFreshness = await syncMachineFlockDocForLocalRead(
+      manager,
+      workspaceId,
+      selectedMachine.id,
+      `mcp.session_create_options:${selectedMachine.id}`
+    );
     const allAgentConfigs = await listMergedAgentConfigs(manager.repo, workspaceId, [
       selectedMachine.id,
     ]);
     const agentConfigQuery = normalizeCliValue(input.agentConfigQuery)?.toLowerCase();
+    if (allAgentConfigs.length === 0) {
+      assertMachineFlockCacheSufficient(flockFreshness, 'Agent config catalog is unavailable.', {
+        kind: 'agent config',
+        id: agentConfigQuery,
+      });
+    }
     const defaultAgentConfigId = selectDefaultAgentConfigForCreate(
       allAgentConfigs,
       selectedMachine.id,
@@ -2648,6 +2730,13 @@ const buildSessionCreateOptions = async (
         return defaultAgentConfigId ? config.id === defaultAgentConfigId : false;
       })
       .slice(0, MAX_MCP_CREATE_OPTION_MATCHES);
+    if (agentConfigQuery && agentConfigs.length === 0) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Agent config is absent from the local replica: ${agentConfigQuery}.`,
+        { kind: 'agent config', id: agentConfigQuery }
+      );
+    }
     const acpCapabilities = await readMachineAcpCapabilities(
       manager,
       workspaceId,
@@ -2658,9 +2747,10 @@ const buildSessionCreateOptions = async (
       currentSession.machineId === selectedMachine.id && currentSession.project?.kind === 'local'
         ? currentSession.project.localProjectId
         : undefined;
-    const localProjectCandidates = Object.values(
+    const allLocalProjects = Object.values(
       await readMachineLocalProjects(manager.repo, workspaceId, selectedMachine.id)
-    ).filter((project) => {
+    );
+    const localProjectCandidates = allLocalProjects.filter((project) => {
       if (localProjectQuery) {
         return [project.id, project.name, project.rootPath].some((value) =>
           value.toLowerCase().includes(localProjectQuery)
@@ -2668,6 +2758,23 @@ const buildSessionCreateOptions = async (
       }
       return currentLocalProjectId !== undefined && project.id === currentLocalProjectId;
     });
+    if (localProjectQuery && localProjectCandidates.length === 0) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Local project is absent from the local replica: ${localProjectQuery}.`,
+        { kind: 'project', id: localProjectQuery }
+      );
+    }
+    if (
+      currentLocalProjectId !== undefined &&
+      !allLocalProjects.some((project) => project.id === currentLocalProjectId)
+    ) {
+      assertMachineFlockCacheSufficient(
+        flockFreshness,
+        `Local project is absent from the local replica: ${currentLocalProjectId}.`,
+        { kind: 'project', id: currentLocalProjectId }
+      );
+    }
     const localProjects = (
       await filterAuthorizedLocalProjectsForOptions(
         auth,
@@ -2705,7 +2812,12 @@ const buildSessionCreateOptions = async (
         : [];
     return {
       ok: true,
-      current: await buildSessionCurrentInfo(manager, workspaceId, currentSession),
+      current: await buildSessionCurrentInfo(
+        manager,
+        workspaceId,
+        currentSession,
+        currentSession.machineId === selectedMachine.id ? flockFreshness : undefined
+      ),
       defaultMachineId: currentSession.machineId,
       ...(defaultAgentConfigId ? { defaultAgentConfigId } : {}),
       machines: machines.map((machine) => ({

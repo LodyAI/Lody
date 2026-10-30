@@ -98,6 +98,9 @@ Parent instructions apply. Background: [README.md](README.md).
   never current values. Stay sparse by default (online Machines, one agent config, the current
   local project, no GitHub fetch), expanding only through explicit query inputs.
   Explicit permissions may exceed the parent; follow the caller's user authorization.
+  Streams failures on this read continue from the local replica and return retryable
+  `SYNC_UNAVAILABLE` only when that replica cannot validate the selection.
+  [Freshness](README.md#machine-catalog-retry-guidance).
 - Machine presence is online/offline/unknown. `getOnlineMachineIds() === null` means
   unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline, never on
   an RPC timeout. Unknown proceeds under its own deadline. Expose three-state liveness,
