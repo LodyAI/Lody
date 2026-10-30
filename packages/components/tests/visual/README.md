@@ -663,6 +663,8 @@ ordering belong to [the helper build guide](../../../code-review-helper/standalo
 
 | `artifacts/visual/leaves107-acceptance.html` | 182 FileTree/commit utilities migrate; 27 unreachable EmptyThread occurrences are cleanup only | 108/136 formal PNG pairs exact; 66,456 standard records equal; native30 and file10 exact | 28 formal OPENs/7,795 raw plus one normal-motion raw pixel remain. Actual body-absence readiness replaces two rejected cells; phone offline tooltip remains offscreen |
 
+| `artifacts/visual/leaves108-109-acceptance.html` | 78 private diff/context utilities; six normal Separator mappings/source removal0, legal Slot retained | 84/128 formal PNG pairs exact; 40,078 standard records equal; 204 pairs total/158exact | 46 OPENs/347raw/135 informational threshold; nativeAfter and file109 finalization unknown. Four transition gates and six selector failures retained; Sidebar context images are After-only |
+
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
 flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
@@ -704,7 +706,11 @@ through107 separately validates thirty production files: 698 occurrences/eight
 used files/18 unresolved expressions, including 519 in ReviewRenderer. See
 `inventory-helper-source-through107-proof.json`. Its decrease of 377 separates
 296 migrations from 81 unused/unreachable cleanup occurrences; 104/106's 86 normal
-runtime mappings delete no source literals. The historical through100 bound
+runtime mappings delete no source literals. The exact successful-build snapshot
+through 109 has 620 occurrences/eight used files/18 unresolved expressions across
+thirty production files, including 441 in ReviewRenderer. Its 78-source decrease is
+migration; 108's six normal-runtime mappings delete no literals. See
+`inventory-helper-source-through109-proof.json`; later 110/111 are excluded. The historical through100 bound
 remains 1,151/ten/26; the two units remove exactly 76. Any later application
 batch requires a fresh source-frozen inventory before advancing the through99
 timeline. These static lower
@@ -715,8 +721,8 @@ from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
 same-element token-input negatives are separate. An original Gallery gate failure
 and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
 verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 50 frozen reports, including the separately scoped helper
-continuations through107. Those later reports preserve every earlier OPEN rather than closing
+keyboard/pointer zoom and 1280/390px layouts. The index now links 51 frozen reports, including the separately scoped helper
+continuations through 109. Those later reports preserve every earlier OPEN rather than closing
 issues through a new successful subset.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its

@@ -3069,6 +3069,149 @@ function CommitAvatar({ name, seed }: { readonly name: string; readonly seed: st
   );
 }
 
+const diffBlockStyles = stylex.create({
+  block: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    borderRadius: 'var(--radius)',
+    transitionProperty: 'opacity',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  collapsed: { overflow: 'hidden' },
+  reviewed: { opacity: 0.65 },
+  header: {
+    position: 'sticky',
+    top: 'calc(var(--crh-toolbar-h) + var(--crh-group-header-h,0px))',
+    zIndex: 10,
+  },
+  headerInner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'border-top-left-radius': 'var(--radius)',
+    'border-top-right-radius': 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  bottomCorners: {
+    'border-bottom-right-radius': 'var(--radius)',
+    'border-bottom-left-radius': 'var(--radius)',
+  },
+  toggle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  chevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+  },
+  path: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  tools: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+  },
+  stats: {
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  body: {
+    overflow: 'hidden',
+    'border-inline-style': 'var(--tw-border-style)',
+    'border-inline-width': '1px',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+  },
+  diagnostics: {
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+    },
+    padding: 'calc(var(--spacing) * 2.5)',
+  },
+});
+
+const contextBlockStyles = stylex.create({
+  root: { borderTopStyle: 'var(--tw-border-style)', borderTopWidth: '1px' },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  icon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  scroll: { overflowX: 'auto', padding: 'calc(var(--spacing) * 2)' },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12.5px',
+  },
+  range: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+    },
+  },
+  lineNumber: {
+    width: 'calc(var(--spacing) * 12)',
+    minWidth: 'calc(var(--spacing) * 12)',
+    userSelect: 'none',
+    'padding-right': 'calc(var(--spacing) * 3)',
+    textAlign: 'right',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  source: { whiteSpace: 'pre', color: 'hsl(var(--foreground))' },
+  status: {
+    flexShrink: 0,
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
 const ReviewDiffBlock = memo(function ReviewDiffBlock({
   block,
   diffStyle,
@@ -3364,22 +3507,29 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
         // sticky header carries its own complete border and never doubles with the
         // block frame while pinned. overflow-hidden is only applied while collapsed
         // (header is then the lone child and nothing scrolls).
-        'crh-block min-w-0 rounded-md bg-card transition-opacity',
-        collapsed && 'overflow-hidden',
-        reviewed && 'opacity-65'
+        'crh-block bg-card',
+        stylex.props(
+          diffBlockStyles.block,
+          collapsed && diffBlockStyles.collapsed,
+          reviewed && diffBlockStyles.reviewed
+        ).className
       )}
       data-block-path={block.path}
     >
-      <div className="crh-block-header sticky top-[calc(var(--crh-toolbar-h)+var(--crh-group-header-h,0px))] z-10">
+      <div className={cn('crh-block-header', stylex.props(diffBlockStyles.header).className)}>
         <div
           className={cn(
-            'crh-block-header-inner flex items-center justify-between gap-2.5 rounded-t-md border px-2.5 py-1.5',
-            collapsed && 'rounded-b-md'
+            'crh-block-header-inner',
+            stylex.props(diffBlockStyles.headerInner, collapsed && diffBlockStyles.bottomCorners)
+              .className
           )}
         >
           <button
             type="button"
-            className="group flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+            className={cn(
+              'group outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+              stylex.props(diffBlockStyles.toggle).className
+            )}
             aria-expanded={!collapsed}
             aria-controls={bodyId}
             onClick={() => {
@@ -3392,21 +3542,22 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           >
             <ChevronDown
               className={cn(
-                'size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:text-foreground',
-                collapsed && '-rotate-90'
+                'text-muted-foreground group-hover:text-foreground',
+                collapsed && '-rotate-90',
+                stylex.props(diffBlockStyles.chevron).className
               )}
             />
             <FileIcon filePath={block.path} className="size-3.5" />
-            <span className="truncate font-mono text-[12.5px] font-medium text-foreground">
+            <span className={cn('font-medium', stylex.props(diffBlockStyles.path).className)}>
               {block.path}
             </span>
             <FileStatusBadge file={block.file} kind={block.kind} />
           </button>
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div {...stylex.props(diffBlockStyles.tools)}>
             {block.file && block.kind === 'change' && (
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                <span className="text-addition">+{block.file.additions}</span>{' '}
-                <span className="text-deletion">−{block.file.deletions}</span>
+              <span className={cn('tabular-nums', stylex.props(diffBlockStyles.stats).className)}>
+                <span {...stylex.props(diffBlockStyles.additions)}>+{block.file.additions}</span>{' '}
+                <span {...stylex.props(diffBlockStyles.deletions)}>−{block.file.deletions}</span>
               </span>
             )}
             <Button
@@ -3430,9 +3581,9 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
       </div>
 
       {isExpanded && (
-        <div id={bodyId} className="overflow-hidden rounded-b-md border-x border-b">
+        <div id={bodyId} {...stylex.props(diffBlockStyles.body, diffBlockStyles.bottomCorners)}>
           {block.diagnostics.length > 0 && (
-            <div className="border-b bg-muted/30 p-2.5">
+            <div {...stylex.props(diffBlockStyles.diagnostics)}>
               <Diagnostics diagnostics={block.diagnostics} />
             </div>
           )}
@@ -3495,23 +3646,21 @@ function ContextBody({ block }: { readonly block: ReviewResolvedBlock }) {
   const end = Math.min(lineCount, range.end + CONTEXT_BODY_CONTEXT_LINES);
   const displayLines = allLines.slice(start - 1, end);
   return (
-    <div className="crh-context-body border-t">
-      <div className="flex items-center gap-2 border-b bg-muted/20 px-2.5 py-1 text-[11px] text-muted-foreground">
-        <Info className="size-3" />
+    <div className={cn('crh-context-body', stylex.props(contextBlockStyles.root).className)}>
+      <div {...stylex.props(contextBlockStyles.header)}>
+        <Info {...stylex.props(contextBlockStyles.icon)} />
         <span>Context from current commit</span>
       </div>
-      <div className="overflow-x-auto p-2">
-        <table className="w-full border-collapse font-mono text-[12.5px] leading-5">
+      <div {...stylex.props(contextBlockStyles.scroll)}>
+        <table className={cn('leading-5', stylex.props(contextBlockStyles.table).className)}>
           <tbody>
             {displayLines.map((line, index) => {
               const lineNumber = start + index;
               const inRange = lineNumber >= range.start && lineNumber <= range.end;
               return (
-                <tr key={lineNumber} className={inRange ? 'bg-foreground/5' : undefined}>
-                  <td className="w-12 min-w-12 select-none pr-3 text-right text-muted-foreground">
-                    {lineNumber}
-                  </td>
-                  <td className="whitespace-pre text-foreground">{line || ' '}</td>
+                <tr key={lineNumber} {...stylex.props(inRange && contextBlockStyles.range)}>
+                  <td {...stylex.props(contextBlockStyles.lineNumber)}>{lineNumber}</td>
+                  <td {...stylex.props(contextBlockStyles.source)}>{line || ' '}</td>
                 </tr>
               );
             })}
@@ -3534,7 +3683,7 @@ function FileStatusBadge({
     kind === 'context' ? 'Unchanged file referenced for context' : formatFileStatus(file);
   return (
     <span
-      className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+      className={cn('tracking-wide', stylex.props(contextBlockStyles.status).className)}
       title={detail}
     >
       {shortLabel}

@@ -653,3 +653,48 @@ export const CommitOverflowCoverage: Story = {
     storageKey: 'storybook-commit-overflow-coverage',
   },
 };
+
+export const ContextBlockCoverage: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/context-block.review.md',
+      markdown: source([
+        '---',
+        'review_version: 1',
+        'merge_base: 1111111111111111111111111111111111111111',
+        'current_commit: 2222222222222222222222222222222222222222',
+        '---',
+        '',
+        '# Read unchanged context',
+        '',
+        '## Group: Context around the selected source',
+        '',
+        '`context://src/unchanged.ts?range=L3-L6`',
+        '',
+        '`context://src/missing-context.ts?range=L3-L4`',
+      ]),
+      files: [
+        {
+          path: 'src/unchanged.ts',
+          status: 'unknown',
+          additions: 0,
+          deletions: 0,
+          oldText: '',
+          newText: source([
+            '// Unchanged source shown for context.',
+            'export const before = 1;',
+            'export function describeContext() {',
+            '',
+            '  const label = "Synthetic unchanged source";',
+            '  return `${label}: a deliberately long context line keeps the original horizontal overflow and selected-range background visible at narrow widths.`;',
+            '}',
+            '',
+            'export const after = 2;',
+            '// Last line lies outside the selected range.',
+          ]),
+        },
+      ],
+    }),
+    storageKey: 'storybook-context-block-coverage',
+  },
+};

@@ -1627,6 +1627,34 @@ aria-expanded 改变后 forceExpanded 仍让 body 挂载两秒，替代帧等待
 为 519 处。1,075→698 的减少分列 296 处迁移和八十一处闲置／不可达清理；八十六处控件
 运行路径映射没有移除源码字面量。stories、测试、后续工作与主组件 1,424 库存保持独立。
 
+Separator 续迁将相同的普通／Slot 分流用于六处普通运行路径映射，源码移除为零。
+既有 JavaScript orientation 分支仍决定样式，不由原始或 Radix 规范化 data 属性替代。
+ref、语义／装饰角色、嵌套 children、inline／caller 优先级，甚至原非法 orientation 的
+样式／属性不一致都保留。三十六对 PNG／完整记录相同，其中四对实际 Sidebar 裁切来自
+Storybook 与离线文件。原四张局部颜色帧因复用稳定计数器，在极短真实 transition 结束前
+误接受旧颜色而拒绝；逐状态清零并等待动画结束及目标 RGBA 修正采集协议，无产品补丁。
+完整页面图仅为 After-only，不宣称手机 Sidebar 已绘制覆盖。
+
+diff／context 续迁移除七十八处私有 utility，render 前行为逻辑逐字不变。两个 Button
+SVG size sentinel、primitive caller 与私有 font／ring／leading writer 保留。
+未分层 `.crh-block` 背景仍压过 `bg-card`，没有在无效 StyleX 后藏原 utility 或虚计迁移。
+最小真实 parser 夹具覆盖九行 context、四行选区、长行与 missing-resolved-file Alert；
+不代表 parse-error 覆盖，后者原样式保留。
+
+一百二十对正式帧中七十六对 PNG 相同、39,822 条标准记录相同；四十四对正式 OPEN 共
+207 原始／九阈值像素，两对 native OPEN 另有 140 原始／126 阈值像素，1,029 条完整
+native 记录均相同。八对正常动效／304 条完整记录与十对离线文件／454 条记录及 1,850 条
+几何记录相同。native After 和离线最终关闭没有返回，保存完整 checkpoint 后仅停止自有
+Node 进程，两者继续标记 `closedNormally=false`，帧相同不代表清理成功。主 Agent 独立
+核对两单元共 204 对全部原始记录、PNG SHA 与解码像素，并实际观察桌面／手机的 context
+和 composer；全部历史 OPEN 状态保留。
+
+截至 109 的成功构建库存核对三十份生产源码哈希，包含已验收 Separator 与 diff／context，
+使用 helper 真实 CSS，得 **620 处／八个使用文件／十八个未解析表达式**。较 698 减少的
+七十八处均为迁移，Separator 六处运行路径映射不删除源码字面量；ReviewRenderer 仍有
+441 处。主产品库存仍独立为截至 99 的 1,424／157／725，不含后续 110／111 与未访问的
+helper 状态。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)

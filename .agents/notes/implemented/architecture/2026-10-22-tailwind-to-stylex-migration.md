@@ -2133,7 +2133,7 @@ original rendering trigger.
 The shared UI-only run through95 additionally passes 25 files / 313 tests, with
 111 source/test/manifest hashes unchanged and the same 78 existing Styleq warnings.
 This does not extend the through93 Electron boundary. A later components-only
-run through99 passes 620 files/6,209 tests while all 2,539 recorded source, test
+run through 99 passes 620 files/6,209 tests while all 2,539 recorded source, test
 and metadata hashes remain unchanged. It includes the existing working-tree
 user changes and does not claim another Electron, helper or root-check run.
 
@@ -2273,7 +2273,7 @@ reviewed-state cells are rejected: aria-expanded can change while forceExpanded
 keeps the body mounted for two seconds. Their replacements wait for actual body
 absence without writing state. A bounded Viewed control records checkbox properties,
 seven pseudo predicates, focus, complete CSS and precise geometry; repeated Before
-frames match the original After raster. A separate root1024 control records every
+frames match the original After raster. A separate root probe at1024px records every
 header descendant and reproduces the original Before PNG on both sources; its
 three PNGs match; the Before/After pre objects match, as do their post objects.
 Both bounded controls retain
@@ -2287,6 +2287,46 @@ CSS: **698 occurrences/eight used files/18 unresolved expressions**. ReviewRende
 accounts for 519. The 1,075→698 decrease separates 296 migrations from 81 unused or
 unreachable cleanup occurrences; the 86 control runtime mappings remove no source
 literals. Stories, tests, later work and the core 1,424 inventory remain separate.
+
+The Separator continuation applies the same ordinary/Slot split to six normal
+runtime mappings, with zero source removal. Its existing JavaScript orientation
+branch remains authoritative for styling; raw or normalized Radix data attributes
+do not replace that branch. Refs, semantic/decorative roles, nested children,
+inline/caller precedence and even the old invalid-orientation mismatch are preserved.
+Thirty-six paired PNGs/full records match, including four real Sidebar crops over
+Storybook and offline files. Four initial local-color frames were rejected: a reused
+stability counter accepted the previous color before a tiny real transition ended.
+Resetting the counter per state and waiting for finished animations and the target
+RGBA fixes the capture protocol, with no product patch. Full-page images are
+After-only and mobile Sidebar paint is not claimed.
+
+The diff/context continuation migrates 78 private utilities, preserving the original
+logic before rendering byte for byte. Two Button SVG size sentinels, primitive
+callers and private font/ring/leading writers remain. The unlayered `.crh-block`
+background still wins over `bg-card`; that inactive utility is not hidden behind
+an ineffective StyleX declaration or credited as migrated. A minimal real parser
+fixture exercises nine context lines, four selected rows, a long line and the
+missing-resolved-file Alert. This does not establish parse-error coverage; that
+branch's original styles remain.
+
+Its 120 formal pairs have 76 exact PNGs and 39,822 equal standard records. Forty-four
+formal OPENs total 207 raw/nine threshold pixels; two native OPENs add 140 raw/126
+threshold pixels. All 1,029 complete native records agree. Eight normal-motion
+pairs/304 complete records and ten offline pairs/454 records plus 1,850 geometry
+records match. Native After and offline finalization did not return; owned Node
+processes were stopped after preserving complete checkpoints, and both retain
+`closedNormally=false`. Matching frames do not establish successful cleanup.
+Root independently verifies all 204 pairs across both units, including full raw
+record arrays, original SHA values and decoded pixels, and observes the real
+context/composer UI at desktop and phone sizes. Historical OPENs remain untouched.
+
+The exact successful-build inventory through 109 includes all thirty production
+source hashes, the accepted Separator and diff/context changes, and the actual
+helper CSS: **620 occurrences/eight used files/18 unresolved expressions**. Its
+78-occurrence decrease from 698 is migration only; Separator's six runtime mappings
+delete no source literals. ReviewRenderer retains 441 occurrences. The core product
+inventory remains 1,424/157/725 through 99; later 110/111 work and unvisited helper
+states are excluded.
 
 ## Remaining work
 
@@ -2338,7 +2378,7 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through99 v2 split is components: 990 occurrences/141 files/632
+The published through 99 v2 split is components: 990 occurrences/141 files/632
 unresolved, legacy UI: 429/14/93 and routes: 5/2/0, from 790 recorded source files.
 Shared UI source and export metadata are frozen outside that three-root count.
 Known StyleX templates remain unresolved expressions, not newly introduced

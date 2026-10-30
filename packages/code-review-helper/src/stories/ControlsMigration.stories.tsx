@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { Separator } from '../ui/separator';
 
 const meta = {
   title: 'Code Review Helper/ControlsMigration',
@@ -201,3 +202,117 @@ export const TooltipSlot: Story = {
     </main>
   ),
 };
+
+function separatorRef(element: HTMLElement | null) {
+  if (element) element.dataset.refTag = element.tagName;
+}
+
+function SeparatorCases({ local = false }: { local?: boolean }) {
+  const variables = local
+    ? ({ '--border': '185 60% 55% / .65', '--sidebar-border': '35 80% 55% / .7' } as CSSProperties)
+    : undefined;
+  const row = {
+    width: 'min(320px, 100%)',
+    height: 40,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  } as const;
+  return (
+    <main
+      className="crh-shell dark"
+      data-controls-migration="separators"
+      style={{
+        ...variables,
+        minHeight: '100vh',
+        padding: 24,
+        display: 'grid',
+        gap: 12,
+        alignContent: 'start',
+        background: 'hsl(var(--background))',
+        color: 'hsl(var(--foreground))',
+      }}
+    >
+      <div>Horizontal, decorative by default</div>
+      <div style={row}>
+        <Separator data-owned-separator="horizontal" ref={separatorRef} />
+      </div>
+      <div>Vertical, named semantic separator</div>
+      <div style={row}>
+        <span>Before</span>
+        <Separator
+          data-owned-separator="vertical"
+          orientation="vertical"
+          decorative={false}
+          aria-label="Named vertical"
+          ref={separatorRef}
+        />
+        <span>After</span>
+      </div>
+      <div>Caller utility overrides and Sidebar border color</div>
+      <div style={row}>
+        <Separator
+          data-owned-separator="caller"
+          className="h-2 w-1/2 shrink bg-sidebar-border"
+          ref={separatorRef}
+        />
+      </div>
+      <div>Horizontal Slot with conflicting child classes and preserved content</div>
+      <div style={row}>
+        <Separator data-owned-separator="slot-horizontal" asChild ref={separatorRef}>
+          <span className="h-4 w-1/2 shrink bg-info" data-slot-child="horizontal">
+            <i
+              data-preserved-child
+              style={{ display: 'block', width: 3, height: 3, backgroundColor: 'currentColor' }}
+            />
+          </span>
+        </Separator>
+      </div>
+      <div>Vertical Slot with conflicting child classes</div>
+      <div style={row}>
+        <Separator
+          data-owned-separator="slot-vertical"
+          orientation="vertical"
+          decorative={false}
+          asChild
+          ref={separatorRef}
+        >
+          <span className="h-1/2 w-4 shrink bg-info" data-slot-child="vertical" />
+        </Separator>
+      </div>
+      <div>Raw attributes and inline dimensions keep their original precedence</div>
+      <div style={row}>
+        <Separator
+          data-owned-separator="inline"
+          orientation="vertical"
+          decorative={false}
+          aria-label="Inline divider"
+          data-orientation="caller-value"
+          tabIndex={0}
+          style={{ width: 3, height: 31, backgroundColor: 'rgb(41, 133, 157)' }}
+          ref={separatorRef}
+        >
+          <span data-preserved-child />
+        </Separator>
+      </div>
+      <div>Original invalid-orientation normalization and owner axis branch</div>
+      <div style={row}>
+        <Separator
+          data-owned-separator="unknown"
+          orientation={'unknown' as 'horizontal'}
+          decorative={false}
+          ref={separatorRef}
+        />
+        <Separator
+          data-owned-separator="null"
+          orientation={null as unknown as 'horizontal'}
+          decorative={false}
+          ref={separatorRef}
+        />
+      </div>
+    </main>
+  );
+}
+
+export const SeparatorAxes: Story = { render: () => <SeparatorCases /> };
+export const SeparatorLocalVariables: Story = { render: () => <SeparatorCases local /> };

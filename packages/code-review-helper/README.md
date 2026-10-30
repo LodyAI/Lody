@@ -16,7 +16,7 @@ private-writer and third-party compatibility. Keep the original dark theme,
 responsive layout and interactions; a styling change does not change reference
 navigation, diff readiness or comment ownership.
 
-The local DropdownMenu, Tooltip, Button and ToggleGroup use StyleX on ordinary
+The local DropdownMenu, Tooltip, Button, ToggleGroup and Separator use StyleX on ordinary
 elements while preserving the original Tailwind cascade for legal Radix `asChild`
 children. Slot concatenates parent and
 child classes without resolving utility conflicts, so moving only parent defaults
@@ -25,6 +25,9 @@ class selectors retain their raw utility values and order; one local CVA declara
 provides both the public legacy selector and the private owned selector. Runtime
 StyleX mappings and source-utility removals are counted separately. Private font,
 transition, ring and descendant rules remain until their writer contracts migrate.
+Separator styling follows its existing JavaScript orientation branch; caller-written
+or Radix-normalized data attributes do not choose its axis. Rendering the original
+invalid-orientation case retains its original attribute/style mismatch.
 
 The four build/test entries share the same compiler options. CSS layers place
 StyleX after base styles and before components/utilities. The standalone build

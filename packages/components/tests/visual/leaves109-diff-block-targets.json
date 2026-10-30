@@ -1,0 +1,734 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--grouped-refactor",
+    "code-review-helper-reviewrenderer--context-block-coverage",
+    "code-review-helper-reviewrenderer--file-statuses",
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics",
+    "code-review-helper-reviewrenderer--split-view"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];if(!a.length)return false;const q=window.__109Warm??{i:0};window.__109Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(true))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")"
+      }
+    ],
+    "code-review-helper-reviewrenderer--context-block-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];if(!a.length)return false;const q=window.__109Warm??{i:0};window.__109Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!(true))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")"
+      }
+    ],
+    "code-review-helper-reviewrenderer--file-statuses": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];if(!a.length)return false;const q=window.__109Warm??{i:0};window.__109Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e||!(true))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")"
+      }
+    ],
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];if(!a.length)return false;const q=window.__109Warm??{i:0};window.__109Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/parser/src/large-parser.ts\\\"]\");if(!e||!(true))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")"
+      }
+    ],
+    "code-review-helper-reviewrenderer--split-view": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll(\"[data-block-path]\")];if(!a.length)return false;const q=window.__109Warm??{i:0};window.__109Warm=q;if(q.i>=a.length)return true;const e=a[q.i];e.scrollIntoView({block:\"center\",behavior:\"instant\"});const h=e.querySelector(\"diffs-container\");if(!e.querySelector(\".crh-diff-placeholder\")&&(!h||h.shadowRoot?.querySelector(\"[data-line]\")))q.i++;return false;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(true))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-shell :hover\")"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(e.querySelector(\".crh-block-header button[aria-controls]\").matches(\":hover\")))return false;const h=e.querySelector(\".crh-block-header\");const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] button[aria-label^=\"Add a review comment to\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(document.activeElement===e.querySelector(\".crh-block-header button[aria-controls]\")&&document.activeElement.matches(\":focus-visible\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "viewed-body-absent",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] input[aria-label=\"Viewed\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()&&e.querySelector(\"input[aria-label=Viewed]\").checked))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "comment-trigger",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] input[aria-label=\"Viewed\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          },
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] button[aria-label^=\"Add a review comment to\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");return e&&e===document.activeElement&&e.getAttribute(\"aria-label\")?.startsWith(\"Comment on index.ts line \");}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--context-block-coverage": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!(e.querySelector(\".crh-block-header button[aria-controls]\").matches(\":hover\")))return false;const h=e.querySelector(\".crh-block-header\");const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] .crh-block-header button[aria-controls]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] button[aria-label^=\"Add a review comment to\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!(document.activeElement===e.querySelector(\".crh-block-header button[aria-controls]\")&&document.activeElement.matches(\":focus-visible\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "viewed-body-absent",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] input[aria-label=\"Viewed\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()&&e.querySelector(\"input[aria-label=Viewed]\").checked))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "comment-trigger",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] input[aria-label=\"Viewed\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/unchanged.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          },
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"src/unchanged.ts\"] button[aria-label^=\"Add a review comment to\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");return e&&e===document.activeElement&&e.getAttribute(\"aria-label\")?.startsWith(\"Comment on unchanged.ts line \");}"
+          }
+        ]
+      },
+      {
+        "name": "missing-context-diagnostic",
+        "steps": [
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-panel textarea\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"src/missing-context.ts\\\"]\");if(!e||!(!!e.querySelector(\"[role=alert]\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--file-statuses": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e||!(e.querySelector(\".crh-block-header button[aria-controls]\").matches(\":hover\")))return false;const h=e.querySelector(\".crh-block-header\");const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] .crh-block-header button[aria-controls]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] button[aria-label^=\"Add a review comment to\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e||!(document.activeElement===e.querySelector(\".crh-block-header button[aria-controls]\")&&document.activeElement.matches(\":focus-visible\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/review-helper/src/cli.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--budget-and-line-diagnostics": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/parser/src/large-parser.ts\\\"]\");if(!e||!(e.querySelector(\".crh-block-header button[aria-controls]\").matches(\":hover\")))return false;const h=e.querySelector(\".crh-block-header\");const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] .crh-block-header button[aria-controls]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] button[aria-label^=\"Add a review comment to\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/parser/src/large-parser.ts\\\"]\");if(!e||!(document.activeElement===e.querySelector(\".crh-block-header button[aria-controls]\")&&document.activeElement.matches(\":focus-visible\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/parser/src/large-parser.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/parser/src/large-parser.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/parser/src/large-parser.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--split-view": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(e.querySelector(\".crh-block-header button[aria-controls]\").matches(\":hover\")))return false;const h=e.querySelector(\".crh-block-header\");const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] button[aria-label^=\"Add a review comment to\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!(document.activeElement===e.querySelector(\".crh-block-header button[aria-controls]\")&&document.activeElement.matches(\":focus-visible\")))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"false\"&&!d;})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "header-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-block-path=\"packages/adaptors/src/index.ts\"] .crh-block-header button[aria-controls]"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/adaptors/src/index.ts\\\"]\");if(!e||!((() => {const b=e.querySelector(\".crh-block-header button[aria-controls]\"),d=document.getElementById(b.getAttribute(\"aria-controls\"));return b.getAttribute(\"aria-expanded\")===\"true\"&&!!d&&!d.querySelector(\".crh-diff-placeholder\");})()))return false;const h=e.querySelector(\".crh-block-header\");h.scrollIntoView({block:\"center\",behavior:\"instant\"});const a=[h,...h.querySelectorAll(\"*\")],s=JSON.stringify(a.map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})),q=window.__109Stable??{s:\"\",n:0};q.n=q.s===s?q.n+1:0;q.s=s;window.__109Stable=q;const b=h.getBoundingClientRect();return b.width>0&&b.top>=0&&b.bottom<=innerHeight&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&q.n>=3;}"
+          }
+        ]
+      }
+    ]
+  }
+}

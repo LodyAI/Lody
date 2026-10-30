@@ -1,0 +1,93 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-controlsmigration--separator-axes",
+    "code-review-helper-controlsmigration--separator-local-variables"
+  ],
+  "ready": {
+    "code-review-helper-controlsmigration--separator-axes": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-controls-migration=separators]'),es=[...document.querySelectorAll('[data-owned-separator]')];if(!root||es.length!==8||document.fonts.status!=='loaded'||getComputedStyle(root).backgroundColor!=='rgb(19, 20, 22)')return false;const by=id=>document.querySelector('[data-owned-separator='+id+']');if(by('horizontal').getAttribute('role')!=='none'||by('vertical').getAttribute('role')!=='separator'||by('vertical').getAttribute('aria-orientation')!=='vertical'||by('inline').dataset.orientation!=='caller-value'||by('slot-horizontal').tagName!=='SPAN'||by('slot-vertical').tagName!=='SPAN'||!by('slot-horizontal').querySelector('[data-preserved-child]')||!by('inline').querySelector('[data-preserved-child]'))return false;if(!['unknown','null'].every(id=>by(id).dataset.orientation==='horizontal'&&by(id).getBoundingClientRect().width===1&&by(id).getBoundingClientRect().height===40))return false;return es.every(e=>{const r=e.getBoundingClientRect();return e.dataset.refTag===e.tagName&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const es=[...document.querySelectorAll('[data-owned-separator]')];const value=JSON.stringify(es.map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return [r.x,r.y,r.width,r.height,s.backgroundColor,s.flexShrink]}));const a=window.__settle108??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__settle108=a;return a.n>=3&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--separator-local-variables": [
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-controls-migration=separators]'),es=[...document.querySelectorAll('[data-owned-separator]')];if(!root||es.length!==8||document.fonts.status!=='loaded'||getComputedStyle(root).backgroundColor!=='rgb(19, 20, 22)')return false;const by=id=>document.querySelector('[data-owned-separator='+id+']');if(by('horizontal').getAttribute('role')!=='none'||by('vertical').getAttribute('role')!=='separator'||by('vertical').getAttribute('aria-orientation')!=='vertical'||by('inline').dataset.orientation!=='caller-value'||by('slot-horizontal').tagName!=='SPAN'||by('slot-vertical').tagName!=='SPAN'||!by('slot-horizontal').querySelector('[data-preserved-child]')||!by('inline').querySelector('[data-preserved-child]'))return false;if(!['unknown','null'].every(id=>by(id).dataset.orientation==='horizontal'&&by(id).getBoundingClientRect().width===1&&by(id).getBoundingClientRect().height===40))return false;return es.every(e=>{const r=e.getBoundingClientRect();return e.dataset.refTag===e.tagName&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const es=[...document.querySelectorAll('[data-owned-separator]')];const value=JSON.stringify(es.map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return [r.x,r.y,r.width,r.height,s.backgroundColor,s.flexShrink]}));const a=window.__settle108??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__settle108=a;return a.n>=3&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-controlsmigration--separator-axes": [
+      {
+        "name": "raw-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-owned-separator=inline]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('[data-owned-separator=inline]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const es=[...document.querySelectorAll('[data-owned-separator]')];const value=JSON.stringify(es.map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return [r.x,r.y,r.width,r.height,s.backgroundColor,s.flexShrink]}));const a=window.__settle108??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__settle108=a;return a.n>=3&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--separator-local-variables": [
+      {
+        "name": "raw-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-owned-separator=inline]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('[data-owned-separator=inline]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const es=[...document.querySelectorAll('[data-owned-separator]')];const value=JSON.stringify(es.map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return [r.x,r.y,r.width,r.height,s.backgroundColor,s.flexShrink]}));const a=window.__settle108??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__settle108=a;return a.n>=3&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}
