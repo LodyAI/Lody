@@ -141,9 +141,8 @@ Unlisted requests retain their existing ordering. [Local control lane decision](
   ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
-  Completed turns retain their Agent until cleanup. GC goal checks use local storage
-  queries without retaining scanned bodies. Process scaling and query measurements:
-  [application memory investigation and goal-query decision](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
+  GC inspects the latest goal through local storage queries. See the
+  [goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
 - `session-transient-store.ts` — buffered ACP updates and their turn ownership;
   each active epoch retains independent event/content facts through flush. The
   image owner drains before content is read and records successful history writes. Classification: [ACP rules](acp/AGENTS.md).
