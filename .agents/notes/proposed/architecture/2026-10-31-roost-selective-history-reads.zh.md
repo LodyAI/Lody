@@ -195,3 +195,8 @@ footprint 包含 GC／内存页波动，输出的微小下降属于测量噪声�
 分为三个 draft：Roost 上游、Lody 共用查询与 Roost 接入、Loro 目标写入／回滚；Loro 叠在基础 PR 上。历史写入 Spec 增加 v2 成员格式后保持 draft，等待审阅。
 
 验证使用忽略的本地 SDK／Native 链接和合成数据。已发布 0.3.0 不包含新 API，合并基础 PR 前需配套发布 SDK／Native，并更新 Lody manifest／lockfile；未进行未经请求的发布，不提交会话记录或本地二进制。draft PR 必须明确这项依赖，不能把旧发布包的普通安装当成候选验收。
+
+
+### Loro 写入 PR 完成记录
+
+子 PR 将普通 Loro action、编辑／重发及 Agent 后备切换到 `HistoryWriter.updateSelected`／`updateSelectedWithRollback`。规划读取全局小字段，展开所有选中归属（包含递归 subagent 祖先）；未选中占位数据发生变更会在 CRDT 写入前拒绝。补偿保留实际存储前像和完整写前／写后身份检查，新 ID 的自动 seen/read、后续追加和无关前缀编辑保留既有行为。现有 writer／存储／边界套件增加禁止读取无关前缀、结果等价和拒绝后状态检查。上面的完整套件、两后端最终桌面流程及配对测量均来自此完整叠加源码；基础 PR 在此子 PR 之前也已独立验证。

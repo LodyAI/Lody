@@ -358,6 +358,16 @@ export interface HistoryWriter {
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     options?: { transcriptVisibility?: boolean }
   ): SessionHistoryInput[];
+  /** All matching bodies are selected before planning; untouched metadata is
+   * guarded against replacement before the first CRDT operation. */
+  updateSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): void;
+  updateSelectedWithRollback(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): () => void;
   /** Detached stored JSON for inspection/hashing; not copy/rollback provenance. */
   readStored(): SessionHistoryInput[];
   capture(): StoredHistorySnapshot;
@@ -568,6 +578,45 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     const value = list.get(index);
     return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
   };
+  const storedRange = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => storedAt(from + index));
+  const membership = () =>
+    Array.from({ length: list.length }, (_, index) => {
+      const row = list.get(index);
+      return {
+        id: storedScalar(storedField(row, 'id')),
+        record: isContainer(row) ? row.kind() === 'Map' : record(row),
+      };
+    });
+  const selectedPlan = (
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ) => {
+    const query = readQuery();
+    const positions = new Set(select(query));
+    for (const index of positions)
+      if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
+        throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+    const untouched = new Set<unknown>();
+    const before = query.map((row, index) => {
+      if (positions.has(index)) return storedAt(index);
+      untouched.add(row);
+      return row as unknown as SessionHistoryInput;
+    });
+    const next = immer.produce(before, (draft) => {
+      const result = updater(draft);
+      if (result && result !== draft) draft.splice(0, draft.length, ...result);
+    });
+    const commit = planWrite(before, next, (old, value) => {
+      if (untouched.has(old))
+        throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
+      return old === undefined
+        ? cleanNew(HistoryEntryWriteSchema, value)
+        : prepareReplacement(old, value);
+    });
+    return { before, next, commit };
+  };
+
   const writer: HistoryWriter = {
     forEachStored(visit) {
       for (let index = 0; index < list.length; index++) {
@@ -583,6 +632,58 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
         return storedAt(index);
       });
+    },
+    updateSelected(select, updater) {
+      selectedPlan(select, updater).commit();
+    },
+    updateSelectedWithRollback(select, updater) {
+      const beforeMembers = membership();
+      const { before, next, commit } = selectedPlan(select, updater);
+      let start = 0,
+        suffix = 0;
+      while (
+        start < before.length &&
+        start < next.length &&
+        historyValuesEqual(before[start], next[start])
+      )
+        start++;
+      while (
+        suffix < before.length - start &&
+        suffix < next.length - start &&
+        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+      )
+        suffix++;
+      const removed = storedRange(start, before.length - suffix);
+      commit();
+      const afterMembers = membership();
+      const end = afterMembers.length - suffix;
+      const after = storedRange(start, end);
+      let consumed = false;
+      return () => {
+        const currentMembers = membership();
+        const sameRows =
+          currentMembers.length >= afterMembers.length &&
+          afterMembers.every(
+            (row, index) =>
+              row.record && currentMembers[index]?.record && row.id === currentMembers[index]!.id
+          );
+        if (consumed || !sameRows)
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        const currentRange = storedRange(start, end);
+        if (
+          !matchesRollbackReceipt(
+            beforeMembers.filter((row) => row.record),
+            after,
+            currentRange
+          )
+        )
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        const current = readQuery() as unknown as SessionHistoryInput[];
+        current.splice(start, end - start, ...currentRange);
+        const restored = [...current.slice(0, start), ...removed, ...current.slice(end)];
+        planWrite(current, restored, (_old, value) => value)();
+        consumed = true;
+      };
     },
     readStored() {
       return list.toJSON() as SessionHistoryInput[];

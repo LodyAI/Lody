@@ -195,3 +195,8 @@ Footprint includes GC/page variation; the small output decrease is measurement n
 Deliver three drafts: upstream Roost; Lody shared queries plus Roost integration; then Loro selected writes/rollback. The latter stacks on the foundation PR. The reviewed history-write Spec remains draft for its v2 membership-format addition.
 
 Validation uses ignored local SDK/Native links and synthetic fixtures. Published 0.3.0 artifacts do not expose the new APIs; coordinated SDK/Native release and Lody manifest/lockfile pins are required before merging the foundation. No unrequested release, captured conversation or local binary is committed. This dependency must remain explicit in the draft PR; a normal install of the old published artifacts is not candidate acceptance.
+
+
+### Loro writer PR completion
+
+The child PR activates `HistoryWriter.updateSelected`/`updateSelectedWithRollback` for ordinary Loro actions, edit/resend and Agent fallbacks. Planning reads global small fields, exports all selected owners including transitive subagent ancestry, and rejects any change to an unselected placeholder before CRDT mutation. Compensation keeps actual stored before-images and complete pre/post identity guards; automatic seen/read on genuinely new IDs, later appends and unrelated prefix edits retain the existing behavior. The owning writer/storage/boundary suites add unread-prefix, result-equivalence and refusal-state checks. The combined source is the one used for the full suites, both final desktop runs and paired measurements above; the foundation was also validated independently before this child.

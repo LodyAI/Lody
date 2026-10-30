@@ -11,6 +11,7 @@ import {
   markTurnSeenBlocked,
   applyOpenAssistantTurn,
   createAssistantTurn,
+  selectAgentHistoryRows,
 } from '@lody/shared/session-data';
 import type {
   SessionFieldChange,
@@ -25,9 +26,8 @@ import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/sh
  * input, never re-selected at flush time. `entryBound` means the caller has
  * already proved every message belongs to `targetAssistantEntryId` (text/thought
  * chunks). Independently, notification batches (text, plans, tools and subagents
- * matched by their stored ownership) write through `HistoryWriter.updateTail`. Only
- * the rest (singleton/structural updates, rich contents, unwindowable storage) route through
- * the whole history.
+ * matched by their stored ownership) write through `HistoryWriter.updateTail`. The remaining updates select their owners through
+ * a shallow directory before the shared reducer runs.
  */
 export type ApplyAgentBatchInput = {
   readonly notifications?: readonly AcpSessionNotification[];
@@ -140,7 +140,31 @@ export function createSessionAgentWrites(writer: HistoryWriter): SessionAgentWri
         })
       )
         return;
-      writer.update((turns) => applyTo(turns));
+      writer.updateSelected(
+        (rows) => {
+          const dependencies = notifications.flatMap(
+            (notification) => targetLocalHistoryTargets([notification]) ?? []
+          );
+          const tools = new Set(dependencies.flatMap((target) => target.toolCallIds));
+          const tasks = new Set(dependencies.flatMap((target) => target.taskIds));
+          for (const notification of notifications) {
+            const update = notification.update;
+            if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
+              tools.add(update.toolCallId);
+          }
+          for (const content of contents) {
+            if (content.type === 'tool_call') tools.add(content.toolCallId);
+            if (content.type === 'subagent_task') tasks.add(content.taskId);
+          }
+          return selectAgentHistoryRows(rows, {
+            targetId,
+            toolCallIds: tools,
+            taskIds: tasks,
+            runs: dependencies.flatMap((target) => target.runs),
+          });
+        },
+        (turns) => applyTo(turns)
+      );
       return;
     },
   };
