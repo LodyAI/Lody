@@ -323,7 +323,7 @@ describe('start shutdown controller', () => {
     expect(exits).toEqual([130]);
   });
 
-  it('forces exit when graceful shutdown exceeds the timeout', async () => {
+  it.each(['cleanup', 'telemetry'])('bounds shutdown (%s)', async (stage) => {
     vi.useFakeTimers();
 
     const logger = createTestLogger();
@@ -333,20 +333,21 @@ describe('start shutdown controller', () => {
     const controller = createStartShutdownController({
       signals: ['SIGINT'],
       logger,
-      shutdown: () => cleanup.promise,
-      flushTelemetry: async () => {},
+      shutdown: () => (stage === 'cleanup' ? cleanup.promise : Promise.resolve()),
+      flushTelemetry: () => (stage === 'telemetry' ? cleanup.promise : Promise.resolve()),
       exit: (code) => {
         exits.push(code);
       },
-      timeoutMs: 1_000,
     });
 
     const shutdownPromise = controller.shutdown('SIGINT');
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(6_999);
+    expect(exits).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(exits).toEqual([130]);
     expect(logger.warn).toHaveBeenCalledWith(
-      'Graceful shutdown did not finish within 1000ms; forcing exit...'
+      'Graceful shutdown did not finish within 7000ms; forcing exit...'
     );
 
     cleanup.resolve();

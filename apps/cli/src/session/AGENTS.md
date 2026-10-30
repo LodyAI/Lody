@@ -72,6 +72,8 @@
 
 ## Lifecycle
 
+- Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
+
 - [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.

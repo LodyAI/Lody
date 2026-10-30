@@ -77,10 +77,22 @@ export class WorkspaceGitService {
 
   async syncSession(
     sessionId: SessionId,
-    session: Pick<ISession, 'exec' | 'getWorkdir'>
+    session: Pick<ISession, 'exec' | 'getWorkdir'>,
+    signal?: AbortSignal
   ): Promise<string | null> {
     try {
-      return await this.sync(sessionId, session.getWorkdir(), session.exec.bind(session));
+      return await this.sync(
+        sessionId,
+        session.getWorkdir(),
+        async (...args) => {
+          signal?.throwIfAborted();
+          const output = await session.exec(...args);
+          signal?.throwIfAborted();
+          return output;
+        },
+        false,
+        signal
+      );
     } catch (error) {
       this.deps.logger.debug(
         `[${sessionId}] Failed to observe session workspace branch: ${formatErrorMessage(error)}`
@@ -170,7 +182,8 @@ export class WorkspaceGitService {
     sessionId: SessionId,
     workdir: string,
     exec: SessionExec,
-    observeLocalRepository = false
+    observeLocalRepository = false,
+    signal?: AbortSignal
   ): Promise<string | null> {
     try {
       const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -180,6 +193,7 @@ export class WorkspaceGitService {
       // overwrite a newer turn-end or child-tab observation of this checkout.
       return await this.withOwnerMutation(ownerId, async () => {
         try {
+          signal?.throwIfAborted();
           const ownerDoc =
             ownerId === sessionId
               ? doc
@@ -187,6 +201,7 @@ export class WorkspaceGitService {
           const run = (await ownerDoc.getMetaState())?.projectRun;
           if (run) {
             const observed = await this.observeProjectRun(run, workdir, exec);
+            signal?.throwIfAborted();
             if (JSON.stringify(observed) !== JSON.stringify(run))
               await ownerDoc.setProjectRun(observed);
             return Object.values(observed.members).sort((a, b) => a.o - b.o)[0]?.branch ?? null;
@@ -196,6 +211,7 @@ export class WorkspaceGitService {
           // Detached HEAD and failed/non-Git probes never invent a branch.
           if (resolution.kind !== 'branch') return null;
           if ((await ownerDoc.getMetaState())?.branchName !== resolution.branch) {
+            signal?.throwIfAborted();
             await ownerDoc.setBranchName(resolution.branch);
           }
           const project = (await ownerDoc.getMetaState())?.project;
@@ -211,6 +227,7 @@ export class WorkspaceGitService {
             ) {
               // Branch was published first. A newly discovered repository can never
               // start PR discovery against the previous checkout's branch.
+              signal?.throwIfAborted();
               await ownerDoc.setProject({ ...current, githubRepoFullName: repoFullName });
             }
           }

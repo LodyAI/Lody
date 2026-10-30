@@ -51,7 +51,7 @@ import {
 import {
   describeScheduleState,
   describeTrigger,
-  triggerTimeZone,
+  scheduleRowTimeZone,
   type ScheduleStatus,
 } from './schedule-format';
 
@@ -655,12 +655,20 @@ function ScheduleListRow({
   entry,
   selected,
   compact,
+  name,
+  viewerTimeZone,
   ...handlers
-}: RowHandlers & { entry: Entry; selected?: boolean; compact: boolean }) {
+}: RowHandlers & {
+  entry: Entry;
+  selected?: boolean;
+  compact: boolean;
+  name: string;
+  viewerTimeZone?: string;
+}) {
   const { t, i18n } = useTranslation();
   const { row, context, status } = entry;
   const actions = useRowActions(entry, handlers);
-  const zone = triggerTimeZone(row.trigger, context?.timeZone);
+  const zone = scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone);
   const offline = context ? context.presence === 'offline' : false;
   const frequency = describeTrigger(row.trigger, t, i18n.language, zone);
   // The one action worth a button: delete a finished message, run a manual
@@ -685,8 +693,11 @@ function ScheduleListRow({
     >
       <button type="button" onClick={handlers.onOpen} {...stylex.props(styles.openButton)}>
         <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
-        <span {...stylex.props(styles.name, status.group === 'ended' && styles.nameEnded)}>
-          {row.title}
+        <span
+          {...stylex.props(styles.name, status.group === 'ended' && styles.nameEnded)}
+          title={name}
+        >
+          {name}
         </span>
         <span {...stylex.props(styles.summary)}>
           <span {...stylex.props(styles.summaryPart)}>{frequency}</span>
@@ -871,6 +882,7 @@ export function ScheduleListView({
   onDelete,
   onClearEnded,
   contextForRow,
+  contentForRow,
   onOpenSession,
   selectedId,
   insetSafeArea = false,
@@ -878,6 +890,7 @@ export function ScheduleListView({
   query: controlledQuery,
   initialFilters,
   now = getServerNow(),
+  viewerTimeZone,
 }: {
   rows: ScheduleRegistryRow[];
   runtimes: ScheduleRuntimeRow[];
@@ -893,6 +906,8 @@ export function ScheduleListView({
   /** Deletes every finished scheduled message the person owns, after confirming. */
   onClearEnded?: (rows: ScheduleRegistryRow[]) => void;
   contextForRow?: (row: ScheduleRegistryRow) => ScheduleRowContext;
+  /** A scheduled message's text; its stored title is only the fallback. */
+  contentForRow?: (row: ScheduleRegistryRow) => string | undefined;
   onOpenSession?: (id: string) => void;
   /** Phone page that draws under the status bar. The home tab leaves this off. */
   insetSafeArea?: boolean;
@@ -910,6 +925,8 @@ export function ScheduleListView({
   selectedId?: string;
   /** Injected so stories and tests render fixed times. */
   now?: number;
+  /** Injected so tests can fix the viewer clock independently of the host zone. */
+  viewerTimeZone?: string;
 }) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
@@ -951,13 +968,15 @@ export function ScheduleListView({
       runtime,
       context,
       status: describeScheduleState(t, row, runtime, {
-        timeZone: triggerTimeZone(row.trigger, context?.timeZone),
+        timeZone: scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone),
         now,
         locale: i18n.language,
       }),
     };
   });
   const projectOf = (entry: Entry) => entry.context?.project ?? (entry.row.projectKey || null);
+  const nameOf = (row: ScheduleRegistryRow) =>
+    (row.scheduledMessage ? contentForRow?.(row)?.trim() : undefined) || row.title;
   const matchesProject = (entry: Entry, filter: ScheduleListProjectFilter) =>
     filter.kind === 'all' ||
     (filter.kind === 'none' ? projectOf(entry) === null : projectOf(entry) === filter.name);
@@ -973,17 +992,17 @@ export function ScheduleListView({
     recent: (a: Entry, b: Entry) =>
       (b.runtime?.lastDispatch?.dispatchedAt ?? 0) - (a.runtime?.lastDispatch?.dispatchedAt ?? 0),
     name: (a: Entry, b: Entry) =>
-      a.row.title.localeCompare(b.row.title, i18n.language.replace('_', '-')),
+      nameOf(a.row).localeCompare(nameOf(b.row), i18n.language.replace('_', '-')),
     created: (a: Entry, b: Entry) => b.row.createdAt - a.row.createdAt,
   }[sort];
   const visible = entries
     .filter(
       (entry) =>
-        entry.row.title.toLowerCase().includes(query) &&
+        nameOf(entry.row).toLowerCase().includes(query) &&
         matchesProject(entry, project) &&
         matchesStatus(entry, statusFilter)
     )
-    .sort((a, b) => compare(a, b) || a.row.title.localeCompare(b.row.title));
+    .sort((a, b) => compare(a, b) || nameOf(a.row).localeCompare(nameOf(b.row)));
   const filtering = project.kind !== 'all' || statusFilter !== 'all';
 
   const projectOptions = [
@@ -1277,6 +1296,8 @@ export function ScheduleListView({
                               <ScheduleListRow
                                 key={entry.row.scheduleId}
                                 entry={entry}
+                                name={nameOf(entry.row)}
+                                viewerTimeZone={viewerTimeZone}
                                 selected={entry.row.scheduleId === selectedId}
                                 compact={hideHeader}
                                 onOpen={() => onOpen(entry.row.scheduleId)}

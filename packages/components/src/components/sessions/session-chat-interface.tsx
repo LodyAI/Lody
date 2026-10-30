@@ -1,3 +1,4 @@
+import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
@@ -16,7 +17,9 @@ import {
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
+import { ScheduledMessageEditDialog } from '../schedules/scheduled-message-edit-dialog';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { useScheduledMessageContents } from '../schedules/use-scheduled-message-content';
 import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
@@ -142,6 +145,7 @@ import {
   hasReportedPreviewTarget,
   isSessionGoalCleared,
   isSessionGoalActive,
+  machineSupportsScheduledMessagesProtocol,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
@@ -2382,6 +2386,7 @@ export type DispatchInputBlocksOptions = {
   agentRole?: SessionTurnAgentRoleSelection;
   /** The MCP selection captured when the user pressed send. */
   mcpServerIds?: readonly McpServerId[];
+  skipMcpOnce?: boolean;
 };
 
 function buildEditedMessageQueueItem(
@@ -3176,7 +3181,13 @@ export const SessionChatInterface = memo(
       existingSession: true,
       disabled: isArchivedSession,
       scopeKey: session.id,
+      defaultsTarget: { project: session.project, machineId: session.machineId },
     });
+    const {
+      send: sendWithMcpSelection,
+      retryDefaults: retryMcpDefaults,
+      recoveryGeneration,
+    } = mcpSelection;
     const executionTurnConfigOverrides = useMemo(
       () =>
         buildExecutionTurnConfigOverrides({
@@ -4742,7 +4753,7 @@ export const SessionChatInterface = memo(
       [configOptionValues, enqueueInputBlocks]
     );
 
-    const dispatchInputBlocks = useCallback(
+    const dispatchInputBlocksUnchecked = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
         options?: DispatchInputBlocksOptions
@@ -4898,6 +4909,46 @@ export const SessionChatInterface = memo(
         selectedModelId,
       ]
     );
+
+    const dispatchInputBlocks = useCallback(
+      async function dispatchWithMcpGuard(
+        inputBlocks: SessionInputBlock[],
+        options?: DispatchInputBlocksOptions
+      ): Promise<boolean> {
+        const accepted = await sendWithMcpSelection(
+          session.id,
+          options,
+          (ids) => dispatchInputBlocksUnchecked(inputBlocks, { ...options, mcpServerIds: ids }),
+          (failed) =>
+            reportMcpDefaultsBlocked(
+              t,
+              failed,
+              retryMcpDefaults,
+              () => {
+                void dispatchWithMcpGuard(inputBlocks, {
+                  ...options,
+                  mcpServerIds: [],
+                  skipMcpOnce: true,
+                });
+              },
+              session.id,
+              recoveryGeneration
+            )
+        );
+        if (accepted) toast.dismiss(`mcp-defaults:${session.id}`);
+        return accepted;
+      },
+      [
+        dispatchInputBlocksUnchecked,
+        recoveryGeneration,
+        retryMcpDefaults,
+        sendWithMcpSelection,
+        session.id,
+        t,
+      ]
+    );
+
+    useEffect(() => () => toast.dismiss(`mcp-defaults:${session.id}`), [session.id]);
 
     const dispatchPrompt = useCallback(
       async (prompt: string, options?: DispatchInputBlocksOptions): Promise<boolean> => {
@@ -5501,6 +5552,20 @@ export const SessionChatInterface = memo(
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
     const scheduleRegistry = useSchedules();
+    const scheduledSessionRows = useMemo(
+      () =>
+        scheduleRegistry.rows.filter(
+          (row) =>
+            row.scheduledMessage &&
+            row.enabled &&
+            row.ownerId === currentUser?.id &&
+            row.destination.kind === 'existing_session' &&
+            row.destination.sessionId === session.id &&
+            row.trigger.kind === 'once'
+        ),
+      [currentUser?.id, scheduleRegistry.rows, session.id]
+    );
+    const scheduledMessageContents = useScheduledMessageContents(scheduledSessionRows);
     const scheduledQueueItems = useMemo<ScheduledQueueItem[]>(() => {
       const runtimeFor = (row: (typeof scheduleRegistry.rows)[number]) =>
         scheduleRegistry.runtimes.find(
@@ -5511,16 +5576,7 @@ export const SessionChatInterface = memo(
             candidate.observedDefinitionFingerprint === row.definitionFingerprint
         );
       const timeZone = getDeviceTimeZone(sessionMachine?.timeZone);
-      return scheduleRegistry.rows
-        .filter(
-          (row) =>
-            row.scheduledMessage &&
-            row.enabled &&
-            row.ownerId === currentUser?.id &&
-            row.destination.kind === 'existing_session' &&
-            row.destination.sessionId === session.id &&
-            row.trigger.kind === 'once'
-        )
+      return scheduledSessionRows
         .map((row) => ({ row, scheduledRuntime: runtimeFor(row) }))
         .filter(
           ({ scheduledRuntime }) =>
@@ -5528,7 +5584,7 @@ export const SessionChatInterface = memo(
         )
         .map(({ row, scheduledRuntime }) => ({
           scheduleId: row.scheduleId,
-          title: row.title,
+          content: scheduledMessageContents.get(row.scheduleId)?.trim() || row.title,
           at: Date.parse(row.trigger.kind === 'once' ? row.trigger.at : ''),
           timeZone,
           state:
@@ -5539,10 +5595,9 @@ export const SessionChatInterface = memo(
         .filter((item) => Number.isFinite(item.at))
         .sort((a, b) => a.at - b.at);
     }, [
-      currentUser?.id,
-      scheduleRegistry.rows,
       scheduleRegistry.runtimes,
-      session.id,
+      scheduledMessageContents,
+      scheduledSessionRows,
       sessionMachine?.timeZone,
     ]);
 
@@ -5550,29 +5605,54 @@ export const SessionChatInterface = memo(
       item: ScheduledQueueItem;
       document: ScheduleDocument;
     } | null>(null);
+    const [scheduledMessageEdit, setScheduledMessageEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
 
     useEffect(() => {
       setScheduledTimeEdit(null);
+      setScheduledMessageEdit(null);
     }, [session.id]);
+
+    const readScheduledMessage = useCallback(
+      async (scheduleId: string) => {
+        if (!runtime) return null;
+        return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+          protectedContent: runtime.contentMode === 'e2ee',
+        }).read(scheduleId);
+      },
+      [runtime]
+    );
 
     const openScheduledTimeEditor = useCallback(
       async (item: ScheduledQueueItem) => {
         if (!runtime || !currentUser) return;
         try {
-          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId, {
-            protectedContent: runtime.contentMode === 'e2ee',
-          }).read(item.scheduleId);
+          const document = await readScheduledMessage(item.scheduleId);
           if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledMessageEdit(null);
           setScheduledTimeEdit({ item, document });
         } catch {
-          if (!workspaceSlug) return;
-          void router.navigate({
-            to: '/$workspaceName/schedules/$scheduleId',
-            params: { workspaceName: workspaceSlug, scheduleId: item.scheduleId },
-          });
+          toast.error(t('scheduledMessage.loadError'));
         }
       },
-      [currentUser, router, runtime, workspaceSlug]
+      [currentUser, readScheduledMessage, runtime, t]
+    );
+
+    const openScheduledMessageEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await readScheduledMessage(item.scheduleId);
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledTimeEdit(null);
+          setScheduledMessageEdit({ item, document });
+        } catch {
+          toast.error(t('scheduledMessage.loadError'));
+        }
+      },
+      [currentUser, readScheduledMessage, runtime, t]
     );
 
     const applyScheduledTime = useCallback(
@@ -5611,7 +5691,7 @@ export const SessionChatInterface = memo(
 
     const cancelScheduledMessage = useCallback(
       async (item: ScheduledQueueItem) => {
-        if (!runtime || !currentUser) return;
+        if (!runtime || !currentUser) return false;
         try {
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
@@ -5625,12 +5705,27 @@ export const SessionChatInterface = memo(
               requestId: uuidv4(),
             })
           );
+          return true;
         } catch {
           toast.error(t('scheduledMessage.saveError'));
+          return false;
         }
       },
       [currentUser, runtime, t]
     );
+
+    const scheduledMessageDisabledReason =
+      !currentUser || session.userId !== currentUser.id
+        ? t('scheduledMessage.ownMachine')
+        : !sessionMachine
+          ? t('scheduledMessage.waiting')
+          : sessionMachine.ownerUserId !== currentUser.id
+            ? t('scheduledMessage.ownMachine')
+            : !machineSupportsScheduledMessagesProtocol(sessionMachine)
+              ? t('scheduledMessage.upgrade')
+              : session.isArchived
+                ? t('scheduledMessage.archived')
+                : undefined;
 
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
@@ -7423,14 +7518,7 @@ export const SessionChatInterface = memo(
                               items={messageQueue}
                               scheduledItems={scheduledQueueItems}
                               onOpenScheduled={(item) => {
-                                if (!workspaceSlug) return;
-                                void router.navigate({
-                                  to: '/$workspaceName/schedules/$scheduleId',
-                                  params: {
-                                    workspaceName: workspaceSlug,
-                                    scheduleId: item.scheduleId,
-                                  },
-                                });
+                                void openScheduledMessageEditor(item);
                               }}
                               onEditScheduledTime={(item) => {
                                 void openScheduledTimeEditor(item);
@@ -7473,6 +7561,21 @@ export const SessionChatInterface = memo(
                           onApply={(at) => {
                             void applyScheduledTime(at);
                           }}
+                        />
+                      ) : null}
+                      {scheduledMessageEdit ? (
+                        <ScheduledMessageEditDialog
+                          document={scheduledMessageEdit.document}
+                          state={
+                            scheduledMessageEdit.item.state === 'failed' ? 'failed' : undefined
+                          }
+                          disabledReason={scheduledMessageDisabledReason}
+                          onClose={() => setScheduledMessageEdit(null)}
+                          onCancel={async () => {
+                            if (await cancelScheduledMessage(scheduledMessageEdit.item))
+                              setScheduledMessageEdit(null);
+                          }}
+                          onSaved={() => setScheduledMessageEdit(null)}
                         />
                       ) : null}
                       <MessageSelectionToolbar selection={shareSelection} />
@@ -7523,6 +7626,9 @@ export const SessionChatInterface = memo(
                             commandsEnabled={isVisible}
                             freeTurnLimitNotice={freeSessionTurnNotice}
                             mcp={mcpSelection.menu}
+                            mcpSelectionReady={mcpSelection.ready}
+                            mcpDefaultsFailed={mcpSelection.defaultsFailed}
+                            onRetryMcpDefaults={mcpSelection.retryDefaults}
                             // The info bar above owns this gap (and seats the queue).
                             hideTopSpacer
                             onModeChange={handleModeChange}

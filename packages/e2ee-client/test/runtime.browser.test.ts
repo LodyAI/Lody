@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { createRequire } from 'node:module';
 import { chromium, webkit, type BrowserContext, type Page } from '@playwright/test';
 import { expect, it } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -17,6 +18,117 @@ const good = async (page: Page, action: string) => {
   expect(result.ok, JSON.stringify(result)).toBe(true);
   return result.value;
 };
+
+let controlRouteBundle: Promise<string> | undefined;
+const testRequire = createRequire(import.meta.url);
+function bundleControlRoute() {
+  controlRouteBundle ??= (async () => {
+    const source = fileURLToPath(new URL('../../components/src/', import.meta.url));
+    const ports = fileURLToPath(
+      new URL('../../components/tests/browser/e2ee-control-route-ports.tsx', import.meta.url)
+    );
+    const output = await build({
+      entryPoints: [
+        fileURLToPath(
+          new URL('../../components/tests/browser/e2ee-control-route-fixture.tsx', import.meta.url)
+        ),
+      ],
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      globalName: 'ControlRouteFixture',
+      target: 'safari16.4',
+      write: false,
+      logLevel: 'silent',
+      define: { 'process.env.NODE_ENV': '"test"' },
+      plugins: [
+        {
+          name: 'control-route-test-ports',
+          setup(builder) {
+            // Custody CI installs only this package's dependency closure. Resolve
+            // Bare imports from the UI fixture use this installed closure too.
+            builder.onResolve(
+              { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
+              ({ path }) => ({ path: testRequire.resolve(path) })
+            );
+            builder.onResolve(
+              {
+                filter:
+                  /^@\/|^(?:@tanstack\/react-router|@lody\/platform\/react|jotai|react-i18next)$/,
+              },
+              ({ path }) => ({
+                path:
+                  path === '@/providers/workspace-runtime-retirements' ||
+                  path === '@/lib/e2ee-ledger-history'
+                    ? source + path.slice(2) + '.ts'
+                    : ports,
+              })
+            );
+          },
+        },
+      ],
+    });
+    return output.outputFiles[0].text;
+  })();
+  return controlRouteBundle;
+}
+
+for (const engine of ['chromium', 'webkit'] as const) {
+  it.each(['describe', 'history'] as const)(
+    `control route reopens after confirmed close before stale %s in ${engine}`,
+    async (paused) => {
+      const directory = await mkdtemp(join(tmpdir(), 'lody-control-reader-'));
+      let context: BrowserContext | undefined;
+      try {
+        const file = join(directory, 'index.html');
+        await writeFile(
+          file,
+          '<!doctype html><script>' +
+            (await bundleControlRoute()).replaceAll('</script', '<\\/script') +
+            '</script>'
+        );
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, 'profile'),
+          { headless: true }
+        );
+        const page = await context.newPage();
+        const startupErrors: string[] = [];
+        page.on('pageerror', (error) => startupErrors.push(error.message));
+        await page.goto(pathToFileURL(file).href);
+        expect(startupErrors).toEqual([]);
+        const result = await page.evaluate(
+          (phase) =>
+            (
+              globalThis as typeof globalThis & {
+                ControlRouteFixture: {
+                  reopen: (phase: 'describe' | 'history') => Promise<{
+                    localView: { view?: string | null };
+                    confirmedClose: { readers: string[] };
+                    beforeNetwork: {
+                      view?: string | null;
+                      readers: string[];
+                      publicReleased: boolean;
+                    };
+                    afterNetwork: unknown;
+                  }>;
+                };
+              }
+            ).ControlRouteFixture.reopen(phase),
+          paused
+        );
+        expect(result.localView.view).toBe('1');
+        expect(result.confirmedClose.readers).toEqual([]);
+        expect(result.beforeNetwork.publicReleased).toBe(false);
+        expect(result.beforeNetwork.view).toBe('1');
+        expect(result.beforeNetwork.readers).toHaveLength(1);
+        expect(result.afterNetwork).toEqual({ ...result.beforeNetwork, publicReleased: true });
+      } finally {
+        await context?.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+}
 
 it.each(['chromium', 'webkit'] as const)(
   'shared platform runtime consumes real personal custody and approved key workflows in %s',
@@ -703,6 +815,147 @@ it.each(['chromium', 'webkit'] as const)(
           (globalThis as RetirementSurface).RetirementFixture.personal.stop()
         );
       }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+// The browser fixture uses components' build aliases; only serialized public outcomes cross this driver boundary.
+type CacheSurface = typeof globalThis & {
+  CustodyCacheFixture: {
+    personal: Fixture;
+    boot(mode: 'create-or-open' | 'open-existing'): Promise<void>;
+    signOut(): Promise<{ ok: boolean }>;
+    clear(enumerable: boolean, hard?: boolean): Promise<void>;
+    savedOriginals(): Promise<string>;
+    reopen(): Promise<{ ok: boolean; status?: unknown; reason?: unknown }>;
+  };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'preserves actual custody and immutable originals through logout and cache recovery in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-custody-cache-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [
+          fileURLToPath(
+            new URL('../../components/tests/browser/custody-cache-fixture.ts', import.meta.url)
+          ),
+        ],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'CustodyCacheFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+        alias: { '@': fileURLToPath(new URL('../../components/src', import.meta.url)) },
+        define: {
+          'import.meta.env': JSON.stringify({ BASE_URL: '/', VITE_LODY_PLATFORM: 'cloud' }),
+        },
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      const operation = (command: string) =>
+        page.evaluate(
+          (commandName) =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.runtimeInvoke(commandName),
+          command
+        );
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('create-or-open')
+      );
+      expect((await operation('prepare')).ok).toBe(true);
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('approve')
+          )
+        ).ok
+      ).toBe(true);
+      for (const command of ['claim', 'open', 'receive'])
+        expect((await operation(command)).ok, command).toBe(true);
+      const status = (await operation('status')).value as { signingPublicKey: string };
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('addMachine')
+          )
+        ).ok
+      ).toBe(true);
+      expect((await operation('refresh')).ok).toBe(true);
+      const pending = await operation('rpc');
+      expect(pending.ok).toBe(true);
+      expect(pending.value).toMatchObject({
+        requestId: expect.any(String),
+        frameHex: expect.any(String),
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      expect(
+        (await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.signOut())).ok
+      ).toBe(true);
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('open-existing')
+      );
+      expect((await operation('open')).ok, 'logout keeps actual identity').toBe(true);
+      expect((await operation('status')).value).toMatchObject({
+        signingPublicKey: status.signingPublicKey,
+        hasCurrentKey: true,
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      const originals = await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+      );
+      for (const enumerable of [true, false]) {
+        await page.evaluate(
+          (canEnumerate) => (globalThis as CacheSurface).CustodyCacheFixture.clear(canEnumerate),
+          enumerable
+        );
+        const after = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+        );
+        await context.close();
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, 'profile'),
+          { headless: true }
+        );
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        const reopened = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.reopen()
+        );
+        expect(reopened, 'cache recovery reopens actual wrappers').toMatchObject({
+          ok: true,
+          status: { signingPublicKey: status.signingPublicKey, hasCurrentKey: true },
+        });
+        expect(
+          after,
+          'cache must preserve installation, wrappers, pins and pending originals'
+        ).toBe(originals);
+        expect(
+          await operation('rpc'),
+          'unconfirmed signed request must retry exact original'
+        ).toEqual(pending);
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      }
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.clear(true, true));
+      expect(
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals())
+      ).toBe('empty');
     } finally {
       await context?.close();
       await rm(directory, { recursive: true, force: true });

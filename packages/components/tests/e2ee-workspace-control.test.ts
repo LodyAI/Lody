@@ -1,6 +1,7 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
   hashRecordBytes,
@@ -382,6 +383,16 @@ const failureOf = (run: () => unknown) => {
   }
   throw new Error('expected a failure');
 };
+
+it.each(['identity-lost', 'approval-required'] as const)(
+  'projects the portable %s outcome into desktop approval guidance',
+  (code) => {
+    expect(classifyE2eeControlFailure(new PersonalHostError({ code }))).toEqual({
+      kind: 'approval-required',
+      code,
+    });
+  }
+);
 
 describe('encrypted workspace recovery classification', () => {
   it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {

@@ -59,6 +59,7 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  onInboxAvailabilityChange?: (message: string | undefined) => void;
   /** Drain this owner on confirmed member removal or device revocation.
    * The workspace host alone owns receipt-verified member-data erasure. */
   onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
@@ -285,6 +286,7 @@ export class Lody {
         closeSessionTerminals: options.closeSessionTerminals,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
+        onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
@@ -493,6 +495,8 @@ export class Lody {
     );
   }
 
+  prepareForShutdown = () => this.runtime.prepareForShutdown();
+
   cleanup = async () => {
     this.cleanedUp = true;
     if (this.builtinAgentConfigRetryTimer) {
@@ -558,6 +562,10 @@ export class Lody {
 
   hasAutomationSessionWork(sessionId: SessionId): boolean {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
+  }
+
+  hasAutomationTurnWork(sessionId: SessionId): boolean {
+    return this.runtime.getMessageHandler()?.hasAutomationTurnWork(sessionId) ?? true;
   }
 
   /** Local pairing completion wakes ledger verification and key installation, never trusts a remote admission hint. */

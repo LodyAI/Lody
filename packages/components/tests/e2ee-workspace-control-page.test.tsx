@@ -51,6 +51,13 @@ const button = (label: string) =>
   [...container!.querySelectorAll('button')].find((item) => item.textContent === label);
 
 describe('encrypted workspace control page recovery', () => {
+  it('guides an unapproved portable device without offering destructive identity recovery', () => {
+    render({ failure: { kind: 'approval-required', code: 'approval-required' } });
+    expect(container!.textContent).toContain('e2ee.pair.desktopApprovalRequired');
+    expect(container!.textContent).toContain('e2ee.pair.help');
+    expect(button('e2ee.control.repairLocal')).toBeUndefined();
+    expect(button('e2ee.control.resetProgress')).toBeUndefined();
+  });
   it('always marks the workspace as an encrypted developer preview', () => {
     render({});
     expect(container!.textContent).toContain('e2ee.control.badge');

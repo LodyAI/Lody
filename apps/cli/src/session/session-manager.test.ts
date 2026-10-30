@@ -414,7 +414,7 @@ describe('SessionManager Codex provider binding', () => {
 });
 
 describe('SessionManager cleanup phases', () => {
-  it('stops session producers before closing the workspace document', async () => {
+  it('finishes independent cleanup after failures and retries failed owners', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(
       createLogger(),
@@ -427,22 +427,40 @@ describe('SessionManager cleanup phases', () => {
         cloudPort: createTestCloudPort(),
       }
     );
-    const cleanupSessionsSpy = vi
-      .spyOn(manager as unknown as { cleanupSessions(): Promise<void> }, 'cleanupSessions')
-      .mockResolvedValue();
-
-    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(1);
-    expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
-
-    await manager.cleanUp();
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(2);
-    expect(workspaceDocument.cleanUp).toHaveBeenCalledTimes(1);
-    expect(cleanupSessionsSpy.mock.invocationCallOrder[1]).toBeLessThan(
-      vi.mocked(workspaceDocument.cleanUp).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    const events: string[] = [];
+    let failing = true;
+    const resource =
+      (name: string, fails = false) =>
+      async () => {
+        events.push(name);
+        if (fails && failing) throw new Error(name);
+      };
+    const sessionId = 'cleanup-failure' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const terminate = session.terminate.bind(session);
+    session.terminate = async () => {
+      await resource('session', true)();
+      await terminate(true);
+    };
+    Object.assign(manager, {
+      mcpAuthentication: { close: resource('mcp', true) },
+      workspaceDocument: { cleanUp: resource('workspace') },
+      gitCredentialBroker: { shutdown: resource('broker', true) },
+      githubTokenManager: { shutdown: resource('token') },
+    });
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
     );
+    expect(events).toEqual(['session']);
+    events.length = 0;
+    await expect(manager.cleanUp()).rejects.toBeInstanceOf(AggregateError);
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker', 'token']);
+    expect(manager.getSession(sessionId)).toBe(session);
+    failing = false;
+    events.length = 0;
+    await manager.cleanUp();
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker']);
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });
 

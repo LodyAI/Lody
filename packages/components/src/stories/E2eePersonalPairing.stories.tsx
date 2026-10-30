@@ -32,7 +32,7 @@ const meta = {
         protection: 'os-keystore' as const,
       }),
       approvePersonalJoin: async () => ({ admitted: true as const, invitationPublished: true }),
-      claimPersonalJoin: async () => ({ ready: true, status: 'published' }),
+      claimPersonalJoin: async () => ({ ready: true, status: 'approved' }),
       cancelPersonalJoin: async () => ({ status: 'cancelled' as const }),
     },
   },
@@ -42,6 +42,16 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const ExistingDesktop: Story = {};
 export const JoiningDesktop: Story = { args: { canApprove: false } };
+export const JoiningPortableDevice: Story = {
+  args: {
+    canApprove: false,
+    runtime: {
+      preparePersonalJoin: meta.args.runtime.preparePersonalJoin,
+      claimPersonalJoin: meta.args.runtime.claimPersonalJoin,
+      cancelPersonalJoin: meta.args.runtime.cancelPersonalJoin,
+    },
+  },
+};
 export const SavedJoiningRequest: Story = {
   args: {
     canApprove: false,
@@ -58,9 +68,9 @@ export const SavedJoiningRequest: Story = {
 export const Confirm: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole('button', { name: /Add a desktop|添加桌面设备/ }));
+    await userEvent.click(canvas.getByRole('button', { name: /Add a device|添加设备/ }));
     await userEvent.click(
-      canvas.getByRole('button', { name: /Check joining desktop|检查申请加入的设备/ })
+      canvas.getByRole('button', { name: /Check joining device|检查申请加入的设备/ })
     );
   },
 };

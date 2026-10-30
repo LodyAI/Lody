@@ -342,6 +342,30 @@ describe('schedule list rows', () => {
     expect(buttonIn(rowOf('Remind me to ship'), en['schedules.delete'])).toBeNull();
   });
 
+  it('shows a scheduled message’s text instead of its stored title', () => {
+    renderList({
+      contentForRow: (row) =>
+        row.scheduleId === 'pending' ? 'Actually review the release notes' : undefined,
+    });
+    const row = rowOf('Actually review the release notes');
+    expect(row.textContent).not.toContain('Remind me to ship');
+    expect(row.querySelector('[title="Actually review the release notes"]')).not.toBeNull();
+  });
+
+  it('shows a scheduled message at the viewer’s clock, not the machine clock', () => {
+    renderList({
+      viewerTimeZone: 'Asia/Shanghai',
+      contextForRow: (row) => ({
+        ...context(),
+        project: row.projectKey ?? null,
+        timeZone: 'UTC',
+        chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+      }),
+    });
+    expect(rowOf('Remind me to ship').textContent).toContain('6:00 PM');
+    expect(rowOf('Nightly review').textContent).toContain('Runs ');
+  });
+
   it('clears the status bar on the edge-to-edge list and stays flush when embedded', () => {
     const header = () => container.querySelector('header')!;
     const embeddedClass = header().className;

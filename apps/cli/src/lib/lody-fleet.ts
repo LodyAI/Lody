@@ -596,6 +596,11 @@ export class LodyFleet {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    const releases = [...this.runtimes.values()].map(({ lody }) => lody.prepareForShutdown());
+    await Promise.allSettled(releases);
+  }
+
   shutdown(): Promise<void> {
     return (this.shutdownReceipt ??= this.shutdownOnce());
   }
@@ -913,6 +918,17 @@ export class LodyFleet {
         lody = await Lody.create({
           logger: workspaceLogger,
           onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
+          onInboxAvailabilityChange: (message) => {
+            const code = `inbox_unavailable:${workspace.id}`;
+            if (message)
+              this.runtimeStateReporter.upsertIssue({
+                code,
+                severity: 'warning',
+                recoverable: true,
+                message,
+              });
+            else this.runtimeStateReporter.clearIssue(code);
+          },
           onEncryptedMemberRemoved: async (owner) => {
             memberRemoved = true;
             const state = this.runtimes.get(workspace.id);
@@ -997,6 +1013,7 @@ export class LodyFleet {
               authorize: (request) => startedLody.authorizeScheduleExecution(request),
               logger: workspaceLogger,
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
+              hasSessionTurnWork: (sessionId) => startedLody.hasAutomationTurnWork(sessionId),
             });
         stopSchedules = schedules.dispose;
         const runtime: WorkspaceRuntimeState = {

@@ -3,7 +3,8 @@ export function createDesktopQuitBarrier(options: {
   prepare?: () => Promise<boolean>
   stop: () => Promise<void>
   quit: () => void
-  reportFailure: (error: unknown) => void
+  recover?: () => boolean | Promise<boolean>
+  reportFailure: (error: unknown, recovered: boolean) => void
   /** The app stays running: a renderer chose Stay, or cleanup failed. */
   cancelled?: () => void
 }) {
@@ -29,11 +30,35 @@ export function createDesktopQuitBarrier(options: {
           state = 'stopped'
           options.quit()
         },
-        (error: unknown) => {
+        async (error: unknown) => {
+          let recovered = false
+          try {
+            recovered = (await options.recover?.()) ?? false
+          } catch {
+            /* report original failure */
+          }
           state = 'running'
-          options.reportFailure(error)
           options.cancelled?.()
+          options.reportFailure(error, recovered)
         }
       )
+  }
+}
+
+/** Ends the recovery wait without abandoning or replacing an unresolved owner. */
+export async function waitForQuitRecovery<T>(
+  cleanup: Promise<T>,
+  timeoutMs = 30_000
+): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      cleanup,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
   }
 }

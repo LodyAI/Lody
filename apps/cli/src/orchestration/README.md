@@ -21,6 +21,12 @@ current history so a preflight snapshot cannot overwrite an intervening update.
 The real-Mirror regression is in
 [operation-progress-feedback.test.ts](../../tests/operation-progress-feedback.test.ts).
 
+## Database startup degradation
+
+Synchronous Inbox startup failure leaves ordinary human dispatch available without Inbox. Dependent MCP tools return retryable `INBOX_UNAVAILABLE` before accessing even cached storage; the local runtime warning clears after recovery or stop.
+Temporary failures retry from 30 seconds, doubling to a 10-minute cap; incompatible schema/protocol does not auto-retry. `stop` and `recoverStop` cancel retry.
+Partial startup detaches Inbox and drains its resources through the stop owner before replacement, without canceling or waiting for ordinary turns. Unknown input is never replayed; the [Inbox decision record](../../../../.agents/notes/implemented/architecture/2026-10-12-operation-inbox.md#database-startup-degradation) explains the remaining adapter scope.
+
 ## Effect and transaction ownership
 
 The native coordinator lives in `coordinator-workflow.ts`; `coordinator-model.ts`

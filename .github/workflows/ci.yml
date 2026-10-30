@@ -408,7 +408,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install custody acceptance dependencies
-        run: pnpm --filter @lody/e2ee-client... install --frozen-lockfile --ignore-scripts
+        # Cache/logout regression bundles the real component implementations.
+        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... install --frozen-lockfile --ignore-scripts
       - name: Install Chromium and WebKit
         run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
       - name: Verify persisted KEK, installation recovery, journals and exclusion
@@ -426,7 +427,14 @@ jobs:
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.
   tests:
     name: Tests
-    needs: [test-groups, e2ee-signature-vectors, e2ee-browser-crypto, e2ee-browser-idb, e2ee-browser-custody]
+    needs:
+      [
+        test-groups,
+        e2ee-signature-vectors,
+        e2ee-browser-crypto,
+        e2ee-browser-idb,
+        e2ee-browser-custody,
+      ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

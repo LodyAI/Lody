@@ -300,6 +300,20 @@ caller cleanup is refused. Other pre-dispatch copies contain ciphertext or publi
 metadata; returned secrets are still acquired with cleanup registration.
 These are local ownership/compatibility rules, not new signed bytes or authority.
 
+Hosted router composition accepts a pure synchronous `E2eeRuntimeFactory` returning
+an application-owned runtime port. It receives a read-only live session, not authority
+or a captured account snapshot. Resource acquisition stays outside render; React may
+repeat the factory call, and memoization is not resource ownership. Anonymous
+standalone login skips it; local and Electron retain their existing owners.
+
+Ordinary cache recovery deletes only known rebuildable IDB families. Adapter database
+names are caller-selected, so a `lody*` sweep cannot distinguish identity/originals
+from caches. An in-memory protection registration also loses that distinction on the
+reload before cache recovery runs. Unknown stores therefore survive both enumeration
+and explicit extra-name passes; full reset remains explicitly destructive. The
+browser regression reopens real wrapped identity/keys after logout, cache recovery
+and process restart, and compares retained original bytes through a synthetic digest.
+
 This is opt-in public assembly, not Web/mobile activation. Browser tests use real
 custody, IDB, mailbox crypto, signed RPC and paused native work; policy-Layer tests
 establish composition and scope, not a new policy-storage implementation. Renderer

@@ -637,9 +637,9 @@ export async function createSessionBackend(
 export async function disposeSessionBackend(sessionDoc: SessionDocument): Promise<void> {
   const binding = sessionBackendBindings.get(sessionDoc);
   if (!binding) return;
-  sessionBackendBindings.delete(sessionDoc);
   const backend = await binding.backend;
   await backend.dispose?.();
+  if (sessionBackendBindings.get(sessionDoc) === binding) sessionBackendBindings.delete(sessionDoc);
 }
 
 export {

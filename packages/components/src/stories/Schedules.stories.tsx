@@ -288,6 +288,13 @@ const messageRows: ScheduleRegistryRow[] = (
   projectKind: undefined,
   projectKey: undefined,
 }));
+const messageContents = new Map<string, string>([
+  ['message-pending', 'Ship the release once the CI run passes'],
+  ['message-sent', 'Summarize today’s CI failures for the team'],
+  ['message-cancelled', 'Ask for another review pass on the auth change'],
+  ['message-failed', 'Ping the design thread about the empty state'],
+]);
+const contentForRow = (target: ScheduleRegistryRow) => messageContents.get(target.scheduleId);
 const messageRuntimes: ScheduleRuntimeRow[] = [
   runtimeFor(messageRows[0]!, {
     messageState: 'pending',
@@ -305,19 +312,28 @@ const messageRuntimes: ScheduleRuntimeRow[] = [
   runtimeFor(messageRows[3]!, { messageState: 'failed' }),
 ];
 export const WithScheduledMessages: Story = {
-  args: { rows: [...rows, ...messageRows], runtimes: [...runtimes, ...messageRuntimes] },
+  args: {
+    rows: [...rows, ...messageRows],
+    runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
+  },
 };
 /** One project picked, sorted by name. */
 export const Filtered: Story = {
   args: {
     rows: [...rows, ...messageRows],
     runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
     initialFilters: { project: { kind: 'project', name: 'loro-dev/lody' }, sort: 'name' },
   },
 };
 export const MobileList: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
-  args: { rows: [...rows, ...messageRows], runtimes: [...runtimes, ...messageRuntimes] },
+  args: {
+    rows: [...rows, ...messageRows],
+    runtimes: [...runtimes, ...messageRuntimes],
+    contentForRow,
+  },
 };
 
 const chats = [
@@ -804,6 +820,7 @@ function DetailStory({
           <ScheduleListView
             rows={[...rows, ...messageRows]}
             runtimes={[...runtimes, ...messageRuntimes]}
+            contentForRow={contentForRow}
             ready
             now={NOW}
             contextForRow={context}

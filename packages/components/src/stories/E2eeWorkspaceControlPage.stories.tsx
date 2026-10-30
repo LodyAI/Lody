@@ -41,6 +41,10 @@ export const Loading: Story = { args: { loading: true } };
 export const Failed: Story = {
   args: { failure: { kind: 'server', code: 'bad-signature', position: 1 } },
 };
+export const DesktopApprovalRequired: Story = {
+  args: { failure: { kind: 'approval-required', code: 'approval-required' } },
+};
+export const ApprovedDevice: Story = { args: { onOpen: fn() } };
 export const ProgressConflict: Story = {
   args: { failure: { kind: 'progress-conflict', code: 'rolled-back' } },
 };

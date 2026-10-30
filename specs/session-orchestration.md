@@ -161,6 +161,16 @@ Every target machine must advertise the control capability before the UI writes
 metadata. Offline machines enforce the barrier after receiving it; the UI must
 not promise simultaneous cancellation or rollback of already performed work.
 
+## Inbox database unavailable at startup
+
+Failure to open or activate Inbox must not prevent workspace startup or ordinary
+human conversations. Report degraded availability through the existing runtime
+warning channel; Inbox-dependent Agent tasks and automatic continuations return
+an explicit unavailable error without accessing the database. The coordinator owns
+bounded-backoff recovery, canceled on shutdown; incompatible schema/protocol errors
+do not auto-retry. Recovery preserves existing submission evidence and never replays
+unknown input. Authentication, E2EE and local/cloud boundaries remain unchanged.
+
 ## Idempotent message consumption
 
 Operation completion receipts enter the durable Inbox with wake eligibility. If a

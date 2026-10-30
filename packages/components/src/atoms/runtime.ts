@@ -206,6 +206,8 @@ export type WorkspaceRuntime = {
   readonly workspaceId: WorkspaceId;
   /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
   readonly contentMode?: 'plaintext' | 'e2ee';
+  /** Host RPC support only; each operation still requires live admission and grants. */
+  readonly protectedRpcAvailable?: boolean;
   readonly attachmentToken?: () => Promise<string>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */

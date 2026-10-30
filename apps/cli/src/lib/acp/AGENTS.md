@@ -68,8 +68,7 @@ The former `_meta.claudeCode.toolName` carrier is read only by the centralized
 one-release compatibility path; new provider output must use the Core contract.
 
 Replay and content settlement use separate per-epoch facts. Stamp ACP content at
-enqueue; generated images count after a matched nonempty history write. Await the
-existing image upload drain before observing content. Image lifecycle events block
+enqueue; generated images count after a matched nonempty history write. Bound the existing image upload wait by the runtime deadline and shutdown signal before observing content; keep raw uploads owned, and write late images only to their captured turn. Image lifecycle events block
 replay but are not replies. Late/suppressed events cannot mark a new epoch; unknown
 state refuses replay and lets settlement fail open. Cases: [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-silent-turn-content-observation.md).
 
@@ -104,7 +103,7 @@ into Code Collab evidence. Evidence arriving for a finalized target is serialize
 through the same per-turn persistence chain as normal finalization; a failed attempt
 restores both captured evidence sets ahead of concurrently collected evidence and
 schedules bounded, evidence-only backoff retries that never replay the
-already-persisted ACP history update.
+already-persisted ACP history update. Budget/shutdown cancellation discards the captured gap-fill attempt instead of retrying against a successor's files.
 
 Shutdown order: cancel those timers, stop SessionManager producers while keeping
 workspace documents open, wait for already-started async evidence collectors, flush

@@ -377,6 +377,7 @@ export type LoroRepoPersistReason =
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
   sessions: Map<SessionId, SessionDocument> = new Map();
+  private readonly sessionDocCleanup = new Map<SessionId, Promise<void>>();
   machine: MachineDocument | null = null;
   private readonly workspaceId: WorkspaceId;
   private readonly userId: string;
@@ -1509,6 +1510,25 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
+    if (existing?.isDestroyed) {
+      try {
+        await withTimeout(
+          this.cleanSessionDoc(sessionId),
+          1_000,
+          `Session ${sessionId} cleanup still pending`
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[${sessionId}] Session document cleanup retry failed: ${formatErrorMessage(error)}`
+        );
+        // A failed backend disposal can still own a writer. Retry next time;
+        // only a released backend permits a new wrapper on the same storage.
+        if (this.sessionDocCleanup.has(sessionId) || existing.getSessionBackend()) throw error;
+        if (this.sessions.get(sessionId) === existing) this.sessions.delete(sessionId);
+      }
+      // Concurrent callers share both cleanup and the normal initialization below.
+      return this.getOrCreateSessionDoc(sessionId, options);
+    }
     if (existing) {
       if (options.historyBackend) {
         await createSessionBackend(existing, { historyBackend: options.historyBackend });
@@ -1979,17 +1999,16 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = null;
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
-    // Await and destroy any in-flight session doc inits so they don't
-    // re-register themselves after cleanup has run.
-    for (const [sessionId, pending] of this.pendingSessionDocs) {
+    const failures: unknown[] = presenceCleanupFailure ? [presenceCleanupFailure] : [];
+    const attempt = async (scope: string, close: () => Promise<unknown>) => {
       try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveSessionStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+        await close();
+      } catch (cause) {
+        failures.push(new Error(`${scope}: cleanup failed; persistence unconfirmed`, { cause }));
       }
-    }
+    };
+    // An init rejection has no registered doc. A destroy rejection must be reported.
+    await Promise.allSettled(this.pendingSessionDocs.values());
     this.pendingSessionDocs.clear();
     this.localDocRoomBridges.clear();
     for (const bridge of this.localFlockRoomBridges.values()) {
@@ -1997,16 +2016,24 @@ export class LoroDocumentManager {
     }
     this.localFlockRoomBridges.clear();
 
-    for (const sessionDoc of this.sessions.values()) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveSessionStatus });
+    for (const sessionId of this.sessions.keys()) {
+      await attempt(`Session ${sessionId}`, () =>
+        this.cleanSessionDoc(sessionId, { preserveStatus: options.preserveSessionStatus })
+      );
     }
-    await this.machine?.destroy();
+    await attempt('Machine document', async () => this.machine?.destroy());
     this.machine = null;
     this.sessions.clear();
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    if (failures.length) {
+      presenceCleanupFailure = new AggregateError(failures, 'Workspace cleanup failed');
+      this.logger.warn(
+        `[${this.workspaceId}] ${failures.map((error) => formatErrorMessage(error)).join('; ')}`
+      );
+    }
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
@@ -2031,28 +2058,26 @@ export class LoroDocumentManager {
     this.machineMonitorRuntime?.clearProvider();
   }
 
-  async cleanSessionDoc(
-    sessionId: SessionId,
-    options: { preserveStatus?: boolean } = {}
-  ): Promise<void> {
-    // Also await any in-flight init for this session
-    const pending = this.pendingSessionDocs.get(sessionId);
-    if (pending) {
-      try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+  cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
+    const active = this.sessionDocCleanup.get(sessionId);
+    if (active) return active;
+    const cleanup = (async () => {
+      const pending = this.pendingSessionDocs.get(sessionId);
+      if (pending) await pending.catch(() => undefined);
+      const sessionDoc = this.sessions.get(sessionId);
+      if (sessionDoc) {
+        await sessionDoc.destroy(options);
+        if (this.sessions.get(sessionId) === sessionDoc) this.sessions.delete(sessionId);
       }
-      this.pendingSessionDocs.delete(sessionId);
-    }
-
-    const sessionDoc = this.sessions.get(sessionId);
-    if (sessionDoc) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveStatus });
-      this.sessions.delete(sessionId);
-    }
+    })();
+    this.sessionDocCleanup.set(sessionId, cleanup);
+    void cleanup
+      .finally(() => {
+        if (this.sessionDocCleanup.get(sessionId) === cleanup)
+          this.sessionDocCleanup.delete(sessionId);
+      })
+      .catch(() => undefined);
+    return cleanup;
   }
 }
 

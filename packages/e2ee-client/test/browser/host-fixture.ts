@@ -115,6 +115,7 @@ let offer: PersonalPairingOffer,
   events: string[] = [],
   failKeys = false,
   foreign = false;
+let databasePrefix = 'personal';
 const FIXED_NOW = 1_800_000_000_000;
 let fixedClock: Clock.Clock;
 let controlledClock:
@@ -147,7 +148,12 @@ const view = () =>
     })
   );
 const retain = () => localStorage.setItem('remote-records', JSON.stringify(records.map(toHex)));
-export async function boot(input: typeof mode = 'create-or-open', controlledClose = false) {
+export async function boot(
+  input: typeof mode = 'create-or-open',
+  controlledClose = false,
+  prefix = 'personal'
+) {
+  databasePrefix = prefix;
   mode = input;
   events = [];
   session = undefined;
@@ -234,14 +240,14 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
         : [genesis.record];
       const ws = Layer.succeed(WorkspaceScope, { genesis: genesis.genesis });
       const options = {
-        databaseName: 'personal-ledger',
+        databaseName: `${databasePrefix}-ledger`,
         accountId: 'account',
         workspaceId: offer.workspaceId,
         mode,
       };
       const base = Layer.mergeAll(
         indexedDbClientStores(options),
-        indexedDbClientInstallationStore({ ...options, databaseName: 'personal-custody' }),
+        indexedDbClientInstallationStore({ ...options, databaseName: `${databasePrefix}-custody` }),
         browserClientWriter({ accountId: 'account', workspaceId: offer.workspaceId })
       ).pipe(Layer.provide(ws));
       const platform = PersonalHostPlatform.of({
@@ -271,7 +277,7 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
           }),
         custody: (binding, candidateRequest) =>
           browserClientCustody({
-            databaseName: 'personal-custody',
+            databaseName: `${databasePrefix}-custody`,
             binding,
             mode,
             candidateRequest,
@@ -305,7 +311,7 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
               const business = yield* Layer.build(
                 indexedDbClientStores({
                   ...options,
-                  databaseName: 'personal-submission-' + binding.installationId,
+                  databaseName: databasePrefix + '-submission-' + binding.installationId,
                 }).pipe(Layer.provide(ws))
               );
               const source = Layer.succeed(LedgerFeedSource, {
@@ -356,7 +362,7 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
             return Layer.effectContext(Effect.fail(new Error('synthetic key I/O')));
           }
           return Layer.mergeAll(
-            indexedDbClientKeyStores({ databaseName: 'personal-custody', binding, mode }),
+            indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
             Layer.succeed(KeyMailbox, {
               status: (slot) =>
                 Effect.succeed({ ...slot, revision: 0, status: 'InstallationReported' }),
@@ -439,9 +445,13 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
           );
         },
         evidence: (binding) =>
-          indexedDbClientApprovalEvidence({ databaseName: 'personal-custody', binding, mode }),
+          indexedDbClientApprovalEvidence({
+            databaseName: `${databasePrefix}-custody`,
+            binding,
+            mode,
+          }),
         rpc: (binding) =>
-          indexedDbClientRpcOriginals({ databaseName: 'personal-custody', binding, mode }),
+          indexedDbClientRpcOriginals({ databaseName: `${databasePrefix}-custody`, binding, mode }),
         drainOld: () => (session ? session.close() : Effect.void),
       });
       const remote = PersonalHostRemote.of({
@@ -526,7 +536,7 @@ export async function invoke(action: string) {
             return yield* Effect.tryPromise({
               try: () =>
                 new Promise<boolean>((resolve, reject) => {
-                  const request = indexedDB.open('personal-custody');
+                  const request = indexedDB.open(`${databasePrefix}-custody`);
                   request.onerror = () => reject(request.error);
                   request.onsuccess = () => {
                     const db = request.result,
@@ -779,7 +789,7 @@ export async function invoke(action: string) {
                 const original = yield* signLedgerRecord(proposal, owner);
                 const context = yield* Layer.build(
                   indexedDbClientStores({
-                    databaseName: 'personal-submission-' + binding.installationId,
+                    databaseName: databasePrefix + '-submission-' + binding.installationId,
                     accountId: binding.accountId,
                     workspaceId: binding.workspaceId,
                     mode: 'open-existing',

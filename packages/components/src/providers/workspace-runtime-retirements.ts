@@ -3,7 +3,7 @@ export interface WorkspaceRuntimeResources {
   readonly native?: {
     readonly accountId: string;
     readonly workspaceId: string;
-    readonly genesisHash: string;
+    readonly genesisHash?: string;
     readonly signingPublicKey?: string;
   };
   readonly repo?: {
@@ -28,7 +28,11 @@ function overlaps(left: WorkspaceRuntimeResources, right: WorkspaceRuntimeResour
     right.native &&
     left.native.accountId === right.native.accountId &&
     left.native.workspaceId === right.native.workspaceId &&
-    left.native.genesisHash === right.native.genesisHash
+    // A cancelled cold open may not have returned its public genesis yet.
+    // Such an owner must drain before reusing this account/workspace binding.
+    (!left.native.genesisHash ||
+      !right.native.genesisHash ||
+      left.native.genesisHash === right.native.genesisHash)
   )
     return true;
   if (!left.repo || !right.repo || left.repo.workspaceId !== right.repo.workspaceId) return false;
