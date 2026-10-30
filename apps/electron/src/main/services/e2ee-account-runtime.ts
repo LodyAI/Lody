@@ -51,6 +51,9 @@ const accountDirectory = (accountId: string) =>
     'e2ee-bootstrap',
     createHash('sha256').update(accountId).digest('hex')
   )
+/** Account-scoped recovery-vault journal (pins and intents only, never secrets). */
+export const desktopE2eeRecoveryJournalPath = (accountId: string) =>
+  join(accountDirectory(accountId), 'recovery-vault.sqlite')
 type IdentityLocation = string | { requestId: string }
 function identityDirectory(accountId: string, location?: IdentityLocation) {
   const root = accountDirectory(accountId)

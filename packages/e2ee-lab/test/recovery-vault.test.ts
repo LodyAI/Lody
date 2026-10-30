@@ -33,7 +33,10 @@ import { commitEpochKey, sealHistoryPacket } from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
 import { LedgerLog, LedgerLogError, SubmissionJournal } from '@lody/e2ee-core/services';
 import { submitRecord, acknowledgeSubmission } from '@lody/e2ee-core/internal';
-import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
+import {
+  sqliteRecoveryVaultLocalStore,
+  sqliteSubmissionJournal,
+} from '@lody/e2ee-core/adapters/node-sqlite';
 import { generateDevice } from '../src/platform/device';
 import { labSyntheticProtector } from '../src/platform/synthetic-protection';
 import { makeLabRecoveryVaultStore } from '../src/platform/recovery-vault-sqlite';
@@ -324,6 +327,92 @@ describe('encrypted recovery vault and genuine workflow', () => {
             }
           })
         )
+      );
+    }));
+  it('keeps the production SQLite journal pin across reopen, refuses stale CAS and foreign files', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const journal = join(dir, 'recovery-journal.sqlite');
+          const created = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const storage = yield* makeLabRecoveryVaultStore({
+                  path: join(dir, 'vault.sqlite'),
+                  mode: 'create',
+                }),
+                local = yield* sqliteRecoveryVaultLocalStore({ path: journal, mode: 'create' }),
+                f = yield* fixture();
+              const { vault, recoveryFile } = yield* createRecoveryVault({
+                locator: 'https://synthetic.invalid/vault',
+                store: storage.store,
+                local,
+              });
+              const bundle = yield* generateRecoveryPackage({
+                genesis: hex(f.initial.genesis.toBytes()),
+                membershipId: hex(f.membership.toBytes()),
+                generation: 0,
+                trust: {
+                  source: 'synthetic',
+                  genesisRecord: f.initial.record,
+                  head: hex(f.view().head.toBytes()),
+                  length: 1,
+                },
+              });
+              const ref = yield* vault.upload(bundle);
+              wipeRecoveryPackage(bundle);
+              expect((yield* vault.reserve(ref)).outcome).toBe('Committed');
+              expect(yield* local.compareAndSwap('k', null, new Uint8Array([1]))).toBe('Committed');
+              expect(yield* local.compareAndSwap('k', null, new Uint8Array([2]))).toBe('Conflict');
+              expect(
+                yield* local.compareAndSwap('k', new Uint8Array([9]), new Uint8Array([2]))
+              ).toBe('Conflict');
+              expect(yield* local.read('k')).toEqual(new Uint8Array([1]));
+              return {
+                recoveryFile,
+                vaultId: vault.vaultId,
+                index: yield* storage.store.readIndex(vault.vaultId),
+              };
+            })
+          );
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const storage = yield* makeLabRecoveryVaultStore({
+                  path: join(dir, 'vault.sqlite'),
+                  mode: 'open',
+                }),
+                local = yield* sqliteRecoveryVaultLocalStore({ path: journal, mode: 'open' });
+              const reopened = yield* openRecoveryVault({
+                recoveryFile: created.recoveryFile,
+                store: storage.store,
+                local,
+              });
+              expect((yield* reopened.readIndex()).value.entries).toHaveLength(1);
+              expect(
+                (yield* local.list(`vault-v1/${created.vaultId}/`)).map((row) => row.key)
+              ).toContain(`vault-v1/${created.vaultId}/index-pin`);
+              // The durable pin outlives the process: a server rollback to no index is refused.
+              const db = new Database(join(dir, 'vault.sqlite'));
+              try {
+                db.prepare('DELETE FROM vault_index WHERE vault=?').run(created.vaultId);
+              } finally {
+                db.close();
+              }
+              const rolledBack = yield* Effect.result(reopened.readIndex());
+              expect(Result.isFailure(rolledBack)).toBe(true);
+              if (Result.isFailure(rolledBack))
+                expect(rolledBack.failure).toMatchObject({ code: 'rollback' });
+              expect(created.index).not.toBeNull();
+            })
+          );
+          const foreign = yield* Effect.result(
+            Effect.scoped(
+              sqliteRecoveryVaultLocalStore({ path: join(dir, 'vault.sqlite'), mode: 'open' })
+            )
+          );
+          expect(Result.isFailure(foreign)).toBe(true);
+          if (Result.isFailure(foreign))
+            expect(foreign.failure).toMatchObject({ _tag: 'LocalStoreError', reason: 'corrupt' });
+        })
       );
     }));
   it('resumes four setup boundaries without a second R, uses real P09/HPKE/protected storage, restores independent C, and rejects revoked R', async () =>

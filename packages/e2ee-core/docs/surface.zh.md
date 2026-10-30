@@ -82,12 +82,12 @@ services 入口还导出 `SnapshotPublicationJournal`、`SnapshotPublicationErro
 
 ## `@lody/e2ee-core/adapters/node-sqlite`
 
-| 分组         | 导出                                                                                                                                                                                                                                                                       |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 全部存储     | `sqliteLocalStores`, `SQLITE_STORE_FILES`, `SqliteFileOptions`                                                                                                                                                                                                             |
-| 单个存储     | `sqliteLedgerPinStore`, `sqliteLedgerFeedStore`, `sqliteInstalledKeyStore`, `sqliteReceiveJournal`, `sqliteRepairJournal`, `sqliteDistributionJournal`, `SqliteDistributionJournalOptions`, `sqliteDeliveryOutbox`, `sqliteEpochCandidateStore`, `sqliteSubmissionJournal` |
-| 参考邮箱后端 | `makeSqliteKeyMailbox`, `referenceKeyMailbox`, `MailboxError`, `MailboxStatus`, `MailboxTarget`                                                                                                                                                                            |
-| 参考快照日志 | `makeSqliteSnapshotPublication`, `snapshotPublicationDigest`, `SnapshotPublicationError`, `SnapshotPublicationRow`                                                                                                                                                         |
+| 分组         | 导出                                                                                                                                                                                                                                                                                                        |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 全部存储     | `sqliteLocalStores`, `SQLITE_STORE_FILES`, `SqliteFileOptions`                                                                                                                                                                                                                                              |
+| 单个存储     | `sqliteLedgerPinStore`, `sqliteLedgerFeedStore`, `sqliteInstalledKeyStore`, `sqliteReceiveJournal`, `sqliteRepairJournal`, `sqliteDistributionJournal`, `SqliteDistributionJournalOptions`, `sqliteDeliveryOutbox`, `sqliteEpochCandidateStore`, `sqliteSubmissionJournal`, `sqliteRecoveryVaultLocalStore` |
+| 参考邮箱后端 | `makeSqliteKeyMailbox`, `referenceKeyMailbox`, `MailboxError`, `MailboxStatus`, `MailboxTarget`                                                                                                                                                                                                             |
+| 参考快照日志 | `makeSqliteSnapshotPublication`, `snapshotPublicationDigest`, `SnapshotPublicationError`, `SnapshotPublicationRow`                                                                                                                                                                                          |
 
 ## `@lody/e2ee-core/adapters/loro-streams`
 

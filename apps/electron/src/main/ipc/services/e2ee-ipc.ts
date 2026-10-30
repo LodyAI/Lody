@@ -5,10 +5,13 @@ import {
   sharingChangeSchema
 } from '@lody/e2ee-machine-sharing/schemas'
 import { randomUUID } from 'node:crypto'
+import { open as openFile, readFile, writeFile } from 'node:fs/promises'
+import { BrowserWindow, dialog } from 'electron'
 import { E2eeMemberRemovedError } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect } from 'effect'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
+import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { isLocalPlatform } from '../../platform'
 import {
   validateDesktopE2eeCreationIntent,
@@ -23,8 +26,16 @@ import {
   runDesktopE2eeOperation,
   inspectDesktopE2eeCachedState,
   withDesktopE2eeAccount,
-  cleanupRemovedDesktopWorkspace
+  cleanupRemovedDesktopWorkspace,
+  desktopE2eeRecoveryJournalPath
 } from '../../services/e2ee-account-runtime'
+import {
+  MAX_RECOVERY_FILE_BYTES,
+  createAccountRecoveryVault,
+  inspectRecoveryFile,
+  recoveryVaultEnabled,
+  recoveryVaultFailure
+} from '../../services/e2ee-recovery-vault.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -1976,5 +1987,103 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+  }
+  private recoveryQueue: Promise<unknown> = Promise.resolve()
+  /** Gate, serialize and account-fence one recovery-vault operation. Network and
+   * file work run outside the account lock; only reason codes leave main. */
+  private async recoveryOperation<A>(
+    work: (input: {
+      accountId: string
+      store: RecoveryVaultStore['Service']
+      journalPath: string
+    }) => Effect.Effect<A, unknown>
+  ): Promise<A> {
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const run = this.recoveryQueue.then(async () => {
+      const { accountId, client } = await desktopE2eeCloudClient()
+      const result = await Effect.runPromise(
+        work({
+          accountId,
+          store: client.recoveryVault(),
+          journalPath: desktopE2eeRecoveryJournalPath(accountId)
+        })
+      ).catch((error) => {
+        throw recoveryVaultFailure(error)
+      })
+      if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+        throw new Error('e2ee_account_mismatch')
+      return result
+    })
+    this.recoveryQueue = run.catch(() => undefined)
+    return run
+  }
+  /** Default-off post-MVP recovery vault: create the account vault, save its file
+   * where the user chooses and prove that file reopens it. The file never reaches the renderer. */
+  @IpcMethod()
+  async createRecoveryVault() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const created = await this.recoveryOperation(({ store, journalPath }) =>
+      createAccountRecoveryVault({
+        store,
+        journalPath,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        persist: (file) =>
+          Effect.tryPromise(async () => {
+            await writeFile(path, file, { mode: 0o600 })
+            return new Uint8Array(await readFile(path))
+          })
+      })
+    )
+    return { outcome: 'created' as const, vaultId: created.vaultId }
+  }
+  /** Default-off: open a vault from a chosen recovery file and authenticate its
+   * index. This checks the file; it neither restores a workspace nor admits a device. */
+  @IpcMethod()
+  async inspectRecoveryFile() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
+    const file = await (async () => {
+      const handle = await openFile(path, 'r')
+      try {
+        const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+        if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
+          buffer.fill(0)
+          throw new Error('e2ee_recovery_invalid-input')
+        }
+        return buffer.subarray(0, bytesRead)
+      } finally {
+        await handle.close()
+      }
+    })()
+    try {
+      const inspected = await this.recoveryOperation(({ store, journalPath }) =>
+        inspectRecoveryFile({ store, journalPath, file })
+      )
+      return { outcome: 'opened' as const, ...inspected }
+    } finally {
+      file.fill(0)
+    }
   }
 }
