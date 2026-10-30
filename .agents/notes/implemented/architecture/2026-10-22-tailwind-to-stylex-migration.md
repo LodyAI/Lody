@@ -2216,6 +2216,78 @@ occurrences/ten files/26 unresolved expressions across 32 production JS/TS files
 all checked against the successful final build. The decrease from 1,151 is 76;
 stories, tests, active later work and the core component timeline are excluded.
 
+### Private comments and compatible local controls
+
+The comment/finding continuation migrates 114 private Renderer utilities. The
+literal `font-sans` remains: a rejected 115-utility candidate changed its fallback
+family list despite 112 matching PNGs. Thirty-five record-different candidate
+pairs stay rejected. `leaves103-105-acceptance.html` contains 156 formal pairs,
+153 byte-exact PNGs and 73,555 equal standard records; three formal OPENs total
+17 raw/zero threshold pixels and one native OPEN adds 17 raw/one threshold pixel.
+Actual navigation, composer resize, keyboard save and eight offline file pairs
+are covered. Original caret-tool and readiness failures remain separate.
+
+Two unused internal Card/Badge modules account for another 54 removed occurrences,
+with zero migration credit. A resolved AST import/export graph finds no supported
+entrypoint or runtime consumer; standalone JavaScript is byte-identical and CSS
+only loses 25 selector contexts/1,929 bytes. The cleanup comparison uses the same
+older control candidate on both sides and proves that deletion delta only.
+
+The local Dropdown/Tooltip and Button/ToggleGroup owners keep two explicit paths:
+ordinary elements use StyleX; legal `asChild` children retain the original utility
+cascade. Exported class selectors keep their raw strings and order for 285 inputs.
+One module-local CVA declaration supplies both selectors without runtime class
+parsing or a public styling-engine option. Source removal is zero; the 35+51=86
+normal-runtime mappings are a separate metric. Moving Slot defaults to the earlier
+StyleX layer caused real child-precedence regressions; the first repair also
+omitted three forwarded flags. Both failed candidates remain, with 55,508 and
+31,564 raw differing pixels. The final five forwarded flags preserve original tags,
+focus, geometry and cascade, without a specificity patch.
+
+`leaves104-106-acceptance.html` contains 194 current exact PNG pairs and equal
+complete records: 98 formal/1,476 standard records, 84 native/Slot pairs, eight
+actual Renderer toolbar pairs and four offline pairs. The earlier fourteen positive
+pairs belong to historical sources. Actual phone CommitRow Tooltip remains
+NOT_ACCEPTED after failed paint gates on both sides; dedicated and desktop success
+do not close that callsite. Both new reports pass real 1280/390 browser QA and
+retain every historical OPEN. Root independently reopens original PNGs/full records
+and views both final reports; root full-check, Electron and core-component coverage
+do not advance from these helper-only results.
+
+The tree/commit continuation migrates 182 more private utilities into local styles.
+It preserves native checked/indeterminate state, filename clipping, RTL physical
+properties, commit details, clipboard write/readback and the local white-variable
+contract. Full Storybook and standalone CSS still contain the original white
+writer and reader after the last `text-white` literal disappears; no alias or
+fallback is added, and the compiler's retention mechanism is not inferred.
+The unreachable EmptyThread branch removes another 27 occurrences with zero
+migration credit: its private guard is the exact complement of the only caller's
+panel-mount condition. Actual empty/save/cancel/delete paths retain behavior.
+
+The frozen 107 matrix has 136 formal pairs, 108 exact PNGs and 66,456 equal records.
+Twenty-eight formal OPENs retain 7,795 raw/7,536 informational threshold pixels;
+one normal-motion pair adds one raw pixel. Thirty native pairs/2,694 complete
+records and ten real offline pairs match. The phone missing-record tooltip remains
+offscreen identically and does not establish painted tooltip coverage. Two original
+reviewed-state cells are rejected: aria-expanded can change while forceExpanded
+keeps the body mounted for two seconds. Their replacements wait for actual body
+absence without writing state. A bounded Viewed control records checkbox properties,
+seven pseudo predicates, focus, complete CSS and precise geometry; repeated Before
+frames match the original After raster. A separate root1024 control records every
+header descendant and reproduces the original Before PNG on both sources; its
+three PNGs match; the Before/After pre objects match, as do their post objects.
+Both bounded controls retain
+the screenshot tool's null-to-empty style serialization separately. Original frames
+lack those flags, so neither
+the exact paint cause nor closure of any original OPEN is claimed.
+
+A production-only source snapshot through 107 matches all thirty successful-build
+input hashes and validates the same v2 AST candidates against the actual helper
+CSS: **698 occurrences/eight used files/18 unresolved expressions**. ReviewRenderer
+accounts for 519. The 1,075→698 decrease separates 296 migrations from 81 unused or
+unreachable cleanup occurrences; the 86 control runtime mappings remove no source
+literals. Stories, tests, later work and the core 1,424 inventory remain separate.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)

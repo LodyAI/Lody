@@ -11,6 +11,8 @@ Standalone local code-review renderer and agent prompt package.
   share `stylex-options.ts`; keep standalone styles in the generated HTML. Retain
   control and third-party compatibility utilities until their real contracts are
   verified. Do not import product primitives or palette themes to migrate a leaf.
+- Preserve the local controls' legal Radix `asChild` cascade and exported raw class
+  selectors when migrating ordinary elements; those are separate styling contracts.
 - Git state is read only. The CLI may run `git show`, `git diff`, `git rev-parse`,
   and serve a local Vite viewer, but it must not mutate the reviewed repository.
 - `.review.md` line references use original merge-base/current source line numbers;

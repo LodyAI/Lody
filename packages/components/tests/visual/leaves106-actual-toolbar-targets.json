@@ -1,0 +1,107 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--grouped-refactor"],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "split-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "radio",
+            "name": "Split diff"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[aria-label=\"Split diff\"]').dataset.state==='on'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "role": "radio",
+            "name": "Split diff",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('aria-label')?.startsWith('Copy ')===true"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "sidebar-toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".crh-toolbar button[title*=\"review map\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const wanted=document.querySelector('[aria-label=\"Split diff\"]')?.dataset.state==='on'?'split':'unified';const key=wanted+':'+document.querySelector('.crh-toolbar button[title*=\"review map\"]')?.getAttribute('aria-pressed');const state=window.__warm106App??{index:0,key};if(state.key!==key){state.index=0;state.key=key;}window.__warm106App=state;if(state.index>=blocks.length)return blocks.every(e=>['single',wanted].includes(e.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')));const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||!h?.shadowRoot?.querySelector('[data-line]')||!['single',wanted].includes(h.shadowRoot.querySelector('[data-diff-type]')?.getAttribute('data-diff-type')))return false;state.index++;return state.index>=blocks.length;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar');if(!m||!t)return false;m.scrollTo({left:0,top:0,behavior:'instant'});window.scrollTo({left:0,top:0,behavior:'instant'});const r=t.getBoundingClientRect(),s=JSON.stringify([...document.querySelectorAll('.crh-shell,.crh-toolbar,.crh-toolbar *')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const a=window.__stable106App??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__stable106App=a;return a.n>=3&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell')).backgroundColor==='rgb(19, 20, 22)'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

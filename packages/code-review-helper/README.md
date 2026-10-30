@@ -16,6 +16,16 @@ private-writer and third-party compatibility. Keep the original dark theme,
 responsive layout and interactions; a styling change does not change reference
 navigation, diff readiness or comment ownership.
 
+The local DropdownMenu, Tooltip, Button and ToggleGroup use StyleX on ordinary
+elements while preserving the original Tailwind cascade for legal Radix `asChild`
+children. Slot concatenates parent and
+child classes without resolving utility conflicts, so moving only parent defaults
+to an earlier CSS layer can change child precedence. Exported Button/ToggleGroup
+class selectors retain their raw utility values and order; one local CVA declaration
+provides both the public legacy selector and the private owned selector. Runtime
+StyleX mappings and source-utility removals are counted separately. Private font,
+transition, ring and descendant rules remain until their writer contracts migrate.
+
 The four build/test entries share the same compiler options. CSS layers place
 StyleX after base styles and before components/utilities. The standalone build
 keeps source transforms pre and extracts CSS post, immediately before the

@@ -491,7 +491,7 @@ const severityMarkerBundle = {
                   ...block,
                   notes: [
                     ...block.notes,
-                    ...(['p0', 'p1'] as const).map((severity, index) => ({
+                    ...(['p0', 'p1', 'p2', 'question'] as const).map((severity, index) => ({
                       id: `severity-note-${severity}`,
                       severity,
                       path: block.path,
@@ -617,5 +617,39 @@ export const LongGroupDescription: Story = {
   args: {
     bundle: longGroupDescriptionBundle,
     storageKey: 'storybook-long-group-description',
+  },
+};
+
+const commitOverflowBundle = createReviewFixtureBundle({
+  reviewFilePath: '/storybook/commit-overflow.review.md',
+  markdown: groupedRefactorReview.replace(
+    'Commits: `a11b22c`, `c33d44e`',
+    'Commits: `a11b22c`, `c33d44e`, `ee00003`, `ee00004`, `ee00005`, `ee00006`'
+  ),
+  files: Object.values(groupedRefactorBundle.files),
+  commits: [
+    ...Object.values(groupedRefactorBundle.commits ?? {}),
+    ...[0, 1, 2].map((index) => {
+      const ref = `ee0000${index + 3}`;
+      return {
+        ref,
+        sha: ref.padEnd(40, '0'),
+        authorName: index === 0 ? 'Synthetic Maintainer' : index === 1 ? '界面测试' : '',
+        authorEmail: `fixture-${index}@example.com`,
+        authorDate: '2026-05-23T10:00:00Z',
+        subject: `Synthetic commit ${index + 1}: verify a long commit subject stays within its row`,
+        body:
+          index === 0
+            ? ''
+            : 'Synthetic commit body.\n\nA second paragraph verifies expanded text wrapping.',
+      };
+    }),
+  ],
+});
+
+export const CommitOverflowCoverage: Story = {
+  args: {
+    bundle: commitOverflowBundle,
+    storageKey: 'storybook-commit-overflow-coverage',
   },
 };

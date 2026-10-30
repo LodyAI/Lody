@@ -1,0 +1,117 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--grouped-refactor"],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const state=window.__lody101Warm??{index:0};window.__lody101Warm=state;if(state.index>=blocks.length)return true;const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||(h&&!h.shadowRoot?.querySelector('[data-line]')))return false;state.index++;return state.index>=blocks.length;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar'),s=document.querySelector('.crh-group-section'),h=s?.querySelector(':scope>header');return !!h&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell.dark')).backgroundColor==='rgb(19, 20, 22)'&&m.style.getPropertyValue('--crh-toolbar-h')===t.offsetHeight+'px'&&s.style.getPropertyValue('--crh-group-header-h')===h.offsetHeight+'px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('.crh-group-section>header'),r=h.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight){h.scrollIntoView({block:'center',behavior:'instant'});return false;}return r.width>0&&r.left>=0&&r.right<=innerWidth;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Group actions",
+        "index": 0
+      },
+      {
+        "action": "press",
+        "role": "button",
+        "name": "Group actions",
+        "index": 0,
+        "key": "ArrowDown"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[role=menu]');if(!e)return false;const r=e.getBoundingClientRect();return e.getAttribute('data-state')==='open'&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&getComputedStyle(e).opacity==='1'&&document.activeElement?.textContent==='Mark all files viewed';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('.crh-group-section>header,[role=menu]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "name": "last-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Expand all files'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('.crh-group-section>header,[role=menu]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "mark-and-reopen",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Home"
+          },
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Mark all files viewed",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Group actions",
+            "index": 0,
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Unmark all files'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('.crh-group-section>header,[role=menu]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

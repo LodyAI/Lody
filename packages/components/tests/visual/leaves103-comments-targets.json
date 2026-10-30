@@ -1,0 +1,968 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "below-lg",
+      "width": 1023,
+      "height": 900
+    },
+    {
+      "name": "at-lg",
+      "width": 1024,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-reviewrenderer--severity-marker-coverage",
+    "code-review-helper-reviewrenderer--with-existing-comments",
+    "code-review-helper-reviewrenderer--file-statuses"
+  ],
+  "ready": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/index.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/adaptors/src/naming.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/package.json\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/src/cli.ts\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-block-path=\"packages/code-review-helper/prompts/review-helper-agent.md\"]');if(!e)return false;e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');return !e.querySelector('.crh-diff-placeholder')&&(!h||!!h.shadowRoot?.querySelector('[data-line]'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ],
+    "code-review-helper-reviewrenderer--file-statuses": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/cli.ts\\\"]\");if(!e)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const d=e.querySelector(\"diffs-container\");return !e.querySelector(\".crh-diff-placeholder\")&&(!d||!!d.shadowRoot?.querySelector(\"[data-line]\"));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/report.ts\\\"]\");if(!e)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const d=e.querySelector(\"diffs-container\");return !e.querySelector(\".crh-diff-placeholder\")&&(!d||!!d.shadowRoot?.querySelector(\"[data-line]\"));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/legacy.ts\\\"]\");if(!e)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const d=e.querySelector(\"diffs-container\");return !e.querySelector(\".crh-diff-placeholder\")&&(!d||!!d.shadowRoot?.querySelector(\"[data-line]\"));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector(\"[data-block-path=\\\"packages/review-helper/src/rendering/comment-export.ts\\\"]\");if(!e)return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const d=e.querySelector(\"diffs-container\");return !e.querySelector(\".crh-diff-placeholder\")&&(!d||!!d.shadowRoot?.querySelector(\"[data-line]\"));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector(\".crh-panel\")&&document.fonts.status===\"loaded\""
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "movePointer",
+        "x": -11,
+        "y": -11
+      },
+      {
+        "action": "movePointer",
+        "x": -10,
+        "y": -10
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-reviewrenderer--severity-marker-coverage": [
+      {
+        "name": "typed-note-p1",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::10\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "typed-note-p2",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::11\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "typed-note-question",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::12\\\"]\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "p0-note-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::9\"] > header > button[title=\"Jump to this line in the diff\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(document.activeElement===e.querySelector(\"header > button\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "p0-note-keyboard-jump",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::9\"] > header > button[title=\"Jump to this line in the diff\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(e.classList.contains(\"crh-thread-focused\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "info-comment-thread",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::11\\\"]:not(:has(> header > button[title=\\\"Jump to this line in the diff\\\"] svg))\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--with-existing-comments": [
+      {
+        "name": "path-header-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "hover",
+            "selector": ".crh-panel [data-thread-path=\"packages/adaptors/src/index.ts\"] > button"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel [data-thread-path=\\\"packages/adaptors/src/index.ts\\\"] > button\");if(!e||!(e.matches(\":hover\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "path-header-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "selector": ".crh-panel [data-thread-path=\"packages/adaptors/src/index.ts\"] > button"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel [data-thread-path=\\\"packages/adaptors/src/index.ts\\\"] > button\");if(!e||!(document.activeElement===e))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "path-header-keyboard-jump",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel [data-thread-path=\"packages/adaptors/src/index.ts\"] > button",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel [data-thread-path=\\\"packages/adaptors/src/index.ts\\\"] > button\");if(!e||!(true))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "existing-thread-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::9\"] > header > button[title=\"Jump to this line in the diff\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(document.activeElement===e.querySelector(\"header > button\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "existing-thread-keyboard-jump",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::9\"] > header > button[title=\"Jump to this line in the diff\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(e.classList.contains(\"crh-thread-focused\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-empty-placeholder",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-long-multiline",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic migration comment.\n\u4e2d\u6587\u8fb9\u754c\u4e0e RTL \u0645\u0631\u062d\u0628\u0627.\nlong-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!((e.scrollTop=0,e.value.includes(\"\u4e2d\u6587\u8fb9\u754c\"))))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "Escape-cancel",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(!document.querySelector(\".crh-panel textarea\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-reopened-empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/adaptors/src/index.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "saved-comment-CtrlEnter",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic saved migration comment."
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Control+Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::1\\\"]\");if(!e||!(e.textContent.includes(\"Synthetic saved migration comment.\")&&!document.querySelector(\".crh-panel textarea\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "deleted-saved-comment",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "article[data-anchor=\"packages/adaptors/src/index.ts::new::1\"] button[aria-label=\"Delete comment\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::9\\\"]\");if(!e||!(!document.querySelector(\"article[data-anchor=\\\"packages/adaptors/src/index.ts::new::1\\\"]\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-reviewrenderer--file-statuses": [
+      {
+        "name": "first-composer-empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/review-helper/src/cli.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "composer-long-multiline",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic migration comment.\n\u4e2d\u6587\u8fb9\u754c\u4e0e RTL \u0645\u0631\u062d\u0628\u0627.\nlong-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/long-path-segment/"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!((e.scrollTop=0,e.value.includes(\"\u4e2d\u6587\u8fb9\u754c\"))))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "Escape-hides-empty-panel",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-panel\")&&!document.body.textContent.includes(\"No comments yet\")"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "whitespace-composer",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/review-helper/src/cli.ts\"]"
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "   "
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(e.value===\"   \"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "whitespace-CtrlEnter-hides-panel",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Control+Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-panel\")&&!document.body.textContent.includes(\"No comments yet\")"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "reopened-composer",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add a review comment to packages/review-helper/src/cli.ts\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\".crh-panel textarea\");if(!e||!(document.activeElement===e&&e.value===\"\"))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "saved-first-comment",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "fill",
+            "selector": ".crh-panel textarea",
+            "value": "Synthetic first saved comment."
+          },
+          {
+            "action": "press",
+            "selector": ".crh-panel textarea",
+            "key": "Control+Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"article[data-anchor=\\\"packages/review-helper/src/cli.ts::new::1\\\"]\");if(!e||!(e.textContent.includes(\"Synthetic first saved comment.\")))return false;e.scrollIntoView({block:\"center\",behavior:\"instant\"});const r=e.getBoundingClientRect();const s=JSON.stringify([...document.querySelectorAll(\".crh-panel,.crh-panel *\")].map(n=>{const b=n.getBoundingClientRect();return[b.x,b.y,b.width,b.height]}));const old=window.__threadPaint??{s:\"\",n:0};old.n=old.s===s?old.n+1:0;old.s=s;window.__threadPaint=old;return r.width>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&document.fonts.status===\"loaded\"&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))&&old.n>=3;}"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      },
+      {
+        "name": "delete-only-comment-hides-panel",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "click",
+            "selector": "article[data-anchor=\"packages/review-helper/src/cli.ts::new::1\"] button[aria-label=\"Delete comment\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector(\".crh-panel\")&&!document.body.textContent.includes(\"No comments yet\")"
+          },
+          {
+            "action": "movePointer",
+            "x": -11,
+            "y": -11
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll(\".crh-shell :hover\").length===0&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!==\"running\"))"
+          }
+        ]
+      }
+    ]
+  }
+}

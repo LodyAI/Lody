@@ -658,6 +658,11 @@ ordering belong to [the helper build guide](../../../code-review-helper/standalo
 
 | `artifacts/visual/leaves101-102-acceptance.html` | 49 private GroupSection utilities and 27 local Alert owner utilities; actual monospace, local colors and CVA selector preserved | 76/92 formal PNG pairs exact; 24,255 standard records equal | 16 formal OPENs/75 raw plus five native OPENs/22 raw; initial ten record mismatches and compiler/fallback/theme failures retained. No 101 standalone pair was captured; two final file images are After-only |
 
+| `artifacts/visual/leaves103-105-acceptance.html` | 114 Renderer utility migrations; 54 additional occurrences removed only as unused-module cleanup | 153/156 formal PNG pairs exact; 73,555 complete standard records equal | Three formal OPENs/17 raw plus one native OPEN/17 raw/one threshold; font fallback rejection and caret/readiness failures retained. The same old 104 environment proves only the cleanup delta |
+| `artifacts/visual/leaves104-106-acceptance.html` | 86 ordinary-runtime mappings in four local control owners; zero source deletion; original Slot and exported class selectors retained | 194 current PNG pairs and complete records exact, including 98 formal/1,476 standard records | Two rejected Slot candidates and four failed images retained; actual phone CommitRow Tooltip remains NOT_ACCEPTED. Fourteen old positive pairs are historical only |
+
+| `artifacts/visual/leaves107-acceptance.html` | 182 FileTree/commit utilities migrate; 27 unreachable EmptyThread occurrences are cleanup only | 108/136 formal PNG pairs exact; 66,456 standard records equal; native30 and file10 exact | 28 formal OPENs/7,795 raw plus one normal-motion raw pixel remain. Actual body-absence readiness replaces two rejected cells; phone offline tooltip remains offscreen |
+
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
 flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
@@ -693,8 +698,13 @@ helper batches 96, 98, 100, 101 and 102 remove 155 selected-source utilities wit
 reducing this component inventory. Its separate through102 source snapshot validates
 32 production JS/TS files against the successful build and uses its actual CSS entry
 with the same v2 AST rules: 1,075 occurrences/ten files/26 unresolved expressions.
-Stories, tests and later work are excluded; see
-`inventory-helper-source-through102-proof.json`. The historical through100 bound
+The historical through102 snapshot excludes stories, tests and later work; see
+`inventory-helper-source-through102-proof.json`. The exact successful-build snapshot
+through107 separately validates thirty production files: 698 occurrences/eight
+used files/18 unresolved expressions, including 519 in ReviewRenderer. See
+`inventory-helper-source-through107-proof.json`. Its decrease of 377 separates
+296 migrations from 81 unused/unreachable cleanup occurrences; 104/106's 86 normal
+runtime mappings delete no source literals. The historical through100 bound
 remains 1,151/ten/26; the two units remove exactly 76. Any later application
 batch requires a fresh source-frozen inventory before advancing the through99
 timeline. These static lower
@@ -705,8 +715,8 @@ from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
 same-element token-input negatives are separate. An original Gallery gate failure
 and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
 verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 47 frozen reports, including the separately scoped batches
-97, 99, 96/98, 100 and 101–102. Those later reports preserve every earlier OPEN rather than closing
+keyboard/pointer zoom and 1280/390px layouts. The index now links 50 frozen reports, including the separately scoped helper
+continuations through107. Those later reports preserve every earlier OPEN rather than closing
 issues through a new successful subset.
 
 The 60–63 report keeps the explicit 48+16 notification Before assembly and its

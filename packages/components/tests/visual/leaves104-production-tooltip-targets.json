@@ -1,0 +1,38 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["code-review-helper-reviewrenderer--grouped-refactor"],
+  "ready": {
+    "code-review-helper-reviewrenderer--grouped-refactor": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const blocks=[...document.querySelectorAll('.crh-group-section [data-block-path]')];if(!blocks.length)return false;const state=window.__lody101Warm??{index:0};window.__lody101Warm=state;if(state.index>=blocks.length)return true;const e=blocks[state.index];e.scrollIntoView({block:'center',behavior:'instant'});const h=e.querySelector('diffs-container');if(e.querySelector('.crh-diff-placeholder')||(h&&!h.shadowRoot?.querySelector('[data-line]')))return false;state.index++;return state.index>=blocks.length;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const m=document.querySelector('.crh-main'),t=document.querySelector('.crh-toolbar'),s=document.querySelector('.crh-group-section'),h=s?.querySelector(':scope>header');return !!h&&document.fonts.status==='loaded'&&getComputedStyle(document.querySelector('.crh-shell.dark')).backgroundColor==='rgb(19, 20, 22)'&&m.style.getPropertyValue('--crh-toolbar-h')===t.offsetHeight+'px'&&s.style.getPropertyValue('--crh-group-header-h')===h.offsetHeight+'px';}"
+      },
+      {
+        "action": "hover",
+        "text": "refactor(adaptors): drop legacy aliases from the public surface"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[role=tooltip]')?.parentElement;if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);const s=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]),a=window.__actualTooltip104??{s:'',n:0};a.n=a.s===s?a.n+1:0;a.s=s;window.__actualTooltip104=a;return a.n>=3&&r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth&&c.opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  }
+}

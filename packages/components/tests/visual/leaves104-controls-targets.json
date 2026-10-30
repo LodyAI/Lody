@@ -1,0 +1,554 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 850
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "code-review-helper-controlsmigration--menu-default",
+    "code-review-helper-controlsmigration--menu-caller",
+    "code-review-helper-controlsmigration--tooltip-top",
+    "code-review-helper-controlsmigration--tooltip-right",
+    "code-review-helper-controlsmigration--tooltip-bottom",
+    "code-review-helper-controlsmigration--tooltip-left",
+    "code-review-helper-controlsmigration--tooltip-caller"
+  ],
+  "ready": {
+    "code-review-helper-controlsmigration--menu-default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--menu-caller": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-top": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-right": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-bottom": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-left": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-caller": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-controls-migration]')&&getComputedStyle(document.documentElement).getPropertyValue('--popover').trim()!==''&&getComputedStyle(document.querySelector('[data-controls-migration]')).backgroundColor==='rgb(19, 20, 22)'&&document.fonts.status==='loaded'"
+      },
+      {
+        "action": "movePointer",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "code-review-helper-controlsmigration--menu-default": [
+      {
+        "name": "keyboard-first",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-menu-trigger]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-menu-trigger]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-menu]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('data-owned-item')==='first'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-last",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-menu]",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('data-owned-item')==='last'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-item=last]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-menu]')&&document.querySelector('[data-selection]').textContent==='Selected: Expanded'&&document.activeElement===document.querySelector('[data-menu-trigger]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pointer-first",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-menu-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-menu]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-owned-item=first]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-item=first]').matches(':hover')&&document.querySelector('[data-owned-item=disabled]').hasAttribute('data-disabled')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-item=first]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-menu]')&&document.activeElement===document.querySelector('[data-menu-trigger]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--menu-caller": [
+      {
+        "name": "keyboard-first",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-menu-trigger]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-menu-trigger]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-menu]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('data-owned-item')==='first'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-last",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-menu]",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('data-owned-item')==='last'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-item=last]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-menu]')&&document.querySelector('[data-selection]').textContent==='Selected: Expanded'&&document.activeElement===document.querySelector('[data-menu-trigger]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pointer-first",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-menu-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-menu]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-owned-item=first]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-item=first]').matches(':hover')&&document.querySelector('[data-owned-item=disabled]').hasAttribute('data-disabled')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-owned-item=first]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-menu]')&&document.activeElement===document.querySelector('[data-menu-trigger]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-top": [
+      {
+        "name": "focus-open",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-tooltip-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-tooltip]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-tooltip-trigger]').getAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-tooltip-trigger]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-tooltip]')&&!document.querySelector('[data-tooltip-trigger]').hasAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-right": [
+      {
+        "name": "focus-open",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-tooltip-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-tooltip]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-tooltip-trigger]').getAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-tooltip-trigger]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-tooltip]')&&!document.querySelector('[data-tooltip-trigger]').hasAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-bottom": [
+      {
+        "name": "focus-open",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-tooltip-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-tooltip]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-tooltip-trigger]').getAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-tooltip-trigger]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-tooltip]')&&!document.querySelector('[data-tooltip-trigger]').hasAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-left": [
+      {
+        "name": "focus-open",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-tooltip-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-tooltip]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-tooltip-trigger]').getAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-tooltip-trigger]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-tooltip]')&&!document.querySelector('[data-tooltip-trigger]').hasAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "code-review-helper-controlsmigration--tooltip-caller": [
+      {
+        "name": "focus-open",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-tooltip-trigger]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-owned-tooltip]\");if(!e)return false;const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&c.opacity==='1'&&c.visibility==='visible';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-tooltip-trigger]').getAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-tooltip-trigger]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-tooltip]')&&!document.querySelector('[data-tooltip-trigger]').hasAttribute('aria-describedby')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const nodes=[...document.querySelectorAll('[data-controls-migration], [data-owned-menu], [data-owned-tooltip]')];const value=JSON.stringify(nodes.map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height,getComputedStyle(e).opacity,getComputedStyle(e).transform]}));const a=window.__stable104??{value:'',n:0};a.n=a.value===value?a.n+1:0;a.value=value;window.__stable104=a;return a.n>=3&&document.fonts.status==='loaded'&&document.getAnimations().every(x=>!x.pending&&x.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

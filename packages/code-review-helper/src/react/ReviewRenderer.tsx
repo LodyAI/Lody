@@ -2319,6 +2319,374 @@ function ColumnResizer({
   );
 }
 
+const treeCommitStyles = stylex.create({
+  tree: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  heading: {
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 1)',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  dirContainer: {
+    minWidth: 'calc(var(--spacing) * 0)',
+  },
+  treeRow: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    backgroundColor: {
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+  },
+  dirToggle: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  treeChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  folderButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    textAlign: 'left',
+  },
+  folderGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  folderLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+    },
+  },
+  leafSpacer: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+  fileButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    textAlign: 'left',
+  },
+  fileLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '13px',
+  },
+  fileLabelChecked: {
+    color: 'hsl(var(--muted-foreground))',
+  },
+  fileLabelUnchecked: {
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  stats: {
+    'margin-left': 'auto',
+    flexShrink: 0,
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+  },
+  additions: {
+    color: 'hsl(var(--github-addition))',
+  },
+  deletions: {
+    color: 'hsl(var(--github-deletion))',
+  },
+  commitsToggle: {
+    'margin-bottom': 'calc(var(--spacing) * 1.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  commitsChevron: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+  },
+  commitList: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    },
+  },
+  showMore: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderTopStyle: 'var(--tw-border-style)',
+    borderTopWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  summary: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  subject: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  author: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  commitFrame: {
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: {
+      default: '1px',
+      ':last-child': 0,
+    },
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--card))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--card)) 40%, transparent)',
+    },
+  },
+  commitRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    backgroundColor: {
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+  },
+  summaryButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  commitChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  bodylessSummary: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    textAlign: 'left',
+  },
+  summarySpacer: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  tooltipBody: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  tooltipSubject: {
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  tooltipMetadata: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  tooltipAuthor: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  tooltipMessage: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 6,
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    fontSize: '11.5px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  tooltipSha: {
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10.5px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  copyButton: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  copiedGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    color: 'hsl(var(--primary))',
+  },
+  copyGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  expandedBody: {
+    whiteSpace: 'pre-wrap',
+    borderTopStyle: 'var(--tw-border-style)',
+    borderTopWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 40%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    fontSize: '12px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  avatar: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '3.40282e38px',
+    fontSize: '10px',
+    color: 'var(--color-white)',
+  },
+});
+
 function FileTree({
   nodes,
   reviewed,
@@ -2336,8 +2704,13 @@ function FileTree({
     return null;
   }
   return (
-    <nav className="-mx-1 grid gap-0.5" aria-label="Changed files">
-      <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <nav {...stylex.props(treeCommitStyles.tree)} aria-label="Changed files">
+      <p
+        className={cn(
+          'font-semibold tracking-[0.14em]',
+          stylex.props(treeCommitStyles.heading).className
+        )}
+      >
         Files
       </p>
       {nodes.map((node) => (
@@ -2376,19 +2749,28 @@ function FileTreeRow({
 
   if (node.type === 'dir') {
     return (
-      <div className="min-w-0">
+      <div {...stylex.props(treeCommitStyles.dirContainer)}>
         <div
           style={{ paddingLeft: `${indent + 8}px` }}
-          className="flex min-w-0 items-center gap-1.5 rounded-md py-1 pr-2 transition-colors hover:bg-foreground/5"
+          className={cn('transition-colors', stylex.props(treeCommitStyles.treeRow).className)}
         >
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
             aria-expanded={open}
             aria-label={`${open ? 'Collapse' : 'Expand'} ${node.name}`}
-            className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+            className={cn(
+              'outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
+              stylex.props(treeCommitStyles.dirToggle).className
+            )}
           >
-            <ChevronDown className={cn('size-3.5 transition-transform', !open && '-rotate-90')} />
+            <ChevronDown
+              className={cn(
+                'transition-transform',
+                stylex.props(treeCommitStyles.treeChevron).className,
+                !open && '-rotate-90'
+              )}
+            />
           </button>
           <Checkbox
             state={state}
@@ -2398,10 +2780,13 @@ function FileTreeRow({
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+            className={cn(
+              'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+              stylex.props(treeCommitStyles.folderButton).className
+            )}
           >
-            <Folder className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono text-[13px] text-foreground/85">{node.name}</span>
+            <Folder {...stylex.props(treeCommitStyles.folderGlyph)} />
+            <span {...stylex.props(treeCommitStyles.folderLabel)}>{node.name}</span>
           </button>
         </div>
         {open &&
@@ -2425,9 +2810,9 @@ function FileTreeRow({
   return (
     <div
       style={{ paddingLeft: `${indent + 8}px` }}
-      className="flex min-w-0 items-center gap-1.5 rounded-md py-1 pr-2 transition-colors hover:bg-foreground/5"
+      className={cn('transition-colors', stylex.props(treeCommitStyles.treeRow).className)}
     >
-      <span aria-hidden className="size-4 shrink-0" />
+      <span aria-hidden {...stylex.props(treeCommitStyles.leafSpacer)} />
       <Checkbox
         state={state}
         onChange={(checked) => onToggle(node, checked)}
@@ -2437,21 +2822,31 @@ function FileTreeRow({
         type="button"
         onClick={() => onNavigate(node.path)}
         title={node.path}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+        className={cn(
+          'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+          stylex.props(treeCommitStyles.fileButton).className
+        )}
       >
         <FileIcon filePath={node.path} className="size-4 shrink-0" />
         <span
           className={cn(
-            'truncate font-mono text-[13px]',
-            state === 'checked' ? 'text-muted-foreground' : 'text-foreground/90'
+            stylex.props(treeCommitStyles.fileLabel).className,
+            state === 'checked'
+              ? stylex.props(treeCommitStyles.fileLabelChecked).className
+              : stylex.props(treeCommitStyles.fileLabelUnchecked).className
           )}
         >
           {node.name}
         </span>
         {stats ? (
-          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums leading-none">
-            <span className="text-addition">+{stats.additions}</span>{' '}
-            <span className="text-deletion">−{stats.deletions}</span>
+          <span
+            className={cn(
+              'tabular-nums leading-none',
+              stylex.props(treeCommitStyles.stats).className
+            )}
+          >
+            <span {...stylex.props(treeCommitStyles.additions)}>+{stats.additions}</span>{' '}
+            <span {...stylex.props(treeCommitStyles.deletions)}>−{stats.deletions}</span>
           </span>
         ) : null}
       </button>
@@ -2482,14 +2877,23 @@ function GroupCommits({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="mb-1.5 flex items-center gap-1 rounded-sm font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+        className={cn(
+          'font-semibold tracking-[0.1em] outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
+          stylex.props(treeCommitStyles.commitsToggle).className
+        )}
       >
-        <ChevronDown className={cn('size-3 transition-transform', !open && '-rotate-90')} />
+        <ChevronDown
+          className={cn(
+            'transition-transform',
+            stylex.props(treeCommitStyles.commitsChevron).className,
+            !open && '-rotate-90'
+          )}
+        />
         {refs.length} {refs.length === 1 ? 'commit' : 'commits'}
       </button>
       {open && (
         <TooltipProvider delayDuration={250} disableHoverableContent>
-          <div className="overflow-hidden rounded-md border border-border/70">
+          <div {...stylex.props(treeCommitStyles.commitList)}>
             {visibleRefs.map((commitRef) => (
               <CommitRow key={commitRef} commitRef={commitRef} commit={commits?.[commitRef]} />
             ))}
@@ -2497,7 +2901,10 @@ function GroupCommits({
               <button
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
-                className="flex w-full items-center justify-center gap-1 border-t border-border/60 bg-muted/30 px-2 py-1 text-[11px] font-medium text-muted-foreground outline-hidden transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45"
+                className={cn(
+                  'font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45',
+                  stylex.props(treeCommitStyles.showMore).className
+                )}
               >
                 {expanded
                   ? 'Show fewer commits'
@@ -2534,12 +2941,12 @@ function CommitRow({
   const summary = (
     <>
       <CommitAvatar name={author} seed={seed} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12.5px] leading-tight text-foreground">
+      <span {...stylex.props(treeCommitStyles.summary)}>
+        <span className={cn('leading-tight', stylex.props(treeCommitStyles.subject).className)}>
           {subject}
         </span>
         {author ? (
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+          <span {...stylex.props(treeCommitStyles.author)}>
             {author}
             {date ? ` · ${date}` : ''}
           </span>
@@ -2559,8 +2966,8 @@ function CommitRow({
   }, [sha]);
 
   return (
-    <div className="border-b border-border/60 bg-card/40 last:border-b-0">
-      <div className="flex w-full min-w-0 items-center gap-2.5 px-2.5 py-1.5 transition-colors hover:bg-foreground/5">
+    <div {...stylex.props(treeCommitStyles.commitFrame)}>
+      <div className={cn('transition-colors', stylex.props(treeCommitStyles.commitRow).className)}>
         <Tooltip>
           <TooltipTrigger asChild>
             {hasBody ? (
@@ -2568,40 +2975,56 @@ function CommitRow({
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 aria-expanded={expanded}
-                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+                className={cn(
+                  'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+                  stylex.props(treeCommitStyles.summaryButton).className
+                )}
               >
                 <ChevronDown
                   className={cn(
-                    'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                    'transition-transform',
+                    stylex.props(treeCommitStyles.commitChevron).className,
                     !expanded && '-rotate-90'
                   )}
                 />
                 {summary}
               </button>
             ) : (
-              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              <div {...stylex.props(treeCommitStyles.bodylessSummary)}>
                 {/* Spacer keeps the avatar/subject aligned with collapsible rows. */}
-                <span aria-hidden className="size-3.5 shrink-0" />
+                <span aria-hidden {...stylex.props(treeCommitStyles.summarySpacer)} />
                 {summary}
               </div>
             )}
           </TooltipTrigger>
           <TooltipContent side="left" align="start" className="w-72 max-w-[18rem] p-0">
-            <div className="grid gap-2 p-3">
-              <p className="text-[12.5px] font-medium leading-snug text-foreground">{subject}</p>
-              <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div {...stylex.props(treeCommitStyles.tooltipBody)}>
+              <p
+                className={cn(
+                  'font-medium leading-snug',
+                  stylex.props(treeCommitStyles.tooltipSubject).className
+                )}
+              >
+                {subject}
+              </p>
+              <p {...stylex.props(treeCommitStyles.tooltipMetadata)}>
                 <CommitAvatar name={author} seed={seed} />
-                <span className="truncate">
+                <span {...stylex.props(treeCommitStyles.tooltipAuthor)}>
                   {author || 'Unknown author'}
                   {date ? ` · ${date}` : ''}
                 </span>
               </p>
               {body ? (
-                <p className="line-clamp-6 whitespace-pre-wrap text-[11.5px] leading-5 text-muted-foreground">
+                <p
+                  className={cn(
+                    'leading-5',
+                    stylex.props(treeCommitStyles.tooltipMessage).className
+                  )}
+                >
                   {body}
                 </p>
               ) : null}
-              <code className="font-mono text-[10.5px] text-muted-foreground">{sha}</code>
+              <code {...stylex.props(treeCommitStyles.tooltipSha)}>{sha}</code>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -2610,14 +3033,21 @@ function CommitRow({
           onClick={() => void copy()}
           aria-label={`Copy commit id ${shortSha}`}
           title="Copy commit id"
-          className="flex shrink-0 items-center gap-1 rounded-sm font-mono text-[11px] tabular-nums text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+          className={cn(
+            'tabular-nums outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring/45',
+            stylex.props(treeCommitStyles.copyButton).className
+          )}
         >
           {shortSha}
-          {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
+          {copied ? (
+            <Check {...stylex.props(treeCommitStyles.copiedGlyph)} />
+          ) : (
+            <Copy {...stylex.props(treeCommitStyles.copyGlyph)} />
+          )}
         </button>
       </div>
       {hasBody && expanded && (
-        <div className="whitespace-pre-wrap border-t border-border/40 bg-muted/20 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+        <div className={cn('leading-5', stylex.props(treeCommitStyles.expandedBody).className)}>
           {body}
         </div>
       )}
@@ -2631,7 +3061,7 @@ function CommitAvatar({ name, seed }: { readonly name: string; readonly seed: st
   return (
     <span
       aria-hidden
-      className="flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+      className={cn('font-semibold', stylex.props(treeCommitStyles.avatar).className)}
       style={{ backgroundColor: `hsl(${hue} 42% 40%)` }}
     >
       {initials}
@@ -3431,6 +3861,231 @@ function buildLineAnnotations(
   }));
 }
 
+const commentStyles = stylex.create({
+  panel: {
+    zIndex: 10,
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    borderColor: 'hsl(var(--sidebar-border))',
+    backgroundColor: 'hsl(var(--sidebar))',
+    color: 'hsl(var(--sidebar-foreground))',
+    borderTopStyle: {
+      default: null,
+      '@media not all and (width >= 64rem)': 'var(--tw-border-style)',
+    },
+    borderTopWidth: {
+      default: null,
+      '@media not all and (width >= 64rem)': '1px',
+    },
+    position: {
+      default: null,
+      '@media (width >= 64rem)': 'sticky',
+    },
+    top: {
+      default: null,
+      '@media (width >= 64rem)': 'calc(var(--spacing) * 0)',
+    },
+    height: {
+      default: null,
+      '@media (width >= 64rem)': '100vh',
+    },
+    borderLeftStyle: {
+      default: null,
+      '@media (width >= 64rem)': 'var(--tw-border-style)',
+    },
+    borderLeftWidth: {
+      default: null,
+      '@media (width >= 64rem)': '1px',
+    },
+  },
+  scroll: {
+    flex: '1',
+    overflowY: 'auto',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  findings: {
+    marginBottom: 'calc(var(--spacing) * 4)',
+  },
+  threadList: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+  fileThreads: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  pathButton: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    'padding-inline': 'calc(var(--spacing) * 0.5)',
+    textAlign: 'left',
+  },
+  pathLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11.5px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  threadItems: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  composer: {
+    marginBottom: 'calc(var(--spacing) * 4)',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--card))',
+  },
+  composerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  composerTitle: {
+    fontSize: '12px',
+    color: 'hsl(var(--foreground))',
+  },
+  composerPath: {
+    'margin-left': 'auto',
+    minWidth: 'calc(var(--spacing) * 0)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  textarea: {
+    display: 'block',
+    minHeight: 'calc(var(--spacing) * 24)',
+    width: '100%',
+    resize: 'vertical',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: 0,
+    backgroundColor: 'hsl(var(--card))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '::placeholder': 'hsl(var(--muted-foreground))',
+    },
+  },
+  composerFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 2)',
+    borderTopStyle: 'var(--tw-border-style)',
+    borderTopWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  threadCard: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--card))',
+  },
+  threadHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  threadJump: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  dangerGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-danger))',
+  },
+  warningGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  mutedWarningGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 70%, transparent)',
+    },
+  },
+  questionGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--primary))',
+  },
+  threadLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  glyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  threadBody: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    fontSize: '13px',
+    color: 'hsl(var(--foreground))',
+  },
+});
+
 function CommentPanel({
   threads,
   total: _total,
@@ -3460,15 +4115,14 @@ function CommentPanel({
   readonly onNavigate: (path: string) => void;
   readonly onJumpToRef: (ref: ReviewFindingRef) => void;
 }) {
-  const isEmpty = threads.length === 0 && draft === null && findings.length === 0;
   return (
     <aside
-      className="crh-panel z-10 flex min-w-0 flex-col border-sidebar-border bg-sidebar text-sidebar-foreground max-lg:border-t lg:sticky lg:top-0 lg:h-screen lg:border-l"
+      className={cn('crh-panel', stylex.props(commentStyles.panel).className)}
       aria-label="Review comments"
     >
-      <div data-cr-panel-scroll className="flex-1 overflow-y-auto p-3">
+      <div data-cr-panel-scroll {...stylex.props(commentStyles.scroll)}>
         {findings.length > 0 && (
-          <div className="mb-4">
+          <div {...stylex.props(commentStyles.findings)}>
             <ReviewFindingsSection findings={findings} files={files} onJump={onJumpToRef} />
           </div>
         )}
@@ -3482,38 +4136,46 @@ function CommentPanel({
           />
         )}
 
-        {isEmpty ? (
-          <EmptyThread />
-        ) : (
-          <div className="grid gap-4">
-            {threads.map((thread) => (
-              <section key={thread.path} data-thread-path={thread.path} className="grid gap-2">
-                <button
-                  type="button"
-                  className="group flex w-full min-w-0 items-center gap-1.5 rounded-sm px-0.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
-                  onClick={() => onNavigate(thread.path)}
-                  title={`Jump to ${thread.path}`}
+        <div {...stylex.props(commentStyles.threadList)}>
+          {threads.map((thread) => (
+            <section
+              key={thread.path}
+              data-thread-path={thread.path}
+              {...stylex.props(commentStyles.fileThreads)}
+            >
+              <button
+                type="button"
+                className={cn(
+                  'group outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+                  stylex.props(commentStyles.pathButton).className
+                )}
+                onClick={() => onNavigate(thread.path)}
+                title={`Jump to ${thread.path}`}
+              >
+                <FileIcon filePath={thread.path} {...stylex.props(commentStyles.glyph)} />
+                <span
+                  className={cn(
+                    'group-hover:text-foreground',
+                    stylex.props(commentStyles.pathLabel).className
+                  )}
                 >
-                  <FileIcon filePath={thread.path} className="size-3.5" />
-                  <span className="truncate font-mono text-[11.5px] text-muted-foreground group-hover:text-foreground">
-                    {thread.path}
-                  </span>
-                </button>
-                <div className="grid gap-2">
-                  {thread.items.map((item) => (
-                    <ThreadCard
-                      key={item.id}
-                      item={item}
-                      focused={focusedAnchor === item.anchor}
-                      onDelete={onDeleteComment}
-                      onFocus={onFocus}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
+                  {thread.path}
+                </span>
+              </button>
+              <div {...stylex.props(commentStyles.threadItems)}>
+                {thread.items.map((item) => (
+                  <ThreadCard
+                    key={item.id}
+                    item={item}
+                    focused={focusedAnchor === item.anchor}
+                    onDelete={onDeleteComment}
+                    onFocus={onFocus}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
     </aside>
   );
@@ -3544,20 +4206,28 @@ function PanelComposer({
   return (
     <div
       ref={containerRef}
-      className="mb-4 overflow-hidden rounded-md border border-border bg-card shadow-sm"
+      className={cn('shadow-sm', stylex.props(commentStyles.composer).className)}
     >
-      <header className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
-        <span className="text-[12px] font-semibold leading-none text-foreground">New comment</span>
-        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-          {fileBaseName(draft.path)}
+      <header {...stylex.props(commentStyles.composerHeader)}>
+        <span
+          className={cn(
+            'font-semibold leading-none',
+            stylex.props(commentStyles.composerTitle).className
+          )}
+        >
+          New comment
         </span>
+        <span {...stylex.props(commentStyles.composerPath)}>{fileBaseName(draft.path)}</span>
       </header>
       <textarea
         ref={textareaRef}
         value={draft.body}
         placeholder="Leave a comment…"
         aria-label={`Comment on ${fileBaseName(draft.path)} line ${draft.lineNumber}`}
-        className="block min-h-24 w-full resize-y border-0 bg-card px-3 py-2.5 font-sans text-[13px] leading-6 text-foreground outline-hidden placeholder:text-muted-foreground"
+        className={cn(
+          'font-sans leading-6 outline-hidden',
+          stylex.props(commentStyles.textarea).className
+        )}
         onChange={(event) => onChange(event.currentTarget.value)}
         onInput={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -3570,7 +4240,7 @@ function PanelComposer({
           }
         }}
       />
-      <div className="flex items-center justify-end gap-2 border-t bg-muted/40 px-3 py-2">
+      <div {...stylex.props(commentStyles.composerFooter)}>
         <Button
           type="button"
           size="sm"
@@ -3605,22 +4275,28 @@ function ThreadCard({
     <article
       data-anchor={item.anchor}
       className={cn(
-        'overflow-hidden rounded-md border border-border bg-card transition-colors',
+        'transition-colors',
+        stylex.props(commentStyles.threadCard).className,
         focused && 'crh-thread-focused'
       )}
     >
-      <header className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5">
+      <header {...stylex.props(commentStyles.threadHeader)}>
         <button
           type="button"
           onClick={() => onFocus(item.anchor, item.path)}
           title="Jump to this line in the diff"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+          className={cn(
+            'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45',
+            stylex.props(commentStyles.threadJump).className
+          )}
         >
-          {severity === 'p0' && <CircleAlert className="size-3.5 shrink-0 text-danger" />}
-          {severity === 'p1' && <AlertTriangle className="size-3.5 shrink-0 text-warning" />}
-          {severity === 'p2' && <AlertTriangle className="size-3.5 shrink-0 text-warning/70" />}
-          {severity === 'question' && <HelpCircle className="size-3.5 shrink-0 text-primary" />}
-          <span className="truncate text-[11px] text-muted-foreground">
+          {severity === 'p0' && <CircleAlert {...stylex.props(commentStyles.dangerGlyph)} />}
+          {severity === 'p1' && <AlertTriangle {...stylex.props(commentStyles.warningGlyph)} />}
+          {severity === 'p2' && (
+            <AlertTriangle {...stylex.props(commentStyles.mutedWarningGlyph)} />
+          )}
+          {severity === 'question' && <HelpCircle {...stylex.props(commentStyles.questionGlyph)} />}
+          <span {...stylex.props(commentStyles.threadLabel)}>
             {isNote
               ? severity === 'question'
                 ? 'question'
@@ -3644,25 +4320,15 @@ function ThreadCard({
           </Button>
         )}
       </header>
-      <div className="crh-line-annotation px-3 py-2.5 text-[13px] leading-6 text-foreground">
+      <div
+        className={cn(
+          'crh-line-annotation leading-6',
+          stylex.props(commentStyles.threadBody).className
+        )}
+      >
         {item.body}
       </div>
     </article>
-  );
-}
-
-function EmptyThread() {
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border/70 px-4 py-10 text-center">
-      <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <MessageSquarePlus className="size-4" />
-      </span>
-      <p className="text-[13px] font-medium text-foreground">No comments yet</p>
-      <p className="max-w-[16rem] text-[12px] leading-5 text-muted-foreground">
-        Click a line in the diff — or the <span className="font-semibold">+</span> on hover — to
-        start a review comment.
-      </p>
-    </div>
   );
 }
 
