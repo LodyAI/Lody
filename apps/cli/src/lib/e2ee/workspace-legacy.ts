@@ -8,6 +8,7 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { openDispatchAfterLedgerCatchUp } from './rpc-ledger-catch-up';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -751,6 +752,16 @@ async function openWorkspaceOwned(
     Date.now
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
+  // Both the realtime offer and the durable execution origin reopen dispatch frames.
+  const dispatchNative = {
+    ...rpc,
+    openDispatch: openDispatchAfterLedgerCatchUp({
+      open: rpc.openDispatch,
+      currentEpoch: () =>
+        Effect.map(opened.runtime.executionLedger(), (view) => view.inspectState().epoch.number),
+      catchUp: () => refreshInBackground(),
+    }),
+  };
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
@@ -1200,7 +1211,7 @@ async function openWorkspaceOwned(
             const state = view.inspectState();
             const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
             if (!machineId) return undefined;
-            const verified = yield* rpc.openDispatch(machineId, rpcOriginal);
+            const verified = yield* dispatchNative.openDispatch(machineId, rpcOriginal);
             if (
               verified.args.sessionId !== intent.sessionId ||
               verified.args.userTurnId !== intent.userTurnId ||
@@ -1270,7 +1281,7 @@ async function openWorkspaceOwned(
                   workspaceId: options.workspaceId,
                   genesis: binding.genesisHash,
                   machineId,
-                  native: rpc,
+                  native: dispatchNative,
                   journal: rpcJournal,
                   authorize: opened.executionAuthorization.authorizeExecution,
                   isOpen: () => !closed,
