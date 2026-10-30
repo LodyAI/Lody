@@ -615,6 +615,119 @@ describe('LodyFleet remote authentication boundary', () => {
   });
 });
 
+describe('LodyFleet local E2EE pairing during startup', () => {
+  type Snapshot = Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0];
+  const genesisHash = 'ab'.repeat(32);
+  const encrypted = {
+    id: 'ws-e2ee',
+    name: 'Private',
+    slug: 'private',
+    role: 'owner',
+    contentMode: 'e2ee',
+    genesisHash,
+  };
+  const prepare = {
+    type: 'prepare',
+    machineId: 'machine-1',
+    accountId: 'user-1',
+    workspaceId: encrypted.id,
+    genesisHash,
+    genesisRecordHex: '00',
+    membershipId: 'cd'.repeat(16),
+    pairingSessionId: 'ef'.repeat(16),
+    frontendSigningPublicKey: '12'.repeat(32),
+  } as const;
+  const material = {
+    pairingSessionId: prepare.pairingSessionId,
+    signingPublicKey: '34'.repeat(32),
+    encryptionPublicKey: '56'.repeat(32),
+    possessionSignature: '78'.repeat(64),
+    credentialHash: '9a'.repeat(32),
+    bindingSignature: 'bc'.repeat(64),
+    protection: 'os-keystore',
+  } as const;
+
+  // A daemon started after the workspace was created: its local catalog has
+  // never seen the workspace, and the live list has not been delivered yet.
+  const coldFleet = async () => {
+    let push: (snapshot: Snapshot) => void = () => {};
+    const cloudPort: CloudPort = {
+      ...createTestCloudPort((onValue) => {
+        push = onValue;
+        return () => {};
+      }),
+      e2ee: {} as NonNullable<CloudPort['e2ee']>,
+    };
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
+      cloudPort
+    );
+    const fleet = harness as unknown as typeof harness & {
+      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+      applyRemoteWorkspaceList: (result: { workspaces: (typeof encrypted)[] }) => Promise<void>;
+      applyWorkspaceList: (next: (typeof encrypted)[]) => Promise<void>;
+      dispatchLocalE2eePairing: (message: typeof prepare) => Promise<unknown>;
+    };
+    // The Streams bridge reconcile is outside this boundary; keep the real list application.
+    fleet.applyRemoteWorkspaceList = (result) => fleet.applyWorkspaceList([...result.workspaces]);
+    await fleet.bootstrapFromLocalCatalog();
+    await fleet.startWorkspaceSubscription({ waitForInitial: false });
+    return { fleet, push: (snapshot: Snapshot) => push(snapshot) };
+  };
+  const stateAfterQueuedWork = (reply: Promise<unknown>) =>
+    Promise.race([
+      reply.then(
+        () => 'settled',
+        () => 'settled'
+      ),
+      new Promise((resolve) => setImmediate(() => resolve('pending'))),
+    ]);
+
+  it('prepares a workspace the cold cache never saw once the first authoritative list arrives', async () => {
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const native = vi
+      .spyOn(legacy, 'prepareCliE2eeMachineLegacy')
+      .mockResolvedValue(material as never);
+    try {
+      const { fleet, push } = await coldFleet();
+      const reply = fleet.dispatchLocalE2eePairing(prepare);
+      expect(await stateAfterQueuedWork(reply)).toBe('pending');
+
+      push({ status: 'authorized', userId: 'user-1', workspaces: [encrypted] });
+
+      await expect(reply).resolves.toEqual({
+        ok: true,
+        type: 'prepare',
+        machineId: 'machine-1',
+        ...material,
+      });
+    } finally {
+      native.mockRestore();
+    }
+  });
+
+  it.each([
+    ['omits the workspace', { status: 'authorized', userId: 'user-1', workspaces: [] }],
+    [
+      'carries another genesis',
+      {
+        status: 'authorized',
+        userId: 'user-1',
+        workspaces: [{ ...encrypted, genesisHash: 'cd'.repeat(32) }],
+      },
+    ],
+    ['rejects the token', { status: 'unauthorized', reason: 'CLI token is invalid or expired.' }],
+  ] as const)('still refuses pairing when the first authoritative list %s', async (_, snapshot) => {
+    const { fleet, push } = await coldFleet();
+    const reply = fleet.dispatchLocalE2eePairing(prepare);
+    expect(await stateAfterQueuedWork(reply)).toBe('pending');
+
+    push(snapshot as Snapshot);
+
+    await expect(reply).rejects.toThrow('e2ee_binding_conflict');
+  });
+});
+
 describe('LodyFleet local session control streaming', () => {
   type FleetControlInternals = {
     runtimes: Map<

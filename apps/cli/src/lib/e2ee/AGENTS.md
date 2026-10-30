@@ -45,6 +45,10 @@
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
   Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
+  The local catalog never refuses that check: a workspace it lacks or binds to another
+  genesis waits for the first authoritative list outcome (list, rejection, subscription
+  error or shutdown), then fails closed; a cached match proceeds offline
+  ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
