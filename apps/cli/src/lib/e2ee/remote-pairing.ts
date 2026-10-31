@@ -66,6 +66,7 @@ export async function pairRemoteMachineLegacy(options: {
     ...offer,
     machineId: options.machineId,
     keyring: options.keyring,
+    cloud: options.cloud,
   });
   if ('superseded' in prepared) throw new Error('e2ee_pairing_superseded_create_new_command');
   const material = LocalE2eePrepareResponseSchema.parse({

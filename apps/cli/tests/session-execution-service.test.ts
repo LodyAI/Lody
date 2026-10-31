@@ -2630,7 +2630,7 @@ describe('SessionExecutionService', () => {
     encryptedExecution?: ReturnType<typeof makeEncryptedAgentExecution>;
     prepared?: boolean;
     create?: boolean;
-    onPrompt?: () => Promise<void>;
+    onPrompt?: (service: SessionExecutionService) => Promise<void>;
     /** Requested by the turn message; untrusted input. */
     project?: ProjectRef;
     /** Synced Session meta; writable by any member. */
@@ -2663,7 +2663,7 @@ describe('SessionExecutionService', () => {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
       prompt: vi.fn(async () => {
-        await options.onPrompt?.();
+        await options.onPrompt?.(service);
         if (options.promptFailure) throw options.promptFailure;
         return { stopReason: 'end_turn' };
       }),
@@ -2915,6 +2915,7 @@ describe('SessionExecutionService', () => {
     const { LoroDoc, LoroMap } = await import('loro-crdt');
     const source = new LoroDoc();
     const submitted: string[] = [];
+    const invocations: Array<{ requesterUserId: string } | undefined> = [];
     const presence = bindTestPresenceApplication(createSilentLogger());
     const execute = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>) =>
       Effect.runPromise(Effect.scoped(effect));
@@ -3346,8 +3347,9 @@ describe('SessionExecutionService', () => {
           hasPromptEventsForTurn: true,
           prepared: true,
           encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
-          onPrompt: async () => {
+          onPrompt: async (service) => {
             submitted.push('hi');
+            invocations.push(service.getActiveInvocationContext(sessionId as SessionId));
           },
         });
       if (backfillFailure) {
@@ -3394,6 +3396,13 @@ describe('SessionExecutionService', () => {
       const before = historyReads.length;
       const result = await dispatch();
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
+      // Only a turn verified as signed by the machine owner's own membership may
+      // lend its identity to derived work (MCP, iOS control). A shared member's
+      // turn gets none, whatever display userId its history row claims.
+      if (!deniedSigner)
+        expect(invocations[0]?.requesterUserId).toBe(
+          mode === 'other-member-shared' ? undefined : user
+        );
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
       expect(result.failureMessages).toEqual(
         mode === 'other-member' || mode === 'other-member-closed'

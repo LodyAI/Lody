@@ -1476,6 +1476,38 @@ describe('host-only E2EE realtime journal', () => {
       expect(read(key)).toBeNull();
     });
 
+    it.each([
+      [['owner', 'owner'], 'owner'],
+      [['owner', 'member'], 'member'],
+    ] as const)(
+      'keeps owner identity across project grants only when every grant names the owner (%j)',
+      async (principals, expected) => {
+        let index = 0;
+        const execution = makeEncryptedAgentExecution({
+          genesis: key.genesis,
+          workspaceId: key.workspaceId,
+          targetMachineId: key.targetMachineId,
+          journal: () => journal,
+          resolveVerifiedOriginal: () =>
+            Effect.succeed({
+              requesterDevice: 'ab'.repeat(32),
+              requesterCryptoUserId: '1e'.repeat(32),
+              expiresAt: 1000,
+            }),
+          authorizeExecution: () =>
+            Effect.sync(() => ({
+              _tag: 'Authorized' as const,
+              principal: principals[index++] ?? 'member',
+            })),
+        });
+        expect(
+          await Effect.runPromise(
+            execution.claim({ ...intent, localProjectIds: ['first', 'second'] })
+          )
+        ).toMatchObject({ state: 'claimed', principal: expected });
+      }
+    );
+
     it('requires every project the turn reaches to be shared before the durable start', async () => {
       const asked: (string | undefined)[] = [];
       const execution = makeEncryptedAgentExecution({

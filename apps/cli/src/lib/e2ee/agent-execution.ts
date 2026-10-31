@@ -28,7 +28,11 @@ const intentSchema = z.object({
 export type EncryptedExecutionIntent = z.infer<typeof intentSchema>;
 /** The shape is structurally compatible with the workspace host freshness gate. */
 export type ExecutionAuthorization =
-  | { readonly _tag: 'Authorized'; readonly isCurrent?: () => boolean }
+  | {
+      readonly _tag: 'Authorized';
+      readonly isCurrent?: () => boolean;
+      readonly principal?: 'owner' | 'member';
+    }
   | { readonly _tag: 'Denied'; readonly reason: string };
 export type AuthorizeEncryptedExecution = (
   workspaceId: string,
@@ -48,7 +52,13 @@ export type ResolveVerifiedExecutionOriginal = (
 ) => Effect.Effect<VerifiedExecutionOriginal | PendingExecutionOriginal | undefined, unknown>;
 
 export type EncryptedExecutionClaim =
-  | { state: 'claimed'; permit: RealtimeStartPermit }
+  | {
+      state: 'claimed';
+      permit: RealtimeStartPermit;
+      /** `owner` only when the verified signer belongs to this machine owner's
+       * membership; anything else, including an unstated principal, is `member`. */
+      principal: 'owner' | 'member';
+    }
   | { state: 'denied'; reason?: 'e2ee_machine_not_shared' }
   | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
 
@@ -127,14 +137,18 @@ export function makeEncryptedAgentExecution(options: {
       authorize: AuthorizeEncryptedExecution
     ): Effect.fn.Return<ExecutionAuthorization, unknown> {
       const fences: (() => boolean)[] = [];
+      // Owner identity survives only if every grant names the owner principal.
+      let owner = true;
       for (const target of targets) {
         const result = yield* authorize(intent.workspaceId, verified.requesterDevice, target);
         if (result._tag !== 'Authorized') return result;
         if (result.isCurrent) fences.push(result.isCurrent);
+        if (result.principal !== 'owner') owner = false;
       }
       return {
         _tag: 'Authorized',
         ...(fences.length ? { isCurrent: () => fences.every((current) => current()) } : {}),
+        ...(owner ? { principal: 'owner' as const } : {}),
       };
     });
     let authorization = yield* authorizeTargets(authorizeExecution);
@@ -187,6 +201,8 @@ export function makeEncryptedAgentExecution(options: {
       frame,
     };
     const executionCurrent = authorization.isCurrent;
+    const principal =
+      authorization.principal === 'owner' ? ('owner' as const) : ('member' as const);
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
       if (
@@ -209,7 +225,7 @@ export function makeEncryptedAgentExecution(options: {
             state:
               result.record.state === 'completed' ? ('completed' as const) : ('uncertain' as const),
           }
-        : result;
+        : { ...result, principal };
     });
   });
   const complete = (permit: RealtimeStartPermit) =>
