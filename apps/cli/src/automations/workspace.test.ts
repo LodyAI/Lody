@@ -38,6 +38,7 @@ async function workspaceFixture(
     collaborationStopped: boolean;
     cliType?: string;
     agentType?: string;
+    latestUserMsgId?: string;
   } = { id: 'session-a', machineId: 'machine', userId: 'user', collaborationStopped: false },
   existingRoot?: string,
   verifyRemoteControl?: (input: {
@@ -111,6 +112,64 @@ async function workspaceFixture(
   return Object.assign(handle, { testRoot: root, testDocument: doc });
 }
 describe('Automation control authority', () => {
+  it('enables recovery for the current confirmed failure without replaying a later input', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      latestUserMsgId: 'input',
+    };
+    const host = await workspaceFixture(meta);
+    const work = {
+      id: 'work',
+      ownerUserId: 'user',
+      updatedAt: 100,
+      sessionId: 'session-a',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'binding',
+      fingerprint: 'fingerprint',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    host.ledger.recordWork(work, {
+      id: 'work',
+      source: 'session/session-a',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: 'work',
+      observedAt: 100,
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: { workId: 'work', bindingId: 'binding' },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { recoverCapacity: true },
+    });
+    const activated = host.ledger
+      .sessionEvents('session-a', 0, 100)
+      .filter((event) => event.type === 'provider.quota.exhausted');
+    expect(activated).toHaveLength(2);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { recoverCapacity: true },
+    });
+    expect(
+      host.ledger
+        .sessionEvents('session-a', 0, 100)
+        .filter((event) => event.type === 'provider.quota.exhausted')
+    ).toHaveLength(2);
+  });
   it('returns every remote wait in encrypted pages even with long reasons', async () => {
     const host = await workspaceFixture(undefined, undefined, async () => ({
       requesterUserId: 'user',

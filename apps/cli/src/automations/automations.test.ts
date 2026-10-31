@@ -18,6 +18,7 @@ import type {
   CapacityObservation,
 } from '@lody/shared/automations';
 import { AutomationLedger, automationIdentity } from './storage/ledger';
+import { configureSessionPolicies } from './policies/session';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
@@ -99,6 +100,60 @@ function fixture() {
 }
 
 describe('Automation durability', () => {
+  it('activates only the current confirmed failure once when recovery is enabled', () => {
+    const { ledger, open } = fixture();
+    const work = {
+      id: 'capacity-work',
+      ownerUserId: 'user',
+      updatedAt: 100,
+      sessionId: 'session',
+      turnId: 'current',
+      nativeSessionId: 'native',
+      bindingId: 'binding',
+      fingerprint: 'config',
+      inputRef: 'current',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    ledger.recordWork(work, {
+      ...event,
+      id: work.id,
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      subject: work.id,
+      data: { workId: work.id, bindingId: work.bindingId },
+    });
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 101);
+    ledger.activateCurrentCapacityFailure('session', 'user', 'newer', 102);
+    expect(ledger.deliveries()).toHaveLength(0);
+    ledger.activateCurrentCapacityFailure('session', 'user', 'current', 103);
+    expect(ledger.deliveries()).toHaveLength(1);
+    expect(ledger.deliveries()[0]?.event.data.workId).toBe(work.id);
+    ledger.close();
+    const reopened = open();
+    reopened.activateCurrentCapacityFailure('session', 'user', 'current', 104);
+    expect(reopened.deliveries()).toHaveLength(1);
+  });
+
+  it('rolls back the recovery setting when activation fails', () => {
+    const { ledger } = fixture();
+    expect(() =>
+      ledger.configureSession(
+        () => {
+          configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 100);
+          throw new Error('activation failed');
+        },
+        'session',
+        'user',
+        'current',
+        100
+      )
+    ).toThrow('activation failed');
+    expect(ledger.rules().some((rule) => rule.name === 'recover-capacity')).toBe(false);
+  });
   const fact = (index: number, released = true): SessionAutomationObservation => ({
     sessionId: 'session' as SessionId,
     turnId: `input-${index}`,
@@ -620,6 +675,12 @@ describe('Recovery evidence and activity inspection', () => {
         data: { errorKind: 'rate_limit' },
       })
     ).toBe('rate_limited');
+    expect(
+      classifyCapacityFailure({
+        code: -32603,
+        message: "You've hit your session limit · resets 2:30pm (UTC)",
+      })
+    ).toBe('quota_exhausted');
     expect(hasUnresolvedToolEffects(undefined)).toBe(true);
     expect(hasUnresolvedToolEffects([{ type: 'tool_call', status: 'in_progress' }])).toBe(true);
     expect(hasUnresolvedToolEffects([{ type: 'tool_call', status: 'failed' }])).toBe(true);

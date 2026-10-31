@@ -21,7 +21,7 @@ Only structured Codex `serverOverloaded` triggers the overload path. The Host
 persists the pending work before dispatch, requires release and tool boundaries,
 and rechecks the Session, binding and authorization at admission. Stop and newer
 input retain their existing semantics; interrupted work and uncertain submissions
-use the existing ledger recovery. Settings apply to future observations. The
+use the existing ledger recovery. Settings apply to future observations; enabling recovery also admits the recorded failure for the current input once. The
 renderer reads this setting even when the beta UI is hidden, so it does not start
 a second automatic retry. Activities expose recovery status through CLI/MCP; the
 Session note currently displays condition waits rather than native recovery work.

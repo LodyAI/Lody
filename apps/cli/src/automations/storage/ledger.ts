@@ -816,6 +816,50 @@ export class AutomationLedger {
   work(id: string): PendingWork | undefined {
     return this.read('work', id);
   }
+  configureSession(
+    action: () => void,
+    sessionId: string,
+    userId: string,
+    turnId: string | undefined,
+    now: number
+  ): void {
+    this.connection.withImmediate(() => {
+      action();
+      if (turnId) this.activateCurrentCapacityFailure(sessionId, userId, turnId, now);
+    });
+  }
+  activateCurrentCapacityFailure(
+    sessionId: string,
+    userId: string,
+    turnId: string,
+    now: number
+  ): void {
+    this.connection.withImmediate(() => {
+      const work = this.sessionWork(sessionId, userId).find(
+        (item) =>
+          item.turnId === turnId && item.state === 'blocked_on_capacity' && !item.invocationId
+      );
+      if (!work) return;
+      const existing = this.connection.raw
+        .prepare(
+          "SELECT 1 FROM deliveries WHERE json_extract(payload,'$.event.data.workId')=? AND json_extract(payload,'$.rule.id')=? LIMIT 1"
+        )
+        .get(work.id, automationIdentity('session-policy', sessionId, 'recover-capacity'));
+      if (existing) return;
+      const row = this.connection.raw
+        .prepare(
+          "SELECT payload FROM events WHERE json_extract(payload,'$.data.workId')=? AND json_extract(payload,'$.type') IN ('provider.quota.exhausted','provider.model.overloaded') LIMIT 1"
+        )
+        .get(work.id) as JsonRow | undefined;
+      if (!row) return;
+      const event = JSON.parse(row.payload) as AutomationEvent;
+      this.publish({
+        ...event,
+        id: automationIdentity('enabled-capacity-recovery', work.id),
+        observedAt: now,
+      });
+    });
+  }
   sessionWork(sessionId: string, userId: string): PendingWork[] {
     return (
       this.connection.raw

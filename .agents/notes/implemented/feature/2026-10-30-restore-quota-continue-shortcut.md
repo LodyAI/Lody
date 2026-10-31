@@ -10,10 +10,10 @@ Translation: current
 
 ## Abstract
 
-The explicit Claude quota-reset shortcut remains available for eligible owned machines while automatic Session recovery is opt-in. The shortcut uses the existing scheduled-message owner. Schedule and automation coordinate admission for the same failed Turn; the [legacy overlap analysis](../../proposed/bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md) describes the boundary.
+The explicit Claude quota-reset shortcut was restored for eligible owned machines while automatic Session recovery was opt-in. The failure banner now enables Session recovery instead of creating a Schedule; existing reservations retain their scheduled-message owner. Schedule and automation coordinate admission for the same failed Turn; the [legacy overlap analysis](../../proposed/bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md) describes the boundary.
 
 ## Decision and verification
 
-The failure banner offers the shortcut with ownership, capability, failure and quota checks. It creates a deterministic one-time Schedule at reset plus one second. Unassociated unprepared legacy reservations are discarded as described by the [discard decision](../bug-fix/2026-10-30-discard-unassociated-quota-reservations.md). This supersedes the [retirement decision](2026-10-27-retire-quota-continue-shortcut.md).
+The former shortcut created a deterministic one-time Schedule at the quota reset. The failure banner now enables the Session recovery policy for the current confirmed failure and future failures. Unassociated unprepared legacy reservations are discarded as described by the [discard decision](../bug-fix/2026-10-30-discard-unassociated-quota-reservations.md). This supersedes the [retirement decision](2026-10-27-retire-quota-continue-shortcut.md).
 
 The automatic policy remains independently configurable; live-provider behavior remains unverified.

@@ -147,7 +147,7 @@ Lody code and is not a caller-authored rule graph.
 }
 ```
 
-Settings apply to future observations. Set a boolean feature or `compactWhenIdle`
+Settings apply to future observations. Enabling capacity recovery also admits the current Session’s confirmed, still-current capacity failure when its work was recorded before the setting was enabled. Set a boolean feature or `compactWhenIdle`
 to `false` to prevent new submissions. Use `cancel` for an already accepted input.
 
 - **Capacity recovery:** structured quota or Codex model-overload failure, the original native conversation,
@@ -161,7 +161,7 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   and 20 seconds; the Host persists the work and applies the same admission checks.
   New Claude scheduled continuations identify the failed Turn and share Session
   admission with this policy. Unassociated unprepared old shortcuts are skipped;
-  prepared or dispatched legacy work retains its Schedule owner. The [overload design](../../../../.agents/notes/proposed/feature/2026-10-27-codex-overload-automation.md) and [legacy overlap analysis](../../../../.agents/notes/proposed/bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md) record recovery trade-offs. The manual shortcut remains available where supported; the [retirement](../../../../.agents/notes/implemented/feature/2026-10-27-retire-quota-continue-shortcut.md) and [restoration](../../../../.agents/notes/implemented/feature/2026-10-30-restore-quota-continue-shortcut.md) decisions document its history.
+  prepared or dispatched legacy work retains its Schedule owner. The [overload design](../../../../.agents/notes/proposed/feature/2026-10-27-codex-overload-automation.md) and [legacy overlap analysis](../../../../.agents/notes/proposed/bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md) record recovery trade-offs. The Claude failure banner enables this Session policy rather than creating a Schedule; the [shortcut history](../../../../.agents/notes/implemented/feature/2026-10-30-restore-quota-continue-shortcut.md) records the earlier decision.
 - **Merge archive:** the existing PR poller records transitions and durable merged
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
