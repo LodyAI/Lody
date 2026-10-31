@@ -1925,6 +1925,8 @@ export type ACPTurnConfig = {
   modelId?: string;
   /** Config option values (configId → value) for setSessionConfigOption. */
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Confirmed baseline used to author this input; checked only at owner acceptance. */
+  configRevision?: number;
   /** Workspace MCP catalog ids selected for this session. */
   mcpServerIds?: McpServerId[];
   /**

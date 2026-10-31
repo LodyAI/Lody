@@ -225,29 +225,24 @@ const normalizeRuntimeConfigOptionValues = (
 };
 
 /**
- * Resolves the ACP-reported shared baseline only when it is causally attached
- * to the latest accepted Turn. A queued Turn is already frozen and always wins.
+ * Reads the execution owner's confirmed state. Accepted inputs and transcript
+ * hydration cannot establish or invalidate runtime configuration.
  */
 export const resolveSessionAcpRuntimeConfig = (
-  history: readonly { id: string; role: unknown }[],
-  messageQueue: readonly unknown[] = [],
   snapshot: unknown
 ): SessionConversationConfig | null => {
-  if (messageQueue.length > 0 || !snapshot || typeof snapshot !== 'object') {
-    return null;
-  }
-  const latestUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
-  if (!latestUserTurn) {
+  if (!snapshot || typeof snapshot !== 'object') {
     return null;
   }
 
   const value = snapshot as Record<string, unknown>;
   if (
     typeof value.acpSessionId !== 'string' ||
-    typeof value.basedOnUserTurnId !== 'string' ||
-    value.basedOnUserTurnId !== latestUserTurn.id ||
+    typeof value.generation !== 'string' ||
+    !value.generation ||
+    (value.state !== 'ready' && value.state !== 'failed') ||
     typeof value.revision !== 'number' ||
-    !Number.isFinite(value.revision)
+    !Number.isSafeInteger(value.revision) || value.revision < 0
   ) {
     return null;
   }
@@ -255,11 +250,25 @@ export const resolveSessionAcpRuntimeConfig = (
   const hasConfigOptionValues = Object.prototype.hasOwnProperty.call(value, 'configOptionValues');
   const configOptionValues = normalizeRuntimeConfigOptionValues(value.configOptionValues);
   return {
-    sourceConfigKey: `runtime:${value.acpSessionId}:${value.revision}`,
+    sourceConfigKey: `runtime:${value.generation}:${value.revision}`,
     ...(typeof value.modeId === 'string' ? { modeId: value.modeId } : {}),
     ...(typeof value.modelId === 'string' ? { modelId: value.modelId } : {}),
     ...(hasConfigOptionValues && configOptionValues ? { configOptionValues } : {}),
   };
+};
+
+/** First owner acceptance only. An existing immutable receipt bypasses this check. */
+export const assertSessionConfigRevision = (
+  input: Pick<SessionTurnInputConfig, 'configRevision'>,
+  snapshot: unknown
+): void => {
+  if (input.configRevision === undefined) return;
+  if (!resolveSessionAcpRuntimeConfig(snapshot)) {
+    throw new Error('SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.');
+  }
+  if ((snapshot as { revision: number }).revision !== input.configRevision) {
+    throw new Error('SESSION_CONFIG_CHANGED: The agent configuration changed. Review the settings and send again.');
+  }
 };
 
 /**
@@ -670,6 +679,7 @@ export const buildSessionTurnInputConfig = (args: {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  configRevision?: number;
   memory?: MemoryBinding;
   mcpServerIds?: readonly McpServerId[] | null;
   agentRoleId?: AgentRoleId | null;
@@ -688,6 +698,7 @@ export const buildSessionTurnInputConfig = (args: {
     agentType: args.agentType,
     modeId: args.modeId ?? undefined,
     modelId: args.modelId ?? undefined,
+    ...(args.configRevision !== undefined ? { configRevision: args.configRevision } : {}),
     configOptionValues:
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues

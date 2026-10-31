@@ -2,7 +2,6 @@ import {
   type MessageQueueItem,
   normalizeSessionTurnInputConfig,
   type PermissionOutcome,
-  type SessionAcpRuntimeConfigPatch,
   type SessionHistoryInput,
   type SessionHistoryBackendKind,
   type SessionMeta,
@@ -232,13 +231,6 @@ export class RoostSessionBackend implements SessionBackend {
 
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult> {
     return this.services.sessionData.commands.applyHistoryImport(input);
-  }
-
-  applyAcpRuntimeConfigPatch(
-    basedOnUserTurnId: string,
-    patch: SessionAcpRuntimeConfigPatch
-  ): Promise<boolean> {
-    return Promise.resolve(this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch));
   }
 
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {

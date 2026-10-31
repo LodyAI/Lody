@@ -334,6 +334,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // Capture references before any async work, since onExit handlers may null them out
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
+    const configurationGeneration = this.agentClient?.configurationGeneration;
 
     // The sandbox as a whole also reaches terminal commands and groups whose
     // leader already exited. It tracks the per-process trees too, so ending
@@ -387,6 +388,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
+      configurationGeneration,
       exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
@@ -1034,7 +1036,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                 }
                 if (isAI) {
                   await this.credentials.release();
-                  this.emit('exit', { sessionId: this.sessionId, exitCode });
+                  this.emit('exit', {
+                    sessionId: this.sessionId,
+                    exitCode,
+                    configurationGeneration: this.agentClient?.configurationGeneration,
+                  });
                 }
                 // stderr is decoded but not used in return value (only logged above)
                 void stderr;

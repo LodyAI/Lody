@@ -1,3 +1,4 @@
+import { AcpConfigurationError } from '@/agent/acp-configuration';
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
@@ -292,6 +293,7 @@ type PromptHandoffRun = {
 };
 
 class SteerWaitEnded extends Error {}
+class SteerConfigurationChanged extends Error {}
 
 /** Cancels only the local wait; the caller retains ownership of any submitted work. */
 async function waitForSteer<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -656,6 +658,7 @@ export type SessionExecutionServiceDeps = {
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
   }) => Promise<ContentBlock[]>;
+  isAcpConfigurationConfirmed: (doc: SessionDocument, generation: string | undefined) => boolean;
   applyAcpModeAndModel: (
     session: {
       sessionId: SessionId;
@@ -666,9 +669,8 @@ export type SessionExecutionServiceDeps = {
     context: {
       sessionDoc: SessionDocument;
       basedOnUserTurnId?: string;
-      signal?: AbortSignal;
     }
-  ) => Promise<void>;
+  ) => Effect.Effect<void, unknown>;
   createAssistantEntryForTurn: (
     sessionId: SessionId,
     sessionDoc: SessionDocument,
@@ -2186,7 +2188,7 @@ export class SessionExecutionService {
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
     }
-    if (steerCapability.configPolicy === 'active') {
+    {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
         return await rejectAndPromote(
@@ -2195,6 +2197,7 @@ export class SessionExecutionService {
         );
       }
     }
+    const configurationGeneration = agentClient.configurationGeneration;
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
     let providerSubmissionStarted = false;
@@ -2235,20 +2238,6 @@ export class SessionExecutionService {
           updatedAt: Date.now(),
         },
       });
-      if (steerCapability.configPolicy === 'apply') {
-        const configuring = this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
-          sessionDoc,
-          basedOnUserTurnId: options.userTurnId,
-          signal: waitController.signal,
-        });
-        const pending = (runtime.pendingSteerConfig ??= new Set());
-        pending.add(configuring);
-        const release = () => {
-          pending.delete(configuring);
-        };
-        void configuring.then(release, release);
-        await wait(configuring);
-      }
 
       await wait(
         this.deps.sessionManager.validateSessionCredentials(runtime.session, options.userId)
@@ -2294,6 +2283,15 @@ export class SessionExecutionService {
         return await resolveProviderSubmissionRejection(postStatusRejection);
       }
       const startSteer = () => {
+        if (
+          agentClient.configurationGeneration !== configurationGeneration ||
+          !this.deps.isAcpConfigurationConfirmed(sessionDoc, configurationGeneration)
+        ) {
+          throw new AcpConfigurationError('steer', 'unknown');
+        }
+        const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
+        if (mismatch)
+          throw new SteerConfigurationChanged(`Active turn configuration differs: ${mismatch}`);
         providerSubmissionStarted = true;
         return agentClient.steerPrompt(acpSessionId, promptBlocks);
       };
@@ -2514,6 +2512,19 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
+      if (error instanceof AcpConfigurationError) {
+        if (preparedDoc)
+          await this.setSteerHistoryStatus(
+            options.sessionId,
+            preparedDoc,
+            options.userTurnId,
+            'failed',
+            'not_submitted'
+          );
+        return reject('error', error.message);
+      }
+      if (error instanceof SteerConfigurationChanged)
+        return await rejectAndPromote('unsupported', error.message);
       if (providerSubmissionStarted) {
         try {
           if (preparedDoc)
@@ -4574,6 +4585,14 @@ export class SessionExecutionService {
         (presenceScope, exit) =>
           Effect.gen(function* () {
             const turnRuntime = runtime;
+            const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : undefined;
+            if (
+              failure?._tag === 'Some' &&
+              failure.value instanceof AcpConfigurationError &&
+              failure.value.reason === 'unknown'
+            ) {
+              turnRuntime.disconnectedTransport = true;
+            }
             const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
             const wasCancelled =
               turnRuntime.cancelRequested ||
@@ -6505,26 +6524,16 @@ export class SessionExecutionService {
         targetSession: ISession,
         triggerReason: 'initial' | 'stale_acp_recovery'
       ): Effect.Effect<void, unknown, never> =>
-        self.tryPromise((signal) =>
-          traceAsync(
-            self.deps.logger,
-            'execution.apply_acp_mode_model',
-            { sessionId, turnId, triggerReason },
-            async () =>
-              await self.deps.applyAcpModeAndModel(
-                targetSession,
-                {
-                  ...acpSessionConfig,
-                  configOptionValues: acpSessionConfig.configOptionValues,
-                },
-                {
-                  sessionDoc,
-                  basedOnUserTurnId: executionUserTurnId,
-                  signal,
-                }
-              )
-          )
-        );
+        self.deps
+          .applyAcpModeAndModel(targetSession, acpSessionConfig, {
+            sessionDoc,
+            basedOnUserTurnId: executionUserTurnId,
+          })
+          .pipe(
+            Effect.withSpan('execution.apply_acp_mode_model', {
+              attributes: { sessionId, turnId, triggerReason },
+            })
+          );
 
       const validatePromptCredentials = Effect.fnUntraced(function* (
         targetSession: ISession,
@@ -7381,26 +7390,12 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          yield* self.tryPromise((signal) =>
-            traceAsync(
-              self.deps.logger,
-              'execution.apply_acp_mode_model',
-              { sessionId, turnId },
-              async () =>
-                await self.deps.applyAcpModeAndModel(
-                  session,
-                  {
-                    ...agentConfig,
-                    configOptionValues: agentConfig.configOptionValues,
-                  },
-                  {
-                    sessionDoc,
-                    basedOnUserTurnId: userTurnId,
-                    signal,
-                  }
-                )
-            )
-          );
+          yield* self.deps
+            .applyAcpModeAndModel(session, agentConfig, {
+              sessionDoc,
+              basedOnUserTurnId: userTurnId,
+            })
+            .pipe(Effect.withSpan('execution.apply_acp_mode_model'));
 
           yield* abortIfCancelled();
 

@@ -1,3 +1,4 @@
+import { machineSupportsProtocolCapability } from '@lody/shared';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
@@ -2673,33 +2674,14 @@ export const SessionChatInterface = memo(
       sourceFence: durableConversationSourceFence,
       documentReady: sessionDocReady,
     });
+    // The execution owner publishes config independently of history and queued inputs.
     const sessionRuntimeConfig = useMemo(
-      () =>
-        resolveSessionAcpRuntimeConfig(
-          sessionTailHistory,
-          sessionDoc?.mq ?? [],
-          sessionDoc?.acpRuntimeConfig
-        ),
-      [sessionDoc?.acpRuntimeConfig, sessionTailHistory, sessionDoc?.mq]
+      () => resolveSessionAcpRuntimeConfig(sessionDoc?.acpRuntimeConfig),
+      [sessionDoc?.acpRuntimeConfig]
     );
-    // A local send and its history/queue row share one fence, so landing the
-    // send cannot consume edits made for the next draft during its upload.
-    const sessionConversationConfigRevision = `${session.id}:${
-      sessionConversationSourceFence.currentTurnKey ?? ''
-    }`;
+    const sessionConversationConfigRevision = sessionRuntimeConfig?.sourceConfigKey ?? session.id;
     const sessionRunConfigTargetKey = getSessionRunConfigDraftTargetKey(session);
-    const sessionConfigPreferences = useMemo(
-      () => ({
-        modeId: sessionConversationConfig.modeId,
-        modelId: sessionConversationConfig.modelId,
-        configOptionValues: sessionConversationConfig.configOptionValues,
-      }),
-      [
-        sessionConversationConfig.configOptionValues,
-        sessionConversationConfig.modeId,
-        sessionConversationConfig.modelId,
-      ]
-    );
+    const sessionConfigPreferences = useMemo(() => ({}), []);
     /* User edits are the only stored selection state, scoped to this session;
        effective values derive per render. The UNVALIDATED candidates feed the
        capability lookup so the catalog can depend on the selection (Codex
@@ -2718,7 +2700,8 @@ export const SessionChatInterface = memo(
       targetKey: sessionRunConfigTargetKey,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
-      runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
+      runtimePreferences: sessionRuntimeConfig,
+      inheritDefaults: true,
       preserveUnsentUserEdits: true,
       draftScope:
         runtime?.accountId && runtime.workspaceId
@@ -2755,11 +2738,16 @@ export const SessionChatInterface = memo(
       : undefined;
     const nativeSteerAvailable =
       !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
-    const { selectedModeId, selectedModelId, configOptionValues } =
+    const { selectedModeId, selectedModelId, configOptionValues, validationErrors } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
         agentType: session.agentType,
       });
+    const configurationError = !machineSupportsProtocolCapability(sessionMachine, 'sessionConfiguration')
+      ? t('sessions.configuration.updateRequired', { defaultValue: 'Update the execution machine to send messages with confirmed configuration.' })
+      : validationErrors.length > 0
+        ? t('sessions.configuration.invalidSelection', { defaultValue: 'The selected configuration is unavailable. Review the settings before sending.' })
+        : null;
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]
@@ -4476,6 +4464,7 @@ export const SessionChatInterface = memo(
         }
       ): Promise<boolean> => {
         try {
+          if (configurationError) throw new Error(configurationError);
           const turnModeId =
             options?.modeIdOverride !== undefined ? options.modeIdOverride : selectedModeId;
           const turnModelId =
@@ -4490,6 +4479,7 @@ export const SessionChatInterface = memo(
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
           const inputConfig = buildSessionTurnInputConfig({
+            configRevision: sessionRuntimeConfig ? sessionDoc?.acpRuntimeConfig?.revision : undefined,
             inputBlocks,
             cliType: session.cliType,
             agentType: session.agentType,
@@ -4600,6 +4590,9 @@ export const SessionChatInterface = memo(
         runtime?.contentMode,
         addSessionHistory,
         captureRunConfigForSend,
+        configurationError,
+        sessionRuntimeConfig,
+        sessionDoc?.acpRuntimeConfig?.revision,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
@@ -4640,6 +4633,7 @@ export const SessionChatInterface = memo(
         >
       ): Promise<boolean> => {
         try {
+          if (configurationError) throw new Error(configurationError);
           const turnModeId =
             options?.modeIdOverride !== undefined ? options.modeIdOverride : selectedModeId;
           const turnModelId =
@@ -4654,6 +4648,7 @@ export const SessionChatInterface = memo(
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
           const inputConfig = buildSessionTurnInputConfig({
+            configRevision: sessionRuntimeConfig ? sessionDoc?.acpRuntimeConfig?.revision : undefined,
             inputBlocks,
             cliType: session.cliType,
             agentType: session.agentType,
@@ -4680,6 +4675,7 @@ export const SessionChatInterface = memo(
             modeId: inputConfig.modeId ?? undefined,
             modelId: inputConfig.modelId ?? undefined,
             configOptionValues: inputConfig.configOptionValues ?? undefined,
+            configRevision: inputConfig.configRevision,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId: inputConfig.agentRoleId,
@@ -4724,6 +4720,9 @@ export const SessionChatInterface = memo(
         runtime?.accountId,
         runtime?.contentMode,
         captureRunConfigForSend,
+        configurationError,
+        sessionRuntimeConfig,
+        sessionDoc?.acpRuntimeConfig?.revision,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
@@ -7569,6 +7568,11 @@ export const SessionChatInterface = memo(
                         }
                       />
 
+                      {configurationError ? <div role="alert">{configurationError}</div> : null}
+                      {!sessionRuntimeConfig && !configurationError ? (
+                        <div role="status">{t('sessions.configuration.unconfirmed', { defaultValue: 'Agent configuration will be confirmed when the next message runs.' })}</div>
+                      ) : null}
+                      {sessionDoc?.acpRuntimeConfig?.error ? <div role="alert">{sessionDoc.acpRuntimeConfig.error.message}</div> : null}
                       {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}

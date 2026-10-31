@@ -41,7 +41,8 @@ Lody 的生命周期缺陷集中在手写定时器、Promise 链、取消标志�
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | L6 入口适配 | MessageHandler RPC 处理器、dispatch watcher、MCP/Operation 投递；唯一允许调用 `runtime.run*` 的地方                               | —                                              |
 | L5 Turn     | TurnService（注册表与停止控制）、TurnProgram、Steer、收尾阶段                                                                     | —                                              |
-| L4 会话资源 | AgentSessionPool（按会话的 `RcMap`，可中断创建）、AgentSession（进程、连接、终端、sandbox 的作用域）、启动闸门、托管 runtime 解析 | —                                              |
+| L4 会话资源 | 会话配置应用 | 已建立 SDK 连接、SessionDocument 本地持久化 | 应用流程原生；保留上游原始请求及持久化所有者 | 初始/恢复 Turn Effect；匹配 steer 不变更配置 | 既有 Turn/AgentClient 原始请求；连接代次与准入 revision | [配置决定](../../implemented/architecture/2026-10-31-session-config-ownership.zh.md)；完整 ACP/Session 所有权仍待完成 |
+| AgentSessionPool（按会话的 `RcMap`，可中断创建）、AgentSession（进程、连接、终端、sandbox 的作用域）、启动闸门、托管 runtime 解析 | —                                              |
 | L3 ACP 连接 | AcpConnection（请求即 Effect、连接级原始工作集合、`closed` Deferred、通知 Stream）、AgentClient 操作、ACP 终端                    | `@agentclientprotocol/sdk`                     |
 | L2 状态与云 | SessionDocuments、SessionHistory、SessionPresence、CloudPort；下接 `loro-repo/effect`                                             | 见下文 Loro 同步栈                             |
 | L1 OS 叶子  | ProcessService（spawn、exec、awaitExit、terminateTree 与平台策略）、Git、FileSystem、LoginShellEnv                                | `node:child_process`、`cross-spawn`、`node:fs` |

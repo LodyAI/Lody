@@ -1,4 +1,7 @@
 {
+  "sessions.configuration.updateRequired": "Update the execution machine to send messages with confirmed configuration.",
+  "sessions.configuration.invalidSelection": "The selected configuration is unavailable. Review the settings before sending.",
+  "sessions.configuration.unconfirmed": "Agent configuration will be confirmed when the next message runs.",
   "export.e2ee.title": "Create a decrypted copy?",
   "export.e2ee.disclosure": "This creates a readable copy outside the encrypted workspace. Anyone with access to the clipboard or saved file can read it. Later workspace revocation cannot take it back.",
   "export.e2ee.confirm": "Create decrypted copy",

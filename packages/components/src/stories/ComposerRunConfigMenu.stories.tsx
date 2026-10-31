@@ -1,3 +1,4 @@
+import { useAcpSessionConfigSelectionState, useResolvedAcpSessionConfigSelection } from '@/hooks/use-acp-session-config-selection';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
@@ -571,3 +572,56 @@ export const NoRolesYet: Story = {
     await openMenu(canvasElement);
   },
 };
+
+/** Real selection hook and production menu; the controls simulate owner observations. */
+function ConfirmedConfigurationStory() {
+  const [revision, setRevision] = useState(1);
+  const [plan, setPlan] = useState(true);
+  const [catalogRemoved, setCatalogRemoved] = useState(false);
+  const state = useAcpSessionConfigSelectionState({
+    targetKey: 'confirmed-configuration-story',
+    preferenceRevision: `runtime:${revision}`,
+    preferences: {},
+    inheritDefaults: true,
+    preserveUnsentUserEdits: true,
+    runtimePreferences: {
+      modeId: 'agent', modelId: 'gpt-5.5',
+      configOptionValues: { collaboration_mode: plan ? 'plan' : 'default', reasoning_effort: 'high' },
+    },
+  });
+  const options = {
+    capabilityAuthority: 'authoritative' as const,
+    modeOptions,
+    modelOptions: catalogRemoved ? modelOptions.slice(1) : modelOptions,
+    defaultModeId: 'read-only', defaultModelId: 'gpt-5.4',
+    configOptionSelectors: selectors, modelReasoningEfforts: undefined,
+  };
+  const selected = useResolvedAcpSessionConfigSelection(state.selection, options);
+  return (
+    <PlatformContext.Provider value={storyPlatform}>
+      <div className="flex min-h-dvh flex-col gap-6 bg-background p-8">
+        <p>Confirmed configuration + private draft</p>
+        <div className="flex gap-4">
+          <button onClick={() => { setPlan(false); setRevision((value) => value + 1); }}>Agent confirms implementation</button>
+          <button onClick={() => setRevision((value) => value + 1)}>Refresh / hydrate old Plan input</button>
+          <button onClick={() => setCatalogRemoved((value) => !value)}>Toggle model availability</button>
+        </div>
+        <div className="flex gap-2 rounded-xl bg-input/90 p-4">
+          <DesktopRunConfigMenu
+            agentSelection={{ agentId: codexId, machineId }} availableAgentConfigs={agents} agentLocked
+            onAgentConfigChange={fn()} modelOptions={options.modelOptions}
+            selectedModelId={selected.selectedModelId} onModelChange={state.selectModel}
+            modeOptions={modeOptions} selectedModeId={selected.selectedModeId}
+            configOptionSelectors={selectors} configOptionValues={selected.configOptionValues}
+            onConfigOptionChange={state.selectConfigOption}
+          />
+          <DesktopPermissionModeButton modeOptions={modeOptions} selectedModeId={selected.selectedModeId} onModeChange={state.selectMode} configOptionSelectors={selectors} configOptionValues={selected.configOptionValues} onConfigOptionChange={state.selectConfigOption} />
+        </div>
+        <output aria-label="Effective configuration">{selected.selectedModelId} · Plan {selected.configOptionValues.collaboration_mode === 'plan' ? 'on' : 'off'}</output>
+        {selected.validationErrors.length > 0 ? <div role="alert">The selected configuration is unavailable. Review the settings before sending.</div> : null}
+      </div>
+    </PlatformContext.Provider>
+  );
+}
+
+export const ConfirmedConfiguration: Story = { render: () => <ConfirmedConfigurationStory /> };

@@ -128,5 +128,6 @@ export interface SessionErrorEvent {
  */
 export interface SessionExitEvent {
   sessionId: SessionId;
+  configurationGeneration?: string;
   exitCode: number;
 }

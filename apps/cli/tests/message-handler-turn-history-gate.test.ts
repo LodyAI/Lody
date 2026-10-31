@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import { AcpConfiguration, AcpConfigurationError } from '../src/agent/acp-configuration';
 import { updateTestHistory } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
@@ -25,7 +27,6 @@ import { createTestCloudPort } from './test-cloud-port';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { AgentClient, AgentSessionWarning } from '../src/agent/agent-client';
 import type {
-  AcpSessionConfigTarget,
   AcpSessionRunConfig,
 } from '../src/session/acp-session-config-applier';
 
@@ -46,10 +47,10 @@ const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 type MessageHandlerHost = {
   executionService: SessionExecutionService;
   applyAcpModeAndModel(
-    session: AcpSessionConfigTarget,
+    session: { sessionId: SessionId; acpSessionId: ACPSessionId; agentClient: AgentClient },
     config: AcpSessionRunConfig,
     context: { sessionDoc: SessionDocument }
-  ): Promise<void>;
+  ): Effect.Effect<void, unknown>;
   recordAgentWarning(sessionId: SessionId, warning: AgentSessionWarning): Promise<void>;
   appendACPUpdatesToAssistantEntry(...args: unknown[]): Promise<void>;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
@@ -205,59 +206,58 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
   });
 
   it.each(['codex', 'claude'])(
-    'persists a rejected %s model as a GUI notice after the driving user turn',
+    'publishes partial confirmation and fails a rejected %s model before any prompt',
     async (agentType) => {
       const sessionId = `model-rejection-${agentType}` as SessionId;
       const { repo, doc, handler } = await createHandlerHarness(sessionId);
       try {
-        await updateTestHistory(doc, () => [userEntry('user-model-selection')]);
-        handler.beginConversationTurn(sessionId, 'user-model-selection', { sessionDoc: doc });
-        const recordWarning = handler.recordAgentWarning.bind(handler);
-        let noticeWrite: Promise<void> | undefined;
-        vi.spyOn(handler, 'recordAgentWarning').mockImplementation((...args) => {
-          noticeWrite = recordWarning(...args);
-          return noticeWrite;
+        const snapshot = { acpSessionId: 'acp-model-rejection' as ACPSessionId, generation: 'connection-1', modeId: 'default', modelId: 'active-model' };
+        const service = AcpConfiguration.of({
+          options: [],
+          read: Effect.sync(() => snapshot),
+          setMode: (value) => Effect.sync(() => { snapshot.modeId = value; }),
+          setModel: () => Effect.fail(new AcpConfigurationError('model', 'rejected')),
+          setOption: () => Effect.void,
         });
-
-        await handler.applyAcpModeAndModel(
-          {
-            sessionId,
-            acpSessionId: 'acp-model-rejection' as ACPSessionId,
-            agentClient: {
-              isCreated: () => true,
-              getAvailableCommands: () => [],
-              getConfigOptions: () => [
-                { id: 'model', category: 'model', type: 'select', currentValue: 'active-model' },
-              ],
-              unstable_setSessionModel: async () => {
-                throw new Error('Requested model is unavailable');
-              },
-            } as unknown as AgentClient,
-          },
-          { agentType, modelId: 'requested-model' },
+        await expect(Effect.runPromise(handler.applyAcpModeAndModel(
+          { sessionId, acpSessionId: snapshot.acpSessionId, agentClient: { getConfiguration: () => service } as unknown as AgentClient },
+          { agentType, modeId: 'plan', modelId: 'requested-model' },
           { sessionDoc: doc }
-        );
-        expect(noticeWrite).toBeDefined();
-        await noticeWrite;
-
-        const history = await doc.sessionData.history.readAll();
-        expect(history[0]?.id).toBe('user-model-selection');
-        const notice = history.find((entry) => entry.role === 'system');
-        expect(notice?.items).toEqual([
-          expect.objectContaining({
-            type: 'system_notice',
-            name: 'agent_warning',
-            meta: {
-              source: 'configWarning',
-              message: expect.stringContaining('model="requested-model"'),
-            },
-          }),
-        ]);
-      } finally {
-        await destroyRepoOnRealTimers(repo);
-      }
+        ))).rejects.toThrow('ACP_CONFIG_REJECTED');
+        expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ state: 'failed', modeId: 'plan', modelId: 'active-model' });
+        expect(await doc.sessionData.history.readAll()).toEqual([]);
+      } finally { await destroyRepoOnRealTimers(repo); }
     }
   );
+
+  it('does not complete configuration until the local publication is durable', async () => {
+    const { repo, doc, handler } = await createHandlerHarness('config-durability' as SessionId);
+    try {
+      let release: (() => void) | undefined;
+      let reached: (() => void) | undefined;
+      const writing = new Promise<void>((resolve) => { reached = resolve; });
+      const durable = new Promise<void>((resolve) => { release = resolve; });
+      vi.spyOn(doc, 'flushLocalWrites').mockImplementation(async () => { reached?.(); await durable; });
+      const service = AcpConfiguration.of({ options: [], read: Effect.succeed({ acpSessionId: 'acp-1' as ACPSessionId, generation: 'connection-1', modeId: 'default' }), setMode: () => Effect.void, setModel: () => Effect.void, setOption: () => Effect.void });
+      let completed = false;
+      const application = Effect.runPromise(handler.applyAcpModeAndModel({ sessionId: doc.sessionId, acpSessionId: 'acp-1' as ACPSessionId, agentClient: { getConfiguration: () => service } as unknown as AgentClient }, {}, { sessionDoc: doc })).then(() => { completed = true; });
+      await writing;
+      expect(completed).toBe(false);
+      release?.();
+      await application;
+      expect(doc.mirror?.getState().acpRuntimeConfig?.state).toBe('ready');
+    } finally { await destroyRepoOnRealTimers(repo); }
+  });
+
+  it('reports local persistence failure as unknown configuration', async () => {
+    const { repo, doc, handler } = await createHandlerHarness('config-write-error' as SessionId);
+    try {
+      vi.spyOn(doc, 'flushLocalWrites').mockRejectedValue(new Error('synthetic disk full'));
+      const service = AcpConfiguration.of({ options: [], read: Effect.succeed({ acpSessionId: 'acp-1' as ACPSessionId, generation: 'connection-1', modeId: 'default' }), setMode: () => Effect.void, setModel: () => Effect.void, setOption: () => Effect.void });
+      await expect(Effect.runPromise(handler.applyAcpModeAndModel({ sessionId: doc.sessionId, acpSessionId: 'acp-1' as ACPSessionId, agentClient: { getConfiguration: () => service } as unknown as AgentClient }, {}, { sessionDoc: doc }))).rejects.toThrow('ACP_CONFIG_UNKNOWN');
+      expect(doc.mirror?.getState().acpRuntimeConfig?.state).toBe('unknown');
+    } finally { await destroyRepoOnRealTimers(repo); }
+  });
 
   it.each([false, true, 'write-failure', 'new-turn'] as const)(
     'drains text before a permission tool (buffered tool: %s)',

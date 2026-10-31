@@ -16,6 +16,7 @@ import {
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveSessionConversationSourceFence,
+  assertSessionConfigRevision,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
 import { sessionDocSchema } from '../src/schema';
@@ -311,16 +312,12 @@ describe('session-input helpers', () => {
     });
   });
 
-  it('resolves ACP runtime config only for the latest accepted user turn', () => {
-    const history = [
-      { id: 'turn-1', role: 'user' as const },
-      { id: 'assistant-1', role: 'assistant' as const },
-      { id: 'turn-2', role: 'user' as const },
-    ];
-
+  it('reads confirmed configuration without any history or queue dependency', () => {
     expect(
-      resolveSessionAcpRuntimeConfig(history, [], {
+      resolveSessionAcpRuntimeConfig({
         acpSessionId: 'acp-2',
+        generation: 'connection-2',
+        state: 'ready',
         basedOnUserTurnId: 'turn-2',
         revision: 3,
         modeId: 'default',
@@ -328,31 +325,46 @@ describe('session-input helpers', () => {
         configOptionValues: { collaboration_mode: 'default', fast_mode: true },
       })
     ).toEqual({
-      sourceConfigKey: 'runtime:acp-2:3',
+      sourceConfigKey: 'runtime:connection-2:3',
       modeId: 'default',
       modelId: 'gpt-5.6-sol',
       configOptionValues: { collaboration_mode: 'default', fast_mode: true },
     });
 
-    expect(
-      resolveSessionAcpRuntimeConfig(history, [], {
-        acpSessionId: 'acp-1',
-        basedOnUserTurnId: 'turn-1',
-        revision: 9,
-        modeId: 'default',
-      })
-    ).toBeNull();
   });
 
-  it('does not let runtime state override a frozen queued turn', () => {
+  it('keeps agent-confirmed false instead of reviving an old input setting', () => {
     expect(
-      resolveSessionAcpRuntimeConfig([{ id: 'turn-1', role: 'user' }], [{ $cid: 'queue-1' }], {
+      resolveSessionAcpRuntimeConfig({
         acpSessionId: 'acp-1',
+        generation: 'connection-1',
+        state: 'ready',
         basedOnUserTurnId: 'turn-1',
         revision: 1,
-        configOptionValues: { collaboration_mode: 'default' },
+        configOptionValues: { plan_mode: false },
       })
-    ).toBeNull();
+    ).toMatchObject({ configOptionValues: { plan_mode: false } });
+  });
+
+  it.each(['applying', 'unknown', undefined])('does not present %s as confirmed', (state) => {
+    expect(resolveSessionAcpRuntimeConfig({
+      acpSessionId: 'acp-1', generation: 'connection-1', state,
+      basedOnUserTurnId: 'turn-1', revision: 1, configOptionValues: { plan_mode: true },
+    })).toBeNull();
+  });
+
+  it('preserves the configuration revision in an immutable input', () => {
+    expect(normalizeSessionTurnInputConfig({
+      configRevision: 7, configOptionValues: { plan_mode: false },
+    })).toEqual({ configRevision: 7, configOptionValues: { plan_mode: false } });
+  });
+
+  it('rejects a stale first admission without confusing omitted configuration with a choice', () => {
+    const snapshot = { acpSessionId: 'acp-1', generation: 'connection-1', state: 'ready', revision: 8 };
+    expect(() => assertSessionConfigRevision({ configRevision: 7 }, snapshot)).toThrow('SESSION_CONFIG_CHANGED');
+    expect(() => assertSessionConfigRevision({ configRevision: 8 }, snapshot)).not.toThrow();
+    expect(() => assertSessionConfigRevision({}, undefined)).not.toThrow();
+    expect(() => assertSessionConfigRevision({ configRevision: 8 }, { ...snapshot, state: 'unknown' })).toThrow('SESSION_CONFIG_UNCONFIRMED');
   });
 
   it('ignores invalid and unconfigured history when resolving conversation config', () => {

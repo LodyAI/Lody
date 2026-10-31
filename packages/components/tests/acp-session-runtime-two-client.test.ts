@@ -189,7 +189,7 @@ describe('ACP runtime config across two clients', () => {
     mirrorA.setState((state) => ({
       ...state,
       acpRuntimeConfig: {
-        acpSessionId: 'acp-session-1',
+        acpSessionId: 'acp-session-1', generation: 'connection-1', state: 'ready',
         basedOnUserTurnId: userTurnId,
         revision: 1,
         configOptionValues: {
@@ -202,16 +202,8 @@ describe('ACP runtime config across two clients', () => {
 
     const stateA = mirrorA.getState();
     const stateB = mirrorB.getState();
-    const runtimeA = resolveSessionAcpRuntimeConfig(
-      stateA.history,
-      stateA.mq,
-      stateA.acpRuntimeConfig
-    );
-    const runtimeB = resolveSessionAcpRuntimeConfig(
-      stateB.history,
-      stateB.mq,
-      stateB.acpRuntimeConfig
-    );
+    const runtimeA = resolveSessionAcpRuntimeConfig(stateA.acpRuntimeConfig);
+    const runtimeB = resolveSessionAcpRuntimeConfig(stateB.acpRuntimeConfig);
     expect(runtimeA).toEqual(runtimeB);
     expect(runtimeB?.configOptionValues).toEqual({
       collaboration_mode: 'default',

@@ -1,3 +1,5 @@
+import { TURN_BUDGETS } from '@/session/turn-budgets';
+import { AcpConfiguration, AcpConfigurationError } from '@/agent/acp-configuration';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
@@ -282,7 +284,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
-import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
+import { getAcpRuntimeConfigPatch } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
 import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
@@ -1679,51 +1681,76 @@ export class MessageHandler {
     await backend.appendHistoryTurn(systemNotice);
   }
 
-  private async applyAcpModeAndModel(
+  private applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
       acpSessionId: ACPSessionId | null;
       agentClient: AgentClient | null;
     },
     config: AcpSessionRunConfig,
-    context: {
-      sessionDoc: SessionDocument;
-      basedOnUserTurnId?: string;
-      signal?: AbortSignal;
-    }
-  ): Promise<void> {
-    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
-      session,
-      config,
-      logger: this.logger,
-      signal: context.signal,
-    });
-
-    if (runtimeConfigPatch && context.basedOnUserTurnId) {
-      const basedOnUserTurnId = context.basedOnUserTurnId;
-      const persistRuntimeConfig = async (): Promise<void> => {
-        await this.awaitTurnHistoryGate(session.sessionId);
-        if (context.signal?.aborted) return;
-        const backend = await this.getSessionBackend(context.sessionDoc);
-        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
-      };
-      void persistRuntimeConfig().catch((error) => {
-        this.logger.warn(
-          `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
+    context: { sessionDoc: SessionDocument; basedOnUserTurnId?: string }
+  ): Effect.Effect<void, unknown> {
+    return Effect.gen(function* () {
+      const client = session.agentClient;
+      if (!client || !session.acpSessionId)
+        return yield* Effect.fail(new AcpConfigurationError('session', 'unknown'));
+      const service = client.getConfiguration();
+      const initial = yield* service.read;
+      const turnId = context.basedOnUserTurnId ?? '';
+      const write = (patch: import('@lody/shared').SessionAcpRuntimeConfigPatch) =>
+        Effect.tryPromise({
+          try: async () => {
+            await context.sessionDoc.applyAcpRuntimeConfigPatch(turnId, patch);
+            await context.sessionDoc.flushLocalWrites();
+          },
+          catch: (cause) => new AcpConfigurationError('persistence', 'unknown', { cause }),
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: TURN_BUDGETS.configurationMs,
+            orElse: () => Effect.fail(new AcpConfigurationError('persistence', 'unknown')),
+          })
         );
+      yield* Effect.tryPromise({
+        try: () =>
+          context.sessionDoc.beginAcpRuntimeConfig(turnId, {
+            ...initial,
+            state: 'applying',
+            error: undefined,
+          }),
+        catch: (cause) => new AcpConfigurationError('persistence', 'unknown', { cause }),
       });
-    }
-
-    if (warningSelections.length > 0) {
-      // Not awaited: this is reporting, and the prompt hot path must not block
-      // on a history write.
-      void this.recordAgentWarning(session.sessionId, {
-        message: `The agent rejected part of the requested run configuration (${warningSelections.join(
-          ', '
-        )}) and is using its own values instead. Reasoning effort and fast mode depend on the selected model.`,
-        source: 'configWarning',
-      });
-    }
+      yield* applyAcpSessionRunConfig(config).pipe(
+        Effect.provideService(AcpConfiguration, service),
+        Effect.timeoutOrElse({
+          duration: TURN_BUDGETS.configurationMs,
+          orElse: () => Effect.fail(new AcpConfigurationError('session', 'unknown')),
+        }),
+        Effect.flatMap((confirmed) => write({ ...confirmed, state: 'ready', error: undefined })),
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            const actual = yield* service.read;
+            yield* write({
+              ...actual,
+              state: error.reason === 'unknown' ? 'unknown' : 'failed',
+              error: { code: `ACP_CONFIG_${error.reason.toUpperCase()}`, message: error.message },
+            });
+            return yield* Effect.fail(error);
+          })
+        ),
+        Effect.onInterrupt(() =>
+          write({
+            acpSessionId: initial.acpSessionId,
+            generation: initial.generation,
+            state: 'unknown',
+            error: {
+              code: 'ACP_CONFIG_INTERRUPTED',
+              message: 'Configuration confirmation was interrupted.',
+            },
+          })
+        )
+      );
+      return undefined;
+    });
   }
 
   private resolveServerBaseUrl(): string {
@@ -3091,8 +3118,9 @@ export class MessageHandler {
       observePromptContentForTurn: (sessionId, turnId) =>
         this.observePromptContentForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      applyAcpModeAndModel: async (session, acpConfig, context) =>
-        await this.applyAcpModeAndModel(
+      isAcpConfigurationConfirmed: (doc, generation) => doc.isAcpConfigurationConfirmed(generation),
+      applyAcpModeAndModel: (session, acpConfig, context) =>
+        this.applyAcpModeAndModel(
           session as {
             sessionId: SessionId;
             acpSessionId: ACPSessionId | null;
@@ -3895,7 +3923,48 @@ export class MessageHandler {
 
     // ACP updates are delivered out-of-band from the agent process and must be merged into the
     // session history. We buffer them briefly to reduce the number of CRDT writes.
-    this.sessionManager.on('onACPUpdateMessage', (sessionId, update) => {
+    this.sessionManager.on('onACPUpdateMessage', (sessionId, update, generation) => {
+      if (getAcpRuntimeConfigPatch(update)) {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        if (!client || !generation || client.configurationGeneration !== generation) return;
+        const target = this.store.getCurrentACPUpdateTarget(sessionId);
+        if (
+          target &&
+          !this.deletedSessionIds.has(sessionId) &&
+          !this.store.recordSuppressedAcpReplay(sessionId)
+        ) {
+          this.recordTurnEvent(sessionId, target.turnEpoch, false);
+        }
+        const { state: _state, ...snapshot } = client.getRuntimeConfiguration();
+        void this.workspaceDocument
+          .getOrCreateSessionDoc(sessionId)
+          .then(async (doc) => {
+            await doc.applyAcpRuntimeConfigPatch('', snapshot);
+            try {
+              await doc.flushLocalWrites();
+            } catch (error) {
+              await doc.applyAcpRuntimeConfigPatch('', {
+                acpSessionId: snapshot.acpSessionId,
+                generation,
+                state: 'unknown',
+                error: {
+                  code: 'ACP_CONFIG_PERSISTENCE',
+                  message: 'Could not save the agent configuration.',
+                },
+              });
+              throw error;
+            }
+          })
+          .catch((error) => {
+            this.logger.error(`[${sessionId}] ACP configuration persistence failed`, error);
+            void this.recordAgentWarning(sessionId, {
+              source: 'configWarning',
+              message:
+                'Could not save the agent configuration. The next input must confirm it again.',
+            });
+          });
+        return;
+      }
       this.enqueueACPUpdate(sessionId, update);
     });
 
@@ -3983,6 +4052,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.retireConfiguration(exit.sessionId, exit.configurationGeneration);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -4002,6 +4072,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.retireConfiguration(event.sessionId, event.configurationGeneration);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;
@@ -4020,6 +4091,19 @@ export class MessageHandler {
         }
       })();
     });
+  }
+
+  private retireConfiguration(sessionId: SessionId, generation: string | undefined): void {
+    if (!generation) return;
+    void this.workspaceDocument
+      .getOrCreateSessionDoc(sessionId)
+      .then(async (doc) => {
+        await doc.retireAcpRuntimeConfig(generation);
+        await doc.flushLocalWrites();
+      })
+      .catch((error) =>
+        this.logger.error(`[${sessionId}] Could not persist retired configuration`, error)
+      );
   }
 
   private getMachineFlockDocIdForMachine(): string {
@@ -5297,20 +5381,9 @@ export class MessageHandler {
     let failedGroupPersisted = 0;
     try {
       sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const backend = await this.getSessionBackend(sessionDoc);
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
-          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
-            group.updates.map((update) => update.notification)
-          );
-          if (runtimeConfigPatch && group.target.userTurnId) {
-            await backend.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
-          } else if (runtimeConfigPatch) {
-            this.logger.debug(
-              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
-            );
-          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,
