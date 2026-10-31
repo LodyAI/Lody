@@ -258,6 +258,74 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('seals formatVersion 1 packages and rejects other versions or non-RFC 8410 private keys before storage', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const file = join(dir, 'vault.sqlite'),
+              storage = yield* makeLabRecoveryVaultStore({ path: file, mode: 'create' }),
+              f = yield* fixture();
+            const { vault } = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              ...storage,
+            });
+            const bundle = yield* generateRecoveryPackage({
+              genesis: hex(f.initial.genesis.toBytes()),
+              membershipId: hex(f.membership.toBytes()),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.initial.record,
+                head: hex(f.view().head.toBytes()),
+                length: 1,
+              },
+            });
+            const entries = () =>
+              (() => {
+                const db = new Database(file, { readonly: true });
+                try {
+                  return db.prepare('SELECT count(*) n FROM vault_entries').get();
+                } finally {
+                  db.close();
+                }
+              })();
+            try {
+              expect(bundle.formatVersion).toBe(1);
+              const before = entries();
+              const swapped = {
+                ...bundle,
+                signingPrivate: bundle.encryptionPrivate,
+                encryptionPrivate: bundle.signingPrivate,
+              };
+              const appended = {
+                ...bundle,
+                signingPrivate: new Uint8Array([...bundle.signingPrivate, 0]),
+              };
+              const { formatVersion: _omitted, ...unversioned } = bundle;
+              for (const invalid of [
+                { ...bundle, formatVersion: 2 },
+                unversioned,
+                swapped,
+                appended,
+              ]) {
+                const rejected = yield* Effect.result(vault.upload(invalid as typeof bundle));
+                expect(Result.isFailure(rejected)).toBe(true);
+                if (Result.isFailure(rejected))
+                  expect(rejected.failure).toMatchObject({ code: 'invalid-input' });
+              }
+              expect(entries()).toEqual(before);
+              const ref = yield* vault.upload(bundle);
+              const read = yield* vault.readEntry(ref);
+              expect(read.formatVersion).toBe(1);
+              wipeRecoveryPackage(read);
+            } finally {
+              wipeRecoveryPackage(bundle);
+            }
+          })
+        )
+      );
+    }));
   it('resumes four setup boundaries without a second R, uses real P09/HPKE/protected storage, restores independent C, and rejects revoked R', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
