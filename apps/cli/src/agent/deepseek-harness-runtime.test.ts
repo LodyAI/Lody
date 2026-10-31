@@ -1,11 +1,15 @@
 import { getDeepSeekHarnessProviderConfigPath } from '@lody/shared';
-import { DEEPSEEK_HARNESS_CORDIS_PACKAGE_VERSIONS } from 'acp-extension-dsh/profile';
+import {
+  createDeepSeekHarnessProfileFiles,
+  DEEPSEEK_HARNESS_CORDIS_PACKAGE_VERSIONS,
+} from 'acp-extension-dsh/profile';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -16,6 +20,7 @@ import {
   resolveDeepSeekHarnessProcessLaunch,
   resolveDeepSeekHarnessSpawn,
   resolveDeepSeekHarnessSessionCompression,
+  withDeepSeekModelCatalog,
 } from './deepseek-harness-runtime';
 
 import { Effect } from 'effect';
@@ -706,5 +711,98 @@ describe('DeepSeek system Node environment', () => {
       { mode: 0o700 }
     );
     await expect(prepareNode({ PATH: root })).rejects.toThrow('[DSH_NODE_UNSUPPORTED]');
+  });
+});
+
+describe('withDeepSeekModelCatalog', () => {
+  const catalog = [
+    { id: 'vision/model', name: 'Vision model', inputModalities: ['text', 'image'] as const },
+    { id: 'plain/model', name: 'Plain model', inputModalities: ['text'] as const },
+  ];
+  const adapterProfile = () =>
+    createDeepSeekHarnessProfileFiles({
+      adapterPath: '/app/deepseek-acp.js',
+      presetRoot: '/app/presets',
+    });
+
+  /** Evaluate the row the Harness evaluates, with the user's settings section stubbed. */
+  function runLlmDeepSeekRow(
+    patchYml: string,
+    section?: Record<string, unknown>
+  ): Record<string, unknown> {
+    const row = patchYml.split('- id: llm-deepseek\n')[1]?.split('\n')[0];
+    if (!row) throw new Error('the generated patch has no llm-deepseek row');
+    const expression: unknown = JSON.parse(row.slice(row.indexOf('!!js ') + 5));
+    if (typeof expression !== 'string') throw new Error('the row is not a JavaScript expression');
+    return runInNewContext(expression, {
+      baseUrl: 'file:///synthetic/profile/',
+      process: {
+        env: {},
+        getBuiltinModule: (name: string) => {
+          if (name === 'node:fs')
+            return {
+              readFileSync: () => {
+                if (!section) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+                return 'synthetic YAML';
+              },
+            };
+          if (name === 'node:path') return { join: (...parts: string[]) => parts.join('/') };
+          if (name === 'node:os') return { homedir: () => '/synthetic' };
+          return { createRequire: () => () => ({ load: () => ({ 'llm-deepseek': section }) }) };
+        },
+      },
+    }) as Record<string, unknown>;
+  }
+
+  it('leaves the adapter patch untouched without a catalog', () => {
+    const files = adapterProfile();
+    expect(withDeepSeekModelCatalog(files.cordisPatchYml, undefined)).toBe(files.cordisPatchYml);
+    expect(withDeepSeekModelCatalog(files.cordisPatchYml, [])).toBe(files.cordisPatchYml);
+  });
+
+  it('declares the gateway catalog when the user declared none', () => {
+    const patched = withDeepSeekModelCatalog(adapterProfile().cordisPatchYml, catalog);
+    expect(runLlmDeepSeekRow(patched)).toEqual({ models: catalog });
+  });
+
+  it('keeps a user-declared catalog and every other settings field', () => {
+    const section = {
+      baseURL: 'https://gateway.example/v1',
+      thinking: 'disabled',
+      models: [{ id: 'user/model', inputModalities: ['text'] }],
+    };
+    const patched = withDeepSeekModelCatalog(adapterProfile().cordisPatchYml, catalog);
+    expect(runLlmDeepSeekRow(patched, section)).toEqual(section);
+  });
+
+  it('degrades instead of failing the launch when a row is unrecognized', () => {
+    const files = adapterProfile();
+    const reformatted = files.cordisPatchYml.replace(
+      /- id: llm-deepseek\n {2}config: !!js .*$/mu,
+      '- id: llm-deepseek\n  config: {}\n'
+    );
+    expect(reformatted).not.toBe(files.cordisPatchYml);
+    expect(withDeepSeekModelCatalog(reformatted, catalog)).toBe(reformatted);
+  });
+
+  it('writes the catalog into the content-addressed host layer', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'lody-dsh-catalog-'));
+    temporaryRoots.push(dataRoot);
+    const options = { dataRoot, adapterPath: '/app/deepseek-acp.js', providerId: 'provider-a' };
+    // Sequential launches: the profile manifest keeps only the newest host layer.
+    const native = await resolveDeepSeekHarnessProcessLaunch(options);
+    const nativeProfile = await readGeneratedProfile(native, native.env.DSH_HOME);
+    const gateway = await resolveDeepSeekHarnessProcessLaunch({
+      ...options,
+      modelCatalog: catalog,
+    });
+    const gatewayProfile = await readGeneratedProfile(gateway, gateway.env.DSH_HOME);
+    const repeat = await resolveDeepSeekHarnessProcessLaunch({ ...options, modelCatalog: catalog });
+    const repeatProfile = await readGeneratedProfile(repeat, repeat.env.DSH_HOME);
+    expect(nativeProfile.generatedPatchYml).not.toContain('vision/model');
+    expect(gatewayProfile.generatedPatchYml).not.toBe(nativeProfile.generatedPatchYml);
+    // The same catalog is the same generated layer, so reruns reuse one bundle.
+    expect(repeatProfile.generatedPatchYml).toBe(gatewayProfile.generatedPatchYml);
+    expect(runLlmDeepSeekRow(gatewayProfile.generatedPatchYml)).toEqual({ models: catalog });
   });
 });

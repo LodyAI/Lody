@@ -77,6 +77,28 @@ describe('Magpie runtime preparation', () => {
       DEEPSEEK_BASE_URL: `${gateway}/v1`,
       DEEPSEEK_API_KEY: 'magpie-lody',
     });
+    // The Harness resolves capabilities only from its configured catalog, so the
+    // gateway catalog has to reach the profile and not just the environment.
+    expect(dsh.modelCatalog).toEqual([
+      {
+        id: 'vendor/model',
+        name: 'Test model',
+        contextWindow: 64000,
+        maxTokens: 4096,
+        inputModalities: ['text', 'image'],
+      },
+    ]);
+  });
+  it('maps a model without capability metadata to text-only', async () => {
+    const directory = await root();
+    const textOnly: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({ data: [{ id: 'plain/model' }] })
+        : fetcher(input, init);
+    const dsh = await prepareMagpieRuntime('deepseek', gateway, undefined, directory, textOnly);
+    expect(dsh.modelCatalog).toEqual([
+      { id: 'plain/model', name: 'plain/model', inputModalities: ['text'] },
+    ]);
   });
   it('loads isolated Kimi and Grok TOML with literal model keys and bounded model selection', async () => {
     const directory = await root();
