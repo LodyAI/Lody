@@ -481,7 +481,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old,
       value
     ) =>
-      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value)
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
+    offset = 0
   ) => {
     const used = new Set<number>();
     const byId = new Map<unknown, number[]>();
@@ -505,7 +506,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       last = index;
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(index);
+      const map = list.get(offset + index);
       if (!isContainer(map) && record(map))
         return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
@@ -513,18 +514,18 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { index, map, value: prepareValue(previous[index], entry) };
     });
     return () => {
-      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(i, 1);
+      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(offset + i, 1);
       plan.forEach((op, i) => {
         if (op.index < 0)
           populateContainer(
-            list.insertContainer(i, new LoroMap()),
+            list.insertContainer(offset + i, new LoroMap()),
             sessionHistorySchema,
             op.value,
             undefined
           );
         else if ('inline' in op && op.inline) {
-          list.delete(i, 1);
-          list.insert(i, op.value as Parameters<LoroList['insert']>[1]);
+          list.delete(offset + i, 1);
+          list.insert(offset + i, op.value as Parameters<LoroList['insert']>[1]);
         } else if (op.value !== undefined && isContainer(op.map))
           diffHistoryContainer(
             op.map,
@@ -677,10 +678,9 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           )
         )
           throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
-        const current = readQuery() as unknown as SessionHistoryInput[];
-        current.splice(start, end - start, ...currentRange);
-        const restored = [...current.slice(0, start), ...removed, ...current.slice(end)];
-        planWrite(current, restored, (_old, value) => value)();
+        // Align only complete values in the owned range. Later appends cannot
+        // consume restored IDs; unchanged containers inside the range survive.
+        planWrite(currentRange, removed, (_old, value) => value, start)();
         consumed = true;
       };
     },

@@ -1759,8 +1759,11 @@ it('selects complete subagent ancestry across stored turns and leaves unrelated 
     })
   );
   const expected = reference.readStored();
-  const body = vi.spyOn(doc.getList('history'), 'toJSON').mockImplementation(() => {
-    throw new Error('whole history forbidden');
+  const historyId = doc.getList('history').id;
+  const json = LoroList.prototype.toJSON;
+  const body = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(function () {
+    if (this.id === historyId) throw new Error('whole history forbidden');
+    return json.call(this);
   });
   try {
     await createSessionAgentWrites(writer).applyAgentBatch({
