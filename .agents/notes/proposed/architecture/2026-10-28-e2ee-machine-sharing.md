@@ -134,7 +134,10 @@ and a machine's history discovery race the repair.
 A verified withdrawal must stay known. The host derives it from the resource's
 accepted pin, which is bound to workspace, genesis, machine, owner and generation, and
 advances only on a newer verified head. A failed, rolled-back or expired refresh never
-rewrites that pin. `knownDenial` re-opens the pinned policy locally. `authorize`
+rewrites that pin. `knownDenial` re-opens the pinned policy locally. A denial needs only
+historical authority: its owner-personal issuer had to be admitted when it signed.
+Revoking that device later invalidates grants, which then need re-signing, but never a
+retained denial. `authorize`
 returns that denial instead of an unknown failure, and the desktop prepare checks it
 before any network read. Only a newer verified read, such as the visible-index refresh
 or the settings view, releases it. The renderer also remembers each verified
@@ -142,8 +145,11 @@ withdrawal for its runtime until a later prepare succeeds. A prepare that outlas
 200 ms deadline for such a machine is refused. For any other machine it stays unknown:
 the turn is written, and if the late answer is a verified withdrawal, the turn becomes
 `canceled`. That uses a commit-time `onlyAwaitingStart` guard, so a turn that a machine
-has already claimed keeps its own outcome. Queued rows have no history turn to settle
-and rely on the machine's window.
+has already claimed keeps its own outcome. The guard protects only this replica's
+commit: a concurrent offline copy can still merge over `canceled`. The cancellation is
+best effort, not proof of a global withdrawal; the machine's owner-approved window
+still bounds that case. Queued rows have no history turn to settle and rely on the
+same window.
 
 The receiving machine was not changed. Policies live in the server's sharing store,
 not in workspace data the machine syncs, and its execution check reuses an

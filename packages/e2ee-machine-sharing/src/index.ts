@@ -566,8 +566,9 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   ) => ReturnType<typeof authorizeMachineExecution>;
   // The resource's accepted pin advances only on a newer verified head, and a failed or
   // timed-out refresh never rewrites it. A pinned denial therefore stays known until a
-  // newer verified policy replaces it; it never grants anything.
-  const pinnedDenial = (initial: Target, decide: Decide) =>
+  // newer verified policy replaces it; it never grants anything. Its issuer only had to
+  // be eligible when it signed: a later revocation invalidates grants, never a denial.
+  const pinnedDenial = (initial: Target, decide: Decide, localProjectId: string | undefined) =>
     Effect.gen(function* () {
       const saved = yield* pin(initial.binding);
       const original = saved?.original;
@@ -583,9 +584,18 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         original,
         initial.machineGeneration,
         { revision: original.revision, digest: original.digest },
+        true,
         true
       );
-      if (!retained.policy) return undefined;
+      if (!retained.policy) {
+        // Historically authenticated owner-personal state: usable only as a denial.
+        if (!retained.state) return undefined;
+        if (!retained.state.sharedWithTeam)
+          return { allowed: false as const, reason: 'machine-not-shared' as const };
+        if (localProjectId !== undefined && !retained.state.projects.includes(localProjectId))
+          return { allowed: false as const, reason: 'project-not-shared' as const };
+        return undefined;
+      }
       const decision = decide(yield* options.ledger(), retained.policy);
       return !decision.allowed &&
         (decision.reason === 'machine-not-shared' || decision.reason === 'project-not-shared')
@@ -628,7 +638,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (yield* authorizeOwner(options, machineId, requester, localProjectId)) return undefined;
     const resolved = yield* decider(machineId, requester, localProjectId);
     if (!resolved || resolved.decide(resolved.initial.ledger, null).allowed) return undefined;
-    return yield* pinnedDenial(resolved.initial, resolved.decide);
+    return yield* pinnedDenial(resolved.initial, resolved.decide, localProjectId);
   });
   const authorize = Effect.fnUntraced(function* (
     machineId: string,
@@ -647,7 +657,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (own.reason !== 'policy-unavailable') return own;
     const unknown = () =>
       Effect.map(
-        pinnedDenial(initial, decide),
+        pinnedDenial(initial, decide, localProjectId),
         (denial) => denial ?? { allowed: false as const, reason: 'policy-unavailable' as const }
       );
     return yield* admitted(
@@ -663,7 +673,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           latest(initial.binding, remote, initial.machineGeneration)
         );
         if (Result.isFailure(refreshed)) {
-          const denial = yield* pinnedDenial(initial, decide);
+          const denial = yield* pinnedDenial(initial, decide, localProjectId);
           if (denial) return denial;
           return yield* Effect.fail(refreshed.failure);
         }

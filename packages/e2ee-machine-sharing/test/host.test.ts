@@ -604,6 +604,84 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
     })
   ));
 
+it('keeps a withdrawal known after its issuer is revoked, until a newer verified grant', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const member = yield* f.make('member-after-revoke', f.bob.signer);
+      const bob = hex(f.bob.publicKey);
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(2),
+          { kind: 'machine', sharedWithTeam: false },
+          f.remote
+        )
+      );
+      yield* f.run(member.read('fixture-machine', f.remote));
+      // The issuer of the withdrawal is then revoked through a second personal device.
+      const second = f.f.ed(21);
+      let view = f.view();
+      const admission = yield* P.prepareDeviceAdmission({
+        genesis: view.genesis,
+        membershipId: view.inspectState().owner,
+        encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(new Uint8Array(32).fill(121))),
+        kind: 'personal',
+        signer: second.signer,
+      });
+      const add = yield* P.signLedgerRecord(
+        ok(P.prepareLedgerCommand(view, f.f.owner.publicKey, admission)),
+        f.f.owner.signer
+      );
+      view = ok(
+        P.extendLedger(view, [add], { length: view.length + 1, head: P.hashRecordBytes(add) })
+      );
+      const revoke = yield* P.signLedgerRecord(
+        ok(
+          P.prepareLedgerCommand(view, second.publicKey, {
+            _tag: 'RevokeDevice',
+            target: f.f.owner.publicKey,
+          })
+        ),
+        second.signer
+      );
+      view = ok(
+        P.extendLedger(view, [revoke], { length: view.length + 1, head: P.hashRecordBytes(revoke) })
+      );
+      f.setView(view);
+      // Refreshes fail and the read expires: revocation cannot turn the denial into unknown.
+      f.io.offline = true;
+      f.io.wall += 900_000;
+      f.io.mono += 900_000;
+      member.invalidate();
+      const withdrawn = { allowed: false, reason: 'machine-not-shared' };
+      expect(yield* f.run(member.knownDenial('fixture-machine', bob, undefined))).toMatchObject(
+        withdrawn
+      );
+      expect(
+        yield* f.run(member.authorize('fixture-machine', bob, undefined, f.remote))
+      ).toMatchObject(withdrawn);
+      // A newer grant signed by a currently valid owner device releases it.
+      f.io.offline = false;
+      const secondHost = yield* f.make('second-after-revoke', second.signer);
+      yield* f.run(
+        secondHost.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(3),
+          { kind: 'machine', sharedWithTeam: true },
+          f.remote
+        )
+      );
+      expect(
+        yield* f.run(member.authorize('fixture-machine', bob, undefined, f.remote))
+      ).toMatchObject({ allowed: true, reason: 'team' });
+    })
+  ));
+
 it('persists removal barriers and cannot revive an older active head', () =>
   test((f) =>
     Effect.gen(function* () {
