@@ -12,7 +12,7 @@ function deferred() {
   });
   return { promise, resolve };
 }
-it.each(['idle', 'stop'] as const)(
+it.each(['idle', 'stop', 'switch'] as const)(
   'releases Android occupancy only after native cleanup (%s)',
   async (reason) => {
     vi.useFakeTimers();
@@ -96,11 +96,18 @@ it.each(['idle', 'stop'] as const)(
       expect(options).toEqual(['saver']);
       let stopping: ReturnType<typeof call> | undefined;
       if (reason === 'idle') await vi.advanceTimersByTimeAsync(30_000);
+      else if (reason === 'switch')
+        stopping = call('first', { action: 'start', id: 'Pixel', quality: 'clear' });
       else stopping = call('first', { action: 'stop', operationId: start.preview!.operationId });
       await cleanupStarted.promise;
       expect((await call('second', { action: 'start', id: 'Pixel' })).error).toBe('occupied');
       cleanupAllowed.resolve();
       if (stopping) await stopping;
+      if (reason === 'switch') {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(options).toEqual(['saver', 'clear']);
+        expect((await call('second', { action: 'start', id: 'Pixel' })).error).toBe('occupied');
+      }
       await service.closeSession('first');
       expect((await call('second', { action: 'start', id: 'Pixel' })).success).toBe(true);
     } finally {

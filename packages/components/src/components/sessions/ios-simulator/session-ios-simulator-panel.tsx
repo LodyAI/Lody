@@ -156,7 +156,6 @@ function SessionIosSimulatorPanelController({
     [platform, runtime, session.id, session.machineId, user?.id]
   );
 
-  const [quality, setQuality] = useState<AndroidEmulatorQuality>('balanced');
   const supportsQuality = platform === 'android' && machineSupportsAndroidEmulatorQuality(machine);
   const [catalog, setCatalog] = useState<IosSimulatorCatalogState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
@@ -181,7 +180,10 @@ function SessionIosSimulatorPanelController({
 
   const requesterUserId = user?.id ?? null;
   const request = useCallback(
-    async (command: IosSimulatorCommand): Promise<IosSimulatorResponse | null> => {
+    async (
+      command: IosSimulatorCommand,
+      requestedQuality: AndroidEmulatorQuality = 'balanced'
+    ): Promise<IosSimulatorResponse | null> => {
       if (!runtime || !requesterUserId) return null;
       if (platform === 'android') {
         if (command.action === 'exterior') return null;
@@ -191,7 +193,11 @@ function SessionIosSimulatorPanelController({
           requestedByUserId: requesterUserId,
           command:
             command.action === 'start'
-              ? { action: 'start', id: command.udid, ...(supportsQuality ? { quality } : {}) }
+              ? {
+                  action: 'start',
+                  id: command.udid,
+                  ...(supportsQuality ? { quality: requestedQuality } : {}),
+                }
               : command,
         });
         return androidEmulatorResponseForPanel(result);
@@ -204,7 +210,7 @@ function SessionIosSimulatorPanelController({
         timeoutMs: command.action === 'exterior' ? 45000 : undefined,
       });
     },
-    [platform, requesterUserId, runtime, session.id, session.machineId, supportsQuality, quality]
+    [platform, requesterUserId, runtime, session.id, session.machineId, supportsQuality]
   );
 
   const refreshCatalog = useCallback(async () => {
@@ -361,7 +367,8 @@ function SessionIosSimulatorPanelController({
     async (
       kind: Exclude<IosSimulatorPendingAction, null>,
       udid: string | undefined,
-      command: IosSimulatorCommand
+      command: IosSimulatorCommand,
+      requestedQuality: AndroidEmulatorQuality = 'balanced'
     ) => {
       // Only a newer action supersedes this one. A poll never does: it would
       // drop the answer and leave the action pending forever.
@@ -369,7 +376,7 @@ function SessionIosSimulatorPanelController({
       statusEpoch.current += 1;
       setPendingAction(kind);
       try {
-        const response = await request(command);
+        const response = await request(command, requestedQuality);
         if (!response || actionId !== actionEpoch.current) return;
         // Polls issued before this answer are older than it.
         statusEpoch.current += 1;
@@ -397,6 +404,16 @@ function SessionIosSimulatorPanelController({
   );
 
   const statusUdid = getIosSimulatorStatusUdid(status) ?? undefined;
+  const changeQuality = useCallback(
+    (next: AndroidEmulatorQuality) => {
+      if (!supportsQuality || pendingAction || status.phase !== 'ready' || !statusUdid) return;
+      setBootExpected(false);
+      setStatus({ phase: 'preparing', udid: statusUdid, stage: 'connecting' });
+      void runAction('start', statusUdid, { action: 'start', udid: statusUdid }, next);
+    },
+    [supportsQuality, pendingAction, status.phase, statusUdid, runAction]
+  );
+
   const stopOperation = useCallback(
     (kind: 'cancel' | 'stop') => {
       if (!operationId) return;
@@ -713,7 +730,7 @@ function SessionIosSimulatorPanelController({
   return (
     <>
       <IosSimulatorPanelView
-        quality={supportsQuality ? { value: quality, onChange: setQuality } : undefined}
+        quality={supportsQuality ? { onChange: changeQuality } : undefined}
         deviceExterior={deviceExterior}
         machineName={machineName}
         blocker={blocker}

@@ -24,8 +24,8 @@ are disabled. APK installation and arbitrary shell commands are not exposed.
 
 H.264 has three per-operation quality presets: Data saver (300 kbps, 640-pixel
 maximum edge, 15 FPS), Balanced (default: 600 kbps, 960 pixels, 24 FPS), and Clear
-(1 Mbps, 1280 pixels, 30 FPS). Select quality before starting; stop and restart to
-change it. Only hosts advertising `androidEmulatorQuality: 1` receive the option. Per-viewer credits and recovery use the common flow controller; viewers do
+(1 Mbps, 1280 pixels, 30 FPS). New previews start Balanced. The running preview exposes a quality button;
+selecting another tier replaces the capture operation while keeping the AVD running. Only hosts advertising `androidEmulatorQuality: 1` receive the option. Per-viewer credits and recovery use the common flow controller; viewers do
 not compete to configure the encoder. Annex-B SPS/PPS and frames are converted to
 avcC/AVCC at this adapter. Android requires WebCodecs H.264 and has no MJPEG fallback.
 

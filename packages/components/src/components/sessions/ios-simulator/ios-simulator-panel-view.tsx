@@ -58,7 +58,7 @@ export type IosSimulatorPanelBlocker =
   | 'offline';
 
 export type IosSimulatorPanelViewProps = {
-  quality?: { value: AndroidEmulatorQuality; onChange: (value: AndroidEmulatorQuality) => void };
+  quality?: { onChange: (value: AndroidEmulatorQuality) => void };
   deviceExterior?: { udid: string; geometry: IosSimulatorExterior; imageUrl: string };
   machineName: string;
   blocker: IosSimulatorPanelBlocker | null;
@@ -749,17 +749,12 @@ export function IosSimulatorPanelView({
       {controls && controlsLayout === 'toolbar' ? (
         <IosSimulatorControls layout="toolbar" {...controls} />
       ) : null}
-      {quality && status.phase !== 'ready' && status.phase !== 'preparing' ? (
+      {quality && status.phase === 'ready' ? (
         <Menu.Root>
           <Menu.Trigger
             render={<Button type="button" variant="ghost" size="small" disabled={busy} />}
           >
-            {t('sessions.androidEmulator.quality.label', 'Preview quality')}:{' '}
-            {quality.value === 'saver'
-              ? t('sessions.androidEmulator.quality.saver', 'Data saver')
-              : quality.value === 'clear'
-                ? t('sessions.androidEmulator.quality.clear', 'Clear')
-                : t('sessions.androidEmulator.quality.balanced', 'Balanced')}
+            {t('sessions.androidEmulator.quality.label', 'Preview quality')}
           </Menu.Trigger>
           <Menu.Content>
             <Menu.Item onClick={() => quality.onChange('saver')}>

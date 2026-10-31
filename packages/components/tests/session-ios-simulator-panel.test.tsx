@@ -1189,7 +1189,7 @@ it('uses Android capability on Linux and renders configured AVDs without touchin
 });
 
 it.each([false, true])(
-  'sends a selected quality only to a capable Android host (supported=%s)',
+  'starts balanced and switches quality while previewing only on capable hosts (supported=%s)',
   async (supported) => {
     const machine = createFakeMachine({ devices: [] });
     let started: unknown;
@@ -1231,24 +1231,30 @@ it.each([false, true])(
         };
       },
     });
+    expect(text()).not.toContain('Preview quality');
+    await click('Preview');
+    expect(started).toEqual({
+      action: 'start',
+      id: 'Pixel_A',
+      ...(supported ? { quality: 'balanced' } : {}),
+    });
+    expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
     if (supported) {
-      await click('Preview quality: Balanced');
+      await click('Preview quality');
       const option = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find(
         (item) => item.textContent === 'Data saver'
       ) as HTMLElement;
       expect(option).toBeDefined();
       await act(async () => option.click());
       await flush();
-      expect(text()).toContain('Preview quality: Data saver');
+      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'saver' });
+      expect(text()).toContain('Preview quality');
+      await click('Stop preview');
+      expect(text()).not.toContain('Preview quality');
+      await click('Preview');
+      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'balanced' });
     } else {
       expect(text()).not.toContain('Preview quality');
     }
-    await click('Preview');
-    expect(started).toEqual({
-      action: 'start',
-      id: 'Pixel_A',
-      ...(supported ? { quality: 'saver' } : {}),
-    });
-    expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
   }
 );
