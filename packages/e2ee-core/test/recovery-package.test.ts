@@ -33,6 +33,7 @@ import {
   encryptVault,
   type VaultCiphertext,
 } from '../src/internal/recovery/crypto';
+import { deriveRecoveryAccessCredential } from '../src/internal/recovery/credential';
 import { generateRecoveryPackage } from '../src/internal/recovery/identity';
 import {
   createRecoveryVault,
@@ -206,5 +207,58 @@ describe('recovery package plaintext ownership', () => {
         })
       )
     );
+  });
+});
+
+// Owner-approved derivation (specs/e2ee/recovery-vault.md). Expected values were
+// computed independently with node:crypto hkdfSync and createPublicKey.
+const vector = {
+  seed: '11'.repeat(32),
+  genesis: '22'.repeat(32),
+  signingPublic: 'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737',
+  credential: '877eeebbad52db5846de3cb827c84740496b6ecb8144e633c55c91d0634aec4f',
+  credentialHash: '5fd92a223e8ab19ba207dc14962438830c5ee113eb221658af906376c01b28a8',
+};
+const hexBytes = (value: string) => Uint8Array.from(Buffer.from(value, 'hex'));
+const vectorPackage = (): RecoveryPrivatePackage => ({
+  formatVersion: 1,
+  genesis: vector.genesis,
+  membershipId: '33'.repeat(16),
+  signingPublic: hexBytes(vector.signingPublic),
+  encryptionPublic: new Uint8Array(32).fill(4),
+  signingPrivate: hexBytes('302e020100300506032b657004220420' + vector.seed),
+  encryptionPrivate: hexBytes('302e020100300506032b656e04220420' + '55'.repeat(32)),
+  generation: 0,
+  trust: {
+    source: 'synthetic',
+    genesisRecord: new Uint8Array(8).fill(6),
+    head: '77'.repeat(32),
+    length: 1,
+  },
+});
+
+describe('recovery access credential', () => {
+  it('derives the pinned credential and hash from R seed, genesis and public key', () => {
+    const input = vectorPackage();
+    const derived = deriveRecoveryAccessCredential(input);
+    expect(Buffer.from(derived.credential).toString('hex')).toBe(vector.credential);
+    expect(Buffer.from(derived.credentialHash).toString('hex')).toBe(vector.credentialHash);
+    // The caller's package is borrowed, never wiped or changed.
+    expect(input.signingPrivate).toEqual(vectorPackage().signingPrivate);
+    const otherGenesis = deriveRecoveryAccessCredential({ ...input, genesis: '23'.repeat(32) });
+    expect(otherGenesis.credentialHash).not.toEqual(derived.credentialHash);
+  });
+
+  it('refuses a public key that the seed does not derive and a non-RFC 8410 key', () => {
+    const input = vectorPackage();
+    expect(() =>
+      deriveRecoveryAccessCredential({ ...input, signingPublic: new Uint8Array(32).fill(9) })
+    ).toThrow(expect.objectContaining({ code: 'authentication' }));
+    expect(() =>
+      deriveRecoveryAccessCredential({
+        ...input,
+        signingPrivate: input.signingPrivate.slice(0, 47),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid-input' }));
   });
 });

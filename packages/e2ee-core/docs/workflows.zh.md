@@ -148,7 +148,7 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 
