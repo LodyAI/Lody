@@ -1,3 +1,7 @@
+vi.hoisted(() => {
+  Object.assign(globalThis, { __LODY_E2E_DAEMON_LOSS__: true });
+  process.env.LODY_E2E = '1';
+});
 import { LodyOperationCoordinator } from '../src/orchestration/operation-coordinator';
 import { MessageHandler } from '../src/lib/message-handler';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
@@ -9549,6 +9553,13 @@ describe('SessionExecutionService', () => {
           expect(terminated).toBe(false);
         }
         await released;
+        if (completion === 'timeout') {
+          // Local cancellation can release the turn slot before transport drain.
+          expect(rawPending).toBe(true);
+          expect(service.inspectClientLoss().bookkeeping).toBeGreaterThan(0);
+          rawPrompt.resolve();
+          await rawCompletion;
+        }
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
         expect(activePresence.has(sessionId)).toBe(false);
         expect(presence.has(sessionId)).toBe(false);

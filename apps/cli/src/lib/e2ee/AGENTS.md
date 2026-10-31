@@ -134,3 +134,8 @@
 Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
 erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
 cleanup before open; preserve projects. Rejoin with new member/keys.
+
+- `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
+  opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
+  state; never refresh authority or stop owners for observation. Track raw watcher
+  and ACP promises after cancellation/map clearing; timeout never means drained.

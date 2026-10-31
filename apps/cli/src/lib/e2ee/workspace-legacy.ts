@@ -1,3 +1,8 @@
+import {
+  daemonLossObserver,
+  daemonLossProbeEnabled,
+  readDaemonLossAuthority,
+} from './client-loss-observer';
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
 import {
@@ -566,6 +571,9 @@ async function openWorkspaceOwned(
   await original.close();
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
     Effect.runPromise(work.pipe(Scope.provide(scope)));
+  let clientLossAuthority:
+    | { view: import('@lody/e2ee-core/protocol').LedgerView; generation: number }
+    | undefined;
   const opened = await run(
     Effect.gen(function* () {
       const custody = yield* makeCliE2eeCustody({
@@ -591,6 +599,17 @@ async function openWorkspaceOwned(
         custody,
         device,
         genesisRecord: bytes(binding.genesisRecordHex),
+        ...(daemonLossProbeEnabled
+          ? {
+              onVerifiedLedger: (
+                view: import('@lody/e2ee-core/protocol').LedgerView,
+                generation: number
+              ) => {
+                clientLossAuthority = { view, generation };
+                daemonLossObserver.changed();
+              },
+            }
+          : {}),
         mailbox: mailbox(options.cloud, options.workspaceId, credential),
         staging: readEpochGroup
           ? {
@@ -1195,6 +1214,15 @@ async function openWorkspaceOwned(
       if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
       return result.attachmentToken;
     },
+    inspectClientLossAuthority: (requesterDevice: string, membershipId?: string) =>
+      daemonLossProbeEnabled
+        ? readDaemonLossAuthority(
+            clientLossAuthority,
+            opened.signingPublicKey,
+            requesterDevice,
+            membershipId
+          )
+        : null,
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,

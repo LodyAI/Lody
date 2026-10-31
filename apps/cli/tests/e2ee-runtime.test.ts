@@ -1,3 +1,7 @@
+import {
+  createDaemonLossRegistry,
+  readDaemonLossAuthority,
+} from '../src/lib/e2ee/client-loss-observer';
 import { authorizeEncryptedSchedule } from '../src/lib/e2ee/schedule-execution-authorization';
 import {
   scheduleDefinitionFingerprint,
@@ -4852,6 +4856,7 @@ describe('remote machine command', () => {
 });
 
 const executionFixture = Effect.fnUntraced(function* (directory: string, count = 2) {
+  let observedAuthority: Parameters<typeof readDaemonLossAuthority>[0];
   const fixture = yield* setup(directory, count);
   const custody = yield* makeCliE2eeCustody({
     directory: join(directory, 'machine'),
@@ -4864,6 +4869,9 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
     custody,
     device,
     genesisRecord: fixture.genesisRecord,
+    onVerifiedLedger: (view, generation) => {
+      observedAuthority = { view, generation };
+    },
   });
   for (let start = 0; start < fixture.records.length; start += 64)
     yield* runtime.ingest(
@@ -4903,7 +4911,21 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
       },
     }).pipe(Effect.provideService(Clock.Clock, clock));
   const gate = yield* makeGate();
-  return { fixture, runtime, gate, makeGate, io, device };
+  return {
+    fixture,
+    runtime,
+    gate,
+    makeGate,
+    io,
+    device,
+    readObservedAuthority: (key: string, membershipId?: string) =>
+      readDaemonLossAuthority(
+        observedAuthority,
+        hex(device.publicKey.toBytes()),
+        key,
+        membershipId
+      ),
+  };
 });
 
 const retainSignedScheduleUpdate = Effect.fnUntraced(function* (
@@ -6130,7 +6152,25 @@ describe('machine execution authorization freshness', () => {
     try {
       await execute(
         Effect.gen(function* () {
-          const { fixture, runtime, gate, io } = yield* executionFixture(directory, 3);
+          const { fixture, runtime, gate, io, readObservedAuthority } = yield* executionFixture(
+            directory,
+            3
+          );
+          const observed = createDaemonLossRegistry(true);
+          observed.register(
+            { workspaceId: 'workspace', machineId: 'machine', accountId: 'account' },
+            () => ({
+              intakeClosed: false,
+              pending: {
+                processorActive: 0,
+                processorQueued: 0,
+                watcherChecks: 0,
+                executionTurns: 0,
+                executionBookkeeping: 0,
+              },
+            }),
+            readObservedAuthority
+          );
           let current = fixture.current;
           const memberEntry = [...current.inspectState().members].find(
             ([, member]) => member.role === 'member'
@@ -6142,6 +6182,8 @@ describe('machine execution authorization freshness', () => {
           );
           if (!requester) throw new Error('missing synthetic requester');
           const [key, device] = requester;
+          const removedMemberBaseline = observed.inspect('workspace', key)!;
+          expect(removedMemberBaseline.code).toBeNull();
           const append = Effect.fnUntraced(function* (
             command: Parameters<typeof prepareLedgerCommand>[2]
           ) {
@@ -6187,8 +6229,20 @@ describe('machine execution authorization freshness', () => {
           expect(yield* gate.authorizeExecution('workspace', extraKey)).toMatchObject({
             _tag: 'Authorized',
           });
+          const revokedBaseline = observed.inspect('workspace', extraKey)!;
+          expect(revokedBaseline.code).toBeNull();
           // Historical author records remain, but known revocation rejects the cached grant immediately.
           yield* append({ _tag: 'RevokeDevice', target: extra.publicKey });
+          expect(observed.inspect('workspace', extraKey)).toMatchObject({
+            code: 'e2ee_device_revoked',
+            fence: 'verified-ledger',
+            drained: true,
+            retired: false,
+            requesterInstance: revokedBaseline.requesterInstance,
+          });
+          expect(
+            readObservedAuthority(extraKey, hex(fixture.membershipId.toBytes()))
+          ).toMatchObject({ devicePresent: false, memberPresent: true });
           io.offline = true;
           expect(yield* gate.authorizeExecution('workspace', extraKey)).toEqual({
             _tag: 'Denied',
@@ -6220,6 +6274,16 @@ describe('machine execution authorization freshness', () => {
           });
           yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
           yield* append({ _tag: 'RemoveMember', membershipId: device.membershipId });
+          expect(observed.inspect('workspace', key)).toMatchObject({
+            code: 'e2ee_member_removed',
+            fence: 'verified-ledger',
+            drained: true,
+            requesterInstance: removedMemberBaseline.requesterInstance,
+          });
+          expect(readObservedAuthority(key, memberId)).toMatchObject({
+            devicePresent: false,
+            memberPresent: false,
+          });
           expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
             _tag: 'Denied',
           });

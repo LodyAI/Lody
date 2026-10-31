@@ -132,6 +132,10 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  onVerifiedLedger?: (
+    view: import('@lody/e2ee-core/protocol').LedgerView,
+    generation: number
+  ) => void;
   staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
@@ -363,7 +367,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const verified = Context.get(context, VerifiedLedger);
   const installed = Context.get(context, InstalledEpochKeys);
   const history = Context.get(context, InstalledEpochHistory);
-  yield* verified.current();
+  const initialVerifiedView = yield* verified.current();
+  options.onVerifiedLedger?.(initialVerifiedView, executionGeneration);
   const receiving = options.mailbox
     ? yield* Layer.buildWithScope(
         Layer.mergeAll(KeyReceiver.layer, KeyRepair.layer).pipe(
@@ -537,7 +542,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             },
             { length, head }
           );
-          yield* verified.current();
+          const updatedVerifiedView = yield* verified.current();
+          options.onVerifiedLedger?.(updatedVerifiedView, executionGeneration);
           if (length - compactedAt >= 64) {
             const origin = yield* feed
               .rebase()

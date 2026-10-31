@@ -1,3 +1,4 @@
+import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
@@ -897,6 +898,14 @@ type TurnAnalyticsState = {
 };
 
 export class SessionExecutionService {
+  private readonly clientLossRawWork = createDaemonLossTasks();
+  inspectClientLoss() {
+    return {
+      turns: this.getActiveTurnIds().length,
+      bookkeeping: this.ownedWork.size + this.clientLossRawWork.size,
+    };
+  }
+
   private readonly completionPublicationAbort = new AbortController();
 
   stopCompletionPublication(): void {
@@ -911,7 +920,10 @@ export class SessionExecutionService {
       return undefined;
     });
     this.ownedWork.add(observed);
-    void observed.then(() => this.ownedWork.delete(observed));
+    void observed.then(() => {
+      this.ownedWork.delete(observed);
+      daemonLossObserver.changed();
+    });
     return observed;
   }
   private async runBookkeepingStage<T>(
@@ -1119,7 +1131,10 @@ export class SessionExecutionService {
     })();
     this.releaseRecoveryBySession.set(sessionId, recovery);
     this.ownedWork.add(recovery);
-    void recovery.then(() => this.ownedWork.delete(recovery));
+    void recovery.then(() => {
+      this.ownedWork.delete(recovery);
+      daemonLossObserver.changed();
+    });
     return recovery;
   }
 
@@ -3051,7 +3066,10 @@ export class SessionExecutionService {
   private releaseTurnRuntime(sessionId: SessionId, turnId: string): void {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const releasedOwner = runtime?.turnId === turnId;
-    if (releasedOwner) this.turnRuntimeBySession.delete(sessionId);
+    if (releasedOwner) {
+      this.turnRuntimeBySession.delete(sessionId);
+      daemonLossObserver.changed();
+    }
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
     if (releasedOwner || this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId) {
@@ -4357,6 +4375,7 @@ export class SessionExecutionService {
       return await owned;
     } finally {
       this.ownedWork.delete(owned);
+      daemonLossObserver.changed();
     }
   }
 
@@ -4678,6 +4697,7 @@ export class SessionExecutionService {
                   typeof pendingSession === 'function' ? pendingSession() : pendingSession,
                 catch: (error) => error,
               });
+              void self.clientLossRawWork.track(pending);
               runtime.pendingSession = pending;
               if (pendingOptions?.terminateOnCancel) {
                 runtime.terminateSessionOnCancel = true;
@@ -4922,12 +4942,17 @@ export class SessionExecutionService {
                               signal,
                               ...(runtime.goalControl ? { goalControl: runtime.goalControl } : {}),
                             });
+                            if (daemonLossObserver.enabled) {
+                              const rawAcp = agentClient.pendingPromptCompletion;
+                              if (rawAcp) void self.clientLossRawWork.track(rawAcp);
+                            }
                             runtime.rawPromptCompletion = raw.then(
                               () => undefined,
                               (cause) => {
                                 runtime.disconnectedTransport = isAgentDisconnectedError(cause);
                               }
                             );
+                            void self.clientLossRawWork.track(runtime.rawPromptCompletion);
                             runtime.inboxOwner?.track(runtime.rawPromptCompletion!);
                             return raw;
                           };
@@ -5324,7 +5349,10 @@ export class SessionExecutionService {
         const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
         const owned = Promise.allSettled([delivery, attention]);
         this.ownedWork.add(owned);
-        void owned.then(() => this.ownedWork.delete(owned));
+        void owned.then(() => {
+          this.ownedWork.delete(owned);
+          daemonLossObserver.changed();
+        });
       }
     }
   }
@@ -5427,6 +5455,7 @@ export class SessionExecutionService {
     const currentTurnId = this.currentTurnBySession.get(sessionId);
     if (!turnId || currentTurnId === turnId) {
       this.currentTurnBySession.delete(sessionId);
+      daemonLossObserver.changed();
       const releasedTurnId = turnId ?? currentTurnId;
       if (releasedTurnId && this.turnRuntimeBySession.get(sessionId)?.turnId !== releasedTurnId) {
         this.resolveTurnReleaseWaiters(sessionId, releasedTurnId);
