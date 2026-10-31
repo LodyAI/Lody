@@ -1,0 +1,37 @@
+{
+  "source": "54b3f19e570c6b001e3f98ce825f85df2b38e739",
+  "comparison": "Independent production main/renderer builds; unchanged bundled CLI",
+  "platform": "macOS 27.2 arm64",
+  "electron": "44.9.3",
+  "zod": "4.3.6",
+  "driverNode": "24.22.1",
+  "profile": "Fresh isolated OSS local workspace; onboarding completed; no conversation; trace stopped; explicit GC before counters",
+  "repetitions": 2,
+  "rows": [
+    {"variant": "baseline","round": 1,"mainHeapMiB": 50.143775939941406,"rendererHeapMiB": 80.46907043457031,"nativeFootprintLabels": {"electron-main": "216.3M","renderer": "315.8M"}},
+    {"variant": "pure","round": 1,"mainHeapMiB": 50.768428802490234,"rendererHeapMiB": 80.38619232177734,"nativeFootprintLabels": {"electron-main": "194.6M","renderer": "291.0M"}},
+    {"variant": "pooled","round": 1,"mainHeapMiB": 43.442481994628906,"rendererHeapMiB": 66.88418579101562,"nativeFootprintLabels": {"electron-main": "174.7M","renderer": "274.1M"}},
+    {"variant": "baseline","round": 2,"mainHeapMiB": 50.22456359863281,"rendererHeapMiB": 80.1932144165039,"nativeFootprintLabels": {"electron-main": "213.6M","renderer": "275.1M"}},
+    {"variant": "pure","round": 2,"mainHeapMiB": 50.7800178527832,"rendererHeapMiB": 80.40132141113281,"nativeFootprintLabels": {"electron-main": "196.2M","renderer": "295.5M"}},
+    {"variant": "pooled","round": 2,"mainHeapMiB": 43.35062026977539,"rendererHeapMiB": 66.87728500366211,"nativeFootprintLabels": {"electron-main": "176.1M","renderer": "278.9M"}}
+  ],
+  "pairedLiveHeapSavingsMiB": [
+    {"round": 1,"main": 6.7012939453125,"renderer": 13.584884643554688,"total": 20.286178588867188},
+    {"round": 2,"main": 6.873943328857422,"renderer": 13.315929412841797,"total": 20.18987274169922}
+  ],
+  "firstRoundSchemaInstanceCounts": [
+    {"variant": "baseline","processName": "electron-main","count": 3657},
+    {"variant": "baseline","processName": "renderer","count": 6290},
+    {"variant": "pure","processName": "electron-main","count": 3831},
+    {"variant": "pure","processName": "renderer","count": 6274},
+    {"variant": "pooled","processName": "electron-main","count": 2386},
+    {"variant": "pooled","processName": "renderer","count": 3601}
+  ],
+  "productionScope": {"base": "39c252437a9b265d43df364baa5752ba657cac19","rules": ["z.string()","z.string().optional()","z.string().trim().min(1)"],"module": "packages/shared/src/message-schemas.ts","replacements": 344,"mainRendererOnly": true,"unchangedCliInBothComparisons": true,"playwrightTraceEnabled": false},
+  "productionScopeRows": [
+    {"variant": "baseline","round": 1,"mainHeapMiB": 50.18836975097656,"rendererHeapMiB": 80.33309555053711},
+    {"variant": "optimized","round": 1,"mainHeapMiB": 48.338218688964844,"rendererHeapMiB": 76.7298698425293},
+    {"variant": "baseline","round": 2,"mainHeapMiB": 50.17355728149414,"rendererHeapMiB": 80.27752304077148},
+    {"variant": "optimized","round": 2,"mainHeapMiB": 48.33079528808594,"rendererHeapMiB": 76.86199188232422}
+  ]
+}
