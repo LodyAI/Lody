@@ -7,93 +7,113 @@ Translation: current
 
 ## Abstract
 
-The core implements vault-v1 recovery but no product surface uses it, so a user who
-loses every paired device loses their encrypted workspaces. This note proposes a
-default-off desktop integration that uses only the recovery file: create an account
-vault, set up per-workspace Recovery devices, and restore from the file. Electron 44
-on macOS cannot return a WebAuthn PRF result, so PRF is deferred. Restoring end to
-end also needs a private-backend authentication path for Recovery devices, which this
-repository cannot provide. Nothing here has been tested on a real device.
+The core implements vault-v1 recovery, but no product uses it. A user who loses every
+paired device therefore loses their encrypted workspaces. On 2026-10-31 the owner decided
+the six integration questions, relayed by the E2EE coordinator:
+
+- one vault per account;
+- V may stay on a desktop only behind per-use user presence;
+- R authenticates with an HKDF-derived credential registered through `credentialHash`;
+- PRF uses a native macOS module;
+- the RFC 8410 PKCS#8 package rule is accepted;
+- a successful restore notifies the user's devices and email, with no extra gates.
+
+The [Spec](../../../../specs/e2ee/recovery-vault.md) revision recording these stays draft
+until the owner approves it. The private backend has no `e2eeRecoveryVault` storage yet.
+Nothing here has been tested on a real device.
 
 ## Problem
 
-The MVP asks users to pair at least two devices. The [recovery vault Spec](../../../../specs/e2ee/recovery-vault.md)
-covers the remaining case, but only `packages/e2ee-core` and the Lab consume it. The
-desktop has no production `RecoveryVaultStore` or `RecoveryVaultLocalStore` adapter,
-no Convex calls for the declared `e2eeRecoveryVault` functions, and no UI. The
-[open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the
-vault as implemented in core only.
+The MVP asks users to pair at least two devices. The vault covers the case where no
+device survives, but only `packages/e2ee-core` and the Lab consume it. The
+[open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the vault
+as implemented in core only. [#2125](https://github.com/LodyAI/Lody/pull/2125) adds a
+default-off desktop loop: create the account vault and its file, then check a file. It
+remains a draft until this revision is approved.
 
-## Proposal
+## Decisions and rejected options
 
-- **Gate.** The main process exposes recovery IPC only when `LODY_E2EE_RECOVERY_VAULT=1`.
-  The renderer additionally requires developer mode plus a default-off setting. With
-  either gate off, no vault, ceremony, network or storage work runs.
-- **Vault per account.** One vault and one recovery file per account. The core index
-  already holds many workspace entries, so a user keeps one file instead of one per
-  workspace. The main process writes the file through a native save dialog, so the
-  unlock secret never reaches the renderer.
-- **Local journal.** A SQLite `RecoveryVaultLocalStore` lives in the account's E2EE
-  directory. It holds only encrypted entries, original signed records and non-secret
-  progress, as the core requires.
-- **Service.** The Convex `RecoveryVaultStore` calls `api.e2eeRecoveryVault.*` and
-  decodes its replies with the `@lody/e2ee-core/host` DTOs.
-- **Minimal first loop.** Create the vault and save its file, then reopen the vault from
-  that file and decrypt its index. This proves the file unlocks the vault through the
-  real service. Workspace setup and restore follow once Recovery devices can authenticate.
+**1. Vault scope: one per account.** The core index already holds many workspace entries.
+- *Rejected: one vault per workspace.* The user would have to keep a file per workspace, and
+  each new workspace would need a new offline backup.
+
+**2. Retaining V: allowed, but only behind per-use user presence.**
+- macOS uses a Keychain item with user-presence access control (Touch ID or the account
+  password). Windows uses Windows Hello or a credential prompt.
+- This is a deliberate exception, for V alone, to the per-device rule that keys need no
+  per-use approval (see the [client custody Spec](../../../../specs/e2ee/client-custody.md)).
+- Where the platform cannot enforce presence, the app asks for the file each time.
+- *Rejected: silent retention.* A compromised or borrowed unlocked device could then open
+  every vault entry without the user.
+- *Rejected: always requiring the file.* Per-epoch tests would go stale and new-workspace
+  setup would need the offline file.
+
+**3. Recovery-device authentication: an HKDF-derived credential.**
+- The credential is HKDF-SHA256 over R's Ed25519 seed. Salt is the genesis hash; info is
+  `lody-e2ee/recovery-credential/v1\0` followed by R's public key.
+- Its SHA-256 is registered through the existing `credentialHash` field on R's admission
+  append.
+- *Rejected: storing a credential inside the package.* That changes the approved
+  `formatVersion: 1` field set.
+- *Rejected: a signature-challenge route.* It adds a new authentication protocol to the
+  backend, where the derived credential reuses the existing device-credential path.
+
+**4. PRF: native macOS AuthenticationServices, macOS 15+.**
+- Prerequisites: a Lody RP domain serving an apple-app-site-association (AASA) file, the
+  `webcredentials:` entitlement, an embedded provisioning profile, and native dependency
+  review.
+- Only a real ceremony counts: PRF `enabled: true` with a 32-byte `results.first`. There is
+  no fallback.
+- *Rejected: a system-browser ceremony.* RP-served JavaScript and the local handoff would
+  join the trust base, and a loopback port or URL scheme can be raced.
+- *Rejected: patching Electron.* That means forking the runtime or waiting on upstream.
+- *Rejected: Electron's built-in authenticators.* They return no PRF (findings below).
+
+**5. Package private keys: exact 48-byte RFC 8410 PKCS#8.** Implemented in
+[#2124](https://github.com/LodyAI/Lody/pull/2124).
+
+**6. After a restore: notify every active device of the account and the account email.**
+- *Rejected: forced R replacement, owner approval and a cooldown.* The owner chose recovery
+  availability. Replacement and revocation remain explicit user actions.
+- The notification is informational. A hostile service can suppress it, while the R-signed
+  admission stays visible in the verified ledger.
+
+## Backend gap
+
+The private backend has a `recovery` device kind but none of the following. Each one
+gates real-service use:
+
+- `e2eeRecoveryVault` storage: immutable entries, and index CAS with a same-transaction
+  check that referenced entries exist, plus `deleteUnreferenced`, per-account isolation
+  and quotas;
+- registration of a Recovery credential hash;
+- R-authenticated mailbox read and append;
+- the restore notification.
 
 ## Platform findings: WebAuthn PRF on macOS
 
-Research on 2026-10-30, from public sources. Nothing was measured on a device.
+Research on 2026-10-30 from public sources; nothing was measured on a device. Lody
+pins Electron 44.9.3.
 
 | Path | PRF result | Requirements | Source |
 | --- | --- | --- | --- |
-| Electron Touch ID authenticator (`app.configureWebAuthn`, 41.5+) | None: Chromium's Touch ID authenticator never sets `supports_prf` | `keychain-access-groups`; credentials stay on one device | [electron#51255](https://github.com/electron/electron/pull/51255) |
-| Electron `platformPasskeys` (iCloud Keychain) | Ignored: Electron's docs say PRF inputs are ignored | Electron 45 only; associated domains, embedded profile, AASA | [electron#51563](https://github.com/electron/electron/pull/51563) |
-| Chromium's own iCloud Keychain authenticator | Yes, on macOS 15+ | Browser-only entitlement, which Apple grants only to real web browsers | [Chromium CL](https://chromium.googlesource.com/chromium/src/+/7fe5155fed538b1d2317c516ddc633ee7fa206ef%5E%21) |
-| Native AuthenticationServices module (e.g. `vault12/electron-webauthn-mac`) | Yes, macOS 15+, 32-byte output | `webcredentials:` associated domain, application identifier, embedded profile, AASA | [Apple docs](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct), [module](https://github.com/vault12/electron-webauthn-mac) |
-| System-browser ceremony on the RP's https domain | Yes, in Safari 18 and Chrome 132+ | Hands the result back to the app; the RP web origin joins the trust base | Analysis |
+| Electron Touch ID authenticator (41.5+) | None (`supports_prf` never set) | `keychain-access-groups`; device-bound | [electron#51255](https://github.com/electron/electron/pull/51255) |
+| Electron `platformPasskeys` (45 only) | PRF inputs ignored | Associated domains, embedded profile, AASA | [electron#51563](https://github.com/electron/electron/pull/51563) |
+| Chromium iCloud Keychain authenticator | Yes, macOS 15+ | Browser-only entitlement | [Chromium CL](https://chromium.googlesource.com/chromium/src/+/7fe5155fed538b1d2317c516ddc633ee7fa206ef%5E%21) |
+| Native AuthenticationServices (chosen) | Yes, macOS 15+, 32 bytes | `webcredentials:`, application identifier, embedded profile, AASA | [Apple docs](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct), [vault12/electron-webauthn-mac](https://github.com/vault12/electron-webauthn-mac) |
+| System browser on the RP domain | Yes (Safari 18, Chrome 132+) | Handoff back to the app | Analysis |
 
-Lody pins Electron 44.9.3. WebAuthn also needs an https origin whose registrable
-domain matches the RP ID, so a `file://` or custom-scheme renderer cannot call it at all.
-Developer ID builds can use Associated Domains, but no end-to-end report confirms it.
-
-## Alternatives
-
-**PRF route.**
-
-- *Native module (recommended next).* It keeps the ceremony inside the app and can
-  report the real PRF result, which the core validates through `verifiedPasskeyPrf`.
-  Costs: macOS 15+ only, an RP domain serving AASA, a provisioning profile in the
-  packaged app, and a native dependency to review.
-- *System browser.* No native code. However, the raw PRF output, or a key derived from
-  it, passes through RP-served JavaScript and a local handoff. A local process can race
-  a loopback port or URL scheme. Mitigation is an HPKE-sealed handoff to an ephemeral
-  app key, plus a short confirmation code. The RP server still stays in the trust base.
-- *Patch Electron.* Wiring PRF into Electron's platform passkey authenticator looks
-  small, but it forks the runtime or waits on upstream.
-- *No PRF.* The recovery file alone is enough for the first release.
-
-**How R authenticates to the service.**
-
-- *Derive R's access credential (recommended).* Use HKDF over R's signing private key
-  with a new domain, and register its hash on R's admission append through the existing
-  `credentialHash` field. The approved package format stays unchanged, but the private
-  backend must accept that hash for a Recovery-kind admission.
-- *Signature challenge for Recovery devices.* This needs a new backend route.
-- *Store a credential inside the package.* Rejected: it changes the approved
-  `formatVersion: 1` field set.
-
-**Retaining V on a desktop.**
-
-- *Wrap V with OS custody.* Setup on new workspaces and per-epoch tests then run
-  without the file. The device already holds those workspaces' keys, but V also
-  unlocks every other entry in the vault.
-- *Require the file each time.* Safer at rest, but stale tests become likely.
+A `file://` or custom-scheme renderer cannot call WebAuthn at all. Associated Domains
+is listed for Developer ID apps, but no end-to-end report confirms that it works.
 
 ## Consequences and limits
 
-All proposed capabilities are default-off and leave current pairing, ledger and
-workspace behavior unchanged. Two things are unverified: whether the private backend
-has deployed the `e2eeRecoveryVault` functions, and whether it can authenticate Recovery
-devices. The owner decisions are listed in the Spec's integration section.
+All capabilities stay default-off and leave pairing, ledger and workspace behavior
+unchanged. Several things remain unverified:
+
+- whether the macOS and Windows user-presence mechanisms behave on real devices;
+- whether the native module and associated domain work in a Developer ID build;
+- the backend work listed above.
+
+The R credential parameters are part of this draft revision and need the owner's
+approval with it.

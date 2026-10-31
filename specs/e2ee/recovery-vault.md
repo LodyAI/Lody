@@ -104,10 +104,12 @@ collection API. A local journal cannot prove that another session has no pending
 reference. Explicit risk-confirmed cleanup of retired indexed entries remains a
 separate operation and requires an up-to-date index CAS.
 
-## Proposed desktop product integration
+## Desktop product integration
 
-This section is a draft proposal for owner review, not approved intent. Research
-and alternatives are in the [desktop integration note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.md).
+On 2026-10-31 the owner decided the six integration questions, relayed by the E2EE
+coordinator. This section records those decisions for review of this revision; it
+is not approved until the owner approves the revision, and the Spec stays draft.
+Research, rejected options and evidence are in the [desktop integration note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.md).
 Nothing here changes MVP behavior: every capability stays behind a default-off
 gate, and existing encrypted workspaces, pairing and ledgers behave as before.
 
@@ -116,40 +118,68 @@ uses an offline recovery file to regain their encrypted workspaces. Pairing with
 surviving device remains the primary path; the vault covers the case where no
 device survives. Without a vault or a surviving device, that content is lost.
 
-**Vault ownership.** One vault per account holds one entry per workspace
-membership. Creating it, from desktop security settings, writes the recovery file
-only through a user-chosen save location; Lody never uploads or syncs the file. A
-user enables recovery per workspace explicitly. Setup admits that workspace's R
-through the user's active personal device and runs the real envelope test.
-Recovery status is shown per workspace and per epoch; a new epoch needs a new test.
+**One vault per account.** An account has one vault and one recovery file; the
+vault index holds one entry per workspace membership. Desktop security settings
+create the vault and write the file only to a location the user chooses; Lody never
+uploads or syncs the file. The user enables recovery per workspace explicitly.
+Setup admits that workspace's R through the user's active personal device and runs
+the real envelope test. Status is shown per workspace and per epoch; a new epoch
+needs a new test.
 
-**Restore.** On a device without an identity for a workspace, "Restore from
-recovery file" sits next to pairing. It opens the vault, asks the user to confirm
-the trust anchor independently, decrypts R's current-epoch envelope, checks its
-commitment, then has R admit a new personal device C. C continues alone; R stays
-active until the user replaces it.
+**V on a desktop requires user presence for every use.** A personal desktop may keep
+V only under an OS key whose every use requires the user's presence: on macOS a
+Keychain item with user-presence access control (Touch ID or the account password),
+on Windows a Windows Hello or credential prompt. This is a deliberate exception,
+for V alone, to the rule that personal-device keys need no per-use approval. When
+the platform cannot enforce presence, V is not stored and the user selects the
+recovery file whenever V is needed. V is never stored silently. Retaining V lets
+setup of a new workspace and per-epoch tests run without the file.
 
-**Passkey PRF.** The PRF wrap is deferred. Electron 44 exposes no WebAuthn PRF
-result on macOS, and every in-app alternative needs an associated RP domain and an
-embedded provisioning profile. The first release ships recovery-file unlock only.
+**Recovery-device authentication.** R's service access credential is derived with
+HKDF-SHA256 from R's 32-byte Ed25519 private seed, salt = genesis hash and info =
+`lody-e2ee/recovery-credential/v1\0` followed by R's signing public key. The
+personal device registers SHA-256 of the derived credential through the existing
+`credentialHash` field when it appends R's admission. On restore the new device
+derives the same credential from the decrypted package, uses it for R's mailbox
+read and C's admission append, then discards it. The package format is unchanged;
+holding R's private key already confers R's ledger authority, so the credential adds
+no new capability.
 
-**Service.** The service stores only the opaque immutable entries and the index
-CAS declared in `packages/cloud-api`, isolated per account. R must be able to read
-its mailbox and append C's admission without any desktop device credential. That
-needs a private-backend authentication path for Recovery devices, not yet available.
+**Restore and notification.** On a device without an identity for a workspace,
+"Restore from recovery file" sits next to pairing. It opens the vault, asks the user
+to confirm the trust anchor independently, decrypts R's current-epoch envelope,
+checks its commitment, then has R admit a new personal device C. After C's admission
+commits, the service notifies every active device of the account and the account
+email that workspace X was restored on a new device with the recovery file. There
+is no forced R replacement, owner approval or cooldown. The notification informs
+the user; it is not a security control, and a hostile service can suppress it.
+The R-signed admission remains visible in the verified ledger.
+
+**Passkey PRF.** The PRF wrap uses a native macOS AuthenticationServices module on
+macOS 15 or newer. Prerequisites: a Lody RP domain serving an apple-app-site-association
+file, the `webcredentials:` associated-domains entitlement, a provisioning profile
+embedded in the signed app, and review of the native dependency. Only a real
+ceremony that reports PRF `enabled: true` with a 32-byte `results.first` may wrap or
+unlock V; there is no fallback. Other platforms and versions use the file.
+
+**Package keys.** The owner accepted the exact 48-byte RFC 8410 PKCS#8 encodings for
+both private keys ([#2124](https://github.com/LodyAI/Lody/pull/2124)).
+
+**Service and current gap.** The service stores only opaque immutable entries and
+the index CAS declared in `packages/cloud-api`, isolated per account. CAS checks in
+the same transaction that every referenced entry exists. The private backend
+already has a `recovery` device kind, but it implements no `e2eeRecoveryVault`
+function, no Recovery credential registration, no R-authenticated mailbox read or
+append, and no restore notification. Until those exist, the desktop loop cannot run
+against the real service.
 
 **Threat model.** Account access controls retrieval and the file controls
 decryption. Anyone holding both can read every recovered workspace and admit
 devices until R is revoked; the service operator plus the file is equivalent.
 The file alone grants nothing without the account's ciphertext. Loss of the file
-loses only that recovery path. The service can withhold or roll back ciphertext;
-local pins detect rollback only on a device that saw a newer revision.
-
-**Owner decisions.** (1) Vault per account versus per workspace. (2) Whether a
-desktop may keep V wrapped by OS custody, so setup and per-epoch tests do not need
-the file each time. (3) How R authenticates to the service. (4) Which PRF route,
-if any, follows. (5) Whether the exact RFC 8410 PKCS#8 package rule is accepted.
-(6) Whether restore needs anything beyond an explicit trust-anchor confirmation.
+loses only that recovery path. On a desktop retaining V, malware that can obtain the
+user's presence approval can unlock V. The service can withhold or roll back
+ciphertext; local pins detect rollback only on a device that saw a newer revision.
 
 ## Boundaries and validation
 
