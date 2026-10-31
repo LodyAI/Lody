@@ -43,6 +43,12 @@ Keep public composition intact until its full supported caller contract has an
 equivalent replacement. Runtime mappings with retained source literals are not
 source-removal credit, and a counterexample withdraws the claimed mapping.
 
+A [separate extraction proposal](../../../../.agents/notes/proposed/architecture/2026-10-31-stylex-cascade-compatibility.md)
+records the measured boundary for native defaults. Flat utilities routing with
+isolated atoms can preserve selected native callers, while real Slot and query
+cases still fail. It has not changed this build: do not switch global layers or
+add two unplugin instances on the strength of native-only screenshots.
+
 The independent helper controls' reviewed internal call graph and original raw
 selectors are separate contracts. Their local ordinary/Slot split is not a recipe
 for public adapters. Check real parent selectors, token readers, layer order and

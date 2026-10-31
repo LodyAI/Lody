@@ -13,7 +13,6 @@ import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -225,11 +224,16 @@ export const GoalActionButton = ({
       size="small"
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        tone === 'success' &&
-          'border-status-success/40 text-status-success hover:text-status-success hover:bg-status-success/10',
-        tone === 'danger' && 'text-destructive'
-      )}
+      labelColor={
+        tone === 'success'
+          ? 'hsl(var(--status-success) / 1)'
+          : tone === 'danger'
+            ? 'hsl(var(--destructive) / 1)'
+            : undefined
+      }
+      className={
+        tone === 'success' ? 'border-status-success/40 hover:bg-status-success/10' : undefined
+      }
     >
       {loading ? (
         <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />

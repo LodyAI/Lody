@@ -101,6 +101,9 @@ const styles = stylex.create({
     ':hover': { textDecoration: 'underline' },
   },
   prIcon: { width: '12px', height: '12px', flexShrink: 0 },
+  ciSuccess: { color: 'hsl(var(--status-success) / 1)' },
+  ciFailure: { color: 'hsl(var(--destructive) / 1)' },
+  ciPending: { color: 'hsl(var(--status-warning) / 1)' },
   hint: {
     padding: `${space[1.5]} ${space[2]}`,
     borderTop: `1px solid ${colors.separator}`,
@@ -115,11 +118,11 @@ const styles = stylex.create({
  * keeps the row to one status mark instead of stacking a second colored dot
  * beside the number. Unreported CI leaves the glyph in its PR-status color.
  */
-const CI_ICON_TONE: Partial<Record<SessionPullRequestCiState, string>> = {
-  s: 'text-status-success',
-  f: 'text-destructive',
-  e: 'text-destructive',
-  p: 'text-status-warning',
+const CI_ICON_TONE: Partial<Record<SessionPullRequestCiState, stylex.StyleXStyles>> = {
+  s: styles.ciSuccess,
+  f: styles.ciFailure,
+  e: styles.ciFailure,
+  p: styles.ciPending,
 };
 
 function getCiLabel(
@@ -226,6 +229,7 @@ function MemberRow({
   const inPlace = row.access === 'additional' || row.access === 'link';
   const statusMeta = row.pr ? PR_STATUS_META[row.pr.status] : null;
   const ciTone = row.pr?.ciState ? CI_ICON_TONE[row.pr.ciState] : undefined;
+  const prIconProps = stylex.props(styles.prIcon, ciTone);
   const ciLabel = getCiLabel(t, row.pr?.ciState);
   const identity = row.repoFullName ?? row.path;
   const inPlaceHint = inPlace
@@ -302,8 +306,8 @@ function MemberRow({
           <statusMeta.icon
             aria-hidden="true"
             className={cn(
-              stylex.props(styles.prIcon).className,
-              ciTone ?? statusMeta.iconColorClassName
+              prIconProps.className,
+              ciTone ? undefined : statusMeta.iconColorClassName
             )}
           />
           <span>#{row.pr.number}</span>

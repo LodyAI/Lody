@@ -1,0 +1,42 @@
+{
+  "scope": "Actual Electron Show navigation sidebar private Button: one text-muted-foreground utility \u2192 existing Button.labelColor physical inline API with hsl(var(--muted-foreground) / 1).",
+  "themes": ["light", "dark"],
+  "viewports": [
+    {
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "width": 820,
+      "height": 900
+    }
+  ],
+  "defaultStates": ["rest", "real pointer hover", "keyboard Tab then Shift+Tab focus-visible"],
+  "controlsAt1280": [
+    "root muted variable",
+    "ancestor muted variable",
+    "element muted variable",
+    "element muted variable initial",
+    "root muted variable initial",
+    "physical inline color"
+  ],
+  "negativeAt1280": "Explicit same-element .dark DOM class. The private fixed Button interface has no route that adds this class; it is not a root/ancestor theme test and is not accepted equivalence.",
+  "totalStates": 26,
+  "positiveStates": 24,
+  "primaryStates": 12,
+  "controlStates": 12,
+  "negativeStates": 2,
+  "viewsPerState": ["350x80 actual header crop", "whole Electron content viewport"],
+  "realFlows": "Four theme/width scenes on each side: actual click and Enter show the sidebar; Meta+B hides it again after each activation.",
+  "allCapturedVariables": "Every computed custom property on target, all descendants, both pseudo elements, and all ancestors. Original raw data retain 576 differences in inherited boot runtime value.",
+  "classifiedRuntimeKey": "Only --lody-boot-elapsed is separately classified in a named analysis projection. Real boot animation readers exist; no whole-app nonvisual assertion or pixel-cause claim.",
+  "inputBoundary": "Original wide observed-file After gate FAIL remains because documentation changed between completed builds. Independent qualified product gate excludes exactly unused style/MIGRATION.md; all other observed inputs except consumer equal, all external and HTML inline CSS byte-exact.",
+  "knownVisualOPEN": "Three target crop views (45 raw/14 threshold) and three context views (5676/261), union four positive states. Do not add overlapping target/context pixels or call them 48 independent states.",
+  "optionalNotCovered": "Additional semantic ghost-label-token injection was not captured because the CSSOM resolver was unresolved. No ID was guessed; full computed custom maps remain strict except the named boot runtime classification.",
+  "collector": "leaves146-capture.mts (ignored artifact; reuses ElectronHarness and 124 transport).",
+  "producerProofs": [
+    "leaves146-before-renderer-build-proof.json",
+    "leaves146-after-renderer-build-proof.json",
+    "leaves146-qualified-product-input-proof.json"
+  ]
+}

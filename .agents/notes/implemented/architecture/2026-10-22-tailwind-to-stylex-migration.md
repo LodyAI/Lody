@@ -2606,6 +2606,57 @@ all click/Enter/Meta+B paths match. The two original zero-frame collector failur
 and the original wide build-gate failure remain in the evidence, without resampling
 successful cells or assigning an unproved paint cause.
 
+### Public callers and the remaining cascade boundary
+
+Later closed scopes remove22 source utilities: Goal/CI147 seven, helper148 four,
+Chevron151 four, helper152 five, Cancel153 one and margin155 one. Three redundant
+size/shrink occurrences are separate cleanup, not migration. The helper's exact
+through155 inventory is311/8/21 across30 production files; the core's observed
+through147 cut is1,376/156/727 across790 files. Only its two147 products differ
+from the qualified146 source. That scanner falls by three while147 removes seven:
+the dynamic `CI_ICON_TONE[state]` dictionary's four original strings were outside
+v2 resolution. This is a recorded lower-bound gap, not four extra deletions or a
+changed counting method. The stable full620/6,209 run remains fixed at146; later
+owning suites and immutable captures have their separate boundaries.
+
+| Unit                      | Real rendered result                                                                                                      | Limits retained                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal and CI147            | All162 pairs byte-exact;10,034 standard plus2,864 complete target records,24 callbacks match                              | Only1,008 precise class/style carriers differ; the legacy bar's container lookup missed its portal, so container CSS is not claimed. Original shallow-class test failure retained;21 owning tests pass after deleting only that assertion. One new broad-type lint warning is explicit. |
+| Shadow and outline148     | Formal30 exact;86 complete pairs78 exact                                                                                  | Eight forced-color OPENs356raw/52threshold; exact named shadow comma-space differences remain. Fourteen registrations/fallbacks and a real no-probe production build verified.                                                                                                          |
+| Chevron151                | Native96 and file16 pairs;103/112 PNGs exact,448 full captured records match                                              | Nine OPENs874raw/2threshold. Fifty-six actual transition events/timing structures match; screenshots prove settled endpoints, not every animation frame. No shared formal-runner pairs invented.                                                                                        |
+| File glyphs and shrink152 | 117/126 PNGs exact;2,808 full captured records/geometry match;three real SVG assets have matching bytes and decoded sizes | Nine OPENs69raw/15threshold. Original22 partial frames, pointer failures and incomplete termination remain. Zero-size glyphs are not called painted; keyboard recovery replaces impossible pointer hit testing only.                                                                    |
+| Cancel153                 | Actual Cancel56 pairs50 exact;all90 positive/reference pairs77 exact with656 matching physical records                    | Thirteen OPENs58raw/zero threshold; exact new inline/private-variable carriers retained. Six private-variable negatives separate. Translate candidate restored after two actual utility-writer probes changed1.98→4px,60,471raw/52,490threshold.                                        |
+| Delete margin155          | 115/128 PNGs exact;2,514 full captured records/geometry and real clipboard/delete outcomes match                          | Thirteen OPENs44raw/15threshold. Six supplemental states establish actual keyboard focus-visible. Sixteen original Copied/rest images remain before-only; authoritative idle-ready replacements are separate and do not close older OPENs.                                              |
+
+Public composition supplies real blockers, beyond default-state screenshots.
+Assistant actions149 retain all six classes: four supported custom-icon token
+readers change6→9px or10→18px when spacing tokens are published, and eight
+supported Stream unlayered caller cases change ink under physical inline color.
+Eight low-specificity controls match. These twenty are explicit DOM-only proposed
+field calibrations, not a product After or migration; the coarse-hover gate failure
+and four uncollected phone states remain. The product View stays byte-identical.
+
+Adaptive150 retains nine layouts:18 controls match, while18 ancestor and two opaque
+caller cases fail. Six ancestor PNGs are identical despite changed overflow or
+container type, so they are still rejected. Progress154 retains height/flex after
+four real public Sidebar caller failures: height4→48px, track4→6px, or track width
+218.125→0 and fill82.875→0. Thirty-eight matching/default/motion pairs cannot
+accept those four. Outline157 retains padding: an actual named popup host carries
+a public zero-specificity ancestor that changes12→48px, or18→72px under local
+spacing. One separate twelve-pixel context OPEN remains unexplained; the popup
+itself matches in that control. The320px Rail is genuinely suppressed, not a popup
+whose locator merely missed. All candidates were restored and receive zero credit.
+
+The isolated156 extraction experiment supports a
+[proposed, bounded route](../../proposed/architecture/2026-10-31-stylex-cascade-compatibility.md).
+A distinct namespace/prefix in flat utilities before Tailwind preserves thirteen
+native Adaptive cases, but not general Slot source order. Late injection breaks
+other Slot/query/caller cases; reused atoms change ordinary StyleX overflow even
+when pixels match. Native sublayers and two unplugin instances are not substitutes.
+No product compiler, dependency, lockfile or global layer order was changed, and
+no universal compatibility route was adopted. Continue owned migrations while
+keeping these specific caller contracts explicit.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)

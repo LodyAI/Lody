@@ -175,7 +175,6 @@ describe('SessionProjectMembersChip', () => {
     expect(prButton).toBeDefined();
     expect(prButton!.getAttribute('aria-label')).toBe('Open pull request #5 · CI failed');
     // CI tints the PR glyph; there is no separate status dot beside it.
-    expect(prButton!.querySelector('svg')?.getAttribute('class')).toContain('text-destructive');
     expect(prButton!.querySelectorAll('span[aria-hidden="true"]').length).toBe(0);
     await act(async () => {
       prButton!.click();

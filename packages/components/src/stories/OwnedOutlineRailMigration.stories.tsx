@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { ConversationOutlineRail } from '../components/ai-gui/conversation-outline-rail';
 import type { ConversationOutlineEntry } from '../lib/conversation-outline';
 
@@ -35,12 +36,22 @@ const entries: ConversationOutlineEntry[] = Array.from({ length: 100 }, (_, inde
 function Fixture({
   mode = 'basic',
 }: {
-  mode?: 'basic' | 'overflow' | 'subtree' | 'flex-last' | 'hidden-last' | 'portal';
+  mode?:
+    | 'basic'
+    | 'overflow'
+    | 'subtree'
+    | 'flex-last'
+    | 'hidden-last'
+    | 'portal'
+    | 'named-host'
+    | 'named-host-padding-caller';
 }) {
   const [activeIndex, setActiveIndex] = useState(mode === 'overflow' ? 70 : 0);
   const [lastJump, setLastJump] = useState(-1);
   const [lastPreview, setLastPreview] = useState(-1);
   const [overlayRoot, setOverlayRoot] = useState<HTMLDivElement | null>(null);
+  const [popupHost, setPopupHost] = useState<HTMLElement | null>(null);
+  const isNamedHost = mode === 'named-host' || mode === 'named-host-padding-caller';
   const scopedVariables =
     mode === 'subtree'
       ? ({ '--muted-foreground': '320 80% 40%', '--foreground': '150 75% 30%' } as CSSProperties)
@@ -75,6 +86,13 @@ function Fixture({
       </header>
       <section
         data-outline-container
+        ref={isNamedHost ? setPopupHost : undefined}
+        data-outline-popup-host={isNamedHost ? String(popupHost !== null) : undefined}
+        className={
+          mode === 'named-host-padding-caller'
+            ? '[:where(&)_:where([role=dialog])]:p-12'
+            : undefined
+        }
         style={{ containerType: 'inline-size', position: 'relative', height: 440 }}
       >
         {mode === 'portal' ? (
@@ -93,17 +111,19 @@ function Fixture({
           <p>Synthetic conversation backdrop; the real production rail sits in the left margin.</p>
           <p>Current turn: {activeIndex + 1}. Keyboard and pointer jumps update this fixture.</p>
         </div>
-        <ConversationOutlineRail
-          entries={mode === 'overflow' ? entries : entries.slice(0, 6)}
-          activeIndex={activeIndex}
-          onJumpToRound={(index) => {
-            setActiveIndex(index);
-            setLastJump(index);
-          }}
-          onPreviewRound={setLastPreview}
-          overlayRoot={mode === 'portal' ? overlayRoot : undefined}
-          className={callerClassName}
-        />
+        <PopupContainerProvider container={isNamedHost ? popupHost : undefined}>
+          <ConversationOutlineRail
+            entries={mode === 'overflow' ? entries : entries.slice(0, 6)}
+            activeIndex={activeIndex}
+            onJumpToRound={(index) => {
+              setActiveIndex(index);
+              setLastJump(index);
+            }}
+            onPreviewRound={setLastPreview}
+            overlayRoot={mode === 'portal' ? overlayRoot : undefined}
+            className={callerClassName}
+          />
+        </PopupContainerProvider>
       </section>
       <footer style={{ padding: 16 }}>Outer marker area outside the rail.</footer>
     </main>
@@ -116,3 +136,8 @@ export const SubtreeVariables: Story = { render: () => <Fixture mode="subtree" /
 export const CallerFlexLast: Story = { render: () => <Fixture mode="flex-last" /> };
 export const CallerHiddenLast: Story = { render: () => <Fixture mode="hidden-last" /> };
 export const Portalled: Story = { render: () => <Fixture mode="portal" /> };
+
+export const NamedHost: Story = { render: () => <Fixture mode="named-host" /> };
+export const NamedHostPaddingCaller: Story = {
+  render: () => <Fixture mode="named-host-padding-caller" />,
+};

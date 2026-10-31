@@ -1848,6 +1848,44 @@ Navigation146迁移真实Electron固定导航按钮一个字色源码出现次�
 Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，不重采成功帧，也不虚构
 像素原因。
 
+### 公开调用方与剩余层叠边界
+
+后续闭合范围移除22处源码utility：Goal／CI147七处、helper148四处、Chevron151四处、
+helper152五处、Cancel153一处、margin155一处。另三处重复尺寸／shrink是清理，不计迁移。
+helper截至155精确库存311／8／21、覆盖30份生产源码；主组件截至147观察库存为
+1,376／156／727、覆盖790份源码，仅两个147产品不同于合格146边界。扫描下界只减少三，
+但147实际移除七：动态`CI_ICON_TONE[state]`字典的原四字符串不在v2解析范围。这是已记录
+的下界缺口，不是四个额外删除，也没改统计方法。完整620／6,209稳定回归仍固定146，
+后续owning suites与不可变真实采集分别限定范围。
+
+| 单元                  | 真实渲染结果                                                        | 保留限制                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal／CI147           | 162对PNG全同，10,034标准及2,864完整目标记录、24回调同               | 仅1,008精确class／style载体不同；legacy bar容器定位漏掉portal，不称容器CSS已采。保留旧class浅断言失败，仅删该断言后21owning测试通过；一条新增宽类型lint warning明确记录。 |
+| Shadow／outline148    | 正式30全同，完整86对78同                                            | 八个forced-color OPEN356原始／52阈值；精确shadow逗号空格差保留。14注册／fallback及真实无probe生产构建已核。                                                               |
+| Chevron151            | native96与file16，共112对103PNG同，448完整记录同                    | 九OPEN874／2；56真实transition事件／时序结构同。截图仅证明稳定端点，不称逐动画帧；未虚构共享formal runner对照。                                                           |
+| File glyph／shrink152 | 126对117PNG同，2,808完整记录／几何同；三类真实SVG内容和解码尺寸一致 | 九OPEN69／15；原22部分帧、pointer失败及未完成终止保留。零尺寸glyph不称painted，只用真实键盘恢复不可命中的状态。                                                           |
+| Cancel153             | 实际Cancel56对50同，全部90正向／参考对77同、656物理记录同           | 十三OPEN58／0；精确新增inline／private-var载体保留，六private-var负控单列。translate候选在两个实际utility-writer探针中1.98→4px，60,471／52,490，已完整恢复。              |
+| Delete margin155      | 128对115PNG同，2,514完整记录／几何与真实剪贴板／删除结果同          | 十三OPEN44／15；另六状态证明实际键盘focus-visible。原十六张Copied／rest图作为before-only保留，权威idle-ready补采另列，不关闭旧OPEN。                                      |
+
+公开组合带来真实阻塞，默认截图不足。Assistant actions149保留六类：四个受支持自定义
+Icon Token reader在发布间距Token后6→9px或10→18px，八个受支持Stream unlayered调用
+在物理inline字色下改变颜色，八个低特异性控制同。这二十组明确是DOM-only拟议字段校准，
+不是产品After或迁移；coarse-hover门禁失败及四个未采手机状态保留，View产品字节不变。
+
+Adaptive150保留九布局：18控制同，18祖先和两opaque调用失败，其中六张祖先PNG相同，
+但overflow／container type已变，仍拒绝。Progress154在四个真实公开Sidebar调用回归后
+保留height／flex：height4→48px、track4→6px，或track宽218.125→0、fill82.875→0。
+另外38个默认／变量／动效匹配对不能接受这四反例。Outline157保留padding：实际named
+popup host带回公开零特异性祖先，使12→48px，局部spacing下18→72px；另一个控制的
+popup本体同，但整页十二像素OPEN原因未定。320px Rail确实被抑制，不是locator缺失即
+误称popup关闭。候选均已恢复，迁移信用为零。
+
+隔离156实验提供一条[仍为proposed的有限路径](../../proposed/architecture/2026-10-31-stylex-cascade-compatibility.zh.md)：
+独立namespace／前缀、Tailwind之前utilities本层，十三个原生Adaptive用例可同，但不保
+任意Slot顺序。后置注入破坏其他Slot／query／caller，共享atom又改变普通StyleX overflow，
+即使PNG同也失败；原生子层与双unplugin实例不能代替隔离提取。没有改产品compiler、
+依赖、锁文件或全局层序，没有采纳通用兼容路径；继续闭合owned范围，并保留这些具体合同。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)

@@ -191,6 +191,7 @@ const privateButtonStyles = stylex.create({
 });
 
 const rootLayoutStyles = stylex.create({
+  toolbarNoShrink: { flexShrink: 0 },
   resizerVisibility: {
     display: { default: null, '@media not all and (width >= 64rem)': 'none' },
   },
@@ -1495,7 +1496,7 @@ export function ReviewRenderer({
               variant={sidebarVisible ? 'secondary' : 'ghost'}
               width="calc(var(--spacing) * 8)"
               height="calc(var(--spacing) * 8)"
-              className="shrink-0"
+              {...stylex.props(rootLayoutStyles.toolbarNoShrink)}
               onClick={() => setSidebarVisible((v) => !v)}
               aria-pressed={sidebarVisible}
               title={sidebarVisible ? 'Hide review map' : 'Show review map'}
@@ -1516,7 +1517,7 @@ export function ReviewRenderer({
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 gap-1.5 px-2.5"
+              className="gap-1.5 px-2.5"
               onClick={() => void copyComments()}
               aria-label={`Copy ${comments.length} comments as markdown`}
             >
@@ -1534,7 +1535,7 @@ export function ReviewRenderer({
                 variant={panelVisible ? 'secondary' : 'ghost'}
                 width="calc(var(--spacing) * 8)"
                 height="calc(var(--spacing) * 8)"
-                className="shrink-0"
+                {...stylex.props(rootLayoutStyles.toolbarNoShrink)}
                 onClick={() => setPanelVisible((v) => !v)}
                 aria-pressed={panelVisible}
                 title={panelVisible ? 'Hide review thread' : 'Show review thread'}
@@ -1775,6 +1776,7 @@ const findingsStyles = stylex.create({
     },
   },
   bodyBlocks: { display: 'grid', gap: 'calc(var(--spacing) * 1.5)' },
+  refGlyph: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   refChip: {
     'margin-inline': '1px',
     display: 'inline-flex',
@@ -2329,7 +2331,7 @@ function FindingRefChip({
         stylex.props(findingsStyles.refChip).className
       )}
     >
-      <FileIcon filePath={refItem.path} className="size-3 shrink-0" />
+      <FileIcon filePath={refItem.path} {...stylex.props(findingsStyles.refGlyph)} />
       <span {...stylex.props(findingsStyles.refLabel)}>
         {fileBaseName(refItem.path)}
         {lineLabel}
@@ -2809,6 +2811,7 @@ const treeCommitStyles = stylex.create({
       },
     },
   },
+  fileGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   treeChevron: {
     width: 'calc(var(--spacing) * 3.5)',
     height: 'calc(var(--spacing) * 3.5)',
@@ -3121,6 +3124,7 @@ const treeCommitStyles = stylex.create({
     transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
     transitionDuration: 'var(--tw-duration,var(--default-transition-duration))',
   },
+  collapsedChevron: { rotate: '-90deg' },
   commitTransitionTransform: {
     transitionProperty: 'transform,translate,scale,rotate',
     transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
@@ -3252,9 +3256,9 @@ function FileTreeRow({
               className={cn(
                 stylex.props(
                   treeCommitStyles.treeChevron,
-                  treeCommitStyles.commitTransitionTransform
-                ).className,
-                !open && '-rotate-90'
+                  treeCommitStyles.commitTransitionTransform,
+                  !open && treeCommitStyles.collapsedChevron
+                ).className
               )}
             />
           </button>
@@ -3309,7 +3313,7 @@ function FileTreeRow({
         title={node.path}
         {...stylex.props(treeCommitStyles.fileButton, treeCommitStyles.commitControlFocus)}
       >
-        <FileIcon filePath={node.path} className="size-4 shrink-0" />
+        <FileIcon filePath={node.path} {...stylex.props(treeCommitStyles.fileGlyph)} />
         <span
           className={cn(
             stylex.props(treeCommitStyles.fileLabel).className,
@@ -3372,9 +3376,9 @@ function GroupCommits({
           className={cn(
             stylex.props(
               treeCommitStyles.commitsChevron,
-              treeCommitStyles.commitTransitionTransform
-            ).className,
-            !open && '-rotate-90'
+              treeCommitStyles.commitTransitionTransform,
+              !open && treeCommitStyles.collapsedChevron
+            ).className
           )}
         />
         {refs.length} {refs.length === 1 ? 'commit' : 'commits'}
@@ -3477,9 +3481,9 @@ function CommitRow({
                   className={cn(
                     stylex.props(
                       treeCommitStyles.commitChevron,
-                      treeCommitStyles.commitTransitionTransform
-                    ).className,
-                    !expanded && '-rotate-90'
+                      treeCommitStyles.commitTransitionTransform,
+                      !expanded && treeCommitStyles.collapsedChevron
+                    ).className
                   )}
                 />
                 {summary}
@@ -3608,6 +3612,7 @@ const diffBlockStyles = stylex.create({
     borderRadius: 'calc(var(--radius) - 2px)',
     textAlign: 'left',
   },
+  fileGlyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
   chevron: {
     width: 'calc(var(--spacing) * 3.5)',
     height: 'calc(var(--spacing) * 3.5)',
@@ -4042,11 +4047,13 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
             <ChevronDown
               className={cn(
                 'text-muted-foreground group-hover:text-foreground',
-                collapsed && '-rotate-90',
-                stylex.props(diffBlockStyles.chevron).className
+                stylex.props(
+                  diffBlockStyles.chevron,
+                  collapsed && treeCommitStyles.collapsedChevron
+                ).className
               )}
             />
-            <FileIcon filePath={block.path} className="size-3.5" />
+            <FileIcon filePath={block.path} {...stylex.props(diffBlockStyles.fileGlyph)} />
             <span className={cn('font-medium', stylex.props(diffBlockStyles.path).className)}>
               {block.path}
             </span>
@@ -4195,6 +4202,11 @@ function FileStatusBadge({
 
 const annotationStyles = stylex.create({
   marker: {
+    '--tw-shadow':
+      '0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a)',
+    boxShadow:
+      'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+
     display: 'inline-flex',
     alignItems: 'center',
     gap: 'calc(var(--spacing) * 0.5)',
@@ -4299,8 +4311,12 @@ function InlineAnnotation({
           title="View in review thread"
           aria-label="View in review thread"
           className={cn(
-            'crh-anno shadow-sm transition-colors',
-            stylex.props(annotationStyles.marker, SEVERITY_MARKER[markerSeverity]).className
+            'crh-anno',
+            stylex.props(
+              annotationStyles.marker,
+              SEVERITY_MARKER[markerSeverity],
+              treeCommitStyles.commitTransitionColors
+            ).className
           )}
         >
           {markerSeverity === 'info' ? (
@@ -4641,6 +4657,11 @@ const commentStyles = stylex.create({
     gap: 'calc(var(--spacing) * 2)',
   },
   composer: {
+    '--tw-shadow':
+      '0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a)',
+    boxShadow:
+      'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+
     marginBottom: 'calc(var(--spacing) * 4)',
     overflow: 'hidden',
     borderRadius: 'var(--radius)',
@@ -4679,6 +4700,11 @@ const commentStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   textarea: {
+    '--tw-outline-style': 'none',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
     display: 'block',
     minHeight: 'calc(var(--spacing) * 24)',
     width: '100%',
@@ -4772,6 +4798,7 @@ const commentStyles = stylex.create({
     flexShrink: 0,
     color: 'hsl(var(--primary))',
   },
+  threadDeleteOffset: { marginRight: 'calc(var(--spacing) * -1)' },
   threadLabel: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -4910,10 +4937,7 @@ function PanelComposer({
   }, [anchorKey]);
 
   return (
-    <div
-      ref={containerRef}
-      className={cn('shadow-sm', stylex.props(commentStyles.composer).className)}
-    >
+    <div ref={containerRef} {...stylex.props(commentStyles.composer)}>
       <header {...stylex.props(commentStyles.composerHeader)}>
         <span
           className={cn(
@@ -4930,7 +4954,7 @@ function PanelComposer({
         value={draft.body}
         placeholder="Leave a comment…"
         aria-label={`Comment on ${fileBaseName(draft.path)} line ${draft.lineNumber}`}
-        className={cn('leading-6 outline-hidden', stylex.props(commentStyles.textarea).className)}
+        className={cn('leading-6', stylex.props(commentStyles.textarea).className)}
         onChange={(event) => onChange(event.currentTarget.value)}
         onInput={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -4949,7 +4973,8 @@ function PanelComposer({
           size="sm"
           variant="ghost"
           height="calc(var(--spacing) * 7)"
-          className="text-muted-foreground"
+          labelColor="var(--crh-muted-button-label)"
+          className={stylex.props(privateButtonStyles.mutedInk).className}
           onClick={onCancel}
         >
           Cancel
@@ -5016,7 +5041,9 @@ function ThreadCard({
             width="calc(var(--spacing) * 6)"
             height="calc(var(--spacing) * 6)"
             labelColor="var(--crh-muted-button-label)"
-            className={cn('-mr-1', stylex.props(privateButtonStyles.mutedInk).className)}
+            className={
+              stylex.props(privateButtonStyles.mutedInk, commentStyles.threadDeleteOffset).className
+            }
             onClick={() => onDelete(item.id)}
             aria-label="Delete comment"
             title="Delete comment"
