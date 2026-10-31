@@ -42,6 +42,16 @@ Two dev-build choices are load-bearing:
   imports the generated `lody-code-review-viewer/manifest`, which does not exist until that
   package is built; inlining it would make `lody --version` fail.
 
+The CLI entry loads the normal command registry for public invocations, retaining
+the existing command order, help and options. An exact first argument of
+`__internal` registers only the MCP helper commands, so each MCP process avoids
+loading the daemon and interactive command implementations. Both paths share the
+existing application runtime, environment setup and cleanup. Shared application
+chunks stay at the output root in development and production so worker and adapter
+lookups still resolve flat sibling files; dependency chunks may remain in `chunks/`.
+The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30-internal-mcp-command-loading.md)
+records the measured scope and why process isolation is retained.
+
 The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
 manifest that actually gets published (cloud builds point it at the private composing package). A
 relative `../package.json` import bakes the stale OSS version into the published bundle — that is

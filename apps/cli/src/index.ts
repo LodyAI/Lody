@@ -25,37 +25,19 @@ import {
   WorkspacePresenceLegacyFailure,
 } from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
-import { startCommand } from './commands/start';
-
-import { appCommand } from './commands/app';
-import { loginCommand } from './commands/login';
-import { logoutCommand } from './commands/logout';
-import { projectCommand } from './commands/project';
-import { sessionCommand } from './commands/session';
-import { scheduleCommand } from './commands/schedule';
-import { syncCommand } from './commands/sync';
-import { workspaceCommand } from './commands/workspace';
-import { dshCommand } from './commands/dsh';
-import { agentConfigCommand } from './commands/agent-config';
-import { machineCommand } from './commands/machine';
-import { exportCommand } from './commands/export';
-import { migrateCommand } from './commands/migrate';
-import { getCliPlatformKind } from './lib/cli-platform';
-import { reviewCommand } from './commands/review';
-import { githubCommand } from './commands/github';
-import { daemonCommand } from './commands/daemon';
-import { daemonRunnerCommand } from './commands/daemon-runner';
 import { internalCommand } from './commands/internal';
-import { e2eeCommand } from './commands/e2ee';
-import { feedbackCommand } from './commands/feedback';
-import { mcpCommand } from './commands/mcp';
-import { agentRoleCommand } from './commands/discovery';
-import { operationCommand } from './commands/operation';
 import { loadEnv } from './utils/const';
 import { getLogger } from './utils/logger';
 import { registerProcessErrorHandlers, reportError } from './utils/telemetry';
 import { installCliHttpGlobalDispatcher } from './utils/http-transport';
 import { applyDefaultDnsResultOrder } from './utils/dns-result-order';
+
+// Internal MCP processes use the same runtime and cleanup policy without retaining
+// the daemon, interactive commands and their unrelated implementation modules.
+const registerUserCommands =
+  process.argv[2] === '__internal'
+    ? undefined
+    : (await import('./commands/register')).registerCommands;
 
 const cliLogger = getLogger('cli');
 
@@ -101,31 +83,11 @@ program
   .version(version, '-v, --version', 'display version number')
   .enablePositionalOptions();
 
-// Add commands
-program.addCommand(loginCommand);
-program.addCommand(logoutCommand);
-program.addCommand(startCommand);
-program.addCommand(appCommand);
-program.addCommand(projectCommand);
-program.addCommand(sessionCommand);
-program.addCommand(scheduleCommand);
-program.addCommand(syncCommand);
-program.addCommand(workspaceCommand);
-program.addCommand(agentConfigCommand);
-program.addCommand(dshCommand);
-program.addCommand(mcpCommand);
-program.addCommand(agentRoleCommand);
-program.addCommand(operationCommand);
-program.addCommand(machineCommand);
-program.addCommand(exportCommand);
-if (getCliPlatformKind() === 'cloud') program.addCommand(migrateCommand);
-program.addCommand(reviewCommand);
-program.addCommand(githubCommand);
-program.addCommand(daemonCommand);
-program.addCommand(daemonRunnerCommand);
-program.addCommand(internalCommand);
-program.addCommand(feedbackCommand);
-program.addCommand(e2eeCommand, { hidden: true });
+if (registerUserCommands) {
+  registerUserCommands(program);
+} else {
+  program.addCommand(internalCommand);
+}
 // Configure commander to show help when no arguments provided
 program.configureHelp({
   sortSubcommands: true,

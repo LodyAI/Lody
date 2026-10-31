@@ -127,7 +127,12 @@ export default defineConfig(({ mode }) => ({
         },
         format: 'es',
         entryFileNames: '[name].js',
-        chunkFileNames: 'chunks/[name]-[hash].js',
+        // Application modules resolve workers relative to import.meta.url. Keep
+        // split application code beside the flat entries, just like index.js.
+        chunkFileNames: ({ name }) =>
+          name.startsWith('vendor-') || name === 'commonjs-helpers'
+            ? 'chunks/[name]-[hash].js'
+            : '[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },

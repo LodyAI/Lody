@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -102,6 +103,7 @@ runDeepSeekAdapterBundleSmoke();
 runGrokAdapterBundleSmoke();
 runDevinAdapterBundleSmoke();
 runPublishedRuntimeSmoke();
+runPublishedInternalCommandSmoke();
 runWorkspaceWatchWorkerSmoke();
 runDiffWorkerSmoke();
 runTurnDiffStoreWorkerSmoke();
@@ -446,6 +448,51 @@ originalExit(0);
       }
     }
     process.exit(1);
+  }
+}
+
+function runPublishedInternalCommandSmoke() {
+  const dataDir = fs.mkdtempSync(path.join(tmpdir(), 'lc-'));
+  const env = { ...process.env, LODY_DATA_DIR: dataDir, LODY_LOG_MODE: 'none' };
+  delete env.LODY_MCP_HTTP_TOKEN;
+  const run = (args) =>
+    spawnSync(process.execPath, [path.join(distDir, 'index.js'), ...args], {
+      cwd: cliRoot,
+      env,
+      input: '',
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+  try {
+    // The normal help route loads every command; the internal route must expose
+    // the same helper surface without loading the user-command registry.
+    const normal = run(['help', '__internal']);
+    const internal = run(['__internal', '--help']);
+    if (
+      normal.status !== 0 ||
+      internal.status !== 0 ||
+      !normal.stdout.includes('lody-mcp-http-host') ||
+      !normal.stdout.includes('lody-mcp-server') ||
+      normal.stdout !== internal.stdout ||
+      normal.stderr !== internal.stderr
+    ) {
+      throw new Error('Published internal command help differs from the normal CLI route');
+    }
+
+    const missingToken = run(['__internal', 'lody-mcp-http-host']);
+    if (
+      missingToken.status !== 2 ||
+      !missingToken.stderr.includes('LODY_MCP_HTTP_TOKEN is required')
+    ) {
+      throw new Error('Published MCP HTTP host did not reject its missing token');
+    }
+
+    const stdio = run(['__internal', 'lody-mcp-server']);
+    if (stdio.status !== 0) {
+      throw new Error(`Published MCP stdio entry did not close on EOF: ${stdio.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
   }
 }
 
