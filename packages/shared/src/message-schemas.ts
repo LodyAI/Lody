@@ -1253,6 +1253,16 @@ const AcpConfigOptionSummarySchema = z
   })
   .strict();
 
+const MachineAcpAuthMethodSummarySchema = z
+  .object({
+    type: z.enum(['agent', 'env_var', 'terminal']),
+    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
+  })
+  .strict();
+
 const AcpCapabilityCacheEntrySchema = z
   .object({
     cliType: AgentConfigCliTypeSchema,
@@ -1274,6 +1284,10 @@ const AcpCapabilityCacheEntrySchema = z
           .strict()
       )
       .optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
@@ -1281,16 +1295,6 @@ const AcpCapabilityCacheEntrySchema = z
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
-  })
-  .strict();
-
-const MachineAcpAuthMethodSummarySchema = z
-  .object({
-    type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
-    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
-    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
   })
   .strict();
 
@@ -1462,6 +1466,8 @@ export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action'
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('start'),
     configId: AgentConfigIdSchema,
+    /** Sign-in method picked from the agent's advertised list. */
+    methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
   }).strict(),
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('cancel'),

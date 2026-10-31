@@ -1726,8 +1726,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
   // Registry and custom providers authenticate through the standard ACP
-  // exchange, but only the agent knows whether it has anything to sign into —
-  // so their panel appears once a live probe reported that auth is required.
+  // exchange. Their agent publishes the available sign-in methods in its
+  // `initialize` response, so the panel offers them directly: `initialize`
+  // lists every way to sign in whether or not the stored credentials still
+  // work, and switching accounts on purpose is a legitimate reason to open it.
+  // `authRequired` now only describes the account state in the hint text.
   // The exchange runs entirely on the daemon, so a machine that predates it
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
@@ -1745,7 +1748,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           brandId: resolvedBrandId,
           env: formData.env,
         }) ||
-          (authRequired && usesProtocolAuthentication))
+          usesProtocolAuthentication)
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
           usesProtocolAuthentication);

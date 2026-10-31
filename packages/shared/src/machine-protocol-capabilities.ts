@@ -24,6 +24,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   subagentCancellation: 'subagentCancellation',
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
+  acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
   providerSetup: 'providerSetup',
@@ -60,6 +61,8 @@ export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+/** `start` accepts the `methodId` the reader picked from the agent's advertised methods. */
+export const ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
@@ -161,6 +164,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection]:
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
@@ -294,6 +299,22 @@ export function machineSupportsAcpAuthenticationInteractionsProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions,
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether `machine/acp-authenticate` accepts a `methodId` the reader picked
+ * before starting. Its request schema is strict, so an older daemon rejects the
+ * whole start when the field is present; callers omit it there and let the
+ * daemon show its own picker after the sign-in has started.
+ */
+export function machineSupportsAcpAuthenticationMethodSelectionProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection,
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION
   );
 }
 

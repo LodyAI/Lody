@@ -2326,6 +2326,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ...common,
               action: message.action,
               configId: message.configId,
+              ...(message.methodId ? { methodId: message.methodId } : {}),
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({

@@ -207,6 +207,7 @@ describe('MessageHandler machine registration', () => {
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
+      acpAuthenticationMethodSelection: 1,
       previewControl: 1,
       iosSimulator: 1,
       iosSimulatorControls: 1,

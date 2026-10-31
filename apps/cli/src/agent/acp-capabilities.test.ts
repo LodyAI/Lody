@@ -44,7 +44,10 @@ const createSilentLogger = (): Logger => ({
   close: async () => {},
 });
 
-function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>) {
+function createSuccessfulStartupResult(
+  sessionResponse?: Record<string, unknown>,
+  authMethods: readonly Record<string, unknown>[] = []
+) {
   return {
     agentProcess: {} as never,
     client: {
@@ -52,6 +55,7 @@ function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>
       getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => undefined,
+      getAuthMethods: () => authMethods,
     } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
@@ -141,6 +145,22 @@ describe('fetchAcpCapabilities', () => {
     await expect(result).rejects.toBeInstanceOf(AcpAuthenticationRequiredError);
     await expect(result).rejects.toMatchObject({ authMethods });
     expect(mocks.startLocalAcpAgent).not.toHaveBeenCalled();
+  });
+
+  it('reports the sign-in methods the agent advertised during initialize', async () => {
+    mocks.startLocalAcpAgent.mockImplementation(async () =>
+      createSuccessfulStartupResult(undefined, [
+        { type: 'agent', id: 'oauth', name: 'OAuth' },
+        { type: 'agent', id: 'api-key', name: 'API key' },
+      ])
+    );
+
+    const result = await fetchAcpCapabilities('registry', 'custom-agent', createSilentLogger());
+
+    expect(result.authMethods).toEqual([
+      { type: 'agent', id: 'oauth', name: 'OAuth' },
+      { type: 'agent', id: 'api-key', name: 'API key' },
+    ]);
   });
 
   it.each(['registry', 'custom', 'builtin'] as const)(

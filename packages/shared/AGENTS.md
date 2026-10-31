@@ -70,6 +70,11 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
   Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
+- An ACP capability entry may carry the agent's advertised `authMethods`; absence means no probe
+  has asked, and an empty list records that the agent advertises none. The same list is returned
+  by a capability refresh. `methodId` on an authenticate `start` request is negotiated by
+  `acpAuthenticationMethodSelection`, because the strict request schema rejects an unknown field
+  on older daemons.
 - ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
