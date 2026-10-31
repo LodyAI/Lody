@@ -5617,14 +5617,18 @@ function WorkspaceChatLanding({
      but our session-action helpers want the branded type. */
   const handleMobileChatTogglePin = useCallback(
     (chatId: string, nextPinned: boolean) => {
-      void setSessionPinned(chatId as SessionId, nextPinned);
+      void setSessionPinned(chatId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [setSessionPinned]
   );
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const handleMobileChatArchive = useCallback(
     (chatId: string) => {
-      void archiveSessionWithConfirmation(chatId as SessionId);
+      void archiveSessionWithConfirmation(chatId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [archiveSessionWithConfirmation]
   );

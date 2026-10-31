@@ -221,7 +221,10 @@ it.each(['chromium', 'webkit'] as const)(
         hasCurrentKey: false,
         writeEpoch: 0,
       });
-      expect((await call(page, 'seal')).reason).toBe('missing-read-key');
+      expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
+      expect((await raw(page, 'graceExpired')).ok).toBe(true);
+      expect((await call(page, 'seal')).reason).toBe('key-update-required');
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       expect((await raw(page, 'stageCurrent')).ok).toBe(true);
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });

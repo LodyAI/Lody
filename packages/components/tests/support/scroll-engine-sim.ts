@@ -42,6 +42,7 @@ export interface SimRow {
 }
 
 export class ScrollSim implements ScrollHost {
+  setContentShift?: (shift: number) => void;
   controller: ScrollController;
   rows: SimRow[];
   viewport: number;

@@ -30,6 +30,22 @@ The service credential has no timed expiry; revocation, replacement or membershi
 
 Only the private Worker reads trusted `request.cf` country/city and signs the forwarded body through the existing service-auth channel. Client location fields and IP headers are not accepted as evidence. The backend stores no raw IP and uses no third-party lookup. Location is bounded, marked estimated, and may be unknown or describe a VPN/relay. Completion, cancellation, conflict and scheduled expiry clear it; an admitting write retains settlement evidence after expiry but loses location.
 
+## Re-pairing a revoked machine
+
+Core never readmits a key that appears in device history, so a machine revoked while
+stopped must not offer its old identity again. Before a new offer, the CLI retires this
+workspace's identity when it is known revoked: the daemon's device-bound
+`revoked-device.json`, written from the exact `e2ee_device_revoked` answer to its own
+credential, or the same exact answer to a probe made with the retained credential at
+pairing time. The original device file is renamed for historical evidence, never deleted
+or reused, and the existing replacement path creates a new signing and encryption
+identity. Any other probe outcome is unknown and keeps the identity. Membership, content
+and other workspaces are untouched, unlike member removal. A desktop that still receives
+a reused historical key reports `e2ee_pairing_key_revoked` instead of `invalid-input`,
+and the page asks for a new identity. Local pairing has no cloud probe and relies on the
+receipt. Tests use real core replay checks, desktop remote pairing and the CLI offer path
+with synthetic cloud answers; no packaged two-machine run is claimed.
+
 ## Dependency and verification limits
 
 The merged main supplies machineId/proof/replacement encoding, workspace identity isolation, current-epoch reception and safe recovery errors. This flow consumes those contracts directly, including device-scoped staged-key reads; revoked devices end access, while projection recovery failures remain errors. No dependency overlays or format fallback remain. Backend adoption still requires the public remote-pairing DTO entry from this PR through a separate private gitlink change.

@@ -373,7 +373,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                   )
                 ),
               readEpochKey: readKey,
-            }),
+            }).pipe(Effect.provideService(VerifiedLedger, verified)),
             owner
           );
           documents.set(id, binding);

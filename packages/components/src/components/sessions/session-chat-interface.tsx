@@ -3029,6 +3029,7 @@ export const SessionChatInterface = memo(
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
+      updateSessionMetadata,
     } = useSessionActions();
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
@@ -5215,16 +5216,23 @@ export const SessionChatInterface = memo(
       (goal: Extract<MessageContent, { type: 'goal' }>) => {
         if (!runtime) return;
         if (session.dismissedGoalThreadId === goal.threadId) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           dismissedGoalThreadId: goal.threadId,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent('session/goal_banner_dismissed', {
           goal_thread_id: goal.threadId,
           goal_status: goal.status,
         });
       },
-      [captureSessionEvent, runtime, session.id, session.dismissedGoalThreadId]
+      [
+        captureSessionEvent,
+        runtime,
+        session.id,
+        session.dismissedGoalThreadId,
+        updateSessionMetadata,
+      ]
     );
 
     // Allow child sessions to change agent config before first message
@@ -5266,14 +5274,15 @@ export const SessionChatInterface = memo(
         if (!runtime) return;
         const config = agentConfigs.find((c) => c.id === selection.agentId);
         if (!config) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           agentConfigId: config.id,
           cliType: config.cliType,
           agentType: config.agentType,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
       },
-      [runtime, agentConfigs, session.id]
+      [runtime, agentConfigs, session.id, updateSessionMetadata]
     );
 
     // ── Pin management ──────────────────────────────────────────────────
@@ -5286,20 +5295,28 @@ export const SessionChatInterface = memo(
           });
           return;
         }
-        const roomId = getSessionRoomId(session.id);
         const historyIndex =
           historyId && conversationView ? conversationView.indexOf(historyId) : -1;
         // Use empty string as "cleared" — undefined is skipped by upsertDocMeta merge
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           pinnedHistoryId: historyId ?? '',
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent(historyId ? 'session/message_pinned' : 'session/message_unpinned', {
           history_id: historyId ?? null,
           history_index: historyIndex >= 0 ? historyIndex : null,
           previous_pinned_history_id: session.pinnedHistoryId || null,
         });
       },
-      [captureSessionEvent, conversationView, runtime, session.id, session.pinnedHistoryId]
+      [
+        captureSessionEvent,
+        conversationView,
+        runtime,
+        session.id,
+        session.pinnedHistoryId,
+        updateSessionMetadata,
+      ]
     );
 
     const pinnedHistoryId = session.pinnedHistoryId || null;

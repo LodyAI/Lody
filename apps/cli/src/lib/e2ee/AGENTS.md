@@ -21,6 +21,11 @@
 - Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
+  A shared grant pins the ledger generation after its policy check, then rechecks the
+  signer and machine against that ledger; a later ingest fails `isCurrent()`.
+  Claims record the principal: only a turn signed by the owner's own membership lends
+  its identity to derived work (MCP, agent control). History `userId` is display data;
+  shared-member or steered turns expose no invocation identity.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
@@ -49,13 +54,16 @@
   genesis waits for the first authoritative list outcome (list, rejection, subscription
   error or shutdown), then fails closed; a cached match proceeds offline
   ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
+  A known-revoked identity (device receipt or exact `e2ee_device_revoked`) is archived
+  before a new offer; never offer a revoked key ([re-pairing](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md#re-pairing-a-revoked-machine)).
   After admission, `lody machine pair` treats a missing key as a bounded wait for desktop
   delivery, never as failure; other activation errors stay terminal
   ([remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)).
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain already sealed old-epoch sends and historical reads. New seals use the verified current
-  epoch in core; a missing current key fails for retry, never falls back to an older key.
+  epoch in core when installed. Only genuine absence permits the newest retained published key
+  within core’s durable fifteen-minute observation budget; exhaustion fails for retry.
   Provider epoch hints are not encryption authority; rotationRequired alone is only a hint.
   A rejected dispatch or feature request naming a newer epoch, or missing its current-epoch key,
   signed by a current ledger device, joins
@@ -134,3 +142,8 @@
 Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
 erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
 cleanup before open; preserve projects. Rejoin with new member/keys.
+
+- `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
+  opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
+  state; never refresh authority or stop owners for observation. Track raw watcher
+  and ACP promises after cancellation/map clearing; timeout never means drained.

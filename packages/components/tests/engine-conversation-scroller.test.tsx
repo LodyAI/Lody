@@ -123,6 +123,7 @@ function mount(
     suppress,
     hidden,
     scaledRects = false,
+    rowHeights = new Map<string, number>(),
     feedback = false,
     tickOnScroll = false,
     oscillatingFeedback,
@@ -133,6 +134,7 @@ function mount(
     hidden?: { current: boolean };
     /** A transformed ancestor scales visual rects while layout sizes stay in CSS pixels. */
     scaledRects?: boolean;
+    rowHeights?: Map<string, number>;
     /** A view whose state flips whenever it is told the offset is 0. */
     feedback?: boolean;
     /** A view that setStates on every onScroll, like the top-fade flag. */
@@ -152,13 +154,19 @@ function mount(
         if (isHidden()) return 0;
         const container = viewport.firstElementChild as HTMLElement | null;
         const spacer = container?.nextElementSibling as HTMLElement | null;
-        return px(container?.style.height) + px(spacer?.style.height);
+        return (
+          px(container?.style.height) + px(container?.style.marginTop) + px(spacer?.style.height)
+        );
       },
       sizeOf: (element) => {
         const el = element as HTMLElement;
         if (isHidden()) return 0;
         if (el.hasAttribute('data-message-selection-scroll')) return VIEWPORT;
-        if (el.hasAttribute('data-virtual-index')) return ROW;
+        if (el.hasAttribute('data-virtual-index'))
+          return (
+            rowHeights.get(el.querySelector<HTMLElement>('[data-row-key]')?.dataset.rowKey ?? '') ??
+            ROW
+          );
         return undefined;
       },
       rectOf: (element, scrollTop) => {
@@ -179,9 +187,16 @@ function mount(
           el.parentElement?.hasAttribute('data-message-selection-scroll') &&
           !el.hasAttribute('data-conversation-reply-room')
         )
-          return { top: -scrollTop, height: px(el.style.height) };
+          return { top: px(el.style.marginTop) - scrollTop, height: px(el.style.height) };
         if (el.hasAttribute('data-virtual-index'))
-          return { top: px(el.style.top) - scrollTop, height: scaledRects ? ROW / 4 : ROW };
+          return {
+            top: px(el.parentElement?.style.marginTop) + px(el.style.top) - scrollTop,
+            height: scaledRects
+              ? ROW / 4
+              : (rowHeights.get(
+                  el.querySelector<HTMLElement>('[data-row-key]')?.dataset.rowKey ?? ''
+                ) ?? ROW),
+          };
         return undefined;
       },
     });
@@ -662,6 +677,79 @@ it.each(['focus', 'typing', 'pointer'])(
     } finally {
       composer.remove();
       unmount(ctx);
+    }
+  }
+);
+
+it.each([
+  { userAgent: 'Mozilla/5.0 (iPhone) AppleWebKit/605.1.15', platform: 'iPhone', maxTouchPoints: 5 },
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15',
+    platform: 'MacIntel',
+    maxTouchPoints: 5,
+  },
+])(
+  'keeps $platform touch momentum offsets while history grows and restores the origin on scrollend',
+  async (device) => {
+    vi.stubGlobal('navigator', { ...device, vendor: 'Apple Computer, Inc.' });
+    const scrollEndDescriptor = Object.getOwnPropertyDescriptor(
+      document.documentElement,
+      'onscrollend'
+    );
+    Object.defineProperty(document.documentElement, 'onscrollend', {
+      configurable: true,
+      value: null,
+    });
+    const rowHeights = new Map<string, number>();
+    const ctx = mount(
+      'engine-ios-origin' as SessionId,
+      Array.from({ length: 80 }, (_, i) => `t${i}`),
+      undefined,
+      { rowHeights }
+    );
+    try {
+      await ctx.settle();
+      act(() => ctx.handle.current!.scrollRowToTop(40, { smooth: false, offset: 0 }));
+      await ctx.settle();
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      ctx.harness.nativeScrollTo(ctx.harness.scrollTop - 120);
+      await ctx.settle();
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      const top = ctx.harness.scrollTop;
+      const row = () =>
+        ctx.viewport().querySelector<HTMLElement>('[data-row-key="t40"]')!.parentElement!;
+      const line = row().getBoundingClientRect().top;
+      const writes = ctx.harness.writes.length;
+      rowHeights.set('t35', 300);
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top);
+      expect(ctx.harness.writes.length).toBe(writes);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      expect((ctx.viewport().firstElementChild as HTMLElement).style.marginTop).toBe('-200px');
+      expect(ctx.handle.current!.scrollOffset).toBe(top + 200);
+      expect(ctx.handle.current!.scrollSize).toBe(8200);
+      expect(ctx.scrolls.at(-1)).toBe(top + 200);
+      // Catch the old fling: a touch alone must not absorb its pending shift.
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      rowHeights.set('t35', 400);
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top);
+      expect(ctx.harness.writes.length).toBe(writes);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      expect(ctx.handle.current!.scrollOffset).toBe(top + 300);
+      const reports = ctx.scrolls.length;
+      await act(() => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top + 300);
+      expect(ctx.scrolls.length).toBe(reports);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      expect((ctx.viewport().firstElementChild as HTMLElement).style.marginTop).toBe('0px');
+    } finally {
+      unmount(ctx);
+      if (scrollEndDescriptor)
+        Object.defineProperty(document.documentElement, 'onscrollend', scrollEndDescriptor);
+      else delete (document.documentElement as unknown as Record<string, unknown>).onscrollend;
     }
   }
 );

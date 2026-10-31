@@ -1,3 +1,4 @@
+import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
 import type {
   LodyClientExtensionCapabilities,
   LodyWorktreeProject,
@@ -2653,6 +2654,7 @@ export class AgentClient implements acp.Client {
   }
 
   private trackPendingExecution(request: Promise<unknown>): void {
+    if (this.options.workspaceId) daemonLossObserver.trackRaw(this.options.workspaceId, request);
     this.pendingPrompts.add(request);
     const release = () => {
       this.pendingPrompts.delete(request);

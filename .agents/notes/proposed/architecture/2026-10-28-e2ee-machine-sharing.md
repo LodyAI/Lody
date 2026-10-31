@@ -2,7 +2,7 @@
 
 Status: proposed
 Translation: current
-PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.com/LodyAI/Lody/pull/2018), [#2033](https://github.com/LodyAI/Lody/pull/2033)
+PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.com/LodyAI/Lody/pull/2018), [#2033](https://github.com/LodyAI/Lody/pull/2033), [#2144](https://github.com/LodyAI/Lody/pull/2144)
 
 [中文](2026-10-28-e2ee-machine-sharing.zh.md)
 
@@ -85,3 +85,100 @@ The surface explains future-member sharing, Guest/recovery exclusion and that
 withdrawal leaves already-running tasks alone. Production provider/preload tests
 exercise pending/remount recovery, conflict, re-signing, scope changes and friendly
 English/Chinese refusals; synthetic Storybook captures establish presentation only.
+
+## Member visibility (A4)
+
+Encrypted workspaces skip the ordinary machine and project visibility queries, so
+until this change a member saw only their own machines and could not start a turn on
+a machine the owner had shared. `useEncryptedSharedMachines` keeps one store per
+account and workspace, shared by every consumer of the visible index. For each synced
+machine owned by another member, it reads the host's verified `readMachineSharing` view
+and treats the machine as usable only when core reported no `deniedReason` and the view
+is shared, current, not removed and available. Guest exclusion and withdrawal therefore
+come from core, never from server machine tables or display account IDs. Signed
+`projects` become the visible projects of that machine; a projectless conversation
+needs only the machine.
+
+Reads run at most two at a time and never block other workspaces or the index's other
+sources. A newer read of a machine supersedes an older one. Ledger changes, `online`,
+returning visibility and a 10-minute interval refresh the views, which stays inside the
+owner-approved bound of under 15 minutes for unknown withdrawal. A denial, removal or
+failed read removes access immediately. These are host IPC reads, not Streams
+subscriptions.
+
+Shared encrypted machines are exposed for selection and execution only. They stay out
+of the Convex-backed authorized set, so startup capability probes never launch agents
+on another member's machine. `withoutEncryptedSharedMachines` also keeps them out of
+automatic agent-config migration, bug-report log collection and memory-provider
+settings, which use fenced machine RPC or write a machine's catalog.
+
+The owner-confirmed MVP lets new members read all workspace history. Session and
+archive lists therefore use the account/workspace-bound encrypted runtime's document
+access independently of the usable-machine/project indexes. Hiding a private machine
+must not hide its encrypted conversations. Adding those machine IDs to the usable index
+was rejected: it would also enable selection and automatic machine reads. An unavailable
+target instead mounts a document-only history reader, without the interactive subtree's
+machine catalogs, probes or RPC. Attachments keep their existing document capabilities;
+Markdown copy keeps the explicit, source-bound decrypted-copy confirmation. Ordinary
+workspace filtering is unchanged. The receiving machine still authorizes every execution.
+The document reader opens workspace-synced Loro history only; machine-owned formats
+remain explicitly unavailable without starting their RPC reader. An empty cold replica
+is not ready until its first remote sync completes.
+Hook and store tests use deterministic fixtures and deferred reads; no two-member product
+run is claimed.
+
+
+The new history-read permission does not grant rename, archive, restore or deletion; existing author management is unchanged. Automatic archive Machine Flock readers remain limited to available machines and projects, never inferred from newly visible history.
+
+Management admission belongs to `useSessionActions`, not list callbacks. The shared
+guard re-reads each affected session from Repo and uses the pre-history visibility
+predicate (author fallback or usable machine/project), never `historyOnlySessionIds`
+as authorization. It fences account/runtime changes across reads. Tree archive,
+restore, collaboration changes and deletion preflight their entire discovered target
+set before cancellation, catalog cleanup or writes, then recheck at each write.
+Newly readable history cannot rename, pin, change owner/project or close tabs via a
+retained callback. Activity receipts also preflight their affected parent. Ordinary
+management behavior is unchanged; signed-policy visibility retains its existing
+refresh contract. Purely local sidebar drag ordering never writes session metadata.
+
+## Sender withdrawal gate
+
+A machine discovers encrypted input in two ways: the signed RPC fast path and pending
+turns in synced session history. History origins are authenticated by their writer, so
+a pending user turn is executable once it syncs. An honest sender that has already
+verified a withdrawal therefore must not write that input. Before any metadata,
+receipt or history write, an encrypted send prepares its dispatch. If the host returns
+the verified denial `e2ee_machine_not_shared`, the send fails as not sent and the
+composer keeps the draft. `prepareDispatch` reports an unverifiable policy separately
+as `e2ee_machine_sharing_unavailable`. That outcome, like timeouts and transport
+failures, stays unknown: the input is written as before and the receiving machine
+decides. Writing first and repairing the turn afterwards was rejected because upload
+and a machine's history discovery race the repair.
+
+A verified withdrawal must stay known. The host derives it from the resource's
+accepted pin, which is bound to workspace, genesis, machine, owner and generation, and
+advances only on a newer verified head. A failed, rolled-back or expired refresh never
+rewrites that pin. `knownDenial` re-opens the pinned policy locally. A denial needs only
+historical authority: its owner-personal issuer had to be admitted when it signed.
+Revoking that device later invalidates grants, which then need re-signing, but never a
+retained denial. `authorize`
+returns that denial instead of an unknown failure, and the desktop prepare checks it
+before any network read. Only a newer verified read, such as the visible-index refresh
+or the settings view, releases it. The renderer also remembers each verified
+withdrawal for its runtime until a later prepare succeeds. A prepare that outlasts its
+200 ms deadline for such a machine is refused. For any other machine it stays unknown:
+the turn is written, and if the late answer is a verified withdrawal, the turn becomes
+`canceled`. That uses a commit-time `onlyAwaitingStart` guard, so a turn that a machine
+has already claimed keeps its own outcome. The guard protects only this replica's
+commit: a concurrent offline copy can still merge over `canceled`. The cancellation is
+best effort, not proof of a global withdrawal; the machine's owner-approved window
+still bounds that case. Queued rows have no history turn to settle and rely on the
+same window.
+
+The receiving machine was not changed. Policies live in the server's sharing store,
+not in workspace data the machine syncs, and its execution check reuses an
+authenticated read younger than 15 minutes. A withdrawal that the machine has not yet
+observed is the owner-approved unknown window. The host test pins both halves: the
+fresh grant survives an unobserved withdrawal, and the host's own verified read denies
+at once. A send that a sender knew was withdrawn is refused before any write; a sender
+that cannot verify still relies on that window.

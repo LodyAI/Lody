@@ -1,3 +1,4 @@
+import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
@@ -82,6 +83,8 @@ export class Lody {
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
   private startReceipt?: Promise<void>;
+  private clientLossReceipt?: ReturnType<typeof daemonLossObserver.register>;
+  private clientLossRpcStopped = false;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
@@ -119,10 +122,17 @@ export class Lody {
           if (!owner) return;
           owner.encryptedRevocation =
             reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
-          await owner.startReceipt?.catch(() => undefined);
-          if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
-          else await owner.cleanup();
-          if (!owner.startReceipt) await owner.documentManager.cleanUp();
+          owner.clientLossReceipt?.loss(owner.encryptedRevocation);
+          try {
+            await owner.startReceipt?.catch(() => undefined);
+            if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+            else await owner.cleanup();
+            if (!owner.startReceipt) await owner.documentManager.cleanUp();
+            owner.clientLossReceipt?.retired();
+          } catch (cause) {
+            owner.clientLossReceipt?.failed();
+            throw cause;
+          }
         },
       });
       // Unimplemented channels cannot inherit their ordinary plaintext sinks.
@@ -238,6 +248,21 @@ export class Lody {
     });
     const lody = new Lody(options, manager, encryptedExecution);
     lody.encryptedWorkspace = e2ee;
+    if (e2ee)
+      lody.clientLossReceipt = daemonLossObserver.register(
+        {
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+        },
+        () => {
+          const work = lody.runtime.inspectClientLoss();
+          return work
+            ? { ...work, intakeClosed: work.intakeClosed && lody.clientLossRpcStopped }
+            : null;
+        },
+        e2ee.inspectClientLossAuthority
+      );
     resolveRemovalOwner(lody);
     return lody;
   }
@@ -507,6 +532,7 @@ export class Lody {
     this.builtinAgentConfigRetryAttempt = 0;
     try {
       await this.encryptedWorkspace?.stopRpc();
+      this.clientLossRpcStopped = true;
     } finally {
       await this.runtime.cleanup();
     }

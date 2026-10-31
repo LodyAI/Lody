@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { createDesktopE2eeContent } from '../../../../../packages/components/src/providers/desktop-e2ee-content.ts'
-import { Context, Effect, Layer, Result, Scope, Exit, Deferred, Fiber } from 'effect'
+import { Clock, Context, Effect, Layer, Result, Scope, Exit, Deferred, Fiber } from 'effect'
 import {
   KeyMailbox,
   WorkspaceScope,
@@ -2595,6 +2595,11 @@ void test('superseded unsigned retirement retains its native cause in main befor
 for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
   void test(`reopens without a candidate and installs the committed epoch via ${source}`, async (t) => {
     const directory = await fixture(t)
+    const clock = Object.assign(Object.create(Effect.runSync(Clock.Clock)), {
+      currentTimeMillisUnsafe: () => 1_800_000_000_000,
+      monotonicTimeNanosUnsafe: () => 0n
+    })
+    const run = (work) => execute(work.pipe(Effect.provideService(Clock.Clock, clock)))
     let prepared, records, group, retained
     const oldRequest = {
       epoch: 0,
@@ -2607,7 +2612,7 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
       plaintext: new Uint8Array([4, 5]),
       additionalData: new Uint8Array([3])
     }
-    await execute(
+    await run(
       Effect.gen(function* () {
         const owner = yield* ownerWithHost(directory)
         prepared = yield* bind(owner)
@@ -2699,7 +2704,7 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
       })
     )
     // The publication key has been wiped and all former native owners are closed.
-    await execute(
+    await run(
       Effect.gen(function* () {
         const owner = yield* ownerWithHost(directory)
         yield* owner.host.open(workspaceId)
@@ -2711,10 +2716,8 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
         assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 0)
         yield* owner.host.closeWorkspace(workspaceId)
         assert.equal((yield* owner.host.open(workspaceId)).writeEpoch, 0)
-        assert.equal(
-          Result.isFailure(yield* Effect.result(owner.host.seal(workspaceId, oldRequest))),
-          true
-        )
+        const beforeReceipt = yield* owner.host.seal(workspaceId, oldRequest)
+        assert.equal(Result.getOrThrow(inspectContentFrame(beforeReceipt.sealed)).epoch, 0)
         assert.deepEqual(
           yield* owner.host.openContent(workspaceId, { ...oldRequest, ...retained }),
           oldRequest.plaintext
@@ -2756,10 +2759,8 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
           'missing-key'
         )
         assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
-        assert.equal(
-          Result.isFailure(yield* Effect.result(owner.host.seal(workspaceId, oldRequest))),
-          true
-        )
+        const grace = yield* owner.host.seal(workspaceId, oldRequest)
+        assert.equal(Result.getOrThrow(inspectContentFrame(grace.sealed)).epoch, 0)
         // A missing mailbox key remains visibly missing across repeated staging failures.
         const retried = yield* Effect.result(
           owner.host.keyRound(workspaceId, () => mailbox, staging)
@@ -2784,7 +2785,7 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
           plaintext: new Uint8Array([1, 2]),
           additionalData: new Uint8Array([3])
         })
-        assert.ok(sealed.sealed.length > 2)
+        assert.equal(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch, 1)
       })
     )
   })
@@ -3469,6 +3470,91 @@ const maintenanceFixture = (directory) =>
       }
     }
   })
+void test('native content uses a durable bounded grace and immediately prefers an installed current key', async (t) => {
+  const directory = await fixture(t)
+  let elapsed = 0
+  const clock = Object.assign(Object.create(Effect.runSync(Clock.Clock)), {
+    currentTimeMillisUnsafe: () => 1_800_000_000_000 + elapsed,
+    monotonicTimeNanosUnsafe: () => BigInt(elapsed) * 1_000_000n
+  })
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* maintenanceFixture(directory)
+      const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(88)))
+      yield* Effect.addFinalizer(() => Effect.sync(() => disposeEpochKey(next)))
+      const previous = yield* f.keys.read(0)
+      const packet = Result.getOrThrow(
+        sealHistoryPacket({ genesis: f.genesis, epoch: 1, currentKey: next, previousKey: previous })
+      )
+      disposeEpochKey(previous)
+      const body = Result.getOrThrow(
+        encodeCbor([
+          f.view().head.toBytes(),
+          f.device.publicKey.toBytes(),
+          [7, 1, Result.getOrThrow(commitEpochKey(f.genesis, 1, next)).toBytes(), packet]
+        ])
+      )
+      const record = yield* signLedgerRecord(
+        Result.getOrThrow(prepareLedgerRecord(f.view(), body)),
+        f.device
+      )
+      f.setView(
+        Result.getOrThrow(
+          extendLedger(f.view(), [record], { head: hashRecordBytes(record), length: 2 })
+        )
+      )
+      yield* f.owner.host.ingestLedgerRecords(
+        workspaceId,
+        page(
+          [Buffer.from(f.prepared.genesisRecordHex, 'hex'), record],
+          f.prepared.genesisHashHex,
+          0
+        )
+      )
+      for (const kind of ['update_batch', 'snapshot']) {
+        const request = {
+          epoch: 0,
+          room: { kind: 'doc', docId: 'bounded-grace' },
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind,
+            ...(kind === 'snapshot' ? { continuationOffset: 'next' } : {})
+          },
+          plaintext: Uint8Array.of(23),
+          additionalData: Uint8Array.of(3)
+        }
+        elapsed = 899_999
+        const sealed = yield* f.owner.host.seal(workspaceId, request)
+        assert.equal(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch, 0)
+        assert.deepEqual(
+          yield* f.owner.host.openContent(workspaceId, { ...request, ...sealed }),
+          request.plaintext
+        )
+      }
+      yield* f.owner.host.closeWorkspace(workspaceId)
+      elapsed = 900_000
+      yield* f.owner.host.open(workspaceId)
+      const request = {
+        epoch: 0,
+        room: { kind: 'meta' },
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch'
+        },
+        plaintext: Uint8Array.of(24),
+        additionalData: Uint8Array.of(3)
+      }
+      const expired = yield* Effect.result(f.owner.host.seal(workspaceId, request))
+      assert.equal(Result.isFailure(expired), true)
+      assert.equal(expired.failure.code, 'key-update-required')
+      yield* f.keys.saveAndReload(1, next)
+      const current = yield* f.owner.host.seal(workspaceId, request)
+      assert.equal(Result.getOrThrow(inspectContentFrame(current.sealed)).epoch, 1)
+    }).pipe(Effect.provideService(Clock.Clock, clock))
+  )
+})
 void test('an unreadable installed blob keeps ledger open and is replaced only by a verified mailbox key', async (t) => {
   const directory = await fixture(t)
   await execute(

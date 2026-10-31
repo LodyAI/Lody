@@ -1,3 +1,8 @@
+import { daemonLossObserver } from '../src/lib/e2ee/client-loss-observer';
+vi.hoisted(() => {
+  Object.assign(globalThis, { __LODY_E2E_DAEMON_LOSS__: true });
+  process.env.LODY_E2E = '1';
+});
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ACPSessionId,
@@ -303,7 +308,20 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['resolve', 'reject'] as const)(
       'keeps cancelled raw prompts pending until they %s',
       async (outcome) => {
-        const { client } = createTestClient();
+        const { client } = createTestClient({ workspaceId: 'e2e-probe' as WorkspaceId });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-probe', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const raw = Promise.withResolvers<PromptResponse>();
         // @ts-expect-error - focused transport-boundary setup
         client.connection = { prompt: () => raw.promise, cancel: async () => {} };
@@ -315,6 +333,7 @@ describe('AgentClient plan mode permission restoration', () => {
         await expect(local).rejects.toThrow('Agent prompt aborted');
 
         const drain = client.pendingPromptCompletion;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(1);
         expect(drain).not.toBeNull();
         let drained = false;
         void drain?.then(() => {
@@ -326,6 +345,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome === 'resolve') raw.resolve({ stopReason: 'cancelled' });
         else raw.reject(new Error('ACP connection closed'));
         await drain;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );
@@ -333,7 +353,23 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['original', 'steer'] as const)(
       'drains both Claude handoff requests when %s finishes first',
       async (first) => {
-        const { client } = createTestClient({ agentType: 'claude' });
+        const { client } = createTestClient({
+          agentType: 'claude',
+          workspaceId: 'e2e-handoff' as WorkspaceId,
+        });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-handoff', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const original = Promise.withResolvers<PromptResponse>();
         const steered = Promise.withResolvers<PromptResponse>();
         let steerId = '';
@@ -366,6 +402,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
         outcome.application.release();
         await application;
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(2);
         const drain = client.pendingPromptCompletion;
         let drained = false;
         void drain?.then(() => {
@@ -379,10 +416,12 @@ describe('AgentClient plan mode permission restoration', () => {
           await steer.completion;
         }
         expect(drained).toBe(false);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(1);
         expect(client.pendingPromptCompletion).not.toBeNull();
         original.resolve({ stopReason: 'end_turn' });
         steered.resolve({ stopReason: 'end_turn' });
         await Promise.all([initial, steer.completion, drain]);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );

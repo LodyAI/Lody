@@ -55,3 +55,15 @@ On 2026-10-31, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, e
 6. A successful restore notifies the account's active devices and email; there is no forced R replacement, owner approval or cooldown.
 
 Approval establishes intent only, not implementation, deployment or real-device acceptance. The private backend gap remains: no `e2eeRecoveryVault` storage, Recovery credential registration, R-authenticated mailbox access or restore notification. The recovery vault remains outside the MVP.
+
+## Whitepaper 2026-10-31 revision
+
+On 2026-10-31, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, approved the [whitepaper](../../../../specs/e2ee/whitepaper.md) revision of [PR #2145](https://github.com/LodyAI/Lody/pull/2145) at commit `7efe3f2c05253a98bb5f8c3034c26b48f7a165a0`. The approved [English text](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.md) has Git blob `4421440f723aa15171a2c6a71ee10be9b6829ccd`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.zh.md) has Git blob `a324c87d687adfa5a11617064eada76005f4633c`.
+
+The scope is the alignment found by a three-way read-only audit of the whitepaper against `main` (audit `c990a689` plus #2143), together with new statements of current behavior:
+
+- Web personal-device custody per the approved client custody Spec; the recovery vault (approved 2026-10-31) and desktop custody approvals, with their implementation limits.
+- The Streams epoch-key provider, snapshot join and safety-code UI status, history versus execution permission (#2143), and billing and disabled legacy interfaces.
+- An owner decision on rotation, favoring availability and backend cost: when the current key is installed, new content uses the verified current epoch. After a new epoch is published, a device without the current key may keep sealing at its latest retained published epoch for at most 15 minutes; after that, new writes fail and can be retried. The backend does not enforce the content epoch. Removed or revoked devices may read new content sealed at the old epoch during that window.
+
+Machine sharing plan A is outside this revision. Approval records intent, not implementation, deployment or real-device acceptance; the 15-minute grace is implemented separately.

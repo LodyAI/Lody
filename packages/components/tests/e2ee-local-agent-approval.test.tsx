@@ -305,6 +305,56 @@ describe('local encrypted agent approval', () => {
 });
 
 describe('remote encrypted machine approval', () => {
+  it('tells the user to regenerate a revoked machine identity instead of a generic failure', async () => {
+    const { E2eeRemoteMachinePairing } =
+      await import('../src/components/pages/e2ee-remote-machine-pairing');
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const pairing = {
+      pairingSessionId: '11'.repeat(16),
+      summary: null,
+      material: null,
+      status: 'pending' as const,
+      expiresAt: 2_000_000,
+      location: null,
+    };
+    const runtime = {
+      beginRemoteMachinePairing: async () => ({
+        ...pairing,
+        command: 'lody machine pair --offer synthetic-command',
+      }),
+      inspectRemoteMachinePairing: async () => {
+        throw new Error(
+          "Error invoking remote method 'e2ee.inspectRemoteMachinePairing': Error: e2ee_pairing_key_revoked"
+        );
+      },
+      approveRemoteMachinePairing: async () => ({ admitted: false, ready: false }),
+      cancelRemoteMachinePairing: async () => ({ ...pairing, status: 'cancelled' as const }),
+    };
+    const click = async (key: string) => {
+      const button = Array.from(container.querySelectorAll('button')).find(
+        (item) => item.textContent === key
+      );
+      if (!button) throw new Error(`missing ${key}`);
+      await act(async () => button.click());
+    };
+    try {
+      await act(async () =>
+        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+      );
+      await click('e2ee.remoteMachine.create');
+      await click('e2ee.remoteMachine.check');
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        'e2ee.remoteMachine.keyRevoked'
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('shows the exact summary and file protection before separate approval, then preserves pending installation', async () => {
     const { E2eeRemoteMachinePairing } =
       await import('../src/components/pages/e2ee-remote-machine-pairing');

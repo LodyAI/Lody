@@ -22,6 +22,10 @@ import {
 import { createE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
+import {
+  WorkspaceKeyReceptionNotice,
+  type KeyReceptionWait,
+} from '../components/workspace-key-reception-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
@@ -150,6 +154,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
+  const [keyReceptionWait, setKeyReceptionWait] = useState<KeyReceptionWait | null>(null);
   const retryKeyUpdateRef = useRef<() => void>(() => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
@@ -583,6 +588,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     setKeyUpdateWorkspace(null);
+    setKeyReceptionWait(null);
     setSnapshotRecoveryWorkspace(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
@@ -705,8 +711,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             handleMemberRemoval(lost);
             return;
           }
-          // Reception failure stays visible and retryable. The retained epoch
-          // remains writable; a status read never confirms key installation.
+          // Reception failure stays retryable. Local edits remain intact; new
+          // seals still require the verified current epoch key.
           try {
             encryptedAccess?.updateStatus(await native.status(leased));
           } catch {
@@ -997,7 +1003,29 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               genesisHash: descriptor.genesisHash,
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
-              onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onKeyUpdateRequired: (source) => {
+                if (disposed || retired) return;
+                if (source === 'seal-complete') {
+                  setKeyReceptionWait((previous) =>
+                    previous?.workspaceId === effectiveWorkspaceId ? null : previous
+                  );
+                  return;
+                }
+                setKeyUpdateWorkspace(effectiveWorkspaceId);
+                if (source === 'seal')
+                  setKeyReceptionWait((previous) =>
+                    previous?.workspaceId === effectiveWorkspaceId
+                      ? previous
+                      : { workspaceId: effectiveWorkspaceId }
+                  );
+              },
+              onPhase: (phase) => {
+                if (disposed || retired) return;
+                if (phase === 'ready' || phase === 'closed')
+                  setKeyReceptionWait((previous) =>
+                    previous?.workspaceId === effectiveWorkspaceId ? null : previous
+                  );
+              },
               onMemberRemoved: handleMemberRemoval,
               onSnapshotRecoveryChange: (pending) => {
                 if (!disposed && !retired)
@@ -1231,14 +1259,20 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {keyUpdateWorkspace === runtime?.workspaceId && (
-        <div role="status">
-          {t('e2ee.content.keyUpdateRequired')}{' '}
-          <button type="button" onClick={() => retryKeyUpdateRef.current()}>
-            {t('e2ee.content.retryKeyUpdate')}
-          </button>
-        </div>
-      )}
+      {keyUpdateWorkspace === runtime?.workspaceId &&
+        runtime?.workspaceId === effectiveWorkspaceId &&
+        runtime?.workspaceSlug === workspaceSlug &&
+        keyReceptionWait?.workspaceId === effectiveWorkspaceId && (
+          <div>
+            <WorkspaceKeyReceptionNotice
+              workspaceId={effectiveWorkspaceId}
+              waiting={keyReceptionWait}
+            />{' '}
+            <button type="button" onClick={() => retryKeyUpdateRef.current()}>
+              {t('e2ee.content.retryKeyUpdate')}
+            </button>
+          </div>
+        )}
       {snapshotRecoveryWorkspace !== null &&
         (snapshotRecoveryWorkspace === runtime?.workspaceId ||
           snapshotRecoveryWorkspace === workspaceId) && (

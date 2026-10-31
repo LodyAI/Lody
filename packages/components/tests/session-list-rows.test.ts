@@ -6,11 +6,31 @@ import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/sha
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
+  selectSidebarTaskSessions,
   getEffectiveLatestMessageAt,
   getEffectiveSessionActivitySummary,
 } from '../src/components/sessions/session-list-rows';
 
 const machineId = 'machine-1' as MachineId;
+
+test('shows unavailable encrypted local-project history as a chat without adding a project or changing ordinary lists', () => {
+  const chat = makeSession({ id: 'chat' });
+  const project = makeSession({
+    id: 'project-history',
+    project: { kind: 'local', localProjectId: 'private-project' as never },
+  });
+  const projects = new Map();
+  const rows = buildSessionListRows(selectSidebarTaskSessions([chat, project], projects, true), {
+    scope: 'team',
+    currentUserId: 'new-member',
+    defaultTitle: 'History',
+  });
+  expect(rows.map((row) => row.sessionId)).toEqual(['chat', 'project-history']);
+  expect(projects.size).toBe(0);
+  expect(selectSidebarTaskSessions([chat, project], projects)).toEqual([chat]);
+  projects.set(`${machineId}:private-project`, {});
+  expect(selectSidebarTaskSessions([chat, project], projects, true)).toEqual([chat]);
+});
 
 function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionMeta {
   return {
