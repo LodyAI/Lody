@@ -1,5 +1,5 @@
 import { getPublicKey, hashes } from '@noble/ed25519';
-import { hkdf } from '@noble/hashes/hkdf.js';
+import { hmac } from '@noble/hashes/hmac.js';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { bytesEqual } from '../foundation/cbor';
 import { fromHex, vaultError } from './crypto';
@@ -29,15 +29,36 @@ export function deriveRecoveryAccessCredential(
 ): RecoveryAccessCredential {
   const owned = ownRecoveryPackage(input);
   const seed = owned.signingPrivate.subarray(16, 48);
-  const info = new Uint8Array(domain.length + 32);
+  // RFC 5869 with SHA-256 and L = 32, so expand is one block: T(1) = HMAC(PRK,
+  // info | 0x01). The pinned library hkdf returns a copy of an unwiped OKM and
+  // never wipes PRK, so every output here is written into a buffer this
+  // function owns and wipes; HMAC/SHA-256 instances wipe their state on digest/destroy.
+  const salt = fromHex(owned.genesis),
+    message = new Uint8Array(domain.length + 33),
+    prk = new Uint8Array(32),
+    credential = new Uint8Array(32),
+    credentialHash = new Uint8Array(32);
+  let returned = false;
   try {
     if (!bytesEqual(getPublicKey(seed), owned.signingPublic)) throw vaultError('authentication');
-    info.set(domain);
-    info.set(owned.signingPublic, domain.length);
-    const credential = hkdf(sha256, seed, fromHex(owned.genesis), info, 32);
-    return { credential, credentialHash: sha256(credential) };
+    message.set(domain);
+    message.set(owned.signingPublic, domain.length);
+    message[message.length - 1] = 1;
+    hmac.create(sha256, salt).update(seed).digestInto(prk);
+    hmac.create(sha256, prk).update(message).digestInto(credential);
+    const hasher = sha256.create();
+    hasher.update(credential).digestInto(credentialHash);
+    hasher.destroy();
+    returned = true;
+    return { credential, credentialHash };
   } finally {
-    info.fill(0);
+    prk.fill(0);
+    message.fill(0);
+    salt.fill(0);
+    if (!returned) {
+      credential.fill(0);
+      credentialHash.fill(0);
+    }
     wipeRecoveryPackage(owned);
   }
 }

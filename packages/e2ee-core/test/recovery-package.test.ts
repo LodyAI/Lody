@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { Effect, Result } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -260,5 +261,59 @@ describe('recovery access credential', () => {
         signingPrivate: input.signingPrivate.slice(0, 47),
       })
     ).toThrow(expect.objectContaining({ code: 'invalid-input' }));
+  });
+});
+
+describe('recovery access credential lifetime', () => {
+  // Probe: record every Uint8Array constructed while deriving, so library and
+  // local temporaries (OKM, PRK, HMAC pads, hash blocks) can be inspected.
+  const recordAllocations = <A>(work: () => A) => {
+    const allocated: Uint8Array[] = [];
+    const Original = globalThis.Uint8Array;
+    globalThis.Uint8Array = new Proxy(Original, {
+      construct(target, args, newTarget) {
+        const value = Reflect.construct(target, args, newTarget) as Uint8Array;
+        allocated.push(value);
+        return value;
+      },
+    });
+    try {
+      return { result: work(), allocated };
+    } catch (error) {
+      return { error, allocated };
+    } finally {
+      globalThis.Uint8Array = Original;
+    }
+  };
+  const holds = (buffer: Uint8Array, secret: Uint8Array) =>
+    Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength).includes(Buffer.from(secret));
+  // Independent node:crypto values for the pinned vector.
+  const prk = createHmac('sha256', hexBytes(vector.genesis)).update(hexBytes(vector.seed)).digest();
+  const credential = hexBytes(vector.credential);
+
+  it('leaves no credential or PRK in any temporary after success, and the returned copy is usable', () => {
+    const input = vectorPackage();
+    const { result, allocated } = recordAllocations(() => deriveRecoveryAccessCredential(input));
+    expect(Buffer.from(result!.credential).toString('hex')).toBe(vector.credential);
+    expect(Buffer.from(result!.credentialHash).toString('hex')).toBe(vector.credentialHash);
+    expect(allocated.length).toBeGreaterThan(0);
+    for (const buffer of allocated) {
+      expect(holds(buffer, prk)).toBe(false);
+      if (buffer.buffer !== result!.credential.buffer)
+        expect(holds(buffer, credential)).toBe(false);
+    }
+    result!.credential.fill(0);
+    wipeRecoveryPackage(input);
+    for (const buffer of allocated) expect(holds(buffer, credential)).toBe(false);
+  });
+
+  it('leaves no credential or PRK after a refused derivation', () => {
+    const input = { ...vectorPackage(), signingPublic: new Uint8Array(32).fill(9) };
+    const { error, allocated } = recordAllocations(() => deriveRecoveryAccessCredential(input));
+    expect(error).toMatchObject({ code: 'authentication' });
+    for (const buffer of allocated) {
+      expect(holds(buffer, prk)).toBe(false);
+      expect(holds(buffer, credential)).toBe(false);
+    }
   });
 });
