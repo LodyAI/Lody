@@ -116,23 +116,50 @@ export interface ButtonProps
   width?: React.CSSProperties['width'];
   height?: React.CSSProperties['height'];
   labelColor?: React.CSSProperties['color'];
+  gap?: React.CSSProperties['gap'];
+  paddingInline?: React.CSSProperties['paddingInline'];
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
-    { className, variant, size, asChild = false, width, height, labelColor, style, ...props },
+    {
+      className,
+      variant,
+      size,
+      asChild = false,
+      width,
+      height,
+      labelColor,
+      gap,
+      paddingInline,
+      style,
+      ...props
+    },
     ref
   ) => {
     const Comp = asChild ? Slot : 'button';
-    // Keep CSS-wide keywords on the physical field. Existing caller and Slot child
-    // inline styles retain their original priority over the opt-in declarations.
+    // A pre-inserted duplicate key can reverse caller shorthand/longhand order.
+    // Keep legacy fields unchanged unless the new spacing path is selected.
+    const hasSpacingFields = gap != null || paddingInline != null;
+    const childStyle =
+      hasSpacingFields &&
+      asChild &&
+      React.isValidElement<{ style?: React.CSSProperties }>(props.children)
+        ? props.children.props.style
+        : undefined;
+    const overridesField = (key: keyof React.CSSProperties) =>
+      Object.prototype.hasOwnProperty.call(style ?? {}, key) ||
+      Object.prototype.hasOwnProperty.call(childStyle ?? {}, key);
     const fieldStyle =
-      width == null && height == null && labelColor == null
+      width == null && height == null && labelColor == null && gap == null && paddingInline == null
         ? style
         : {
-            ...(width != null && { width }),
-            ...(height != null && { height }),
-            ...(labelColor != null && { color: labelColor }),
+            ...(width != null && (!hasSpacingFields || !overridesField('width')) && { width }),
+            ...(height != null && (!hasSpacingFields || !overridesField('height')) && { height }),
+            ...(labelColor != null &&
+              (!hasSpacingFields || !overridesField('color')) && { color: labelColor }),
+            ...(gap != null && !overridesField('gap') && { gap }),
+            ...(paddingInline != null && !overridesField('paddingInline') && { paddingInline }),
             ...style,
           };
     return (

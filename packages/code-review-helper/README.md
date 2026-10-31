@@ -42,13 +42,18 @@ Separator styling follows its existing JavaScript orientation branch; caller-wri
 or Radix-normalized data attributes do not choose its axis. Rendering the original
 invalid-orientation case retains its original attribute/style mismatch.
 
-The local Button exposes opt-in CSS-typed `width`, `height` and `labelColor`
-fields for reviewed private consumers. They write actual inline CSS fields, so
-CSS-wide keywords retain their field semantics. Existing caller `style` wins over
-these declarations, and a Slot child's style retains its original final priority.
-Omitting all three reuses the original style object. The raw variant selectors,
-default classes and ordinary/Slot routes remain intact; the API does not migrate
-raw public selectors or promise unchanged priority against arbitrary utility classes.
+The local Button exposes opt-in CSS-typed `width`, `height`, `labelColor`, `gap`
+and `paddingInline` fields for reviewed private consumers. ToggleGroup exposes
+`gap`/`padding`, and its Item exposes `gap`. These write actual inline CSS properties,
+so CSS-wide keywords retain their field semantics. Caller and direct Slot-child
+styles keep their original priority. On the spacing path, an API field already
+owned by those styles is omitted before merging; inserting a duplicate first can
+reverse their shorthand/longhand order. Omitting the optional fields preserves
+the original style object and legacy dimension/ink-only path. The raw variant
+selectors, default classes and ordinary/Slot routes remain intact. ToggleGroup's
+existing Provider child does not forward root styles in its `asChild` path;
+these fields do not change that behavior or promise unchanged priority against
+arbitrary utility classes.
 
 The four build/test entries share the same compiler options. CSS layers place
 StyleX after base styles and before components/utilities. The standalone build

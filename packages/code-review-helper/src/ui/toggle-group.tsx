@@ -94,8 +94,25 @@ function ToggleGroup({
   variant = 'default',
   size = 'default',
   children,
+  gap,
+  padding,
+  style,
   ...props
-}: React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Root> & ToggleGroupVariant) {
+}: React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Root> &
+  ToggleGroupVariant & {
+    gap?: React.CSSProperties['gap'];
+    padding?: React.CSSProperties['padding'];
+  }) {
+  const callerOverrides = (key: keyof React.CSSProperties) =>
+    Object.prototype.hasOwnProperty.call(style ?? {}, key);
+  const fieldStyle =
+    gap == null && padding == null
+      ? style
+      : {
+          ...(gap != null && !callerOverrides('gap') && { gap }),
+          ...(padding != null && !callerOverrides('padding') && { padding }),
+          ...style,
+        };
   return (
     <ToggleGroupPrimitive.Root
       asChild={asChild}
@@ -107,6 +124,7 @@ function ToggleGroup({
         className
       )}
       {...props}
+      style={fieldStyle}
     >
       <ToggleGroupContext.Provider value={{ variant, size }}>
         {children}
@@ -120,8 +138,22 @@ function ToggleGroupItem({
   asChild,
   variant,
   size,
+  gap,
+  style,
   ...props
-}: React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Item> & ToggleGroupVariant) {
+}: React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Item> &
+  ToggleGroupVariant & {
+    gap?: React.CSSProperties['gap'];
+  }) {
+  const childStyle =
+    gap != null && asChild && React.isValidElement<{ style?: React.CSSProperties }>(props.children)
+      ? props.children.props.style
+      : undefined;
+  const overridesGap =
+    gap != null &&
+    (Object.prototype.hasOwnProperty.call(style ?? {}, 'gap') ||
+      Object.prototype.hasOwnProperty.call(childStyle ?? {}, 'gap'));
+  const fieldStyle = gap == null ? style : { ...(!overridesGap && { gap }), ...style };
   const context = React.useContext(ToggleGroupContext);
   return (
     <ToggleGroupPrimitive.Item
@@ -135,6 +167,7 @@ function ToggleGroupItem({
         className
       )}
       {...props}
+      style={fieldStyle}
     />
   );
 }

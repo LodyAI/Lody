@@ -1531,7 +1531,8 @@ export function ReviewRenderer({
               type="button"
               size="sm"
               variant="outline"
-              className="gap-1.5 px-2.5"
+              gap="calc(var(--spacing) * 1.5)"
+              paddingInline="calc(var(--spacing) * 2.5)"
               onClick={() => void copyComments()}
               aria-label={`Copy ${comments.length} comments as markdown`}
             >
@@ -1709,13 +1710,25 @@ function DiffStyleControl({
         }
       }}
       aria-label="Diff view"
-      className={cn('gap-0.5 p-0.5', stylex.props(rootLayoutStyles.diffControlHeight).className)}
+      className={stylex.props(rootLayoutStyles.diffControlHeight).className}
+      gap="calc(var(--spacing) * 0.5)"
+      padding="calc(var(--spacing) * 0.5)"
     >
-      <ToggleGroupItem value="unified" aria-label="Unified diff" size="sm" className="gap-1.5">
+      <ToggleGroupItem
+        value="unified"
+        aria-label="Unified diff"
+        size="sm"
+        gap="calc(var(--spacing) * 1.5)"
+      >
         <Rows3 className="size-3.5" />
         Unified
       </ToggleGroupItem>
-      <ToggleGroupItem value="split" aria-label="Split diff" size="sm" className="gap-1.5">
+      <ToggleGroupItem
+        value="split"
+        aria-label="Split diff"
+        size="sm"
+        gap="calc(var(--spacing) * 1.5)"
+      >
         <Columns2 className="size-3.5" />
         Split
       </ToggleGroupItem>

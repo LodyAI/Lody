@@ -314,3 +314,280 @@ function PhysicalFields() {
   );
 }
 export const ButtonPhysicalFields: Story = { render: () => <PhysicalFields /> };
+
+const spacingModes = [
+  'explicit',
+  'zero',
+  'negative',
+  'initial',
+  'inherit',
+  'unset',
+  'revert',
+  'revert-layer',
+  'fallback',
+  'omitted',
+] as const;
+function SpacingFields() {
+  const [mode, setMode] = useState<(typeof spacingModes)[number]>('explicit');
+  const [calls, setCalls] = useState({ button: 0, parent: 0, child: 0, selection: 'first' });
+  const native = useRef<HTMLButtonElement>(null);
+  const slot = useRef<HTMLButtonElement>(null);
+  const [refs, setRefs] = useState('');
+  useLayoutEffect(() => setRefs(native.current?.tagName + '/' + slot.current?.tagName), []);
+  const v = (factor: number): CSSProperties['gap'] =>
+    mode === 'explicit'
+      ? 'calc(var(--spacing) * ' + factor + ')'
+      : mode === 'zero'
+        ? 0
+        : mode === 'negative'
+          ? 'calc(var(--spacing) * -' + factor + ')'
+          : mode === 'fallback'
+            ? 'var(--missing-spacing-field, inherit)'
+            : mode === 'omitted'
+              ? undefined
+              : mode;
+  const button = { gap: v(1.5), paddingInline: v(2.5) };
+  const root = { gap: v(0.5), padding: v(0.5) };
+  const item = { gap: v(1.5) };
+  const caller = { gap: 11, paddingInline: 19 };
+  const rootCaller = { gap: 13, padding: 17 };
+  const wrapper: CSSProperties = { display: 'flex', gap: 19, padding: 27, maxWidth: '100%' };
+  return (
+    <Scope>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {spacingModes.map((key) => (
+          <button key={key} data-set-spacing={key} onClick={() => setMode(key)}>
+            {key}
+          </button>
+        ))}
+      </div>
+      <section data-spacing-fixture data-mode={mode} style={{ display: 'grid', gap: 8 }}>
+        <div style={wrapper}>
+          <Button
+            ref={native}
+            data-spacing-case="button"
+            {...button}
+            onClick={() => setCalls((x) => ({ ...x, button: x.button + 1 }))}
+          >
+            <Check />
+            Native
+          </Button>
+        </div>
+        <div style={wrapper}>
+          <Button data-spacing-case="button-caller" {...button} style={caller}>
+            Caller
+          </Button>
+        </div>
+        <div style={wrapper}>
+          <Button
+            ref={slot}
+            asChild
+            data-spacing-case="button-slot"
+            {...button}
+            onClick={() => setCalls((x) => ({ ...x, parent: x.parent + 1 }))}
+          >
+            <a
+              href="#spacing-slot"
+              style={{ gap: 13, paddingInline: 23 }}
+              onClick={(event) => {
+                event.preventDefault();
+                setCalls((x) => ({ ...x, child: x.child + 1 }));
+              }}
+            >
+              <Check />
+              Child
+            </a>
+          </Button>
+        </div>
+        <div style={wrapper}>
+          <Button data-spacing-case="disabled" disabled {...button}>
+            Disabled
+          </Button>
+        </div>
+        <div style={wrapper}>
+          <ToggleGroup
+            type="single"
+            value={calls.selection}
+            aria-label="Spacing root"
+            data-spacing-case="root"
+            {...root}
+            onValueChange={(selection) => {
+              if (selection) setCalls((x) => ({ ...x, selection }));
+            }}
+          >
+            <ToggleGroupItem value="first" data-spacing-case="item" {...item}>
+              <Check />
+              First
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="second"
+              data-spacing-case="item-caller"
+              {...item}
+              style={{ gap: 15 }}
+            >
+              Second
+            </ToggleGroupItem>
+            <ToggleGroupItem value="third" asChild data-spacing-case="item-slot" {...item}>
+              <span style={{ gap: 17 }}>
+                <Check />
+                Slot
+              </span>
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <div style={wrapper}>
+          <ToggleGroup
+            type="single"
+            defaultValue="first"
+            aria-label="Root caller"
+            data-spacing-case="root-caller"
+            {...root}
+            style={rootCaller}
+          >
+            <ToggleGroupItem value="first">Root caller</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <div style={wrapper}>
+          <ToggleGroup type="single" defaultValue="first" aria-label="Root slot" asChild {...root}>
+            <section data-spacing-case="root-slot-child">
+              <ToggleGroupItem value="first">Root child</ToggleGroupItem>
+            </section>
+          </ToggleGroup>
+        </div>
+        <output data-spacing-calls>
+          {calls.button}/{calls.parent}/{calls.child}/{calls.selection}
+        </output>
+        <output data-spacing-refs>{refs}</output>
+      </section>
+    </Scope>
+  );
+}
+export const SpacingPhysicalFields: Story = { render: () => <SpacingFields /> };
+
+const orderKinds = [
+  'button-padding',
+  'button-gap',
+  'root-padding',
+  'root-gap',
+  'item-gap',
+  'slot-padding',
+  'slot-gap',
+  'item-slot-gap',
+] as const;
+function SpacingOrderFields() {
+  const [clear, setClear] = useState(false);
+  const [direction, setDirection] = useState<'ltr' | 'rtl'>('ltr');
+  function ordered(kind: string, reverse: boolean): CSSProperties {
+    if (clear) return {};
+    const pairs = kind.includes('padding')
+      ? kind.startsWith('root')
+        ? [
+            ['paddingLeft', '8px'],
+            ['padding', '4px'],
+          ]
+        : [
+            ['paddingLeft', '8px'],
+            ['paddingInline', '4px'],
+          ]
+      : [
+          ['rowGap', '8px'],
+          ['gap', '4px'],
+        ];
+    return Object.fromEntries(reverse ? [...pairs].reverse() : pairs);
+  }
+  return (
+    <Scope>
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button data-order-action="clear" onClick={() => setClear(true)}>
+          Clear caller styles
+        </button>
+        <button data-order-action="restore" onClick={() => setClear(false)}>
+          Restore caller styles
+        </button>
+        <button data-order-action="ltr" onClick={() => setDirection('ltr')}>
+          LTR
+        </button>
+        <button data-order-action="rtl" onClick={() => setDirection('rtl')}>
+          RTL
+        </button>
+      </div>
+      <section
+        data-order-fixture
+        data-clear={String(clear)}
+        data-direction={direction}
+        dir={direction}
+        style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2,minmax(0,1fr))' }}
+      >
+        {orderKinds.flatMap((kind) =>
+          [false, true].map((reverse) => {
+            const key = kind + '-' + (reverse ? 'reverse' : 'forward');
+            const caller = ordered(kind, reverse);
+            const buttonFields = {
+              gap: 'calc(var(--spacing) * 1.5)',
+              paddingInline: 'calc(var(--spacing) * 2.5)',
+            };
+            const rootFields = {
+              gap: 'calc(var(--spacing) * 0.5)',
+              padding: 'calc(var(--spacing) * 0.5)',
+            };
+            const itemFields = { gap: 'calc(var(--spacing) * 1.5)' };
+            let control;
+            if (kind.startsWith('root'))
+              control = (
+                <ToggleGroup
+                  type="single"
+                  defaultValue="first"
+                  dir={direction}
+                  {...rootFields}
+                  style={caller}
+                  data-order-case={key}
+                >
+                  <ToggleGroupItem value="first">Value</ToggleGroupItem>
+                </ToggleGroup>
+              );
+            else if (kind === 'item-gap' || kind === 'item-slot-gap')
+              control = (
+                <ToggleGroup type="single" defaultValue="first" dir={direction}>
+                  {kind === 'item-gap' ? (
+                    <ToggleGroupItem
+                      value="first"
+                      {...itemFields}
+                      style={caller}
+                      data-order-case={key}
+                    >
+                      Value
+                    </ToggleGroupItem>
+                  ) : (
+                    <ToggleGroupItem value="first" asChild {...itemFields} data-order-case={key}>
+                      <span style={caller}>Value</span>
+                    </ToggleGroupItem>
+                  )}
+                </ToggleGroup>
+              );
+            else if (kind.startsWith('slot'))
+              control = (
+                <Button asChild {...buttonFields} data-order-case={key}>
+                  <a href="#order" onClick={(event) => event.preventDefault()} style={caller}>
+                    Value
+                  </a>
+                </Button>
+              );
+            else
+              control = (
+                <Button {...buttonFields} style={caller} data-order-case={key}>
+                  Value
+                </Button>
+              );
+            return (
+              <div key={key} style={{ display: 'grid', justifyItems: 'start', gap: 4 }}>
+                <small>{key}</small>
+                {control}
+              </div>
+            );
+          })
+        )}
+      </section>
+    </Scope>
+  );
+}
+export const SpacingOrdering: Story = { render: () => <SpacingOrderFields /> };

@@ -908,6 +908,8 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `leaves190-candidate.html` | One closed time-picker constraint adopted by Root;18 Input/indicator ROIs and78 UA nodes exact | Whole-view15/18exact;three OPENs2094/2112/2094raw,maximum channel delta1; frozen candidate predates Root adoption |
 | `leaves171-final-matrix-acceptance.html`, `leaves184-acceptance.html`, `leaves188-counterexample.html` | Rejected native compiler route;zero migration credit | Earlier66 exact pairs and actual-App crop equality do not accept three arbitrary-property size/clipping/hit regressions; all trial source/config/lock changes restored |
 
+| `leaves189-acceptance.html` | Six private spacing consumers;final6 keyorder PNGs/342records exact;56 healthy and3Copied states qualified by real-browser field bridges | Original56 images55exact andCopy3 images2exact;twoOPEN68raw/43threshold;four naive-order failures retained; bridges are not new PNGs;original cleanup unknown |
+
 Root independently reopens original compressed records and decodes PNG RGBA.
 Named carrier exceptions retain both raw values; they never establish whole-object
 equality. The latest fixed component suite passes 620 files/6,209 tests with all
