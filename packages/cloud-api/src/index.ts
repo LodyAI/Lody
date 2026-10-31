@@ -467,6 +467,12 @@ export type CloudApi = {
         }
       | { status: 'unauthorized'; reason: string }
     >;
+    /** The paired machine's own workspace plan, authenticated by its device credential. */
+    workspaceEntitlement: Query<
+      { workspaceId: string; credential: string; machineId: string },
+      | { valid: false; reason: string }
+      | { valid: true; effectivePlanTier: PlanTier; checkoutPending: boolean }
+    >;
     complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
   };
   e2eeWorkspaces: {

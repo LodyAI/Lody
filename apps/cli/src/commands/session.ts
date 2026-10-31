@@ -978,7 +978,19 @@ const billingEntitlementCache = new Map<
   }
 >();
 
-async function getWorkspaceBillingEntitlementBestEffort(
+/**
+ * After a failed or timed-out read, the plan stays unknown (fail open) for this long
+ * without asking again, so a persistently offline machine does not make every
+ * command wait for the read deadline. A failure is never cached as a plan.
+ */
+const BILLING_ENTITLEMENT_RETRY_AFTER_MS = 30_000;
+const billingEntitlementRetryAfter = new Map<
+  string,
+  { port: NonNullable<LoroDocumentManager['cloudBilling']>; until: number }
+>();
+
+/** @internal Exported for the quota fail-open tests. */
+export async function getWorkspaceBillingEntitlementBestEffort(
   manager: LoroDocumentManager,
   workspace: WorkspaceSummary
 ): Promise<WorkspaceBillingEntitlement | null> {
@@ -987,6 +999,8 @@ async function getWorkspaceBillingEntitlementBestEffort(
     return null;
   }
   const now = getServerNow();
+  const retryAfter = billingEntitlementRetryAfter.get(workspace.id);
+  if (retryAfter?.port === port && retryAfter.until > now) return null;
   let entry = billingEntitlementCache.get(workspace.id);
   if (!entry || entry.port !== port || entry.expiresAt <= now) {
     entry = {
@@ -997,12 +1011,18 @@ async function getWorkspaceBillingEntitlementBestEffort(
     billingEntitlementCache.set(workspace.id, entry);
   }
   try {
-    return await entry.entitlement;
+    const entitlement = await entry.entitlement;
+    billingEntitlementRetryAfter.delete(workspace.id);
+    return entitlement;
   } catch (error) {
     // A failure must not be cached for the rest of the TTL.
     if (billingEntitlementCache.get(workspace.id) === entry) {
       billingEntitlementCache.delete(workspace.id);
     }
+    billingEntitlementRetryAfter.set(workspace.id, {
+      port,
+      until: getServerNow() + BILLING_ENTITLEMENT_RETRY_AFTER_MS,
+    });
     getLogger('session').warn(
       `Billing entitlement unavailable; allowing local operation: ${formatErrorMessage(error)}`
     );
