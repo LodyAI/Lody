@@ -16,6 +16,8 @@ import {
 } from '@lody/shared/automations';
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
+import { providerBindingFingerprint } from '@/session/automation-observations';
+import { internalPolicy } from './policies/session';
 import { createRpcSecretRecipient, encryptRpcSecret } from '@lody/loro-streams-rpc';
 import {
   createAutomationWorkspaceLegacy,
@@ -39,12 +41,17 @@ async function workspaceFixture(
     cliType?: string;
     agentType?: string;
     latestUserMsgId?: string;
+    acpSessionId?: string;
   } = { id: 'session-a', machineId: 'machine', userId: 'user', collaborationStopped: false },
   existingRoot?: string,
   verifyRemoteControl?: (input: {
     intent: RemoteAutomationIntent;
     requestToken: string;
-  }) => Promise<{ requesterUserId: string; expiresAt: number }>
+  }) => Promise<{ requesterUserId: string; expiresAt: number }>,
+  quota?: {
+    config: Parameters<typeof providerBindingFingerprint>[0];
+    refresh: () => Promise<unknown>;
+  }
 ) {
   const root = existingRoot ?? mkdtempSync(path.join(os.tmpdir(), 'lody-automation-owner-'));
   if (!existingRoot) roots.push(root);
@@ -80,6 +87,7 @@ async function workspaceFixture(
       return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
     },
     inputDisposition: () => 'unsubmitted',
+    refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
     getDocMeta: async (room: string) =>
@@ -92,7 +100,11 @@ async function workspaceFixture(
     hasUncertainLegacyQuota: () => false,
     verifyRemoteControl,
     lody: {
-      documentManager: { repo, getOrCreateSessionDoc: async () => doc },
+      documentManager: {
+        repo,
+        getOrCreateSessionDoc: async () => doc,
+        getAgentConfigForMachineLaunch: async () => quota?.config,
+      },
       hasAutomationSessionWork: () => false,
       resolveSessionWorkdir: async () => root,
       getAutomationSessionAuthority: () => authority,
@@ -112,6 +124,79 @@ async function workspaceFixture(
   return Object.assign(handle, { testRoot: root, testDocument: doc });
 }
 describe('Automation control authority', () => {
+  it('queries capacity at the reset even when the exhausted snapshot is still fresh', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const refreshed = Promise.withResolvers<void>();
+    const config = { id: 'binding', cliType: 'builtin', agentType: 'claude', env: {} } as const;
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      latestUserMsgId: 'input',
+      acpSessionId: 'native',
+    };
+    const host = await workspaceFixture(meta, undefined, undefined, {
+      config,
+      refresh: async () => {
+        refreshed.resolve();
+      },
+    });
+    const fingerprint = providerBindingFingerprint(config);
+    host.ledger.recordCapacity({
+      bindingId: 'binding',
+      fingerprint,
+      observedAt: 90_000,
+      validUntil: 200_000,
+      source: 'query',
+      authentication: 'valid',
+      billing: 'valid',
+      windows: [{ id: 'quota', usedPercent: 100, resetsAt: 100_000 }],
+    });
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { recoverCapacity: true },
+    });
+    const work = {
+      id: 'due-work',
+      ownerUserId: 'user',
+      updatedAt: 90_000,
+      sessionId: 'session-a',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'binding',
+      fingerprint,
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      notBefore: 100_000,
+      attempts: 0,
+    };
+    host.ledger.recordWork(work, {
+      id: work.id,
+      source: 'session/session-a',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: work.id,
+      observedAt: 90_000,
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: { workId: work.id, bindingId: work.bindingId, retryAt: 100_000 },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const delivery = host.ledger.deliveries().find((item) => item.event.id === work.id)!;
+    const receipt = host.ledger.accept(delivery, internalPolicy(delivery)[0]!, 90_000);
+    host.ledger.finishDelivery(delivery, undefined, 90_000);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    await refreshed.promise;
+    expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
+  });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {
       id: 'session-a',
