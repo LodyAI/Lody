@@ -85,3 +85,34 @@ The surface explains future-member sharing, Guest/recovery exclusion and that
 withdrawal leaves already-running tasks alone. Production provider/preload tests
 exercise pending/remount recovery, conflict, re-signing, scope changes and friendly
 English/Chinese refusals; synthetic Storybook captures establish presentation only.
+
+## Member visibility (A4)
+
+Encrypted workspaces skip the ordinary machine and project visibility queries, so
+until this change a member saw only their own machines and could not start a turn on
+a machine the owner had shared. `useEncryptedSharedMachines` keeps one store per
+account and workspace, shared by every consumer of the visible index. For each synced
+machine owned by another member, it reads the host's verified `readMachineSharing` view
+and treats the machine as usable only when core reported no `deniedReason` and the view
+is shared, current, not removed and available. Guest exclusion and withdrawal therefore
+come from core, never from server machine tables or display account IDs. Signed
+`projects` become the visible projects of that machine; a projectless conversation
+needs only the machine.
+
+Reads run at most two at a time and never block other workspaces or the index's other
+sources. A newer read of a machine supersedes an older one. Ledger changes, `online`,
+returning visibility and a 10-minute interval refresh the views, which stays inside the
+owner-approved bound of under 15 minutes for unknown withdrawal. A denial, removal or
+failed read removes access immediately. These are host IPC reads, not Streams
+subscriptions.
+
+Shared encrypted machines are exposed for selection and execution only. They stay out
+of the Convex-backed authorized set, so startup capability probes never launch agents
+on another member's machine. `withoutEncryptedSharedMachines` also keeps them out of
+automatic agent-config migration, bug-report log collection and memory-provider
+settings, which use fenced machine RPC or write a machine's catalog. Sessions on a
+shared machine or project become visible as in ordinary workspaces; every member
+already holds those encrypted documents, so this filter is presentation, not a security
+boundary. The receiving machine still authorizes every execution. Hook and store tests
+use fake timers and deferred reads; no two-member product run is claimed.
+
