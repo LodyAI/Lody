@@ -53,8 +53,9 @@ pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` acce
 `{command: {type: "register", program: "async ({ctx}) => ..."}}` and binds the
 current Session automatically. Its caller cannot redirect the result to another
 Session. CLI and MCP share the same local control endpoint. The Electron Session
-UI uses that endpoint for local-machine waits and settings;
-remote machines and Web do not have an Automation control bridge yet.
+UI uses that endpoint for local-machine waits and settings, and the remote machine
+control bridge for eligible remote Sessions. Encrypted workspaces and Web remain unsupported.
+The [general availability decision](../../../../.agents/notes/implemented/feature/2026-10-30-session-continuation-general-availability.md) explains the UI gate removal; the [UI design](../../../../.agents/notes/proposed/feature/2026-10-27-session-continuation-note-ui.md) records its presentation trade-offs.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and
 `expiresAt` (absolute epoch milliseconds) describe the wait. CLI exposes
@@ -83,7 +84,7 @@ All other resources/parameters are rejected. A new resource adapter belongs besi
 its existing owner and must define its scope, freshness and admission evidence.
 Programs cannot select another Session or access Node, shell, filesystem, arbitrary
 network endpoints or the daemon environment. Credentials stay with existing source
-owners. Await every read. See [CI](examples/wait-for-ci.js) and
+owners. The [external checks proposal](../../../../.agents/notes/proposed/architecture/2026-10-28-automation-external-checks.md) explores broader host capabilities, and the [interpreter decision](../../../../.agents/notes/proposed/architecture/2026-10-28-codemode-automation-interpreter.md) records the CodeMode trade-offs. Await every read. See [CI](examples/wait-for-ci.js) and
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
@@ -107,7 +108,7 @@ prompt, resolving Project members through their existing scoped worktree paths.
 
 The Host commits the matched result, captured evidence and stable continuation identity atomically.
 The matched result is final: its JS program does not run again. The original result
-is delivered after current source, permission and Session admission checks pass.
+is delivered after current source, permission and Session admission checks pass. The [match decision](../../../../.agents/notes/implemented/bug-fix/2026-10-30-automation-match-is-final.md) explains why a committed event is not reevaluated.
 JavaScript cannot choose actions, grants, targets or dispatch policies. Resume text
 becomes the Session input; optional JSON payload is included as reference data.
 Existing Session/Inbox owners retain queueing, transport, permissions and Stop.
@@ -117,7 +118,7 @@ Stop leaves authorized condition checks active. A match retains its original
 continuation as `blocked` with reason `target_stopped`, without increasing the
 condition error count. The local note offers explicit restoration through the
 existing collaboration control; admission then rechecks permissions, the Session and
-captured source evidence before submitting the same continuation. Cancel revokes that intent.
+captured source evidence before submitting the same continuation. Cancel revokes that intent. The [Stop and observation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.md) explains this admission boundary.
 
 A lost submission acknowledgement triggers reconciliation of the same turn, not
 another prompt. `matched` means the condition finished; the nested `continuation`
@@ -160,7 +161,7 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   and 20 seconds; the Host persists the work and applies the same admission checks.
   New Claude scheduled continuations identify the failed Turn and share Session
   admission with this policy. Unassociated unprepared old shortcuts are skipped;
-  prepared or dispatched legacy work retains its Schedule owner.
+  prepared or dispatched legacy work retains its Schedule owner. The [overload design](../../../../.agents/notes/proposed/feature/2026-10-27-codex-overload-automation.md) and [legacy overlap analysis](../../../../.agents/notes/proposed/bug-fix/2026-10-27-quota-recovery-legacy-schedule-overlap.md) record recovery trade-offs. The manual shortcut remains available where supported; the [retirement](../../../../.agents/notes/implemented/feature/2026-10-27-retire-quota-continue-shortcut.md) and [restoration](../../../../.agents/notes/implemented/feature/2026-10-30-restore-quota-continue-shortcut.md) decisions document its history.
 - **Merge archive:** the existing PR poller records transitions and durable merged
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
