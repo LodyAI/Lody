@@ -1,5 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { SessionMeta } from '@lody/shared';
+import { Button } from '@lody/ui';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 import * as stylex from '@stylexjs/stylex';
 import { fn } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
@@ -113,6 +118,74 @@ export const NativeSharing: Story = {
 
 export const PdfDocument: Story = {
   args: { path: '/tmp/annual-report.pdf', bytes: createSamplePdf() },
+};
+
+function PdfFilePanelStory({ preload = false }: { preload?: boolean }) {
+  const [mounted, setMounted] = useState(preload);
+  const [open, setOpen] = useState(false);
+  const provider = useMemo(
+    () =>
+      createFakeSessionFileProvider({
+        sourceState: 'live-readonly',
+        files: [
+          { fileId: 'pdf', path: 'report.pdf', kind: 'binary', sourceState: 'live-readonly' },
+        ],
+        snapshots: { 'report.pdf': { kind: 'binary', bytes: createSamplePdf() } },
+      }),
+    []
+  );
+  const session = {
+    id: 'storybook-pdf-panel',
+    machineId: 'storybook-machine',
+    userId: 'storybook-user',
+    createdAt: '2026-10-19T00:00:00Z',
+    cliType: 'codex',
+    agentType: 'codex',
+  } as unknown as SessionMeta;
+  return (
+    <DesktopSessionDetailLayout
+      defaultSizes={{ main: 50, sidebar: 50 }}
+      topBar={null}
+      chatSurfaces={
+        <Button
+          onClick={() => {
+            setMounted(true);
+            setOpen(true);
+          }}
+        >
+          Open PDF
+        </Button>
+      }
+      terminalDock={null}
+      secondaryPanel={
+        mounted ? (
+          <SessionFileContentView
+            sessionId={session.id}
+            session={session}
+            filePath="report.pdf"
+            fileId="pdf"
+            fileProvider={provider}
+            fileProviderRole="read"
+            active={open}
+            onAddSelectionToChat={() => true}
+          />
+        ) : null
+      }
+      sidebarOpen={open}
+      onSidebarCollapse={() => setOpen(false)}
+      deleteConfirmDialog={null}
+    />
+  );
+}
+
+export const PdfFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory />,
+};
+
+export const PdfCollapsedFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory preload />,
 };
 
 export const DocxDocument: Story = {
