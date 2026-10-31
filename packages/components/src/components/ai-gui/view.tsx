@@ -184,6 +184,8 @@ import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
+import { PendingImageMarkupDialog } from '../sessions/pending-image-markup-dialog';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import { UserMessageEditor, type UserMessageEditorProps } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
@@ -643,6 +645,7 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -1782,6 +1785,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
@@ -2744,6 +2748,7 @@ export const SessionChatStreamView = forwardRef<
                 activeImageKey={activeImageKey}
                 onActiveImageKeyChange={setActiveImageKey}
                 entries={activeGalleryEntries}
+                onAnnotateImage={onAnnotateImage}
                 portalAnchorRef={scrollRootRef}
               />
             </ContainerQueryProvider>
@@ -6491,6 +6496,7 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange,
   entries,
   portalAnchorRef,
+  onAnnotateImage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -6498,7 +6504,20 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange: (imageKey: string | null) => void;
   entries: ReadonlyArray<SessionImageGalleryEntry>;
   portalAnchorRef?: ImagePreviewPortalAnchorRef;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
 }) => {
+  const { t } = useTranslation();
+  const [markupFile, setMarkupFile] = useState<File | null>(null);
+  const markupRequest = useRef(0);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    []
+  );
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [open, activeImageKey]);
   const activeIndex = useMemo(
     () => findSessionImageGalleryEntryIndex(entries, activeImageKey),
     [activeImageKey, entries]
@@ -6517,6 +6536,7 @@ const ImagePreviewDialog = ({
 
   const handleIndexChange = useCallback(
     (index: number) => {
+      markupRequest.current += 1;
       const entry = entries[index];
       if (entry) {
         onActiveImageKeyChange(entry.key);
@@ -6526,18 +6546,62 @@ const ImagePreviewDialog = ({
   );
 
   const handleClose = useCallback(() => {
+    markupRequest.current += 1;
     onOpenChange(false);
   }, [onOpenChange]);
 
   return (
-    <ZoomableImageViewer
-      open={open}
-      onClose={handleClose}
-      images={images}
-      index={activeIndex}
-      onIndexChange={handleIndexChange}
-      {...(portalAnchorRef ? { portalAnchorRef } : {})}
-    />
+    <>
+      <ZoomableImageViewer
+        open={open && !markupFile}
+        onClose={handleClose}
+        images={images}
+        index={activeIndex}
+        onIndexChange={handleIndexChange}
+        onAnnotate={
+          onAnnotateImage
+            ? (item) => {
+                const request = ++markupRequest.current;
+                if (!item.src) return;
+                void fetch(item.src)
+                  .then((response) => {
+                    if (!response.ok) throw new Error('Image unavailable');
+                    return response.blob();
+                  })
+                  .then((blob) => {
+                    if (request !== markupRequest.current) return;
+                    setMarkupFile(
+                      new File([blob], item.fileName || 'image.png', { type: blob.type })
+                    );
+                  })
+                  .catch(() => {
+                    if (request === markupRequest.current)
+                      toast.error(
+                        t(
+                          'sessions.fileViewer.selection.imageFailed',
+                          'Could not open this image for markup. Your attachment is unchanged.'
+                        )
+                      );
+                  });
+              }
+            : undefined
+        }
+        {...(portalAnchorRef ? { portalAnchorRef } : {})}
+      />
+      {markupFile && onAnnotateImage && (
+        <PendingImageMarkupDialog
+          file={markupFile}
+          portalAnchorRef={portalAnchorRef}
+          onClose={() => setMarkupFile(null)}
+          onAdd={(selection) => {
+            if (!onAnnotateImage(selection)) return false;
+            setMarkupFile(null);
+            onOpenChange(false);
+            return true;
+          }}
+        />
+      )}
+    </>
   );
 };
 

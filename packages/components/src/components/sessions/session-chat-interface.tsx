@@ -3004,6 +3004,11 @@ export const SessionChatInterface = memo(
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
     const shareSelection = useMessageSelection(session.id);
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
+    const handleAnnotateImage = useCallback(
+      (selection: DocumentSelection) =>
+        inputAreaRef.current?.addDocumentSelection(selection) ?? false,
+      []
+    );
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
     const [foldMessageArea, setFoldMessageArea] = useState<HTMLDivElement | null>(null);
@@ -7347,6 +7352,9 @@ export const SessionChatInterface = memo(
                                 onFileDiffClick={onFileDiffClick}
                                 onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                                 onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onAnnotateImage={
+                                  isArchivedSession ? undefined : handleAnnotateImage
+                                }
                                 messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                                 assistantActions={assistantQuickActions}
                                 assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
