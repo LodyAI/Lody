@@ -46,7 +46,8 @@
   conflict marker never upgrades the stored cursor by implication.
 - `user-status` writes every stored copy of a duplicated user turn through
   `updateCopies`: the last copy gates guarded writes, settled copies never regress,
-  and any started or settled copy vetoes a requeue.
+  and any started or settled copy vetoes a requeue. `onlyAwaitingStart` settles only
+  while every copy is still pending or seen.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.

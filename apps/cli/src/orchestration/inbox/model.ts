@@ -12,7 +12,7 @@ export const INBOX_INLINE_MEMBERS = 50;
 export type InboxScope = { workspaceId: string; sessionId: string; userId: string };
 export type InboxInput = InboxScope & {
   inputId: string;
-  kind: 'human' | 'task' | 'automatic';
+  kind: 'human' | 'task' | 'automatic' | 'automation';
   config: SessionTurnInputConfig;
 };
 export type InboxBatch = InboxInput & {
@@ -36,7 +36,7 @@ export type InboxMember = {
 };
 export type InboxRelease = InboxInput & {
   executionId: string;
-  outcome: 'normal' | 'user_stop' | 'failed' | 'unreleased';
+  outcome: 'normal' | 'user_stop' | 'failed';
   cause?: string;
   releaseWatermark?: number;
 };

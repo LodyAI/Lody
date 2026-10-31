@@ -1,6 +1,6 @@
 # 移除成员与暂存换代发布
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](atomic-removal.md)
@@ -13,7 +13,7 @@ MVP 移除使用现有普通签名记录中的 tag10 `[10, targetMembershipId]`�
 
 快照、保留状态与状态摘要一起升为 current-only v4，保存单调增加的 capability 集合。未知能力声明要求升级；拒绝旧状态格式，不提供迁移。账本 v1 尚未生产冻结；独立向量新增 capability 1、tag10 和未知能力停止点。继续拒绝 tag2。现有 tag8 `[8, targetMembershipId, nextEpoch, commitment, previousEpochKey]` 保持 Owner 个人设备原子移除并换代的语义，但不用于 MVP 移除界面。Owner/Admin 可另行发布 tag7；代次溢出与重复承诺拒绝，发布成功清除换代提醒。
 
-服务端接受移除时，在同一接纳事务中使该成员全部设备投影、凭据和续签权限失效。移除不等待换代或辅助清理。MVP 仅依赖现有内容 token 的 15 分钟过期，不主动断开已发 token 或长连接。诚实客户端下次打开得知移除后停止同步、远程执行并删除该加密工作区本地数据；这不能擦除恶意保留的副本。重新加入须新邀请、新成员实例和新设备密钥，不复活旧凭据。
+服务端接受移除时，在同一接纳事务中使该成员全部设备投影、凭据和续签权限失效。移除不等待换代或辅助清理。Owner 批准的 MVP 缓解将 E2EE 内容 token 的有效期缩短至最多 480 秒。加上固定 gateway 的 60 秒 JWT 宽限与 300 秒 SSE 寿命，常规读交付预算为 840 秒（14 分钟），向 15 分钟目标留出 60 秒余量。这不是全过程截止保证：请求体缓冲、上游等待/重试、时钟误差、响应排空与存储提交不受这段余量约束。上线前已签发的 900 秒 token 在过渡期保留原寿命；普通工作区 token 不变。SSE/长轮询按绝对期限结束、缓冲/重试后复查与存储提交侧期限列为上游后续项，不阻塞上线。MVP 不在移除时主动废止已发 JWT 或断开连接。诚实客户端下次打开得知移除后停止同步、远程执行并删除该加密工作区本地数据；这不能擦除恶意保留的副本。重新加入须新邀请、新成员实例和新设备密钥，不复活旧凭据。
 
 ## 先暂存，一次提交
 
@@ -59,7 +59,7 @@ core 仅定义暂存、读回、按条件删除 port；DTO 归 cloud-api；Conve
 
 ## 审批与证据
 
-以上方向来自用户明确要求；修订后的 Spec 仍为 **draft，待审批**，不代表生产
+用户于 2026-10-28 批准了本修订，不代表生产
 启用，也未决定 vault、原生保管、严格 B、账号恢复或 MLS 替换。
 参见[准入](../../packages/e2ee-core/src/internal/ledger/ADMISSION.md)、
 [暂存 port](../../packages/e2ee-core/src/internal/keys/staging.ts)、

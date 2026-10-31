@@ -123,6 +123,14 @@ export class NotificationService {
     }
   }
 
+  showQuitWarning(input: { title: string; body: string }): Promise<{ shown: boolean }> {
+    if (!Notification.isSupported()) return Promise.resolve({ shown: false })
+    return showNativeNotification(
+      new Notification({ ...input, silent: true }),
+      this.activeNotifications
+    )
+  }
+
   async showSessionCompletion(
     input: ShowSessionCompletionNotificationInput
   ): Promise<ShowSessionCompletionNotificationResult> {

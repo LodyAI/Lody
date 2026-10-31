@@ -18,7 +18,7 @@ import {
   type LedgerMemberLabel,
   type LedgerOverview,
 } from '@/lib/e2ee-ledger-overview';
-import type { E2eeControlFailure } from '@/lib/e2ee-control-failure';
+import { custodyFailureMessages, type E2eeControlFailure } from '@/lib/e2ee-control-failure';
 import { LedgerVerificationCard } from './e2ee-ledger-verification';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -194,7 +194,9 @@ const styles = stylex.create({
 });
 
 const failureMessage: Record<E2eeControlFailure['kind'], string> = {
+  'approval-required': 'e2ee.pair.help',
   'local-identity': 'e2ee.identity.localFailure',
+  ...custodyFailureMessages,
   network: 'e2ee.control.failure.network',
   auth: 'e2ee.control.failure.auth',
   server: 'e2ee.control.failure.server',
@@ -205,9 +207,17 @@ const failureMessage: Record<E2eeControlFailure['kind'], string> = {
   'local-corrupt': 'e2ee.control.failure.localCorrupt',
 };
 
+const custodyTitle: Partial<Record<E2eeControlFailure['kind'], string>> = {
+  'custody-locked': 'e2ee.custody.locked.title',
+  'custody-indeterminate': 'e2ee.custody.indeterminate.title',
+  'custody-unavailable': 'e2ee.custody.unavailable.title',
+};
+
 /** Network and sign-in problems clear on their own; the rest stop verification. */
 const failureTone = (kind: E2eeControlFailure['kind']) =>
-  kind === 'network' || kind === 'auth' ? 'warning' : 'danger';
+  kind === 'network' || kind === 'auth' || kind === 'approval-required' || kind === 'custody-locked'
+    ? 'warning'
+    : 'danger';
 
 function FailurePanel(props: {
   failure: E2eeControlFailure;
@@ -233,9 +243,13 @@ function FailurePanel(props: {
   return (
     <Alert.Root tone={failureTone(props.failure.kind)}>
       <Alert.Title>
-        {failureTone(props.failure.kind) === 'warning'
-          ? t('e2ee.control.status.unreachable')
-          : t('e2ee.control.status.stopped')}
+        {custodyTitle[props.failure.kind]
+          ? t(custodyTitle[props.failure.kind]!)
+          : props.failure.kind === 'approval-required'
+            ? t('e2ee.pair.desktopApprovalRequired')
+            : failureTone(props.failure.kind) === 'warning'
+              ? t('e2ee.control.status.unreachable')
+              : t('e2ee.control.status.stopped')}
       </Alert.Title>
       <Alert.Description>
         {t(failureMessage[props.failure.kind], { code: props.failure.code })}
@@ -448,6 +462,8 @@ export interface E2eeWorkspaceControlPageProps {
   onLoadMore: () => void;
   onRefresh: () => void;
   onBack: () => void;
+  /** Present only after the owning host accepted this device's read-open. */
+  onOpen?: () => void;
   /** Optional host-backed developer controls; no cryptographic work in this surface. */
   children?: ReactNode;
 }
@@ -472,6 +488,15 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
             <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
             <span {...stylex.props(styles.preview)}>{t('e2ee.control.badge')}</span>
           </div>
+          {props.onOpen && (
+            <Button
+              variant="primary"
+              disabled={props.loading || Boolean(props.failure)}
+              onClick={props.onOpen}
+            >
+              {t('e2ee.control.openWorkspace')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             icon

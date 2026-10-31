@@ -104,6 +104,16 @@ export class ScheduleStore<Prepared = unknown> {
         .all(workspaceId) as { payload: string }[]
     ).map((row) => JSON.parse(row.payload));
   }
+
+  unfinishedForSession(workspaceId: string, sessionId: string): ScheduleRun<Prepared>[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT payload FROM schedule_runs WHERE workspace_id=? AND state NOT IN ('finished','failed','skipped') AND json_extract(payload,'$.sessionId')=? ORDER BY planned_at,run_key"
+        )
+        .all(workspaceId, sessionId) as { payload: string }[]
+    ).map((row) => JSON.parse(row.payload));
+  }
   history(workspaceId: string, scheduleId: string, limit = 50): ScheduleRun<Prepared>[] {
     return (
       this.db

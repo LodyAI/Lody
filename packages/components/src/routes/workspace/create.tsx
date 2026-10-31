@@ -7,7 +7,7 @@ import {
 } from '@/lib/referral-attribution';
 import { ConvexError } from 'convex/values';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useCloudAction, usePlatform, usePlatformSession } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
@@ -154,6 +154,18 @@ function CreateWorkspaceAuthed({
     if (!organizationsLoading) setOrgSettled(true);
   }, [organizationsLoading]);
   const navigate = useNavigate();
+  const followRedirect = useCallback(
+    (target: string) => {
+      const appOrigin = getAppOriginForUrlParsing();
+      const url = new URL(target, appOrigin);
+      if (url.origin === appOrigin) {
+        void navigate({ href: `${url.pathname}${url.search}${url.hash}`, replace: true });
+      } else {
+        window.location.assign(target);
+      }
+    },
+    [navigate]
+  );
   const [workspaceName, setWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -262,6 +274,7 @@ function CreateWorkspaceAuthed({
     orgSettled,
     postHog,
     redirect,
+    followRedirect,
     willRenderCreateForm,
   ]);
 
@@ -311,7 +324,7 @@ function CreateWorkspaceAuthed({
       organizations.length > 0
     ) {
       if (redirect) {
-        window.location.href = redirect;
+        followRedirect(redirect);
       } else {
         const targetSlug = getPreferredWorkspaceSlug(activeOrganization, organizations);
         if (targetSlug) {
@@ -344,6 +357,7 @@ function CreateWorkspaceAuthed({
     organizations,
     organizationsLoading,
     redirect,
+    followRedirect,
     navigate,
     missingSlugMessage,
   ]);
@@ -502,7 +516,7 @@ function CreateWorkspaceAuthed({
         duration_ms: getDurationSinceMs(startMs),
       });
       if (redirect) {
-        window.location.href = redirect;
+        followRedirect(redirect);
       } else {
         const existingSlug = getPreferredWorkspaceSlug(activeOrganization, organizations);
         const targetSlug = createdWorkspace?.slug || workspaceSlug || existingSlug;

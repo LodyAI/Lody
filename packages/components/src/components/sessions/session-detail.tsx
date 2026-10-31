@@ -1,12 +1,12 @@
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
+import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
 } from './session-archive-confirmation';
-import type { FileLinkCandidate } from '@lody/shared';
-import { getIpcServices } from '@/lib/electron-ipc-client';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
@@ -40,13 +40,10 @@ import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
-  getAcpCapabilityCacheKey,
-  resolveSessionAcpTargetId,
   getProjectRefBranch,
   getServerNow,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
-  getAcpCapabilityCacheEntryAuthority,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
@@ -118,7 +115,17 @@ import {
   zenLayoutModeAtom,
   zenRightPanelAtom,
 } from '@/atoms/layout-state';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNativeSideRail } from '../mobile/native-side-rail';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -130,6 +137,7 @@ import {
   runtimeInitializingAtom,
 } from '@/atoms';
 import { lodyControlConnectionStateAtom } from '@/atoms/control-connection';
+import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import {
   sessionMetaAtomFamily,
@@ -201,6 +209,7 @@ import { cn, getBasename } from '@/lib';
 
 import {
   resolveSessionFileOpenTarget,
+  resolveDirectMarkdownFileOpenTarget,
   type SessionFileOpenPathKind,
 } from '@/lib/session-file-open-target';
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
@@ -914,6 +923,56 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
     </span>
   );
 });
+
+function AdaptiveMobileSessionHeader({
+  inset,
+  title,
+  hasUnread,
+  onBack,
+  onTabs,
+  onMore,
+}: {
+  inset: string;
+  title: ReactNode;
+  hasUnread: boolean;
+  onBack: () => void;
+  onTabs: () => void;
+  onMore: () => void;
+}) {
+  const { t } = useTranslation();
+  const sideRailVisible = useNativeSideRail(
+    [
+      { id: 'back', label: t('common.back', 'Back'), symbol: 'chevron.left', onPress: onBack },
+      {
+        id: 'more',
+        label: t('sessions.moreActions', 'More actions'),
+        symbol: 'ellipsis',
+        onPress: onMore,
+      },
+    ],
+    2
+  );
+  return (
+    <BaseHeader
+      truncateTitle={false}
+      hideMenuButton
+      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+      style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
+      leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
+      title={title}
+      actions={
+        <div {...stylex.props(detailStyles.mobileHeaderRight)}>
+          <MobileSessionTabButton hasUnread={hasUnread} onOpen={onTabs} />
+          {!sideRailVisible && (
+            <GlassIconButton label={t('sessions.moreActions', 'More actions')} onClick={onMore}>
+              <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
+            </GlassIconButton>
+          )}
+        </div>
+      }
+    />
+  );
+}
 
 // Toggles the bottom terminal dock, which is hidden by default and only mounted
 // in the desktop app (Electron). Shown only when a terminal-capable local session
@@ -1636,37 +1695,9 @@ const SessionDetail = ({
     MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
   );
   const effectiveAllChangesDiffScope = allChangesScopeSupported ? allChangesDiffScope : 'branch';
-  const canForkSession = useCallback(
-    (target: SessionMeta): boolean => {
-      if (target.isArchived || !target.agentConfigId || !resolveSessionAcpTargetId(target))
-        return false;
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
-  );
-  const canForkSessionToWorktree = useCallback(
-    (target: SessionMeta): boolean => {
-      if (
-        !target.agentConfigId ||
-        !resolveSessionAcpTargetId(target) ||
-        !target.project ||
-        (target.project.kind !== 'local' && target.project.kind !== 'github')
-      ) {
-        return false;
-      }
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
+  const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
+    activeSessionMachineId,
+    sessionMachine?.acpCapabilities
   );
   const handleForkAssistant = useCallback(
     async (
@@ -2664,6 +2695,7 @@ const SessionDetail = ({
           payload.attachments
         );
         accepted = true;
+        payload.onAccepted?.();
         // Marks the first message read for the sender and bubbles activity to
         // the parent session, matching the ordinary send path. The child's own
         // lastMessageAt is already durable inside the startSession accept unit.
@@ -3023,7 +3055,18 @@ const SessionDetail = ({
     [router, workspaceSlug]
   );
 
-  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const confirmAndArchiveSession = useArchiveSessionWithConfirmation(archiveSession);
+  const archiveSessionWithConfirmation = useCallback(
+    async (...args: Parameters<typeof confirmAndArchiveSession>) => {
+      try {
+        return await confirmAndArchiveSession(...args);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return false;
+      }
+    },
+    [confirmAndArchiveSession]
+  );
   const requestArchiveConfirmation = useArchiveConfirmationRequest();
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {
@@ -3097,6 +3140,7 @@ const SessionDetail = ({
   // Share-as-image preview target: the selected tab's session plus the plain-text
   // conversation snapshot pulled from its chat surface when the menu item fires.
   const [shareImageTarget, setShareImageTarget] = useState<{
+    runtime: WorkspaceRuntime;
     session: SessionMeta;
     messages: ConversationMessage[];
     agentName?: string;
@@ -3267,7 +3311,7 @@ const SessionDetail = ({
       { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
       'export'
     );
-    if (activeDraftTab) {
+    if (activeDraftTab || !runtime) {
       return;
     }
     const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
@@ -3287,12 +3331,13 @@ const SessionDetail = ({
     }
     activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
       setShareImageTarget({
+        runtime: shareData.sourceRuntime,
         session: activeTabSession,
         messages,
         agentName: shareData.agentName,
       });
     });
-  }, [runtime?.contentMode, activeDraftTab, activeTabSession, activeTabSessionId, t]);
+  }, [runtime, activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
   // The share is finished, so the whole flow ends: the preview closes and the
   // chat drops the selection behind it. Resolve the surface by the session the
@@ -4003,84 +4048,30 @@ const SessionDetail = ({
     },
     [fileLinkSessionKey, runtime]
   );
-  const [fileLinkChoice, setFileLinkChoice] = useState<{
-    sessionKey: string;
-    candidates: readonly FileLinkCandidate[];
-    options: SessionDetailOpenFileOptions;
-  } | null>(null);
-
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
       const request = ++fileLinkRequestRef.current;
-      const sessionKey = fileLinkSessionKey;
-      setFileLinkChoice(null);
+      const target =
+        options.pathKind === 'canonical'
+          ? resolveSessionFileOpenTarget({
+              rawPath: filePath,
+              pathKind: 'canonical',
+              startLine: options.startLine,
+              endLine: options.endLine,
+            })
+          : resolveDirectMarkdownFileOpenTarget(filePath);
+      if (!target) {
+        void writeTextToClipboard(filePath).then((copied) => {
+          if (request !== fileLinkRequestRef.current) return;
+          if (copied) toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
+          else toast.error(t('sessions.fileViewer.pathCopyFailed', 'Failed to copy file path'));
+        });
+        return;
+      }
       const claimCloseTarget = semanticRouterRef.current?.deferActivation('side-panel');
       setFileProviderRequestedByInteraction(true);
       void (async () => {
-        // Where the path came from decides whether it may be rewritten at all;
-        // `resolveSessionFileOpenTarget` owns that rule and documents why.
-        const preserveWorktreePath =
-          isElectronRenderer() &&
-          (isActiveSessionLocalMachine ||
-            (activeSessionMachineId
-              ? await getIpcServices()
-                  ?.machineRpc.isLocalFileMachine(activeSessionMachineId)
-                  .catch(() => false)
-              : false));
-        const target = resolveSessionFileOpenTarget({
-          rawPath: filePath,
-          pathKind: options.pathKind ?? 'markdown-href',
-          workspacePath: activeSessionWorkspacePath,
-          preserveWorktreePath,
-          ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
-          ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
-        });
-        let openingPath = target.filePath;
-        if (
-          target.resolveMarkdownLink &&
-          runtime &&
-          activeSessionMachineId &&
-          activeBrowserSession
-        ) {
-          const link = await runtime.requestFilePreview(
-            activeSessionMachineId,
-            {
-              sessionId: activeBrowserSession.id,
-              path: openingPath,
-              resolveMarkdownLink: true,
-            },
-            {
-              ownerSessionId: activeBrowserSession.parentSessionId ?? activeBrowserSession.id,
-              workspaceRoot: activeSessionWorkspacePath,
-            }
-          );
-          if (request !== fileLinkRequestRef.current) return;
-          if (link.status === 'resolved-link') {
-            if (link.candidates.length > 1) {
-              setFileLinkChoice({
-                sessionKey,
-                candidates: link.candidates,
-                options: {
-                  ...options,
-                  pathKind: 'canonical',
-                  startLine: target.startLine,
-                  endLine: target.endLine,
-                },
-              });
-              return;
-            }
-            openingPath = link.candidates[0]!.path;
-          } else if (link.status === 'error' && link.code !== 'unsupported_protocol') {
-            toast.error(
-              t(
-                'sessions.fileLinks.resolveFailed',
-                'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
-              )
-            );
-            return;
-          }
-          // Older daemons cannot discover worktrees: open against the session root as before.
-        }
+        const openingPath = target.filePath;
         const resolution = await resolveSessionFileProviderOpenPath(
           activeSessionFileProvider,
           openingPath
@@ -4088,6 +4079,7 @@ const SessionDetail = ({
           path: openingPath,
           redirected: false,
         }));
+        if (request !== fileLinkRequestRef.current) return;
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
@@ -4098,8 +4090,8 @@ const SessionDetail = ({
             filePath: resolvedFilePath,
             ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
             label: getBasename(resolvedFilePath),
-            startLine: target.startLine,
-            endLine: target.endLine,
+            startLine: options.startLine ?? target.startLine,
+            endLine: options.endLine ?? target.endLine,
             focusRequestSeq: requestSeq,
             ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
           },
@@ -4115,15 +4107,6 @@ const SessionDetail = ({
       })();
     }
   );
-
-  const fileLinkDialog =
-    fileLinkChoice?.sessionKey === fileLinkSessionKey ? (
-      <FileLinkCandidateDialog
-        candidates={fileLinkChoice.candidates}
-        onClose={() => setFileLinkChoice(null)}
-        onSelect={(candidate) => handleOpenFile(candidate.path, fileLinkChoice.options)}
-      />
-    ) : null;
 
   const handleOpenHtmlFile = useStableCallback((filePath: string) => {
     handleOpenFile(filePath, {
@@ -6305,37 +6288,18 @@ const SessionDetail = ({
           detailStyles.conversationTopInset(mobileHeaderInset)
         )}
       >
-        <BaseHeader
-          truncateTitle={false}
-          hideMenuButton
-          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-          style={{ height: mobileHeaderInset, paddingTop: 'var(--safe-area-top, 0px)' }}
-          leading={<MobileSessionHeaderBackButton onBack={handleMobileSessionBack} />}
+        <AdaptiveMobileSessionHeader
+          inset={mobileHeaderInset}
+          onBack={handleMobileSessionBack}
+          onTabs={() => setMobileTabSheetOpen(true)}
+          onMore={() => setMobileMenuSheetOpen(true)}
+          hasUnread={hasBackgroundUnread(mobileConversations)}
           title={
             <MobileProjectInfo
               session={activeSession}
               localProjectMeta={resolvedLocalProjectMeta}
               isSyncing={activeSessionDocIsSyncing}
             />
-          }
-          actions={
-            /* Extra -mr beyond the 4px disc/hit-target offset: the large
-               glass radius reads optically left of the hard right gutter
-               (user avatar + composer), so nudge ~8px total. */
-            <div {...stylex.props(detailStyles.mobileHeaderRight)}>
-              {/* Files, PR, and Browser entries live in the mobile tab sheet
-                  (mobileViewers), not the header. */}
-              <MobileSessionTabButton
-                hasUnread={hasBackgroundUnread(mobileConversations)}
-                onOpen={() => setMobileTabSheetOpen(true)}
-              />
-              <GlassIconButton
-                label={t('sessions.moreActions', 'More actions')}
-                onClick={() => setMobileMenuSheetOpen(true)}
-              >
-                <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-              </GlassIconButton>
-            </div>
           }
         />
         <MobileSessionTabSheet
@@ -6634,6 +6598,7 @@ const SessionDetail = ({
           onOpenChange={setMobileFilesBrowserOpen}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6689,8 +6654,8 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6701,6 +6666,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6741,8 +6707,8 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6753,6 +6719,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6811,6 +6778,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6846,7 +6814,6 @@ const SessionDetail = ({
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
         {dirtyForkDialog}
-        {fileLinkDialog}
         {worktreeForkObservers}
         <SessionShareDialog
           open={showSessionSharing && pendingSessionShare != null}
@@ -6873,6 +6840,7 @@ const SessionDetail = ({
           }}
           onCompleted={handleShareImageCompleted}
           session={shareImageTarget?.session ?? null}
+          sourceRuntime={shareImageTarget?.runtime ?? null}
           messages={shareImageTarget?.messages ?? []}
           agentName={shareImageTarget?.agentName}
         />
@@ -7327,7 +7295,6 @@ const SessionDetail = ({
           target on desktop. They portal out, so tree position
           doesn't matter. */}
       {dirtyForkDialog}
-      {fileLinkDialog}
       {worktreeForkObservers}
       <SessionShareDialog
         open={showSessionSharing && pendingSessionShare != null}
@@ -7354,6 +7321,7 @@ const SessionDetail = ({
         }}
         onCompleted={handleShareImageCompleted}
         session={shareImageTarget?.session ?? null}
+        sourceRuntime={shareImageTarget?.runtime ?? null}
         messages={shareImageTarget?.messages ?? []}
         agentName={shareImageTarget?.agentName}
       />
@@ -7361,4 +7329,15 @@ const SessionDetail = ({
   );
 };
 
-export default SessionDetail;
+export default function SessionDetailWithHistoryAccess(props: Parameters<typeof SessionDetail>[0]) {
+  return (
+    <SessionHistoryAccessBoundary
+      sessionId={props.sessionId}
+      urlTab={props.urlTab}
+      onMobileBack={props.onMobileBack}
+      onMobilePresented={props.onMobilePresented}
+    >
+      <SessionDetail {...props} />
+    </SessionHistoryAccessBoundary>
+  );
+}

@@ -16,6 +16,7 @@ import type { MachineAccessVerification } from '../src/session/session-access-re
 import { fileLockLayer } from '../src/utils/file-lock';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { createSessionBackend } from '../src/session/session-backend';
+import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
@@ -431,6 +432,45 @@ describe('SessionDispatchWatcher', () => {
       { dispatchSource: 'crdt' }
     );
     expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('does not stash or activate an input rejected at first owner acceptance', async () => {
+    const id = 'session-rejected-input' as SessionId;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: { getDocMeta: async () => ({ meta: { id, machineId: 'machine-1' } }) },
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        acceptInboxHumanInput: async () => false,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(
+          await watcher.offerRpcTurn({
+            sessionId: id,
+            userTurnId: 'stale-input',
+            userId: 'user-1',
+            timestamp: '2026-10-31T00:00:00Z',
+            inputOrigin: 'human',
+            inputConfig: { prompt: 'Preserve me', configRevision: 1 },
+          })
+        ).toBe('already-terminal');
+        expect(
+          (watcher as unknown as { rpcTurnStash: Map<string, unknown> }).rpcTurnStash.size
+        ).toBe(0);
+        expect(
+          (watcher as unknown as { sessionCheckChains: Map<string, unknown> }).sessionCheckChains
+            .size
+        ).toBe(0);
+      }
+    } finally {
+      await watcher.stop();
+    }
   });
 
   it('dispatches a stashed RPC turn before its history entry syncs', async () => {
@@ -1448,12 +1488,14 @@ describe('SessionDispatchWatcher', () => {
   // in history, so dispatch reaches the canUseMachine gate without the 5-min wait.
   const createAccessHarness = (opts: {
     canUseMachine: WatcherDeps['canUseMachine'];
+    encryptedWorkspace?: boolean;
     accessPolicy?: WatcherDeps['accessPolicy'];
     currentUserId?: WatcherDeps['currentUserId'];
     recordOwnerAccessSnapshot?: WatcherDeps['recordOwnerAccessSnapshot'];
     recordMemberAccessSnapshot?: WatcherDeps['recordMemberAccessSnapshot'];
     recordChatFailure?: WatcherDeps['recordChatFailure'];
     onFatalAuthFailure?: WatcherDeps['onFatalAuthFailure'];
+    dispatchPrepared?: SessionExecutionService['dispatchPreparedSessionTurn'];
   }) => {
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
@@ -1499,12 +1541,14 @@ describe('SessionDispatchWatcher', () => {
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
+      encryptedWorkspace: opts.encryptedWorkspace,
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       ...(opts.currentUserId ? { currentUserId: opts.currentUserId } : {}),
       workspaceDocument,
       executionService: {
+        ...(opts.dispatchPrepared ? { dispatchPreparedSessionTurn: opts.dispatchPrepared } : {}),
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
@@ -1543,6 +1587,85 @@ describe('SessionDispatchWatcher', () => {
   // turn), and the fiber's outcome routes back to dispatch or a visible failure.
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
+
+  it.each([
+    { encryptedWorkspace: false, reason: 'not_visible' as const },
+    { encryptedWorkspace: true, reason: 'not_visible' as const },
+    { encryptedWorkspace: false, reason: 'project_not_shared' as const },
+    { encryptedWorkspace: true, reason: 'project_not_shared' as const },
+  ])(
+    'routes encrypted=$encryptedWorkspace through its admission gate ($reason)',
+    async ({ encryptedWorkspace, reason }) => {
+      const forwarded: string[] = [];
+      const snapshots: string[] = [];
+      const h = createAccessHarness({
+        encryptedWorkspace,
+        currentUserId: 'machine-owner',
+        canUseMachine: async () => ({ outcome: 'denied', reason }),
+        accessPolicy: {
+          decide: () => Effect.succeed({ outcome: 'remote' as const }),
+        } as never,
+        recordMemberAccessSnapshot: async ({ requesterUserId }) => {
+          snapshots.push(requesterUserId);
+        },
+        dispatchPrepared: async (options) => {
+          const access = await options.accessPromise;
+          if (access.outcome === 'denied') {
+            await options.onAccessDenied(access);
+            return;
+          }
+          expect(access).toEqual({ outcome: 'allowed' });
+          await options.requestPromise;
+          forwarded.push(options.userTurnId);
+        },
+      });
+      try {
+        await runMaybeHandleSession(h.watcher, h.sessionId);
+        expect(forwarded).toEqual(encryptedWorkspace ? ['turn-x'] : []);
+        expect(h.getHistory()[0]?.status).toBe(encryptedWorkspace ? 'pending' : 'failed');
+        if (encryptedWorkspace) expect(snapshots).toEqual([]);
+      } finally {
+        h.watcher.stop();
+      }
+    }
+  );
+
+  it('retries missing execution evidence without retiring the pending turn, and cancels the retry on stop', async () => {
+    vi.useFakeTimers();
+    const dispatched = createDeferred();
+    let originalAvailable = false;
+    let starts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      dispatchPrepared: async (options) => {
+        if (!originalAvailable) {
+          await options.onExecutionDeferred?.();
+          return;
+        }
+        starts += 1;
+        dispatched.resolve();
+      },
+    });
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      expect(starts).toBe(0);
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      await dispatched.promise;
+      expect(starts).toBe(1);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      originalAvailable = false;
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      h.watcher.stop();
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(starts).toBe(1);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
 
   it('does not fail or retire a pending turn when access verification is indeterminate', async () => {
     const canUseMachine = vi.fn(async () => ({
@@ -2046,7 +2169,7 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
-  it('hydrates queued mq items into pending turns before dispatching', async () => {
+  const verifyQueuedRevision = async (hasReusableSession: boolean) => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
     const cancelSession = vi.fn(async () => ({ success: true }));
@@ -2068,6 +2191,7 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2142,7 +2266,7 @@ describe('SessionDispatchWatcher', () => {
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
-          hasReusableSession: false,
+          hasReusableSession,
         })),
         continueSession,
         startSession,
@@ -2154,7 +2278,7 @@ describe('SessionDispatchWatcher', () => {
     await watcher.start();
 
     await vi.waitFor(() => {
-      expect(startSession).toHaveBeenCalledTimes(1);
+      expect(hasReusableSession ? continueSession : startSession).toHaveBeenCalledTimes(1);
     });
     expect(queue).toHaveLength(0);
     expect(history[0]).toEqual(
@@ -2166,6 +2290,7 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2177,14 +2302,15 @@ describe('SessionDispatchWatcher', () => {
     );
     // The promoted turn is published for dispatch, not just written to history.
     expect(promotedPointer).toBe('queued-mq-1');
-    expect(startSession).toHaveBeenCalledWith(
+    expect(hasReusableSession ? continueSession : startSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'session/create',
+        type: hasReusableSession ? 'session/chat' : 'session/create',
         sessionId,
         userTurnId: 'queued-mq-1',
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2195,7 +2321,11 @@ describe('SessionDispatchWatcher', () => {
       }),
       { dispatchSource: 'queue' }
     );
-  });
+  };
+  it.each([false, true])(
+    'hydrates queued mq items before dispatch (reusable=%s)',
+    verifyQueuedRevision
+  );
 
   it('repairs activation after a history-only queue commit without duplicating or replaying turns', async () => {
     const id = 'queue-retry' as SessionId;
@@ -2563,6 +2693,106 @@ describe('SessionDispatchWatcher', () => {
     expect(promoted?.id).toBe(queuedTurnId);
     return meta;
   };
+
+  it('keeps a promoted queue intent identical to its durable Loro config at the encrypted origin gate', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'queued-execution-origin-'));
+    const id = 'queue-origin' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      createdAt: '2026-10-30T00:00:00.000Z',
+      status: { type: 'idle' },
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    const loro = new LoroDoc();
+    composeTestSessionDoc(doc, { doc: loro });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      await doc.pushMessageQueue({
+        userTurnId: 'queued-turn',
+        task: 'synthetic queue prompt',
+        userId: 'user-1',
+        timestamp: '2026-10-30T20:17:36.812Z',
+        acpSessionConfig: {
+          prompt: 'synthetic queue prompt',
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+      } as never);
+      const promoted = await (
+        watcher as unknown as {
+          promoteNextQueuedMessage: (
+            doc: SessionDocument,
+            meta: SessionMeta,
+            history: SessionHistoryInput[]
+          ) => Promise<SessionHistoryInput | null>;
+        }
+      ).promoteNextQueuedMessage(doc, meta, []);
+      if (!promoted) throw new Error('queue promotion failed');
+      const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+      // Missing signed originals must defer, never deny because JS-only undefined
+      // fields differ from the exact durable input config before evidence lookup.
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          origins.resolve(
+            {
+              workspaceId: 'workspace-1',
+              sessionId: id,
+              userTurnId: promoted.id,
+              inputConfig: promoted.inputConfig,
+            },
+            loro,
+            () => Effect.die('no signed frame has arrived')
+          )
+        )
+      );
+      expect(result).toEqual({
+        state: 'pending-evidence',
+        expiresAt: Date.parse('2026-10-30T20:32:36.812Z'),
+      });
+      expect(
+        await Effect.runPromise(
+          Effect.scoped(
+            origins.resolve(
+              {
+                workspaceId: 'workspace-1',
+                sessionId: id,
+                userTurnId: promoted.id,
+                inputConfig: { ...promoted.inputConfig, prompt: 'different input' },
+              },
+              loro,
+              () => Effect.die('changed input must not open an original')
+            )
+          )
+        )
+      ).toBeUndefined();
+      const stored = await doc.sessionData.history.readTurn(promoted.id);
+      expect(stored.state).toBe('ready');
+      if (stored.state === 'ready')
+        expect(promoted.inputConfig).toStrictEqual(stored.turn.inputConfig);
+      expect(await doc.getMessageQueue()).toEqual([]);
+    } finally {
+      watcher.stop();
+      doc.mirror.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it('leaves no pending activation once a promoted queue turn is handled', async () => {
     // The settled state after a direct send has run: both pointers name it.
@@ -3476,6 +3706,8 @@ describe('SessionDispatchWatcher', () => {
         (_, index) => `metadata-burst-${index}` as SessionId
       );
       const releaseHistory = createDeferred();
+      const slowHistory = createDeferred();
+      const lateStarted = createDeferred();
       const firstBatchStarted = createDeferred();
       const allHistoryStarted = createDeferred();
       let metadataCallback: ((event: { kind: 'doc-metadata'; docId: string }) => void) | undefined;
@@ -3503,6 +3735,7 @@ describe('SessionDispatchWatcher', () => {
       const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
+        if (sessionId === 'late') lateStarted.resolve();
         if (!openedSessionIds.has(sessionId)) {
           openedSessionIds.add(sessionId);
           historyReadCount += 1;
@@ -3510,7 +3743,7 @@ describe('SessionDispatchWatcher', () => {
           maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
           if (historyReadCount === 4) firstBatchStarted.resolve();
           if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
-          await releaseHistory.promise;
+          await (sessionId === sessionIds[4] ? slowHistory.promise : releaseHistory.promise);
           activeHistoryReads -= 1;
         }
         return withSessionData(
@@ -3574,6 +3807,12 @@ describe('SessionDispatchWatcher', () => {
       await flushMicrotasks(20);
       expect(historyReadCount).toBe(sessionIds.length);
       expect(maxActiveHistoryReads).toBe(4);
+      const lateId = 'late' as SessionId;
+      metaBySession.set(lateId, { ...metaBySession.get(sessionIds[0]!)!, id: lateId });
+      metadataCallback?.({ kind: 'doc-metadata', docId: `session-${lateId}` });
+      await lateStarted.promise;
+      slowHistory.resolve();
+      await flushMicrotasks(20);
       watcher.stop();
     } finally {
       vi.useRealTimers();

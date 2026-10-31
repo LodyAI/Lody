@@ -226,6 +226,37 @@ function createDeferred<T>() {
 }
 
 describe('ProviderSetupManager', () => {
+  it('continues setup after a scan failure and retries cleanup on the next kick', async () => {
+    let healthy = false;
+    let credentialPresent = true;
+    const store = {
+      list: async () => {
+        if (!healthy) throw new Error('profile root unavailable');
+        return [{ machineId, configId: 'orphan', profile: { profileId: 'orphan-profile' } }];
+      },
+      remove: async () => {
+        credentialPresent = false;
+        return true;
+      },
+    };
+    const getter = vi
+      .spyOn(codexProfiles, 'getCodexProfileStore')
+      .mockReturnValue(store as unknown as codexProfiles.CodexProfileStore);
+    const harness = createHarness();
+    try {
+      seedSetup(harness.flock);
+      await harness.manager.kick();
+      expect(readState(harness.flock).config).toBeDefined();
+      expect(credentialPresent).toBe(true);
+      healthy = true;
+      await harness.manager.kick();
+      expect(credentialPresent).toBe(false);
+    } finally {
+      harness.manager.stop();
+      getter.mockRestore();
+    }
+  });
+
   it('publishes the config and removes the setup in one commit after a live probe', async () => {
     const harness = createHarness();
     seedSetup(harness.flock);

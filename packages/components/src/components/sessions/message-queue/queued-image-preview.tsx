@@ -1,3 +1,4 @@
+import { runtimeAtom } from '@/atoms/runtime';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Image as ImageIcon } from 'lucide-react';
@@ -26,6 +27,7 @@ export function QueuedImagePreview({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const runtime = useAtomValue(runtimeAtom);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -39,7 +41,8 @@ export function QueuedImagePreview({
     let active = true;
     void getSessionImageBlobUrl({
       workspaceId,
-      sessionId,
+      sessionId: image.storageSessionId ?? sessionId,
+      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
       token: authToken,
       variant: 'original',
@@ -54,7 +57,7 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
+  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
 
   const previewImages = useMemo(
     () => [{ key: image.imageId, src: originalUrl, fileName: image.fileName }],
@@ -75,7 +78,8 @@ export function QueuedImagePreview({
 
     void getSessionImageBlobUrl({
       workspaceId,
-      sessionId,
+      sessionId: image.storageSessionId ?? sessionId,
+      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
       token: authToken,
       variant: 'thumbnail',
@@ -98,7 +102,7 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, image.imageId, sessionId, workspaceId, size]);
+  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, sessionId, workspaceId, size]);
 
   return (
     <>

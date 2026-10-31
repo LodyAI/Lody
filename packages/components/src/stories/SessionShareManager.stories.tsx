@@ -50,6 +50,9 @@ const meta = {
       { sessionId: 'child-2', title: 'Reader layout notes' },
     ],
     hasPending: false,
+    plaintextConfirmation: false,
+    onConfirmPlaintextPublish: noop,
+    onCancelPlaintextPublish: () => {},
     phase: 'idle',
     progress: 0,
     result: null,
@@ -148,3 +151,8 @@ export const Revoked: Story = {
 };
 
 export const Loading: Story = { args: { entry: undefined } };
+
+export const EncryptedPublicationConfirmation: Story = { args: { plaintextConfirmation: true } };
+export const EncryptedPublicationConfirmationEmbedded: Story = {
+  args: { plaintextConfirmation: true, embedded: true },
+};

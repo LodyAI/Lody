@@ -9,7 +9,11 @@ import { Bytes } from '@lody/e2ee-core';
 import { E2eeWorkspace, WorkspacePlatform } from '@lody/e2ee-core';
 import { type WorkspaceRecoveryInput } from '@lody/e2ee-core';
 import { createRecoveryVault, openRecoveryVault } from '@lody/e2ee-core/internal';
-import { decodeRecord } from '@lody/e2ee-core/protocol';
+import {
+  decodeRecord,
+  deriveRecoveryAccessCredential,
+  wipeRecoveryPackage,
+} from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
 import { makeLabRecoveryVaultStore } from '../src/platform/recovery-vault-sqlite';
 import { makeLabScenarioFixture } from '../src/platform/scenario-fixture';
@@ -46,6 +50,7 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
             length: f.point().length,
           };
           let delivery: KeyDistributor['Service'] | undefined;
+          const registered: { record: Uint8Array; hash: Uint8Array }[] = [];
           const fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
             recipient,
             epoch,
@@ -89,6 +94,12 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
                 membershipId,
                 trust,
                 fetchCurrentEnvelope,
+                // The Lab service authenticates R by signature; record what a
+                // credential-based service would register with R's admission.
+                registerRecoveryCredential: ({ record, recoveryCredentialHash }) =>
+                  Effect.sync(() => {
+                    registered.push({ record, hash: recoveryCredentialHash });
+                  }),
               });
             },
           });
@@ -111,10 +122,32 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
           expect(
             yield* Effect.result(owner.recovery.replace({ requestId: '', compromised: false }))
           ).toMatchObject({ _tag: 'Failure', failure: { code: 'invalid-input' } });
+          expect(registered).toHaveLength(0);
           expect(yield* owner.recovery.setup()).toMatchObject({
             outcome: 'Committed',
             status: { paired: true, envelopeAvailable: true, recoverable: true, skipped: false },
           });
+          // Exactly R's admission registered the hash derived from R's own package.
+          const index = yield* created.vault.readIndex();
+          const expectedHash = yield* Effect.acquireUseRelease(
+            created.vault.readEntry(index.value.entries.find((ref) => !ref.retired)!),
+            (bundle) =>
+              Effect.sync(() => {
+                const derived = deriveRecoveryAccessCredential(bundle);
+                derived.credential.fill(0);
+                return derived.credentialHash;
+              }),
+            (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
+          );
+          expect(registered).toHaveLength(1);
+          expect(registered[0]!.hash).toEqual(expectedHash);
+          expect(
+            [...f.records].some(
+              (row) =>
+                row.length === registered[0]!.record.length &&
+                row.every((byte, i) => byte === registered[0]!.record[i])
+            )
+          ).toBe(true);
           expect(yield* owner.recovery.test()).toMatchObject({
             paired: true,
             envelopeAvailable: true,

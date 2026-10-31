@@ -244,7 +244,9 @@ catch })`. Construct the Promise inside the thunk and pass the signal to the I/O
 `LoginShellEnvironmentLive` injects host selection and the existing official
 process service. Candidate shells share one Clock deadline; core composition
 never executes. `LoginShellCacheLive` owns one producer in a child Scope and
-retains its complete Exit for later readers. CLI readers retain their 3-second
+retains successful Exits for later readers. Completed failures retry on the next
+read after five seconds; unconfirmed process release retains its Exit and owner.
+CLI readers retain their 3-second
 pending-overlay behavior; cancellation and timeout affect only that local reader.
 Application shutdown rejects new readers, interrupts and joins the producer, then
 closes its child Scope. Process cleanup keeps its own bounded backend and recovery

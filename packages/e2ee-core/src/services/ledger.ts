@@ -107,6 +107,18 @@ export class LedgerPinStore extends Context.Service<
     read(): Effect.Effect<LedgerCheckpoint | null, LocalStoreError>;
     /** Atomically persist and verify the checkpoint; callers have already established continuation. */
     write(checkpoint: LedgerCheckpoint): Effect.Effect<void, LocalStoreError>;
+    /** Optional bounded local observation journal. Absence retains strict current-key writes.
+     * Bytes contain timing metadata only, never keys or ledger authority. CAS must be atomic,
+     * binding-checked, durable and return false without mutation on a mismatch. */
+    readonly writeGrace?: {
+      /** Read an owned observation blob, or null on first use; failure is never absence. */
+      read(): Effect.Effect<Uint8Array | null, LocalStoreError>;
+      /** Replace only the exact prior blob (null means absent); success follows durable readback. */
+      compareAndSet(
+        expected: Uint8Array | null,
+        next: Uint8Array
+      ): Effect.Effect<boolean, LocalStoreError>;
+    };
   }
 >()('@lody/e2ee-core/LedgerPinStore') {}
 

@@ -1,6 +1,6 @@
 # Snapshot-first workspace invitations
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 Translation: current
 
 [中文](snapshot-join.zh.md)

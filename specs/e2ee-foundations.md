@@ -222,6 +222,56 @@ path; do not add legacy decoding, migration, metadata guesses or re-signing of
 history. Production has no encrypted workspaces requiring that compatibility.
 This does not authorize erasing uncertain operations or execution evidence.
 
+### Machine sharing policy (pending approval increment)
+
+**Increment status: draft; not covered by the approved revision above.** The
+existing approved machine identity and execution contracts remain in force.
+
+Each machine binding generation has one complete encrypted owner-personal policy:
+machine sharing plus shared localProjectIds. New generations and absent projects
+are private. Enabling a project also enables its machine atomically; disabling
+the machine retains project records. Workspace Owner/Admin has no cross-member
+override. All-team includes future qualified members; Guest/recovery never execute.
+
+Generation is the initial machine admission signing key of the current uninterrupted
+atomic-replacement chain. Genuine ledger inclusion and exact replaces links prove
+it; server counters or resource metadata cannot choose it. Atomic replacement
+preserves this root and policy. Revocation/removal followed by readmission starts
+a new root/resource even for the same member/machineId. The old generation remains
+terminal. New sharing requires new explicit owner intent and starts at revision
+1/null parent, without importing old grants, pins or deleted policy history.
+
+Signed current-only policy v2 binds workspace ID, pinned genesis, machineId,
+owner membership instance, generation, revision/previous original-frame digest,
+requestId, complete state, personal signer and descriptive issuedAt. A distinct
+business signature/AAD domain and generation-qualified resource use existing
+content-v0 encryption, docEpoch zero; no ledger record or state format changes.
+Within a generation, server CAS orders immutable originals and checks current
+ledger generation plus full head status/scope/position in the same transaction.
+Old pending requests cannot cross removal, even when numeric positions match.
+Sharing withdrawal is a new signed policy; physical cleanup is scoped to the
+closed generation and cannot erase successor commits. Storage tombstones never
+substitute for verified pins. Exact retry receipts never resurrect cleaned frames.
+
+Before each start and later authorized action, check current ledger eligibility,
+actual machine key/generation and the current owner-personal policy; actual local
+projects also need their own switch. A revoked signer invalidates execution on
+its old policy. Historical owner-personal data may preserve state for a new
+explicit same-generation intent, but cannot grant execution or skip history.
+Withdrawal blocks new starts/later actions without killing already running tasks.
+A separate account display query returns only ciphertext/untrusted metadata.
+
+Observed withdrawal invalidates authorization immediately. A strictly less than
+15-minute memory cache bounds time since this machine's authenticated latest read
+started, intersected with ledger/request deadlines. It does **not** prove an unknown
+withdrawal takes effect within 15 minutes if the server continuously withholds new
+heads: signatures/chains detect known rollback/forks, not globally latest state.
+On 2026-10-28, the owner confirmed acceptance of trusting the server not to
+continuously withhold newer heads; the MVP adds no signed freshness proof. Restart or
+clock uncertainty requires revalidation; unrelated content/local work stays usable.
+No network, cache, UI or execution integration is enabled by these primitives.
+See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+
 ### Permission freshness and the separate durable expiry clock
 
 A verified ledger proves continuity, not a fresh latest read. Tokens, timestamps,

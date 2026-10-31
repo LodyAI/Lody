@@ -36,6 +36,7 @@ import {
   WorktreeGit,
   WorktreeGitHost,
   WorktreeGitLive,
+  BEST_EFFORT_FETCH_TIMEOUT_MS,
   WorktreeGitCommandFailed,
   WorktreeGitExecutionFailed,
 } from '../src/session/worktree/git-execution';
@@ -247,17 +248,28 @@ describe('worktree Git execution boundary', () => {
       });
     })
   );
-  for (const kind of ['git', 'helper'] as const) {
+  for (const kind of ['git', 'helper', 'fetch'] as const) {
     effectIt.effect(`${kind} deadline waits for whole-tree cleanup`, () =>
       Effect.gen(function* () {
         const { table, started, cleaning, layer } = yield* fixture;
         table.queueSpawn({ ignores: ['SIGTERM'] });
-        const command = yield* (kind === 'git' ? gitCommand : helperProbe).pipe(
-          Effect.provide(layer),
-          Effect.forkChild
-        );
+        const command = yield* (
+          kind === 'fetch'
+            ? Effect.flatMap(WorktreeGit, (git) =>
+                git.run({
+                  args: ['fetch', 'origin'],
+                  cwd: '/project',
+                  timeout: BEST_EFFORT_FETCH_TIMEOUT_MS,
+                })
+              )
+            : kind === 'git'
+              ? gitCommand
+              : helperProbe
+        ).pipe(Effect.provide(layer), Effect.forkChild);
         const { pid, descendant } = yield* Deferred.await(started);
-        yield* TestClock.adjust(kind === 'git' ? '10 minutes' : '5 seconds');
+        yield* TestClock.adjust(
+          kind === 'fetch' ? '30 seconds' : kind === 'git' ? '10 minutes' : '5 seconds'
+        );
         yield* Deferred.await(cleaning);
         expect(command.pollUnsafe()).toBeUndefined();
         expect(table.isAlive(descendant)).toBe(true);

@@ -61,6 +61,21 @@ agent's answer and the agent's own warning about it.
   same compact type as the activity timeline; the previous footnote size made
   the notice smaller than the conversation around it.
 
+## Stop control diagnostics
+
+Stop diagnostics use the existing `agent_warning` carrier because the task may still
+be running. `sessionCancelFailed` identifies provider-cancel rejection,
+`sessionStopTimedOut` identifies the existing five-second drain expiring before
+forced termination, and `sessionTerminationFailed` identifies failed termination.
+Each has a localized title and guidance followed by the original diagnostic message.
+Older readers can still show the message as an ordinary warning.
+
+The notice remains open in the conversation. It neither completes the assistant nor
+claims that sending the Stop RPC stopped the provider. Repeated Stop does not add
+another notice for the same turn and phase; a later turn can report the same error.
+The [implementation decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-stop-failure-notices.md)
+records the ownership and reporting limits.
+
 ## Copying failures
 
 Every `chat_failed` banner has an always-visible Copy error button, including
@@ -86,3 +101,13 @@ width. Long unbroken paths wrap within the detail instead of overflowing the wel
 - A visible countdown keeps consent reversible without a second control —
   reveal stop-auto-retry on hover or keyboard focus, and show it directly on
   touch devices.
+
+## Rejected configuration recovery
+
+A first-input revision rejection appears as `session_config_changed` in the existing
+`chat_failed` banner. Failed user rows expose the ordinary resend confirmation,
+including a warning about repeating any completed work. The handler sends only the
+original content through the current composer configuration as a new input. After
+successful local admission it marks the old row canceled; failed admission retains
+that row and its recovery action. Neither a transport ACK nor a delivery overlay
+may hide a failed row behind the Delivered indicator.

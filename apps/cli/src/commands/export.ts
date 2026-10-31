@@ -51,6 +51,14 @@ async function syncWorkspaceSessionsForExport(
     );
   });
 
+  if (
+    !workspaceSupports(
+      { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'schedules'
+    )
+  )
+    return;
+
   // This reconciles visible index rows with repo existence, repairing a missing
   // projection row without reviving an explicit index tombstone.
   const workspaceId = workspace.id as WorkspaceId;
@@ -83,23 +91,9 @@ export const exportCommand = new Command('export')
       }
 
       const offline = { offline: options.offline };
-      const requested = options.allWorkspace
+      const workspaces = options.allWorkspace
         ? await listWorkspaceCandidates(auth, offline)
         : [await resolveWorkspaceOrThrow(auth, options.workspace, offline)];
-      // A plaintext export of an encrypted workspace is a restricted feature until its
-      // E2EE milestone; never decrypt to disk here.
-      const exportable = (workspace: WorkspaceSummary) =>
-        workspaceSupports(
-          { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-          'export'
-        );
-      if (!options.allWorkspace && requested.some((workspace) => !exportable(workspace)))
-        throw new Error('Export is not available for end-to-end encrypted workspaces.');
-      const workspaces = requested.filter(exportable);
-      for (const skipped of requested.filter((workspace) => !exportable(workspace)))
-        console.log(
-          `Skipped end-to-end encrypted workspace ${skipped.name}: export is not available.`
-        );
 
       let totalSessions = 0;
       const warnings: string[] = [];

@@ -8,7 +8,11 @@ pointer to this page live in
 this page is the full text of the rules summarised there.
 
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
-  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
+  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). The desktop split's resize
+  handle paints nothing at rest: hover shows one centred ink block, keyboard focus a darker and
+  taller one, drag the darkest, and the block is a `ResizableHandle` child so it never shifts
+  panel geometry ([decision](../notes/implemented/feature/2026-10-31-session-sidebar-resize-handle.md)).
+  All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
   viewers never split the conversation surface: opt-in Files, All Changes, Browser, conditional PR,
   and file/conversation-diff/turn-diff tabs all live in the right panel under
@@ -63,6 +67,8 @@ this page is the full text of the rules summarised there.
   would open a Loro session doc per side chat even for a user who never expands the panel: mount one
   when it is first selected (`mountedSideSessionIds`), plus any fork target still waiting to report
   durable history, and keep it mounted after that.
+  `useSessionForkCapabilities` resolves the bound Provider's runtime overrides for Tab,
+  Side Chat and worktree fork availability, so Pi extension selections use their matching cache.
   Show the launcher only when the active conversation's provider has authoritative native-fork
   support; keep it visible but disabled when that conversation's machine is explicitly offline. That
   offline rule lives ONLY in `getSideChatLauncherState` — the shared fork entry point stays

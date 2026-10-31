@@ -339,7 +339,7 @@ describe('MessageHandler image upload flow', () => {
     expect(harness.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
   });
 
-  it('attaches Codex generated images to the turn captured at generation start', async () => {
+  it.each([false, true])('keeps late generated images on their exact turn or drops them (missing=%s)', async (missing) => {
     const harness = createHarness();
     handlers.push(harness.handler);
 
@@ -371,7 +371,9 @@ describe('MessageHandler image upload flow', () => {
       mimeType: 'image/png',
       sizeBytes: 10,
     });
-    vi.spyOn(harness.host, 'uploadSessionImageFile').mockResolvedValue({
+    const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+    vi.spyOn(harness.host, 'uploadSessionImageFile').mockImplementation(async () => {
+      started.resolve(); await finish.promise; return {
       imageId: 'img-codex',
       fileName: 'codex-image.png',
       mimeType: 'image/png',
@@ -379,7 +381,7 @@ describe('MessageHandler image upload flow', () => {
       width: 100,
       height: 50,
       downloadUrl: 'https://example.com/img-codex',
-    });
+    }; });
 
     (harness.host.handleImageGenerationEnd as (sessionId: SessionId, event: unknown) => void)(
       sessionId,
@@ -390,19 +392,19 @@ describe('MessageHandler image upload flow', () => {
         savedPath: '/tmp/codex-image.png',
       }
     );
+    await started.promise;
+    const nextId = (harness.host.beginConversationTurn as (id: SessionId) => string)(sessionId);
+    await harness.host.createAssistantEntryForTurn(sessionId, harness.sessionDoc, nextId, undefined);
+    (harness.host.clearACPState as (id: SessionId) => void)(sessionId);
+    if (missing) harness.history.splice(0, 1);
+    finish.resolve();
     await (harness.host.flushCodexGeneratedImageUploads as (sessionId: SessionId) => Promise<void>)(
       sessionId
     );
 
-    expect(harness.history).toHaveLength(1);
-    expect(harness.history[0]?.id).toBe(turnId);
-    const items = harness.history[0]?.items as MessageContent[] | undefined;
-    expect(items).toHaveLength(1);
-    expect(items?.[0]).toMatchObject({
-      type: 'image_group',
-      images: [{ imageId: 'img-codex' }],
-    });
-    expect(harness.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+    expect(harness.history.map((entry) => entry.id)).toEqual(missing ? [nextId] : [turnId, nextId]);
+    expect(harness.history.find((entry) => entry.id === nextId)?.items).toEqual([]);
+    if (!missing) expect(harness.history[0]?.items).toMatchObject([{ type: 'image_group', images: [{ imageId: 'img-codex' }] }]);
   });
 
   it('uploads completed-only Codex inline images without persisting base64', async () => {

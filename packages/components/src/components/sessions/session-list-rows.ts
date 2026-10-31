@@ -18,8 +18,24 @@ import {
 } from '@lody/shared';
 import type { SessionListRow, SessionListRowOwner } from '@/components/session-list';
 import { getLineChangeDeltaForScope, type LineChangeScope } from '@/lib/file-change-category';
+import { placeOpenedSessionsWithOpeners } from '@/lib/session-opened-by-tree';
 
 export type SessionListScope = 'my' | 'team';
+
+/** Unavailable local-project history has no project section; keep it in Chats. */
+export function selectSidebarTaskSessions(
+  sessions: SessionMeta[],
+  visibleLocalProjects: { has(key: string): boolean },
+  workspaceHistoryReadable = false
+): SessionMeta[] {
+  return sessions.filter(
+    (session) =>
+      session.project?.kind !== 'local' ||
+      session.projectRun !== undefined ||
+      (workspaceHistoryReadable &&
+        !visibleLocalProjects.has(`${session.machineId}:${session.project.localProjectId}`))
+  );
+}
 
 export type WorkspaceMember = {
   userId: string;
@@ -468,4 +484,123 @@ export function buildSessionListRows(
 
   // For team scope, include owner info
   return sessions.map((session) => mapAndAggregate(session, getOwner(session.userId)));
+}
+
+/** The unpinned rows each Workspace-mode sidebar group renders. */
+export type WorkspaceSidebarGroups = {
+  chatSessions: SessionListRow[];
+  repoSessions: SessionListRow[];
+  projectGroupSessions: SessionListRow[];
+  /** Keyed by `getLocalProjectVisibilityKey`. */
+  localProjectSessionsByKey: ReadonlyMap<string, SessionMeta[]>;
+};
+
+/**
+ * Moves each opened Session into its opener's Workspace group so the tree there
+ * can indent it, across Machines and work contexts: a Role dispatched from a
+ * Local Project to another Machine lands in Chats or a GitHub group otherwise.
+ * Pinned and Updated lists keep their natural membership.
+ *
+ * Only rendered groups participate: a local project outside
+ * `isRenderedLocalProject` neither hosts nor loses rows. A row joining a task
+ * group takes that group's grouping fields; a Local Project Session joining one
+ * becomes a task row through `toTaskRows`, and a task joining a local project
+ * is rendered from its `SessionMeta`.
+ */
+export function placeWorkspaceSessionsWithOpeners(
+  natural: WorkspaceSidebarGroups,
+  options: {
+    sessions: readonly SessionMeta[];
+    isRenderedLocalProject: (projectKey: string) => boolean;
+    resolveOpenerRowId: (openerSessionId: string | null | undefined) => string | null;
+    toTaskRows: (sessions: SessionMeta[]) => SessionListRow[];
+    latestMessageAt: (session: SessionMeta) => number;
+  }
+): WorkspaceSidebarGroups {
+  const groupBySessionId = new Map<string, string>();
+  const openerRowBySessionId = new Map<string, string | null>();
+  const taskGroupFields = new Map<string, Pick<SessionListRow, 'repoFullName' | 'projectGroup'>>();
+  const addTask = (task: SessionListRow, groupKey: string) => {
+    groupBySessionId.set(task.sessionId, groupKey);
+    openerRowBySessionId.set(task.sessionId, task.openedByRowSessionId ?? null);
+    if (!taskGroupFields.has(groupKey)) {
+      taskGroupFields.set(groupKey, {
+        repoFullName: task.repoFullName ?? null,
+        projectGroup: task.projectGroup ?? null,
+      });
+    }
+  };
+  for (const task of natural.chatSessions) addTask(task, 'chats');
+  for (const task of natural.repoSessions)
+    addTask(task, `repo:${(task.repoFullName ?? '').trim()}`);
+  for (const task of natural.projectGroupSessions)
+    addTask(task, `group:${task.projectGroup?.id ?? ''}`);
+  const sessionById = new Map<string, SessionMeta>();
+  for (const [projectKey, sessionsForProject] of natural.localProjectSessionsByKey) {
+    if (!options.isRenderedLocalProject(projectKey)) continue;
+    for (const session of sessionsForProject) {
+      groupBySessionId.set(session.id, `local:${projectKey}`);
+      openerRowBySessionId.set(
+        session.id,
+        session.openedByRootSessionId ?? options.resolveOpenerRowId(session.openedBySessionId)
+      );
+      sessionById.set(session.id, session);
+    }
+  }
+  const moved = placeOpenedSessionsWithOpeners(groupBySessionId, (id) =>
+    openerRowBySessionId.get(id)
+  );
+  if (moved.size === 0) return natural;
+
+  for (const session of options.sessions) {
+    if (moved.has(session.id) && !sessionById.has(session.id)) sessionById.set(session.id, session);
+  }
+  const stays = (id: string) => !moved.has(id);
+  const taskById = new Map(
+    [...natural.chatSessions, ...natural.repoSessions, ...natural.projectGroupSessions].map(
+      (task) => [task.sessionId, task]
+    )
+  );
+  const localSessionsToRow = [...moved.entries()]
+    .filter(([id, target]) => !target.startsWith('local:') && !taskById.has(id))
+    .flatMap(([id]) => sessionById.get(id) ?? []);
+  for (const row of options.toTaskRows(localSessionsToRow)) taskById.set(row.sessionId, row);
+  const joining = (inGroup: (target: string) => boolean) =>
+    [...moved.entries()].flatMap(([id, target]) => {
+      const task = inGroup(target) ? taskById.get(id) : undefined;
+      const fields = taskGroupFields.get(target);
+      return task && fields ? [{ ...task, ...fields }] : [];
+    });
+
+  const localProjectSessionsByKey = new Map<string, SessionMeta[]>();
+  for (const [projectKey, sessionsForProject] of natural.localProjectSessionsByKey) {
+    localProjectSessionsByKey.set(
+      projectKey,
+      sessionsForProject.filter((session) => stays(session.id))
+    );
+  }
+  for (const [id, target] of moved) {
+    if (!target.startsWith('local:')) continue;
+    const session = sessionById.get(id);
+    const list = localProjectSessionsByKey.get(target.slice('local:'.length));
+    if (session && list) list.push(session);
+  }
+  for (const list of localProjectSessionsByKey.values()) {
+    list.sort((a, b) => options.latestMessageAt(b) - options.latestMessageAt(a));
+  }
+  return {
+    chatSessions: [
+      ...natural.chatSessions.filter((task) => stays(task.sessionId)),
+      ...joining((target) => target === 'chats'),
+    ],
+    repoSessions: [
+      ...natural.repoSessions.filter((task) => stays(task.sessionId)),
+      ...joining((target) => target.startsWith('repo:')),
+    ],
+    projectGroupSessions: [
+      ...natural.projectGroupSessions.filter((task) => stays(task.sessionId)),
+      ...joining((target) => target.startsWith('group:')),
+    ],
+    localProjectSessionsByKey,
+  };
 }

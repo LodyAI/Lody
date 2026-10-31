@@ -1,3 +1,7 @@
+import { useMemo, useState } from 'react';
+import { Button } from '@lody/ui/button';
+import { AgentFileLinkIndexContext } from '@/components/ai-gui/agent-file-link-context';
+import { createAgentFileLinkIndex } from '@/lib/agent-file-link-index';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
@@ -17,3 +21,35 @@ export const OpenFile: Story = {
 export const Incomplete: Story = {
   args: { text: ':codex-file-citation{path="/tmp/exports/report.pdf"' },
 };
+
+function IndexedPathsPreview() {
+  const index = useMemo(createAgentFileLinkIndex, []);
+  const [indexed, setIndexed] = useState(false);
+  return (
+    <AgentFileLinkIndexContext.Provider value={index}>
+      <Button
+        onClick={() => {
+          index.setFiles(
+            indexed
+              ? []
+              : ['src/app.ts', 'docs/guide.md', 'out/report.pdf'].map((path) => ({
+                  path,
+                  kind: 'text' as const,
+                  sourceState: 'live-readonly' as const,
+                }))
+          );
+          setIndexed(!indexed);
+        }}
+      >
+        {indexed ? 'Remove indexed files' : 'Confirm indexed files'}
+      </Button>
+      <MarkdownRenderer
+        text={
+          'Absolute: `/tmp/report.pdf`\n\nCandidates: src/app.ts, `missing/file.ts`, [Guide](./docs/guide.md#L8)\n\n:codex-file-citation{path="out/report.pdf"}'
+        }
+        onAgentFileLinkClick={(href) => alert(href)}
+      />
+    </AgentFileLinkIndexContext.Provider>
+  );
+}
+export const IndexedPaths: Story = { render: () => <IndexedPathsPreview /> };

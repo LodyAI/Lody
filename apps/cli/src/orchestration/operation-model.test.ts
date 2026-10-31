@@ -11,6 +11,23 @@ describe('current Inbox scheduling contract', () => {
   it('exhaustively preserves nonempty at-most-once batches over bounded interleavings', () => {
     expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(100);
   });
+  it('automation never clears Stop and an accepted human wins before automatic submission', () => {
+    expect(trace('stop', 'automation', 'schedule')).toMatchObject({
+      active: 'none',
+      paused: true,
+      automation: false,
+    });
+    expect(trace('automation', 'human', 'schedule', 'submit')).toMatchObject({
+      active: 'human',
+      submitted: true,
+      automation: true,
+    });
+    expect(trace('automation', 'schedule', 'human', 'submit')).toMatchObject({
+      active: 'automation',
+      submitted: false,
+      human: true,
+    });
+  });
   it('wakeable results coalesce before an idle conversation is scheduled', () => {
     expect(trace('result', 'result', 'schedule')).toMatchObject({
       active: 'automatic',
@@ -77,12 +94,20 @@ describe('current Inbox scheduling contract', () => {
       trace('human', 'schedule', 'submit', 'result', 'normal', 'human', 'schedule', 'submit')
     ).toMatchObject({ active: 'human', receipts: [[1]], pending: [] });
   });
-  it('unreleased work blocks even a fresh human until resource recovery', () => {
-    expect(trace('human', 'schedule', 'submit', 'unreleased', 'human', 'schedule')).toMatchObject({
-      blocked: true,
-      active: 'human',
-      human: true,
-    });
+  it('restart retires interrupted work without replay and admits fresh human input', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'restart',
+        'schedule',
+        'human',
+        'schedule',
+        'submit'
+      )
+    ).toMatchObject({ active: 'human', batch: [1], receipts: [[1]], pending: [] });
   });
   it('withdrawing an unverified human execution reschedules the same results once', () => {
     expect(

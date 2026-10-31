@@ -82,6 +82,11 @@ Ownership: [README.md](README.md).
 
 ## Content Contracts
 
+- Conversation file-path candidates become interactive only for an absolute path
+  or an exact match in the owning Session's file index. Unconfirmed relative paths
+  keep their text/code presentation. Open known targets directly; copy actions use
+  the authored path without file resolution or a worktree picker.
+
 - Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
   and an exact parent turn; never Stop the parent or invent state. Dialogs reuse
   parent renderers/grouping, one scroller, and read run bodies only while open:

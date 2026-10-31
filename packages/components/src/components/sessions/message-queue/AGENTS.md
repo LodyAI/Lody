@@ -49,5 +49,7 @@ Production passes a separate `scheduledItems` view model; never fake a
 `MessageQueueItem` for a reservation. Keep dedicated rows after ordinary and
 local-pending rows, ordered by send time, in a `Scheduled` section without index,
 drag, steer or move-to-top. They reuse the queued row layout: the send time leads
-the text inline and opens the time editor; details and cancel end the row.
-Never fake a scheduled row through a queue item or add a time field to durable `mq`.
+the text inline and opens the time editor; details open the in-chat message
+editor and cancel ends the row. Row text is the scheduled message's content; its
+schedule title is never shown. Never fake a scheduled row through a queue item
+or add a time field to durable `mq`.

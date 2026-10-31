@@ -169,6 +169,10 @@ describe('local platform zero-cloud integration', () => {
             fresh: true,
             state: 'idle',
           }),
+          readActiveTurnId: () => undefined,
+          steerSession: async () => {
+            throw new Error('Unexpected steer');
+          },
           cancelSession: async () => ({ success: true }),
           dispatchSession: async (id) => {
             dispatched.push(id);

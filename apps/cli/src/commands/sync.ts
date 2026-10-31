@@ -8,7 +8,6 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
-import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import {
   getAuthContextOrThrow,
   listAliveDocMetas,
@@ -235,13 +234,12 @@ export async function syncItems(input: {
  */
 async function listSyncableFlockDocIds(
   manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  schedules: boolean
+  workspaceId: WorkspaceId
 ): Promise<string[]> {
   const machines = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
   return [
     ...machines.map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id)),
-    ...(schedules ? [getScheduleRegistryFlockDocId(workspaceId)] : []),
+    getScheduleRegistryFlockDocId(workspaceId),
   ].sort((left, right) => left.localeCompare(right));
 }
 
@@ -293,18 +291,12 @@ async function syncWorkspace(input: {
       return;
     }
 
-    // Schedules have no encrypted channel yet; their rooms are not part of a protected replica.
-    const schedules = workspaceSupports(
-      { mode: input.workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-      'schedules'
-    );
-    if (schedules)
-      await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
-        reason: 'sync:schedules:registry',
-      });
-    const scheduleIds = schedules ? await listWorkspaceScheduleIds(manager, workspaceId) : [];
+    await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
+      reason: 'sync:schedules:registry',
+    });
+    const scheduleIds = await listWorkspaceScheduleIds(manager, workspaceId);
     const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true), scheduleIds);
-    const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId, schedules);
+    const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId);
 
     await syncItems({
       summary,

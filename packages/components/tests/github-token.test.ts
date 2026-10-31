@@ -2,6 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installGitHubTokenPort } from '../src/lib/github-token-port';
 
 const mockAction = vi.fn();
+const mockFreshJwt = vi.fn();
+const retriedRequests: string[] = [];
+vi.mock('../src/lib/auth-client-singleton', () => ({ getRegisteredAuthClient: () => ({}) }));
+vi.mock('../src/lib/convex-jwt', () => ({ requestCurrentConvexJwt: () => mockFreshJwt() }));
+vi.mock('convex/browser', () => ({
+  ConvexHttpClient: class {
+    setAuth() {}
+    async action() {
+      retriedRequests.push('retried');
+      return { success: true, token: 'retried-token', expiresAt: 'synthetic' };
+    }
+  },
+}));
 
 vi.mock('@lody/cloud-api', () => ({
   api: {
@@ -14,6 +27,7 @@ vi.mock('@lody/cloud-api', () => ({
 
 vi.mock('../src/providers/convex-provider', () => ({
   convexClient: {
+    url: 'https://synthetic.invalid',
     action: (...args: unknown[]) => mockAction(...args),
   },
 }));
@@ -553,4 +567,81 @@ describe('shared refresh after GitHub rejects a token', () => {
     expect(mockAction).toHaveBeenCalledTimes(3);
     expect(mockAction.mock.calls[2]?.[1]).toMatchObject({ invalidatedPersonalToken: 'ghu_old' });
   });
+});
+
+describe('imperative cloud token admission', () => {
+  beforeEach(() => {
+    mockFreshJwt.mockReset();
+    retriedRequests.length = 0;
+  });
+
+  it('refuses before sending when admission is unknown and preserves ordinary success', async () => {
+    const { createCloudGitHubTokenPort } = await import('../src/providers/cloud-github-token-port');
+    let admitted = false;
+    let sent = false;
+    mockAction.mockImplementation(async () => {
+      sent = true;
+      return { success: true, token: 'ordinary-token', expiresAt: 'synthetic' };
+    });
+    const port = createCloudGitHubTokenPort(() => {
+      if (!admitted) throw new Error('admission_pending');
+      return 'account/workspace/route';
+    });
+    await expect(
+      port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' })
+    ).rejects.toThrow('admission_pending');
+    expect(sent).toBe(false);
+    admitted = true;
+    await expect(
+      port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' })
+    ).resolves.toMatchObject({ success: true, token: 'ordinary-token' });
+    expect(sent).toBe(true);
+  });
+
+  it('does not expose a token arriving after the account binding changes', async () => {
+    const { createCloudGitHubTokenPort } = await import('../src/providers/cloud-github-token-port');
+    const response = Promise.withResolvers<unknown>();
+    mockAction.mockReturnValue(response.promise);
+    let binding = 'first-account/workspace/route';
+    const port = createCloudGitHubTokenPort(() => binding);
+    const pending = port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' });
+    binding = 'second-account/workspace/route';
+    response.resolve({ success: true, token: 'first-account-token', expiresAt: 'synthetic' });
+    await expect(pending).rejects.toMatchObject({ code: 'legacy_workspace_admission_changed' });
+  });
+
+  it.each([false, true])(
+    'rechecks admission after auth refresh before retry (changed=%s)',
+    async (changed) => {
+      const { createCloudGitHubTokenPort } =
+        await import('../src/providers/cloud-github-token-port');
+      const refresh = Promise.withResolvers<string>();
+      const refreshing = Promise.withResolvers<void>();
+      mockAction.mockResolvedValue({
+        success: false,
+        errorCode: 'unauthorized',
+        errorMessage: 'synthetic',
+      });
+      mockFreshJwt.mockImplementation(() => {
+        refreshing.resolve();
+        return refresh.promise;
+      });
+      let binding = 'ordinary-account/workspace/route';
+      const port = createCloudGitHubTokenPort(() => binding);
+      const pending = port.getRepoToken({
+        workspaceId: 'workspace',
+        repoFullName: 'synthetic/repo',
+      });
+      await refreshing.promise;
+      if (changed) binding = 'different-account/workspace/route';
+      refresh.resolve('synthetic-jwt');
+      if (changed) {
+        await expect(pending).rejects.toMatchObject({ code: 'legacy_workspace_admission_changed' });
+        expect(retriedRequests).toEqual([]);
+      } else {
+        await expect(pending).resolves.toMatchObject({ success: true, token: 'retried-token' });
+        expect(retriedRequests).toEqual(['retried']);
+      }
+    }
+  );
 });

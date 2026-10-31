@@ -11,6 +11,7 @@ import {
   inboxFeatureEnabledAtom,
 } from '../src/atoms/settings';
 import { MobileAboutSettings } from '../src/components/mobile/mobile-about-settings';
+import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 import { useVisibleSettingsTabs } from '../src/components/settings/settings-tabs';
 import { TestCloudPlatformProvider } from './test-platform';
 import { initI18n } from '../src/i18n';
@@ -76,6 +77,30 @@ afterEach(() => {
 });
 
 describe('MobileAboutSettings developer mode', () => {
+  it('keeps the version and links on separate panels without resetting the reveal gesture', () => {
+    const store = createStore();
+    const renderFold = (fold: boolean) =>
+      act(() =>
+        root.render(
+          <Provider store={store}>
+            <MobileSettingsFoldContext.Provider
+              value={fold ? { messageHeight: 300, lowerTop: 340, gapHeight: 40 } : null}
+            >
+              <MobileAboutSettings />
+            </MobileSettingsFoldContext.Provider>
+          </Provider>
+        )
+      );
+    renderFold(true);
+    const upper = container.querySelector('[data-settings-fold-upper]')!;
+    const lower = container.querySelector('[data-settings-fold-lower]')!;
+    expect(upper.textContent).toContain('unknown');
+    expect(lower.textContent).toContain('Links');
+    for (let i = 0; i < 6; i += 1) act(() => revealRow().click());
+    renderFold(false);
+    act(() => revealRow().click());
+    expect(switchLabelled('Developer mode')).not.toBeNull();
+  });
   it('hides the Developer mode switch until the commit row is tapped enough times', () => {
     const store = createStore();
     render(store);

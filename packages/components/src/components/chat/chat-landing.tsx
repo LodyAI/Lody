@@ -1,3 +1,9 @@
+import { McpDefaultsRecovery } from './mcp-defaults-recovery';
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
@@ -695,7 +701,9 @@ function WorkspaceChatLanding({
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
@@ -726,18 +734,20 @@ function WorkspaceChatLanding({
     visibleAllActiveSessions
   );
   const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
-  const showProjectSharing = shouldShowSessionSharing({
-    workspaceId,
-    activeWorkspaceId: activeOrganization?.id ?? null,
-    memberCount: activeOrganization?.members.length ?? null,
-  });
-  const inboxRows = useCloudQuery(
+  const showProjectSharing =
+    legacyQueriesEnabled &&
+    shouldShowSessionSharing({
+      workspaceId,
+      activeWorkspaceId: activeOrganization?.id ?? null,
+      memberCount: activeOrganization?.members.length ?? null,
+    });
+  const inboxRows = useLegacyWorkspaceQuery(
     cloudOperations.inbox.listMine,
     showProjectSharing && workspaceId ? { workspaceId } : 'skip'
   );
-  const sharingReviewServerState = useCloudQuery(
+  const sharingReviewServerState = useLegacyWorkspaceQuery(
     cloudOperations.inbox.getSharingReviewState,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewInboxRevisionRef = useRef<string | null>(null);
   const sharingReviewReconcileRef = useRef({
@@ -749,10 +759,14 @@ function WorkspaceChatLanding({
   if (sharingReviewInboxReady) {
     sharingReviewInboxRevisionRef.current = sharingReviewServerState?.sourceRevision ?? null;
   }
-  const reconcileSharingReview = useCloudMutation(cloudOperations.inbox.reconcileSharingReview);
-  const markInboxItemRead = useCloudMutation(cloudOperations.inbox.markRead);
-  const dismissInboxItem = useCloudMutation(cloudOperations.inbox.dismiss);
-  const suppressSharingReview = useCloudMutation(cloudOperations.inbox.suppressSharingReview);
+  const reconcileSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.reconcileSharingReview
+  );
+  const markInboxItemRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
+  const dismissInboxItem = useLegacyWorkspaceMutation(cloudOperations.inbox.dismiss);
+  const suppressSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.suppressSharingReview
+  );
   const handleShareLocalProjectWithTeam = useCallback(
     async (selection: LocalProjectSelection) => {
       if (!workspaceId) throw new Error('Workspace is not ready');
@@ -816,17 +830,17 @@ function WorkspaceChatLanding({
     (machineId: string) => onlineMachineIds.has(machineId as MachineId),
     [onlineMachineIds]
   );
-  const freshRepositories = useCloudQuery(
+  const freshRepositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const billingEntitlement = useCloudQuery(
     cloudOperations.billing.getWorkspaceBillingEntitlement,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const workspaceReposWithStatus = useCloudQuery(
+  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
     | {
         repoFullName: string;
@@ -835,11 +849,20 @@ function WorkspaceChatLanding({
       }[]
     | null
     | undefined;
-  const repositories = freshRepositories ?? cachedRepositories ?? undefined;
+  const repositories = useMemo(
+    () =>
+      legacyQueriesEnabled
+        ? (freshRepositories ?? cachedRepositories ?? undefined)
+        : legacyQueryStatus === 'blocked'
+          ? []
+          : undefined,
+    [legacyQueriesEnabled, legacyQueryStatus, freshRepositories, cachedRepositories]
+  );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
-  const repositoriesReady = freshRepositories !== undefined;
+  const repositoriesReady =
+    legacyQueryStatus === 'blocked' || (legacyQueriesEnabled && freshRepositories !== undefined);
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)
@@ -968,7 +991,7 @@ function WorkspaceChatLanding({
         reconcileWriterId: writerId,
         reconcileAttempt: attempt,
       });
-    })();
+    })().catch((error) => console.error('Failed to reconcile sharing review', error));
     return cancel;
   }, [
     activeOrganization?.id,
@@ -3013,10 +3036,6 @@ function WorkspaceChatLanding({
   }, [openAddProjectDialog]);
 
   const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
-  const handleCreateProject = useCallback(
-    () => requestProjectEditor({ kind: 'create' }),
-    [requestProjectEditor]
-  );
 
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
@@ -3073,7 +3092,7 @@ function WorkspaceChatLanding({
   );
 
   // ── Submit ──
-  const handleSubmit = async () => {
+  const handleSubmit = async (withoutMcp = false) => {
     if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
@@ -3108,16 +3127,13 @@ function WorkspaceChatLanding({
     }
     // The selection still comes from defaults that were never read; sending now
     // would create the conversation with no MCP servers instead of its defaults.
-    if (!mcpSelection.ready) {
+    if (!mcpSelection.ready && !withoutMcp) {
       captureSessionInputBlocked('mcp_defaults_not_ready');
-      setComposerError(
-        mcpSelection.defaultsFailed
-          ? t(
-              'chat.validation.mcpDefaultsFailed',
-              'Default MCP servers couldn’t be read, so this conversation can’t be created yet.'
-            )
-          : t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
-      );
+      if (!mcpSelection.defaultsFailed) {
+        setComposerError(
+          t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
+        );
+      }
       return;
     }
     const scopedMachineId =
@@ -3283,7 +3299,7 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
-        mcpServerIds: mcpSelection.selectedIds,
+        mcpServerIds: withoutMcp ? [] : mcpSelection.selectedIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
         memory: activeAgentRole?.runConfig.memory,
@@ -3340,6 +3356,7 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
+      mcpSelection.acceptSend(sessionId, withoutMcp);
       if (mobileNewChatOpen) {
         setMobileCreatedSessionId(sessionId);
         setRestoreMobileProject(false);
@@ -3764,6 +3781,19 @@ function WorkspaceChatLanding({
     },
     [handleSelectedLocalProjectChange, selectProjectGroup]
   );
+  // The project just created is what the user meant to work in.
+  const handleCreateProject = useCallback(
+    () =>
+      requestProjectEditor({
+        kind: 'create',
+        onCreated: (projectId) => handleDesktopProjectChange({ kind: 'group', projectId }),
+      }),
+    [handleDesktopProjectChange, requestProjectEditor]
+  );
+  const handleEditProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
+  );
   const desktopProjectGroupOptions = useMemo<UnifiedProjectGroupOption[]>(
     () =>
       workspaceProjects.flatMap((project) => {
@@ -4079,6 +4109,7 @@ function WorkspaceChatLanding({
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
           onCreateProject={handleCreateProject}
+          onEditProjectGroup={handleEditProjectGroup}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }
@@ -5414,7 +5445,9 @@ function WorkspaceChatLanding({
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
       if (!item) return;
-      void markInboxItemRead({ itemId: item._id });
+      void markInboxItemRead({ itemId: item._id }).catch((error) =>
+        console.error('Failed to mark inbox item read', error)
+      );
       if (item.kind === 'sharing_review') {
         if (sharingReviewState.actionTarget === 'machines') {
           openSettings('machines');
@@ -5442,7 +5475,10 @@ function WorkspaceChatLanding({
   const handleMobileInboxItemDismiss = useCallback(
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
-      if (item) void dismissInboxItem({ itemId: item._id });
+      if (item)
+        void dismissInboxItem({ itemId: item._id }).catch((error) =>
+          console.error('Failed to dismiss inbox item', error)
+        );
     },
     [dismissInboxItem, inboxRows]
   );
@@ -5581,14 +5617,18 @@ function WorkspaceChatLanding({
      but our session-action helpers want the branded type. */
   const handleMobileChatTogglePin = useCallback(
     (chatId: string, nextPinned: boolean) => {
-      void setSessionPinned(chatId as SessionId, nextPinned);
+      void setSessionPinned(chatId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [setSessionPinned]
   );
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const handleMobileChatArchive = useCallback(
     (chatId: string) => {
-      void archiveSessionWithConfirmation(chatId as SessionId);
+      void archiveSessionWithConfirmation(chatId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [archiveSessionWithConfirmation]
   );
@@ -6177,7 +6217,9 @@ function WorkspaceChatLanding({
               type="button"
               className="text-xs font-semibold text-primary hover:underline"
               onClick={() => {
-                void markInboxItemRead({ itemId: sharingReviewRow._id });
+                void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
+                  console.error('Failed to mark sharing review read', error)
+                );
                 openSettings(sharingReviewState.actionTarget ?? 'projects');
               }}
             >
@@ -6189,7 +6231,11 @@ function WorkspaceChatLanding({
           <button
             type="button"
             className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-            onClick={() => void suppressSharingReview({ itemId: sharingReviewRow._id })}
+            onClick={() =>
+              void suppressSharingReview({ itemId: sharingReviewRow._id }).catch((error) =>
+                console.error('Failed to suppress sharing review', error)
+              )
+            }
           >
             {t('inbox.sharingReview.neverRemind', "Don't remind me again")}
           </button>
@@ -6198,7 +6244,11 @@ function WorkspaceChatLanding({
       <button
         type="button"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
-        onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
+        onClick={() =>
+          void dismissInboxItem({ itemId: sharingReviewRow._id }).catch((error) =>
+            console.error('Failed to dismiss sharing review', error)
+          )
+        }
         aria-label={t('common.dismiss', 'Dismiss')}
       >
         <X className="h-4 w-4" aria-hidden="true" />
@@ -6250,7 +6300,11 @@ function WorkspaceChatLanding({
       />
     ) : null;
   const composerNoticeNode =
-    e2eeLocalAgentNode || sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    mcpSelection.defaultsFailed ||
+    e2eeLocalAgentNode ||
+    sharingReviewNoticeNode ||
+    sessionLimitNoticeNode ||
+    canMigratePi ? (
       <>
         <PiProviderMigrationCard
           count={migratablePiProviders.length}
@@ -6259,6 +6313,13 @@ function WorkspaceChatLanding({
           canMigrate={canMigratePi}
           onConfirm={() => void confirmPiMigration()}
         />
+        {mcpSelection.defaultsFailed ? (
+          <McpDefaultsRecovery
+            onRetry={mcpSelection.retryDefaults}
+            onSendWithoutMcp={() => void handleSubmit(true)}
+            disabled={submitting}
+          />
+        ) : null}
         {e2eeLocalAgentNode}
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
@@ -6634,25 +6695,27 @@ function WorkspaceChatLanding({
              cleanup scripts. */
           settingsTabContent={
             mobileProjectContext.kind === 'local' ? (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileLocalProjectSettings
-                  machineId={mobileProjectContext.machineId}
-                  projectId={mobileProjectContext.projectId}
-                  onRemoved={handleMobileProjectBack}
-                />
-              </>
+              <MobileLocalProjectSettings
+                machineId={mobileProjectContext.machineId}
+                projectId={mobileProjectContext.projectId}
+                onRemoved={handleMobileProjectBack}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             ) : (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileGithubProjectSettings repoFullName={mobileProjectContext.fullName} />
-              </>
+              <MobileGithubProjectSettings
+                repoFullName={mobileProjectContext.fullName}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             )
           }
         />

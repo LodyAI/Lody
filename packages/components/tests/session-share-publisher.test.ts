@@ -3,57 +3,116 @@ import { decodeShareHistoryBytes } from '@lody/shared/session-sharing';
 import { captureSessionShare } from '../src/lib/session-share-publisher';
 vi.mock('@/lib', () => ({ API_BASE_URL: 'https://api.example.test' }));
 
-it('acquires sources concurrently but preserves selected order and releases all leases', async () => {
-  let release!: () => void;
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const released: string[] = [],
-    syncReleased: string[] = [];
-  let acquired = 0;
-  const runtime = {
-    workspaceId: 'workspace',
-    prepareSessionTarget: async () => {},
-    acquireSessionStore: async (id: string) => {
-      acquired++;
-      if (acquired === 4) release();
-      // The first finishes after the others, reproducing completion-order bugs.
-      if (id === 's0') await ready;
-      return {
-        sessionId: id,
-        firstSynced: Promise.resolve(),
-        acquireSync: () => () => syncReleased.push(id),
-        sessionData: {
-          history: {
-            readAll: async () => [
-              { id: 't', role: 'assistant', items: [{ type: 'text', text: id.repeat(1000) }] },
-            ],
+it('waits for content admission before detaching a plaintext share package', async () => {
+  const mode = Promise.withResolvers<void>();
+  const waiting = Promise.withResolvers<void>();
+  let sourceRead = false;
+  const capturing = captureSessionShare({
+    runtime: {
+      workspaceId: 'workspace',
+      contentMode: 'plaintext',
+      waitForContentAdmission: () => {
+        waiting.resolve();
+        return mode.promise;
+      },
+      prepareSessionTarget: async () => {},
+      acquireSessionStore: async () => {
+        sourceRead = true;
+        return {
+          sessionId: 'root',
+          firstSynced: Promise.resolve(),
+          acquireSync: () => () => {},
+          sessionData: {
+            history: {
+              readAll: async () => [
+                {
+                  id: 'turn',
+                  role: 'user',
+                  items: [{ type: 'text', text: 'C1 private share sentinel' }],
+                },
+              ],
+            },
           },
-        },
-      };
+        };
+      },
+      releaseSessionStoreRef: () => {},
     },
-    releaseSessionStoreRef: (id: string) => released.push(id),
-  };
-  const result = await captureSessionShare({
-    runtime,
-    sessions: Array.from({ length: 4 }, (_, i) => ({
-      id: `s${i}`,
-      title: `Title ${i}`,
-      machineId: 'machine',
-    })),
-    rootSessionId: 's0',
+    sessions: [{ id: 'root', title: 'Private title' }],
+    rootSessionId: 'root',
     token: 'test',
     signal: new AbortController().signal,
   } as unknown as Parameters<typeof captureSessionShare>[0]);
-  for (const [i, conversation] of result.manifest.conversations.entries()) {
-    expect(conversation.title).toBe(`Title ${i}`);
-    const descriptor = result.manifest.objects.find((o) => o.id === conversation.historyObjectId)!;
-    const bytes = decodeShareHistoryBytes(result.objects.get(descriptor.id)!, descriptor);
-    expect(JSON.parse(new TextDecoder().decode(bytes))[0].items[0].text).toBe(`s${i}`.repeat(1000));
+  try {
+    await Promise.race([waiting.promise, capturing]);
+    expect(sourceRead).toBe(false);
+    mode.resolve();
+    const result = await capturing;
+    expect(result.manifest.conversations[0]?.title).toBe('Private title');
+  } finally {
+    mode.resolve();
+    await capturing;
   }
-  expect(released.sort()).toEqual(['s0', 's1', 's2', 's3']);
-  expect(syncReleased.sort()).toEqual(released);
 });
+
+it.each(['plaintext', 'e2ee'] as const)(
+  'captures %s sources through the same package path and releases all leases',
+  async (contentMode) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const released: string[] = [],
+      syncReleased: string[] = [];
+    let acquired = 0;
+    const runtime = {
+      contentMode,
+      workspaceId: 'workspace',
+      prepareSessionTarget: async () => {},
+      acquireSessionStore: async (id: string) => {
+        acquired++;
+        if (acquired === 4) release();
+        // The first finishes after the others, reproducing completion-order bugs.
+        if (id === 's0') await ready;
+        return {
+          sessionId: id,
+          firstSynced: Promise.resolve(),
+          acquireSync: () => () => syncReleased.push(id),
+          sessionData: {
+            history: {
+              readAll: async () => [
+                { id: 't', role: 'assistant', items: [{ type: 'text', text: id.repeat(1000) }] },
+              ],
+            },
+          },
+        };
+      },
+      releaseSessionStoreRef: (id: string) => released.push(id),
+    };
+    const result = await captureSessionShare({
+      runtime,
+      sessions: Array.from({ length: 4 }, (_, i) => ({
+        id: `s${i}`,
+        title: `Title ${i}`,
+        machineId: 'machine',
+      })),
+      rootSessionId: 's0',
+      token: 'test',
+      signal: new AbortController().signal,
+    } as unknown as Parameters<typeof captureSessionShare>[0]);
+    for (const [i, conversation] of result.manifest.conversations.entries()) {
+      expect(conversation.title).toBe(`Title ${i}`);
+      const descriptor = result.manifest.objects.find(
+        (o) => o.id === conversation.historyObjectId
+      )!;
+      const bytes = decodeShareHistoryBytes(result.objects.get(descriptor.id)!, descriptor);
+      expect(JSON.parse(new TextDecoder().decode(bytes))[0].items[0].text).toBe(
+        `s${i}`.repeat(1000)
+      );
+    }
+    expect(released.sort()).toEqual(['s0', 's1', 's2', 's3']);
+    expect(syncReleased.sort()).toEqual(released);
+  }
+);
 
 it('drains acquisitions after a sibling fails before releasing their source references', async () => {
   let fail!: () => void;

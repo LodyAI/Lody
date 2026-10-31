@@ -1,6 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { collectBootDiagnostics, renderBootFailure } from '../src/lib/boot-failure';
+import {
+  captureBootFailedBeacon,
+  collectBootDiagnostics,
+  renderBootFailure,
+} from '../src/lib/boot-failure';
 
 describe('collectBootDiagnostics', () => {
   it('formats an Error using its name + message', () => {
@@ -199,5 +203,40 @@ describe('renderBootFailure', () => {
     window.localStorage.setItem('vite-ui-theme', 'system');
     renderBootFailure(root, new Error('boom'));
     expect(root.querySelector<HTMLElement>('.lody-boot-failure')!.dataset.theme).toBeUndefined();
+  });
+});
+
+describe('boot failure telemetry boundary', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  it('uses fixed error types while preserving local diagnostics', async () => {
+    vi.stubEnv('VITE_LODY_PLATFORM', 'cloud');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_KEY', 'synthetic-key');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_HOST', 'http://127.0.0.1');
+    const bodies: Blob[] = [];
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      sendBeacon: (_url: string, body: Blob) => {
+        bodies.push(body);
+        return true;
+      },
+    });
+    const error = new Error('PRIVATE_MESSAGE');
+    error.name = 'PRIVATE_PATH';
+    captureBootFailedBeacon(error);
+    expect(bodies).toHaveLength(1);
+    const wire = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(bodies[0]!);
+    });
+    expect(wire).not.toContain('PRIVATE_');
+    expect(JSON.parse(wire).properties.error_type).toBe('Error');
+    expect(collectBootDiagnostics(error).message).toContain('PRIVATE_MESSAGE');
+    vi.stubEnv('VITE_LODY_PLATFORM', 'local');
+    captureBootFailedBeacon(error);
+    expect(bodies).toHaveLength(1);
   });
 });

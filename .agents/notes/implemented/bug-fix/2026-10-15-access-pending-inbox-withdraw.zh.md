@@ -27,8 +27,8 @@ PR: not created
 
 - **根因修复：撤回而不是释放。** 访问结果为 `indeterminate` 时，准备好的派发会标记 turn runtime。
   轮次结束时，如果 execution 从未开始 prompt 且未被取消，就调用新的 `ExecutionOwner.withdraw`。
-  SQLite `withdraw` 只在该 execution 没有释放回执、没有登记过资源、其输入也没有已 fence 或已提交
-  的批次时，才清除活动 execution。它不写回执，输入保持未结束。重试复用固定的 execution ID
+  SQLite `withdraw` 只在该 execution 没有释放回执、其输入也没有已 fence 或已提交
+  的批次时，才清除活动 execution；执行 owner 持有 Session 清理句柄后也拒绝撤回。它不写回执，输入保持未结束。重试复用固定的 execution ID
   `assistant:<userTurnId>`，如果写了回执，重试最终释放时就会与之冲突。已准备好的"人类输入 + 结果"
   批次保留其认领，重试时直接复用。
 - **访问仍在可见轮次内解析。** 现有契约要求访问待定期间 turn runtime 已经注册，这样校验过程中
@@ -57,7 +57,7 @@ PR: not created
 `apps/cli/tests/session-execution-service.test.ts` 使用真实 SQLite Inbox 和 Session 历史。
 `indeterminate` 派发后输入保持未结束、轮次仍可派发，随后 `allowed` 的重试只发送一次 prompt。
 预先存在的已结束输入会被退役，下一条消息正常执行。没有本次改动时两个测试都会失败，错误与线上
-一致。`apps/cli/src/orchestration/inbox/inbox.test.ts` 覆盖撤回条件：登记资源、fence 或释放之后
+一致。`apps/cli/src/orchestration/inbox/inbox.test.ts` 覆盖撤回条件：fence 或释放之后
 拒绝撤回，撤回后同一 ID 可以再次 begin。`operation-model.test.ts` 追踪了新事件。
 
 访问待定期间 daemon 崩溃时，仍会留下没有回执的活动 execution，这和以前一样，由现有的重启恢复

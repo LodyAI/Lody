@@ -1002,6 +1002,94 @@ test.describe('mobile first-send continuity', () => {
   }
 });
 
+test('wide native landing applies the keyboard offset once', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/iframe.html?id=chat-homedashboard--landing-native-keyboard&viewMode=story');
+  const draft = page.getByRole('textbox', { name: 'Draft' });
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  const before = (await draft.boundingBox())!;
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    for (const animation of document.getAnimations()) animation.finish();
+  });
+  await expect.poll(async () => Math.round(before.y - (await draft.boundingBox())!.y)).toBe(300);
+});
+
+test('ordinary native iPhone PR drawer keeps an unsent comment above repeated keyboard changes', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 852 });
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __LODY_NATIVE__: true,
+      Capacitor: { getPlatform: () => 'ios', isNativePlatform: () => true },
+    });
+  });
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.goto(
+    '/iframe.html?id=sessions-prtabview--mobile-native-keyboard-drawer&viewMode=story'
+  );
+  const drawer = page.locator('[data-slot="drawer-content"]');
+  const draft = drawer.locator('[data-pr-comment-composer] textarea');
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  await draft.fill('Unsent ordinary-phone PR draft');
+  await expect(draft).toBeFocused();
+  expect(await page.evaluate(() => window.__LODY_HORIZONTAL_DIVISION__ ?? null)).toBeNull();
+
+  for (const height of [300, 0, 300, 0]) {
+    await page.evaluate((keyboardHeight) => {
+      document.documentElement.style.setProperty('--native-keyboard-height', `${keyboardHeight}px`);
+      Object.defineProperty(window.visualViewport, 'height', {
+        configurable: true,
+        value: 852 - keyboardHeight,
+      });
+      window.visualViewport?.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(
+        new CustomEvent('lody:keyboard-resize', { detail: { height: keyboardHeight } })
+      );
+    }, height);
+    await expect
+      .poll(async () => {
+        const box = (await drawer.boundingBox())!;
+        return Math.round(box.y + box.height);
+      })
+      .toBe(852 - height);
+    const box = (await draft.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(852 - height);
+    await expect(draft).toHaveValue('Unsent ordinary-phone PR draft');
+    await expect(draft).toBeFocused();
+  }
+});
+
+test('mobile new-chat composer stays below a fold and retains its draft', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-long-draft&viewMode=story'
+  );
+  const lower = page.locator('[data-new-chat-fold-lower]');
+  const draft = lower.getByRole('combobox', { name: 'Message' });
+  await expect(draft).toBeVisible({ timeout: 30_000 });
+  const text = await draft.inputValue();
+  await page.evaluate(() => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 422, height: 30, viewportHeight: 844 };
+    window.dispatchEvent(new Event('lody:division-change'));
+  });
+  await expect.poll(async () => (await lower.boundingBox())?.y).toBe(452);
+  const draftBox = await draft.boundingBox();
+  expect(draftBox!.y).toBeGreaterThanOrEqual(452);
+  expect(draftBox!.y + draftBox!.height).toBeLessThanOrEqual(844);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    window.dispatchEvent(new Event('lody:keyboard-resize'));
+  });
+  await expect(lower).toHaveCSS('display', 'contents');
+  await expect(draft).toHaveValue(text);
+});
+
 test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
   await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
   await page.setViewportSize({ width: 390, height: 844 });

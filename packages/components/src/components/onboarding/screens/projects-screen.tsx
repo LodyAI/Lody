@@ -1,7 +1,13 @@
+import { Link } from '@tanstack/react-router';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
+import {
+  useLegacyWorkspaceQuery,
+  useLegacyWorkspaceAction,
+} from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCloudAction, usePlatformCapability } from '@lody/platform/react';
+import { usePlatformCapability } from '@lody/platform/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ExternalLink, FolderPlus, Github } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -21,7 +27,6 @@ import {
   localProbeResultAtom,
 } from '@/atoms/local-probe';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -151,6 +156,7 @@ export interface ProjectsScreenViewProps {
   localImportDisabledHint?: string;
   /** Whether the connect-GitHub action is enabled (workspace ready). */
   canConnectGitHub: boolean;
+  encryptedWorkspaceId?: string;
   /** True while the GitHub repository list is still loading. */
   loadingRepos: boolean;
   selectedProjectKey?: string | null;
@@ -172,6 +178,7 @@ export function ProjectsScreenView({
   localImportDisabledHint,
   canConnectGitHub,
   loadingRepos,
+  encryptedWorkspaceId,
   selectedProjectKey,
   onSelectProject,
   onAddLocal,
@@ -286,7 +293,12 @@ export function ProjectsScreenView({
           />
         </div>
 
-        {!hasAnyProject ? (
+        {encryptedWorkspaceId ? (
+          <Link to="/workspace/e2ee/$workspaceId" params={{ workspaceId: encryptedWorkspaceId }}>
+            {t('e2ee.control.title')}
+          </Link>
+        ) : null}
+        {loadingRepos || !hasAnyProject ? (
           <p {...stylex.props(surface.hint, surface.hintCentered)}>
             {loadingRepos
               ? t('onboarding.projects.loadingRepos', 'Loading your repositories…')
@@ -312,16 +324,19 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
   const analytics = useOnboardingAnalytics();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localCliStarting = useAtomValue(localCliStartingAtom);
   const setLocalProbeResult = useSetAtom(localProbeResultAtom);
   const getConvexErrorMessage = useConvexErrorMessage();
-  const repos = useCloudQuery(
+  const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const createGitHubInstallState = useCloudAction(cloudOperations.github.createGitHubInstallState);
+  const createGitHubInstallState = useLegacyWorkspaceAction(
+    cloudOperations.github.createGitHubInstallState
+  );
   const canUseGitHub = usePlatformCapability('githubIntegration');
 
   const { projects: localProjectIndex } = useVisibleLocalProjects();
@@ -453,7 +468,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
   ]);
 
   const handleConnectGitHub = useCallback(() => {
-    if (workspaceId === null) return;
+    if (workspaceId === null || legacyStatus !== 'allowed') return;
     const startedAtMs = analytics.now();
     analytics.capture('onboarding/operation_started', {
       step: 'projects',
@@ -508,6 +523,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
     createGitHubInstallState,
     getConvexErrorMessage,
     isElectron,
+    legacyStatus,
     t,
     workspaceId,
     workspaceSlug,
@@ -545,8 +561,11 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
       connectingGitHub={connectingGitHub}
       canImportLocal={canImportLocal}
       localImportDisabledHint={localImportDisabledHint}
-      canConnectGitHub={canUseGitHub && workspaceId !== null}
-      loadingRepos={canUseGitHub && workspaceId !== null && repos === undefined}
+      canConnectGitHub={canUseGitHub && workspaceId !== null && legacyStatus === 'allowed'}
+      encryptedWorkspaceId={legacyStatus === 'blocked' && workspaceId ? workspaceId : undefined}
+      loadingRepos={
+        canUseGitHub && workspaceId !== null && legacyStatus !== 'blocked' && repos === undefined
+      }
       selectedProjectKey={
         selectedProject?.kind === 'local'
           ? `local:${selectedProject.machineId}:${selectedProject.localProjectId}`

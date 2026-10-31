@@ -8,6 +8,10 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./automations": {
+      "types": "./src/automations/index.ts",
+      "import": "./src/automations/index.ts"
+    },
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
@@ -184,7 +188,8 @@
       "types": "./src/local-loro-writer/legacy.ts",
       "import": "./src/local-loro-writer/legacy.ts"
     },
-    "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts"
+    "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
+    "./e2ee-rpc": "./src/e2ee-rpc.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

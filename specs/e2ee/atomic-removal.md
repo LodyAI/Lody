@@ -1,6 +1,6 @@
 # Member removal and staged epoch publication
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 Translation: current
 
 [中文](atomic-removal.zh.md)
@@ -34,8 +34,17 @@ and reused commitments fail; publication clears the rotation reminder.
 
 Server acceptance must invalidate every device projection, credential and renewal
 permission in the same acceptance transaction. Auxiliary cleanup and rotation do
-not gate removal. MVP relies on the existing 15-minute content-token expiry; it
-does not actively disconnect issued tokens or long-lived connections. Honest
+not gate removal. The owner-approved MVP mitigation requests E2EE content tokens with at most
+480 seconds of validity. With the fixed gateway's 60-second JWT leeway and
+300-second SSE lifetime, the nominal read-delivery budget is 840 seconds
+(14 minutes), leaving 60 seconds toward a 15-minute target. This is not an
+end-to-end cutoff: request-body buffering, upstream waits/retries, clock error,
+response draining and storage commit are not bounded by that headroom. Previously
+issued 900-second tokens retain their old lifetime during rollout. Ordinary
+workspace tokens are unchanged. Strict absolute-expiry enforcement for SSE and
+long-poll, rechecks after buffering/retry, and storage-side commit deadlines are
+deferred upstream work, not launch blockers. The MVP does not actively revoke
+issued JWTs or disconnect a connection when a member is removed. Honest
 clients stop sync/remote execution and delete this encrypted workspace's local
 data when removal is learned on the next open. This does not erase maliciously
 retained copies. Readmission requires a new invitation, membership instance and
@@ -98,8 +107,7 @@ force a malicious publisher to make usable ciphertext or preserve it forever.
 
 ## Approval and evidence
 
-The design direction above is supplied by the user; this revised Spec remains
-**draft for approval**. It does not enable production, select vault/native custody,
+The user approved this revised Spec on 2026-10-28. It does not enable production, select vault/native custody,
 strict B, account recovery or an MLS replacement. See [producer and replay](../../packages/e2ee-core/src/internal/ledger/ADMISSION.md),
 [staging port](../../packages/e2ee-core/src/internal/keys/staging.ts),
 [rotation workflow](../../packages/e2ee-core/src/internal/keys/publisher.ts) and

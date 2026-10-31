@@ -1,0 +1,40 @@
+{
+  "name": "@lody/e2ee-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./pairing": "./src/pairing.ts",
+    "./history": "./src/admission.ts",
+    "./errors": "./src/errors.ts",
+    "./maintenance": "./src/maintenance.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run --no-file-parallelism",
+    "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts'",
+    "test:browser": "vitest run --config vitest.browser.config.ts"
+  },
+  "dependencies": {
+    "@lody/e2ee-core": "workspace:*",
+    "@lody/cloud-api": "workspace:*",
+    "@lody/platform": "workspace:*",
+    "@lody/shared": "workspace:*",
+    "@lody/loro-streams-rpc": "workspace:*",
+    "@noble/hashes": "2.2.0",
+    "effect": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "3.2.4",
+    "oxfmt": "^0.65.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "esbuild": "0.28.2",
+    "@playwright/test": "1.58.2"
+  }
+}

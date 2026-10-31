@@ -14,6 +14,8 @@ opening files through the session's existing Markdown file-link boundary.
 No attachment upload or additional filesystem authority is introduced.
 Code examples and incomplete or invalid citations remain non-card content.
 
+Conversation rendering confirms relative citations through the owning file index; absolute paths render immediately. Copy retains the original unencoded path and never invokes file discovery.
+
 ## Decision and evidence
 
 A remark transform runs before URL/path linkification. It trims surrounding path

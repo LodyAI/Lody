@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { Cause, Effect, Option } from 'effect';
+import { Cause, Effect, FileSystem, Option } from 'effect';
 import { isSafeProjectPath, projectRepositoryUrlIdentity } from '@lody/shared';
 import { WorktreeGit, WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
 import {
@@ -45,6 +45,49 @@ const canReferenceProjectRepository = Effect.fn('canReferenceProjectRepository')
     })
   );
   return partialCloneConfig === '';
+});
+
+/** Optional local optimization: never borrow through symlinks, alternates or another repository. */
+export const findProjectSubmoduleReference = Effect.fn('findProjectSubmoduleReference')(function* (
+  repositoryPath: string,
+  expectedRepositoryUrl: string
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const git = yield* WorktreeGit;
+  const inspect = Effect.gen(function* () {
+    if (!(yield* fs.exists(path.join(repositoryPath, '.git')))) return undefined;
+    const root = yield* fs.realPath(repositoryPath);
+    if (root !== path.resolve(repositoryPath)) return undefined;
+    const run = (args: readonly string[]) => git.run({ cwd: root, args });
+    if ((yield* run(['rev-parse', '--show-toplevel'])) !== root) return undefined;
+    const url = yield* run(['config', '--get', 'remote.origin.url']);
+    if (projectRepositoryUrlIdentity(url) !== projectRepositoryUrlIdentity(expectedRepositoryUrl))
+      return undefined;
+    if (!(yield* canReferenceProjectRepository(root))) return undefined;
+    const alternates = yield* run([
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'objects/info/alternates',
+    ]);
+    if (yield* fs.exists(alternates)) return undefined;
+    return root;
+  });
+  return yield* inspect.pipe(
+    Effect.catchCause((cause) => {
+      const error = Cause.findErrorOption(cause);
+      // A missing/stale optional source must not block ordinary cloning. Preserve
+      // mixed Causes and process cleanup failures rather than treating them as a miss.
+      if (
+        cause.reasons.length === 1 &&
+        Option.isSome(error) &&
+        (error.value instanceof WorktreeGitCommandFailed || error.value._tag === 'PlatformError')
+      ) {
+        return Effect.as(Effect.logDebug('Skipping unavailable submodule reference'), undefined);
+      }
+      return Effect.failCause(cause);
+    })
+  );
 });
 
 /** Validates a configured Member against the parent's actual gitlink before any checkout. */

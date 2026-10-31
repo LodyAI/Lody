@@ -15,7 +15,7 @@ Translation: current
 
 ## 决定与发现
 
-[明确的 note 更新条件](../../implemented/process/2026-09-07-explicit-agent-note-triggers.zh.md)细化了本提案的记录门槛，包含纯设计结论；本提案其他部分仍待评审。
+[明确的 note 更新条件](../../archived/process/2026-09-07-explicit-agent-note-triggers.zh.md)细化了本提案的记录门槛，包含纯设计结论；本提案其他部分仍待评审。
 
 notes 按生命周期和决策类型归档，本篇属于待 review 的 process 提案；不要求普通小修复写 note。
 

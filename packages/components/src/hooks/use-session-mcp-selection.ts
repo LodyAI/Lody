@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { createStore, createStaticStore, type MutableStore } from '@lody/platform';
+import { useStoreValue } from '@lody/platform/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import {
   getEffectiveDefaultMcpIds,
@@ -8,8 +10,9 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { useWorkspaceCatalog } from './use-workspace-catalog';
+import { retryWorkspaceCatalog } from '@/lib/workspace-catalog-room';
 
 export type SessionMcpSelection = {
   servers: WorkspaceMcpServerMeta[];
@@ -18,13 +21,23 @@ export type SessionMcpSelection = {
   /** Ready to hand to `AttachmentAddMenu`; undefined when the catalog is empty. */
   menu: AttachmentAddMenuMcp | undefined;
   /**
-   * Whether `selectedIds` can be sent. False only while a new conversation's
+   * Whether `selectedIds` can be sent. False only while its
    * selection still comes from a local catalog that has not been read: sending
    * then would silently author a turn with no MCP servers.
    */
   ready: boolean;
   /** The defaults this selection depends on could not be read at all. */
   defaultsFailed: boolean;
+  retryDefaults: () => void;
+  /** Renderer-local recovery, recorded only after a send is accepted. */
+  acceptSend: (sessionId: string, skipMcpOnce?: boolean) => void;
+  recoveryGeneration: { readonly current: number };
+  send: (
+    sessionId: string,
+    options: { mcpServerIds?: readonly McpServerId[]; skipMcpOnce?: boolean } | undefined,
+    dispatch: (ids: readonly McpServerId[]) => Promise<boolean>,
+    onBlocked: (failed: boolean) => void
+  ) => Promise<boolean>;
 };
 
 /** The project a NEW conversation is created in; its defaults preselect servers. */
@@ -35,6 +48,18 @@ export type SessionMcpDefaultsTarget = {
 };
 
 const NO_IDS: McpServerId[] = [];
+// Recovery belongs to this renderer/runtime, never the durable turn or daemon.
+// A successful ordinary send consumes the entry; retiring the runtime releases it.
+const recoveryStores = new WeakMap<WorkspaceRuntime, MutableStore<ReadonlySet<string>>>();
+const NO_RECOVERY = createStaticStore<ReadonlySet<string>>(new Set());
+function recoveryStore(runtime: WorkspaceRuntime) {
+  let store = recoveryStores.get(runtime);
+  if (!store) {
+    store = createStore<ReadonlySet<string>>(new Set());
+    recoveryStores.set(runtime, store);
+  }
+  return store;
+}
 
 /**
  * The MCP selection a composer sends with.
@@ -42,6 +67,8 @@ const NO_IDS: McpServerId[] = [];
  * - An existing conversation keeps what it recorded — including `[]`, which
  *   nothing here may overwrite — and one that never recorded any stays empty:
  *   defaults are for creating a conversation, not for enrolling an old one.
+ *   A successful one-send opt-out explicitly resumes defaults in this renderer
+ *   until the next ordinary accepted send records the normal selection.
  * - A new conversation starts from its target project's defaults (or the
  *   workspace's, when it has no project or the project has no list).
  *
@@ -62,10 +89,20 @@ export function useSessionMcpSelection(
 ): SessionMcpSelection {
   const { existingSession, disabled, scopeKey, defaultsTarget } = options;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const recoveryGeneration = useRef(0);
+  useEffect(
+    () => () => {
+      recoveryGeneration.current += 1;
+    },
+    [runtime, scopeKey]
+  );
+  const recovery = useStoreValue(runtime ? recoveryStore(runtime) : NO_RECOVERY);
+  const resumeDefaults = !!scopeKey && recovery.has(scopeKey);
+  const inheritDefaults = !existingSession || resumeDefaults;
   const { servers, synced, loaded, failed, projectMcpDefaults } = useWorkspaceCatalog();
-  const projectKey = existingSession
-    ? undefined
-    : getProjectMcpKey(defaultsTarget?.project, defaultsTarget?.machineId);
+  const projectKey = inheritDefaults
+    ? getProjectMcpKey(defaultsTarget?.project, defaultsTarget?.machineId)
+    : undefined;
   const preference = projectKey ? projectMcpDefaults[projectKey] : undefined;
   const persistedKey = persistedIds ? `ids:${persistedIds.join('\0')}` : 'none';
   const scope = [runtime?.workspaceId ?? '', scopeKey ?? '', projectKey ?? '', persistedKey].join(
@@ -81,10 +118,11 @@ export function useSessionMcpSelection(
   // gets an identity-stable selection; a fresh array here would invalidate
   // every send-payload/menu memo built on `selectedIds` each render.
   const defaultSelectedIds = useMemo(
-    () => (existingSession ? NO_IDS : getEffectiveDefaultMcpIds(servers, preference)),
-    [existingSession, preference, servers]
+    () => (inheritDefaults ? getEffectiveDefaultMcpIds(servers, preference) : NO_IDS),
+    [inheritDefaults, preference, servers]
   );
-  const baseSelection = scopedOverride ?? persistedIds ?? defaultSelectedIds;
+  const baseline = resumeDefaults ? undefined : persistedIds;
+  const baseSelection = scopedOverride ?? baseline ?? defaultSelectedIds;
   const selectedIds = useMemo(() => {
     // An empty catalog is authoritative only after the first remote sync. Until
     // then, preserve persisted ids so a fast send cannot erase a session's MCP
@@ -95,7 +133,7 @@ export function useSessionMcpSelection(
   }, [baseSelection, servers, synced]);
 
   const dependsOnDefaults =
-    !existingSession && scopedOverride === undefined && persistedIds === undefined;
+    inheritDefaults && scopedOverride === undefined && baseline === undefined;
   // Defaults come from the locally read snapshot. Remote catch-up never gates a
   // send: a slow or offline room would otherwise block every new conversation,
   // and the selection stays visible and editable in the composer meanwhile.
@@ -123,6 +161,37 @@ export function useSessionMcpSelection(
     [disabled, existingSession, selectedIds, servers, setSelectedIds]
   );
 
+  const retryDefaults = useCallback(() => {
+    if (runtime) retryWorkspaceCatalog(runtime);
+  }, [runtime]);
+
+  const acceptSend = useCallback(
+    (sessionId: string, skipMcpOnce = false) => {
+      recoveryGeneration.current += 1;
+      if (!runtime) return;
+      const store = recoveryStore(runtime);
+      if (store.get().has(sessionId) === skipMcpOnce) return;
+      const next = new Set(store.get());
+      if (skipMcpOnce) next.add(sessionId);
+      else next.delete(sessionId);
+      store.set(next);
+    },
+    [runtime]
+  );
+
+  const send: SessionMcpSelection['send'] = useCallback(
+    async (sessionId, sendOptions, dispatch, onBlocked) => {
+      if (sendOptions?.mcpServerIds === undefined && !ready) {
+        onBlocked(dependsOnDefaults && failed);
+        return false;
+      }
+      const accepted = await dispatch(sendOptions?.mcpServerIds ?? selectedIds);
+      if (accepted) acceptSend(sessionId, sendOptions?.skipMcpOnce);
+      return accepted;
+    },
+    [acceptSend, dependsOnDefaults, failed, ready, selectedIds]
+  );
+
   return {
     servers,
     selectedIds,
@@ -130,5 +199,9 @@ export function useSessionMcpSelection(
     menu,
     ready,
     defaultsFailed: dependsOnDefaults && failed,
+    retryDefaults,
+    acceptSend,
+    recoveryGeneration,
+    send,
   };
 }

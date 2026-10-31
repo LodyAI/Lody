@@ -18,6 +18,7 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { EDGE_ZONE_PX } from './mobile-edge-back-swipe';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
 
 export type MobileNewChatSheetLabels = {
   /** Accessible page title. */
@@ -234,6 +235,12 @@ export function MobileNewChatSheetContent({
   onClose,
 }: MobileNewChatSheetContentProps & { onClose?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
+  const setScrollElement = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element;
+    setScrollArea(element);
+  }, []);
+  const fold = useHorizontalFoldLayout(scrollArea, true);
   useKeyboardAwareScrollIntoView(scrollRef);
   const headerInset = isNativeAppShell() ? 'calc(3rem + var(--safe-area-top, 0px))' : '3rem';
   return (
@@ -254,9 +261,13 @@ export function MobileNewChatSheetContent({
             title={targetNode}
           />
           <div
-            ref={scrollRef}
+            ref={setScrollElement}
             className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', scrollAreaClassName)}
-            style={{ paddingTop: headerInset, scrollPaddingTop: headerInset }}
+            style={{
+              paddingTop: headerInset,
+              scrollPaddingTop: headerInset,
+              maxHeight: fold?.messageHeight,
+            }}
           >
             {labels.description ? (
               <p className="text-xs text-muted-foreground">{labels.description}</p>
@@ -266,10 +277,32 @@ export function MobileNewChatSheetContent({
             <div className="h-6 shrink-0" />
           </div>
           <div
-            data-new-chat-no-edge-back=""
-            className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: true })}
+            data-new-chat-fold-lower=""
+            style={
+              fold
+                ? {
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    top: fold.lowerTop,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'flex-end',
+                    minHeight: 0,
+                  }
+                : { display: 'contents' }
+            }
           >
-            <ConversationColumn>{composer}</ConversationColumn>
+            <div
+              data-new-chat-no-edge-back=""
+              className={getSessionChatInputAreaShellClassName({
+                protectFromEdgeBackZone: true,
+                liftAboveKeyboard: true,
+              })}
+            >
+              <ConversationColumn>{composer}</ConversationColumn>
+            </div>
           </div>
         </SessionConversationPage>
       </Coordinator>

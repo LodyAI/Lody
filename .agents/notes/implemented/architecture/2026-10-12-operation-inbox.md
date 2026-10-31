@@ -25,11 +25,11 @@ The 2026-10-12 research borrowed durable queuing, separate admission and batched
 
 ## Ownership, recovery and compatibility
 
-Effect remains locked at 4.0.2. `inbox/service.ts` owns the repository, signals and scoped fibers; `operationInboxLegacy` bridges Session input; `operation-coordinator.ts` and `workspace-cleanup-legacy.ts` are registered application entries. Platform Session resource observers bridge acquisition callbacks synchronously before spawn. Whole Session/ACP/history migration remains unfinished, as recorded in the [Effect ledger](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger).
+Effect remains locked at 4.0.2. `inbox/service.ts` owns the repository, signals and scoped fibers; `operationInboxLegacy` bridges Session input; `operation-coordinator.ts` and `workspace-cleanup-legacy.ts` are registered application entries. Whole Session/ACP/history migration remains unfinished, as recorded in the [Effect ledger](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger).
 
 Review of `40ef5c29cbe496f28f17ab10297cf37c3c48030f` found three adapter defects, addressed by the following contracts:
 
-1. Journal every resource acquisition before spawning, mark incomplete acquisition persistently, union later terminal/process roots, and retain all Session owners and the producing host PID. Reopen requires a complete resource set and proven disappearance. Missing identities, Windows and unproven release remain blocked; never signal a possibly reused PID.
+1. Retain every attached Session owner's terminate handle for cleanup. The [availability decision](../bug-fix/2026-10-29-inbox-no-durable-block.md) supersedes the original resource journal and release-proof admission: restart retires interrupted input without replay; failed release detaches the old Agent and never blocks successors; process identities are no longer journaled. Never signal a possibly reused PID.
 2. Trusted renderer/non-delegated CLI sends persist `humanInputReceipts` before activation or queuing. History fallback restores matching authorization after lost or oversized RPC; generic history, foreign receipts and canceled/terminal inputs cannot clear pause.
 3. Coordinator `recoverStop()` calls independent `recoverClose()` to repair durable settlement/release/pause writes. Preserve the original failed receipt and recovery owner; never replay transport or treat repeated Scope close as recovery.
 
@@ -39,7 +39,24 @@ Source provenance is separate from display snapshots. A retained current Operati
 
 Stop request details now live in one replaceable `cancelRequest` control-document slot, rather than an extra metadata ID field. The renderer persists the payload before publishing `lastCanceledTurn = cancel-request:<id>`; RPC remains an immediate fast path with the same ID. The watcher waits for matching control data and processes control arrivals on its separate cancellation chain. Legacy turn-ID markers remain supported. SQLite owns durable deduplication, so reopen and late RPC/fallback cannot pause fresh input again, while a new click has an independent ID. Resource ownership, actual-release handoff and failed-pause recovery are unchanged; this adapter adjustment does not extend the native migration.
 
-Integration with main `09407b3b7` preserves raw ACP drain → presence clear → Turn/Inbox handoff. Presence cleanup failure retains the old execution owner. Daemon shutdown cancels history-owned work and drains/recover-closes Inbox. Merged dependency pins remain unchanged, including Streams 0.17.0 and Effect 4.0.2. Capability registration retains Inbox v2 alongside main’s new Magpie/DSH capabilities.
+Integration with main `09407b3b7` preserves raw ACP drain → presence clear → Turn/Inbox handoff. Presence cleanup failure is reported; the old Agent is detached and its turn slot returned. Daemon shutdown cancels history-owned work and drains/recover-closes Inbox. Merged dependency pins remain unchanged, including Streams 0.17.0 and Effect 4.0.2. Capability registration retains Inbox v2 alongside main’s new Magpie/DSH capabilities.
+
+## Database startup degradation
+
+SQLite open/activation failure belongs to the optional coordinator, not workspace
+startup. Ordinary human dispatch uses the existing no-Inbox path; dependent tools
+check the daemon's current availability before touching storage, including cached
+connections. This avoids accepting delegated work whose receipt cannot run.
+The facade owns one startup timer, doubles from 30 seconds to a 10-minute cap,
+detaches Inbox on any synchronous startup failure, drains partial resources through
+the stop owner before retry without canceling or waiting for ordinary turns, and cancels retry on stop/recoverStop.
+Incompatible schema/protocol needs a compatible binary, so it does not auto-retry.
+The local runtime warning clears on recovery. Existing unknown-submission and
+resource-release rules remain authoritative; degradation cannot prove release.
+Startup remains in the registered application facade: migrating unfinished
+Session/ACP adapters would broaden this fix without improving its boundary.
+The coordinator, MCP and execution suites cover startup failure and recovery;
+installed-desktop and full-disk acceptance remain separate.
 
 ## Native orchestration unit
 
@@ -95,18 +112,10 @@ upstream Session/ACP/history migration completion is not expanded.
 
 Merged base `0b46cc2d8e33c6feafd08c00f51089456ab1e732` without rewriting PR history. Conflict resolution keeps main's reusable Effect function conversions and lint installation/check scripts, together with Inbox admission/non-replay, exact-input notification attribution and sandbox recovery roots. The six execution, sandbox, Coordinator and Inbox suites pass 391 cases after resolution. Root types, lint (including Effect lint), format, quick boundaries and docs pass. Full CLI tests report 4137 passed, four skipped and the same Git transport failure observed before this merge; the root check remains incomplete.
 
-The blocked-restart review was reproduced on `ea9fb9b0f` with disk SQLite reopen:
-a missing resource row cannot enter automatic enumeration; an incomplete journal
-cannot prove release even with an empty process table. The fix retains this conservative
-automatic rule and adds `session recover-inbox`, a local offline operator entry.
-A scoped platform adapter holds the Host lease before opening SQLite; all external I/O
-stays there, while the native workflow checks explicit attestation and exact execution.
-Known live roots, failed probes and cross-platform identities reject recovery. The
-operator must independently confirm unrecorded resources as well. One transaction pauses,
-retires old input, confirms release and records the attestation; failures roll it all back.
-Unknown batch receipts remain unknown, no automatic intent is created, and only fresh
-trusted human input resumes. No MCP recovery tool or remote RPC was added. The existing
-Promise Host-lease capability remains a named platform adapter, not a new native migration claim.
+The [availability decision](../bug-fix/2026-10-29-inbox-no-durable-block.md) replaces startup PID proof,
+durable blocking and offline operator recovery. Their previous rationale is retained
+in the [archived manual recovery record](../../archived/bug-fix/2026-10-21-manual-inbox-recovery.md).
+Unknown submissions remain non-replayable; queued inputs/results survive retirement.
 
 Admission gates now count queued waiters and holders and evict only at zero references;
 projected batch cache entries are pruned against retained SQLite receipts. Named reconcile
@@ -267,31 +276,8 @@ Finalization rechecks Stop under the SQLite writer transaction and normalizes bo
 
 Follow-up implementation: [PR #1553](https://github.com/LodyAI/Lody/pull/1553).
 
-## Deterministic operator recovery verification (2026-10-17)
+## Superseded operator recovery
 
-The two Inbox failures observed during [Roost PR #1626](https://github.com/LodyAI/Lody/pull/1626)
-were reproduced with the same controlled memory-probe failure in an archive of
-its unmodified main baseline `fb4d565fa235fc56f626aef50bf4721ad6e5ea42`.
-The process sampler, operator adapter, recovery probe and recovery predicate have
-identical Git blobs in that baseline and the original Roost head `b625473e3`.
-This establishes the pre-existing warning behavior, rather than inferring
-independence merely because the files were unchanged.
-
-The success tests depended on the real machine's process and optional macOS
-memory sampling. Their success therefore required a warning-free host snapshot.
-The operator suite now supplies deterministic command output at the process I/O
-boundary, while retaining the real Host lease, SQLite reopen, scoped platform
-adapter and native workflow. Assertions cover paused recovery without replay,
-absent/live known roots, unavailable probes, and the existing macOS memory-warning
-refusal. A failure still retains the blocked execution and prevents its successor;
-Scope exit still releases the operator lease.
-
-This change fixes test determinism. It does not relax production release checks
-or change their existing treatment of memory warnings. A separate PID-only probe
-would require its own bounded behavior change and review. Effect 4.0.2, native
-ownership boundaries and migration ledger facts remain unchanged.
-
-Final verification for this fixture correction: all 63 Inbox cases and the root
-`pnpm check` pass, including 4287 CLI and 5402 component cases. Formatting and
-documentation checks pass; missing isolated Kimi/Pi checkouts were initialized at
-the existing pins without changing the dependency graph or their tracked source.
+The [availability decision](../bug-fix/2026-10-29-inbox-no-durable-block.md) removes the operator workflow
+and its process-probe tests. Their conservative release proof could preserve an
+unusable conversation indefinitely; process cleanup is now separate from admission.

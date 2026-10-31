@@ -1,54 +1,6 @@
-import {
-  ACP_PLAN_PERMISSION_MODE_ID,
-  ACP_REASONING_EFFORT_CONFIG_ID,
-  isAcpFastModeConfigId,
-  isAcpPlanModeConfigOption,
-  isAcpThoughtLevelConfigOption,
-  isSensitiveAcpConfigOptionId,
-  type ACPSessionId,
-  type AcpConfigOptionValue,
-  type AgentConfigCliType,
-  type SessionId,
-  type SessionAcpRuntimeConfigPatch,
-} from '@lody/shared';
-import type { AgentClient } from '@/agent/agent-client';
-import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
-import type { Logger } from '@/utils/logger';
-
-const MAX_ACP_CONFIG_VALUE_LOG_LENGTH = 160;
-
-function formatAcpConfigValueForLog(configId: string, value: AcpConfigOptionValue): string {
-  if (isSensitiveAcpConfigOptionId(configId)) {
-    return '<redacted>';
-  }
-  if (typeof value === 'string') {
-    const normalized = value.replace(/\s+/g, ' ').trim();
-    const truncated =
-      normalized.length > MAX_ACP_CONFIG_VALUE_LOG_LENGTH
-        ? `${normalized.slice(0, MAX_ACP_CONFIG_VALUE_LOG_LENGTH)}...`
-        : normalized;
-    return JSON.stringify(truncated);
-  }
-  return String(value);
-}
-
-function shouldSkipFableFastModeDisable(args: {
-  modelId: string | undefined;
-  configId: string;
-  value: AcpConfigOptionValue;
-}): boolean {
-  return (
-    args.modelId?.toLowerCase().includes('fable') === true &&
-    isAcpFastModeConfigId(args.configId) &&
-    args.value === false
-  );
-}
-
-export type AcpSessionConfigTarget = {
-  sessionId: SessionId;
-  acpSessionId: ACPSessionId | null;
-  agentClient: AgentClient | null;
-};
+import { Effect } from 'effect';
+import type { AcpConfigOptionValue, AgentConfigCliType } from '@lody/shared';
+import { AcpConfiguration, AcpConfigurationError } from '@/agent/acp-configuration';
 
 export type AcpSessionRunConfig = {
   cliType?: AgentConfigCliType;
@@ -58,172 +10,36 @@ export type AcpSessionRunConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
 };
 
-type AcpSessionRunConfigApplyResult = {
-  /** Every selection rejected by the agent, retained for diagnostics. */
-  rejectedSelections: string[];
-  /** Rejections that should become a user-visible Agent warning. */
-  warningSelections: string[];
-  /** Agent-confirmed state after applying the requested selections. */
-  runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
-};
+/** All supplied values are requirements; only confirmed values may reach the next prompt. */
+export const applyAcpSessionRunConfig = Effect.fnUntraced(function* (config: AcpSessionRunConfig) {
+  const client = yield* AcpConfiguration;
+  const modeOption = client.options.find((option) => option.category === 'mode');
+  const modelOption = client.options.find((option) => option.category === 'model');
+  const values = config.configOptionValues ?? {};
+  const optionMode = modeOption ? values[modeOption.id] : undefined;
+  const optionModel = modelOption ? values[modelOption.id] : undefined;
+  const mode = config.modeId ?? (typeof optionMode === 'string' ? optionMode : undefined);
+  const model = config.modelId ?? (typeof optionModel === 'string' ? optionModel : undefined);
 
-function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
-  return config.agentType === 'codex' || config.agentType === 'claude';
-}
-
-function isKnownRunConfigOption(
-  configId: string,
-  agentConfigOptions: ReadonlyArray<{ id: string; category?: string | null }>
-): boolean {
-  if (
-    configId === ACP_REASONING_EFFORT_CONFIG_ID ||
-    isAcpFastModeConfigId(configId) ||
-    isAcpPlanModeConfigOption({ id: configId })
-  ) {
-    return true;
-  }
-  const option = agentConfigOptions.find((candidate) => candidate.id === configId);
-  return option
-    ? isAcpThoughtLevelConfigOption({ id: option.id, category: option.category ?? undefined })
-    : false;
-}
-
-export async function applyAcpSessionRunConfig(args: {
-  session: AcpSessionConfigTarget;
-  config: AcpSessionRunConfig;
-  logger: Logger;
-  signal?: AbortSignal;
-}): Promise<AcpSessionRunConfigApplyResult> {
-  const { session, config, logger, signal } = args;
-  const assertNotAborted = (): void => {
-    if (!signal?.aborted) return;
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new Error('ACP run configuration was aborted');
-  };
-  const { sessionId, acpSessionId, agentClient } = session;
-  const configOptionValues = config.configOptionValues;
-  const configOptionEntries = configOptionValues ? Object.entries(configOptionValues) : [];
-  const configOptionSummary =
-    configOptionEntries.length > 0
-      ? configOptionEntries
-          .map(([configId, value]) => `${configId}=${formatAcpConfigValueForLog(configId, value)}`)
-          .join(',')
-      : 'none';
-  logger.debug(
-    `[${sessionId}] applyAcpSessionRunConfig called (cliType=${config.cliType ?? 'unknown'} agentType=${
-      config.agentType ?? 'unknown'
-    } modeId=${config.modeId ?? 'none'} modelId=${
-      config.modelId ?? 'none'
-    } configOptions=${configOptionEntries.length} configOptionValues=${configOptionSummary})`
-  );
-  if (!agentClient?.isCreated() || !acpSessionId) {
-    logger.debug(`[${sessionId}] applyAcpSessionRunConfig skipped (agentClient not ready)`);
-    return { rejectedSelections: [], warningSelections: [], runtimeConfigPatch: null };
+  if (mode !== undefined) yield* client.setMode(mode);
+  if (model !== undefined) yield* client.setModel(model);
+  for (const [id, value] of Object.entries(values)) {
+    if (id === modeOption?.id || id === modelOption?.id) continue;
+    yield* client.setOption(id, value);
   }
 
-  const rejectedSelections: string[] = [];
-  const warningSelections: string[] = [];
-  let confirmedLegacyModeId: string | undefined;
-  let confirmedLegacyModelId: string | undefined;
-  const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
-  const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
-  const recordRejection = (selection: string, suppressWarning: boolean): void => {
-    rejectedSelections.push(selection);
-    if (!suppressWarning) {
-      warningSelections.push(selection);
-    }
-  };
-  const modeConfigId =
-    agentConfigOptions.find((option) => option.category === 'mode')?.id ?? 'mode';
-  const modelConfigId =
-    agentConfigOptions.find((option) => option.category === 'model')?.id ?? 'model';
-  const configOptionModeId = configOptionValues?.[modeConfigId];
-  const targetModeId =
-    config.modeId ?? (typeof configOptionModeId === 'string' ? configOptionModeId : undefined);
-  const configOptionModelId = configOptionValues?.[modelConfigId];
-  const targetModelId =
-    config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
-
-  // Modes can change the model, and models can reset model-dependent options.
-  // Resolve both representations before applying effort, regardless of key order.
-  if (targetModeId) {
-    assertNotAborted();
-    try {
-      await agentClient.setSessionMode?.(acpSessionId, targetModeId);
-      confirmedLegacyModeId = targetModeId;
-    } catch (error) {
-      assertNotAborted();
-      recordRejection(
-        `mode=${JSON.stringify(targetModeId)}`,
-        suppressKnownRunConfigWarnings && targetModeId === ACP_PLAN_PERMISSION_MODE_ID
-      );
-      logger.debug(
-        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(targetModeId)}: ${String(error)}`
-      );
-    }
-    assertNotAborted();
+  const confirmed = yield* client.read;
+  if (mode !== undefined && confirmed.modeId !== mode) {
+    return yield* Effect.fail(new AcpConfigurationError('mode', 'unconfirmed'));
   }
-  if (targetModelId) {
-    assertNotAborted();
-    try {
-      await agentClient.unstable_setSessionModel?.(acpSessionId, targetModelId);
-      confirmedLegacyModelId = targetModelId;
-    } catch (error) {
-      assertNotAborted();
-      recordRejection(`model=${JSON.stringify(targetModelId)}`, false);
-      logger.debug(
-        `[${sessionId}] Failed to set ACP model ${JSON.stringify(targetModelId)}: ${String(error)}`
-      );
-    }
-    assertNotAborted();
+  if (model !== undefined && confirmed.modelId !== model) {
+    return yield* Effect.fail(new AcpConfigurationError('model', 'unconfirmed'));
   }
-
-  for (const [configId, value] of configOptionEntries) {
-    assertNotAborted();
-    if (configId === modeConfigId || configId === modelConfigId) {
-      continue;
-    }
-    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
-      continue;
-    }
-    try {
-      await agentClient.setSessionConfigOption(acpSessionId, configId, value);
-    } catch (error) {
-      assertNotAborted();
-      recordRejection(
-        `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
-        suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
-      );
-      logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
-    }
-    assertNotAborted();
-  }
-
-  assertNotAborted();
-  logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
-  const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
-    acpSessionId,
-    agentClient.getConfigOptions()
-  );
-  if (confirmedLegacyModeId) {
-    runtimeConfigPatch.modeId = confirmedLegacyModeId;
-    if (
-      !isSensitiveAcpConfigOptionId(modeConfigId) &&
-      agentConfigOptions.some((option) => option.id === modeConfigId)
-    ) {
-      runtimeConfigPatch.configOptionValues = {
-        ...runtimeConfigPatch.configOptionValues,
-        [modeConfigId]: confirmedLegacyModeId,
-      };
+  for (const [id, value] of Object.entries(values)) {
+    if (id === modeOption?.id || id === modelOption?.id) continue;
+    if (confirmed.configOptionValues?.[id] !== value) {
+      return yield* Effect.fail(new AcpConfigurationError(id, 'unconfirmed'));
     }
   }
-  if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
-    runtimeConfigPatch.modelId = confirmedLegacyModelId;
-  }
-  return {
-    rejectedSelections,
-    warningSelections,
-    runtimeConfigPatch,
-  };
-}
+  return confirmed;
+});

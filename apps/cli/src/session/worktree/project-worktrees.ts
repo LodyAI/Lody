@@ -195,12 +195,15 @@ export async function materializeProjectGroup(
     supportsAdditionalDirectories?: boolean;
     onProgress?: (detail: string) => void;
     setup: (member: SessionProjectMember, workdir: string) => Promise<void>;
+    /** Rejects the snapshot actually read before any member is resolved. */
+    authorizeRun?: (run: SessionProjectRun) => Promise<void>;
   }
 ): Promise<{ workdir: string; run: SessionProjectRun }> {
   let result!: { workdir: string; run: SessionProjectRun };
   const owner = new WorkspaceGitService(options);
   await owner.updateProjectRun(options.sessionId, async (snapshot, publish) => {
     const run = SessionProjectRunSchema.parse(snapshot);
+    await options.authorizeRun?.(run);
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(options.sessionId))
       throw new Error('Invalid session ID');
     const workdir = path.join(projectGroupDirectory(run), 'worktrees', options.sessionId);
@@ -379,7 +382,12 @@ export async function materializeProjectGroup(
             logger: options.logger,
           }).initializeMissingProjectSubmodules(
             path.join(root, member.path),
-            await options.brokerAuth(target.source)
+            await options.brokerAuth(target.source),
+            members.flatMap(([, child]) =>
+              child.placement.kind === 'submodule' && child.placement.parent === id
+                ? [child.placement.path]
+                : []
+            )
           );
         })
       );

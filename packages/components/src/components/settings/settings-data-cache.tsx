@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -9,7 +11,7 @@ import {
 } from '@/atoms/local-storage-cache';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { usePlatformCapability } from '@lody/platform/react';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
@@ -115,6 +117,7 @@ export type SettingsWorkspaceRepoWithStatus = {
 };
 
 type SettingsDataCacheContextValue = {
+  workspaceModePending: boolean;
   workspaceId: string | null;
   canManageGithub: boolean;
   usageTimelineByRange: Partial<Record<SettingsUsageRange, SettingsUsageTimelineData | undefined>>;
@@ -133,7 +136,12 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
   // Removal clears the atom before Better Auth drops its stale active organization.
-  const workspaceId = activeOrganization?.id === currentWorkspaceId ? currentWorkspaceId : null;
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(currentWorkspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const workspaceId =
+    legacyQueriesEnabled && activeOrganization?.id === currentWorkspaceId
+      ? currentWorkspaceId
+      : null;
   const canManageGithub = Boolean(workspaceId) && hasAdminPermission;
 
   const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isConvexAuthenticated);
@@ -141,36 +149,36 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const setWorkspaceReposCache = useSetAtom(setWorkspaceReposCacheAtom);
 
   // Preload all stats ranges once at settings-root level to avoid re-fetch when switching tabs.
-  const dayUsage = useCloudQuery(
+  const dayUsage = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,
     workspaceId ? { workspaceId, range: 'day', granularity: 'hour' } : 'skip'
   ) as SettingsUsageTimelineData | undefined;
-  const weekUsage = useCloudQuery(
+  const weekUsage = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,
     workspaceId ? { workspaceId, range: 'week', granularity: 'hour' } : 'skip'
   ) as SettingsUsageTimelineData | undefined;
-  const monthUsage = useCloudQuery(
+  const monthUsage = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,
     workspaceId ? { workspaceId, range: 'month' } : 'skip'
   ) as SettingsUsageTimelineData | undefined;
-  const totalUsage = useCloudQuery(
+  const totalUsage = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,
     workspaceId ? { workspaceId, range: 'total' } : 'skip'
   ) as SettingsUsageTimelineData | undefined;
-  const usageCalendar = useCloudQuery(
+  const usageCalendar = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageCalendar,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsUsageCalendarData | undefined;
 
   // Preload GitHub workspace state once at settings-root level.
-  const repositories = useCloudQuery(
+  const repositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsWorkspaceRepository[] | undefined;
 
   // Reactive query for all repos with enabled status (used by settings integrations page).
   // Any workspace member can view; mutations (toggle) still require admin.
-  const workspaceReposWithStatus = useCloudQuery(
+  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsWorkspaceRepoWithStatus[] | undefined | null;
@@ -180,12 +188,14 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   // would falsely report "not loading" and flash the empty-state UI before the
   // repo list comes back. The shared helper waits on `isConvexAuthLoading`
   // so the spinner stays up across the reconnect window.
-  const workspaceReposLoading = isAuthedWorkspaceQueryLoading({
-    workspaceId,
-    isConvexAuthLoading,
-    canQuery,
-    queryResult: workspaceReposWithStatus,
-  });
+  const workspaceReposLoading =
+    (Boolean(currentWorkspaceId) && legacyQueryStatus === 'pending') ||
+    isAuthedWorkspaceQueryLoading({
+      workspaceId,
+      isConvexAuthLoading,
+      canQuery,
+      queryResult: workspaceReposWithStatus,
+    });
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -238,6 +248,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const value = useMemo<SettingsDataCacheContextValue>(
     () => ({
       workspaceId,
+      workspaceModePending: Boolean(currentWorkspaceId) && legacyQueryStatus === 'pending',
       canManageGithub,
       usageTimelineByRange,
       usageCalendar,
@@ -248,6 +259,8 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     }),
     [
       canManageGithub,
+      currentWorkspaceId,
+      legacyQueryStatus,
       repositories,
       usageTimelineByRange,
       usageCalendar,
@@ -262,8 +275,12 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   );
 }
 
+export function useOptionalSettingsDataCache() {
+  return useContext(SettingsDataCacheContext);
+}
+
 export function useSettingsDataCache() {
-  const context = useContext(SettingsDataCacheContext);
+  const context = useOptionalSettingsDataCache();
   if (!context) {
     throw new Error('useSettingsDataCache must be used within SettingsDataCacheProvider');
   }
@@ -278,7 +295,7 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
   day: SettingsUsageDayData | undefined;
   loading: boolean;
 } {
-  const { workspaceId } = useSettingsDataCache();
+  const { workspaceId, workspaceModePending } = useSettingsDataCache();
   const { authSessionId, confirmedUnauthenticated } = useAuthenticatedConvex();
   const usageAvailable = usePlatformCapability('usageAnalytics');
   const cacheSessionId = usageAvailable && !confirmedUnauthenticated ? authSessionId : null;
@@ -296,7 +313,7 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
   const ageMs = cachedEntry ? Date.now() - cachedEntry.fetchedAt : Infinity;
   const fresh = ageMs >= 0 && ageMs < USAGE_DAY_CACHE_TTL_MS;
   const shouldQuery = enabled && !fresh;
-  const result = useCloudQuery(
+  const result = useLegacyWorkspaceQuery(
     cloudOperations.usage.getWorkspaceUsageDay,
     shouldQuery && workspaceId && dayStartMs !== null ? { workspaceId, dayStartMs } : 'skip'
   ) as SettingsUsageDayData | undefined;
@@ -347,6 +364,8 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
 
   return {
     day,
-    loading: enabled && day === undefined,
+    loading:
+      (usageAvailable && workspaceModePending && dayStartMs !== null) ||
+      (enabled && day === undefined),
   };
 }

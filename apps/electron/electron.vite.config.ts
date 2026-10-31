@@ -87,7 +87,15 @@ export default defineConfig(({ mode }) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: viteEnvDefine,
       build: {
+        lib: {
+          entry: {
+            index: resolve(__dirname, 'src/main/index.ts'),
+            'native-storage-smoke': resolve(__dirname, 'src/main/native-storage-smoke.mts')
+          }
+        },
         externalizeDeps: {
+          // E2EE's Node SQLite adapter cannot inline its dynamic addon loader.
+          include: ['better-sqlite3'],
           exclude: [
             '@devframes/agentic',
             '@devframes/hub',
