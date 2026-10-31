@@ -16,8 +16,10 @@ export interface SelectionRect {
 }
 export type SelectionPoint = { readonly x: number; readonly y: number };
 export type ImageMarkup = {
-  readonly tool: 'pen' | 'rectangle' | 'arrow';
+  readonly tool: 'pen' | 'rectangle' | 'arrow' | 'text';
   readonly points: readonly SelectionPoint[];
+  readonly color?: string;
+  readonly note?: string;
 };
 export const MAX_SELECTION_TEXT = 50_000;
 export const MAX_SELECTION_PIXELS = 4 * 1024 * 1024;
@@ -184,7 +186,6 @@ export function drawImageMarkup(
   pixelRatio = 1
 ): void {
   context.save();
-  context.strokeStyle = '#dc2626';
   context.lineWidth = 3 * pixelRatio;
   context.lineCap = 'round';
   context.lineJoin = 'round';
@@ -192,9 +193,12 @@ export function drawImageMarkup(
     const start = mark.points.at(0),
       end = mark.points.at(-1);
     if (start === undefined || end === undefined) continue;
+    context.strokeStyle = mark.color ?? '#dc2626';
     context.beginPath();
     if (mark.tool === 'rectangle') context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
-    else {
+    else if (mark.tool === 'text') {
+      // Text is rendered below without a shape.
+    } else {
       context.moveTo(start.x, start.y);
       if (mark.tool === 'pen') for (const point of mark.points) context.lineTo(point.x, point.y);
       else {
@@ -210,6 +214,42 @@ export function drawImageMarkup(
       }
     }
     context.stroke();
+    if (mark.note?.trim()) {
+      const text = mark.note.trim();
+      const fontSize = 14 * pixelRatio;
+      context.font = `${fontSize}px sans-serif`;
+      const padding = 6 * pixelRatio;
+      const maxWidth = Math.max(1, context.canvas.width - padding * 2);
+      const words = text.split(/\s+/);
+      const lines: string[] = [];
+      let line = '';
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && context.measureText(next).width > maxWidth - padding * 2) {
+          lines.push(line);
+          line = word;
+        } else line = next;
+      }
+      if (line) lines.push(line);
+      const width = Math.min(
+        maxWidth,
+        Math.max(...lines.map((item) => context.measureText(item).width)) + padding * 2
+      );
+      const lineHeight = fontSize * 1.3;
+      const height = lines.length * lineHeight + padding * 2;
+      const x = Math.max(0, Math.min(start.x, context.canvas.width - width));
+      const y = Math.max(
+        0,
+        Math.min(Math.max(start.y, end.y) + 4 * pixelRatio, context.canvas.height - height)
+      );
+      context.fillStyle = '#202020';
+      context.fillRect(x, y, width, height);
+      context.fillStyle = '#ffffff';
+      context.textBaseline = 'top';
+      lines.forEach((item, index) =>
+        context.fillText(item, x + padding, y + padding + index * lineHeight, width - padding * 2)
+      );
+    }
   }
   context.restore();
 }

@@ -90,7 +90,9 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   retains the last committed presentation. With no owners and navigation settled,
   the provider releases the frame and clears that memory so later session navigation
   cannot revive it. Static BootShell and `WorkspaceCard`
-  share frame geometry. `DocumentStyle` replaces the inline first-paint sheet
+  share frame geometry. Desktop web headers share the macOS row geometry across the
+  card rim; see [header alignment](../../../../.agents/notes/implemented/bug-fix/2026-10-29-web-header-alignment.md).
+  `DocumentStyle` replaces the inline first-paint sheet
   after commit and keeps live CSS mutable during updates; React's immutable
   `style href` resources cannot own it. The card's content `LoadingPlaceholder` retains the
   same mark while workspace data resolves. See [startup intent](../../../../specs/app-startup-landing.md),

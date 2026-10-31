@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ClientCustodyError } from '@lody/e2ee-core/services';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,12 +29,14 @@ type Runtime = Pick<
 describe('personal desktop approval', () => {
   let root: Root, container: HTMLDivElement, runtime: Runtime;
   let admitted: boolean, publish: boolean, inspectFailure: Error | undefined;
+  let joined: boolean;
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     admitted = false;
+    joined = false;
     publish = true;
     inspectFailure = undefined;
     runtime = {
@@ -65,14 +68,17 @@ describe('personal desktop approval', () => {
     await act(async () => root.unmount());
     container.remove();
   });
-  const render = (canApprove = true, workspaceId = 'w') =>
+  const render = (canApprove = true, workspaceId = 'w', approved = false) =>
     act(async () =>
       root.render(
         <E2eePersonalPairing
           workspaceId={workspaceId}
           runtime={runtime}
           canApprove={canApprove}
-          onJoined={() => {}}
+          approved={approved}
+          onJoined={() => {
+            joined = true;
+          }}
         />
       )
     );
@@ -93,6 +99,84 @@ describe('personal desktop approval', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   };
+  it.each([false, true])(
+    'a request-only personal host can join with desktop approval even when ledger display allows approval (%s)',
+    async (canApprove) => {
+      delete runtime.personalPairingOffer;
+      delete runtime.inspectPersonalJoin;
+      delete runtime.approvePersonalJoin;
+      let submitted: unknown;
+      let approved = false;
+      runtime.preparePersonalJoin = async (input) => {
+        submitted = input;
+        return {
+          pairingSessionId: input.pairingSessionId,
+          signingPublicKey: '55'.repeat(32),
+          status: 'pending',
+        };
+      };
+      runtime.claimPersonalJoin = async () => ({
+        ready: approved,
+        status: approved ? 'approved' : 'pending',
+      });
+      await render(canApprove);
+      expect(container.textContent).toContain('e2ee.pair.desktopApprovalRequired');
+      expect(container.textContent).not.toContain('e2ee.pair.create');
+      expect(submitted).toBeUndefined();
+      await inputOffer();
+      await click('e2ee.pair.trust');
+      expect(submitted).toEqual(offer);
+      await click('e2ee.pair.claim');
+      expect(joined).toBe(false);
+      expect(container.textContent).toContain('e2ee.pair.waiting');
+      approved = true;
+      await click('e2ee.pair.claim');
+      expect(joined).toBe(true);
+      expect(container.textContent).toContain('e2ee.pair.ready');
+      expect(admitted).toBe(false);
+    }
+  );
+  it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+    'retains the pairing input and explains a typed custody %s outcome',
+    async (reason) => {
+      const original = runtime.preparePersonalJoin;
+      runtime.preparePersonalJoin = async () => {
+        throw new ClientCustodyError({ reason });
+      };
+      await render(false);
+      await inputOffer();
+      await click('e2ee.pair.trust');
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        `e2ee.custody.${reason}.help`
+      );
+      expect(container.querySelector('textarea')?.value).toBe(JSON.stringify(offer));
+      expect(joined).toBe(false);
+      runtime.preparePersonalJoin = original;
+      await click('e2ee.pair.trust');
+      expect(container.textContent).toContain('e2ee.pair.waiting');
+    }
+  );
+  it('stops asking an admitted requester-only device to pair again', async () => {
+    delete runtime.personalPairingOffer;
+    delete runtime.inspectPersonalJoin;
+    delete runtime.approvePersonalJoin;
+    await render(true, 'w', true);
+    expect(container.textContent).toBe('');
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(admitted).toBe(false);
+  });
+  it('an approver does not require requester-only methods', async () => {
+    delete runtime.preparePersonalJoin;
+    delete runtime.pendingPersonalJoin;
+    delete runtime.claimPersonalJoin;
+    await render();
+    await click('e2ee.pair.create');
+    await click('e2ee.pair.inspect');
+    await click('e2ee.pair.approve');
+    expect(admitted).toBe(true);
+    expect(container.textContent).toContain('e2ee.pair.published');
+    expect(joined).toBe(false);
+  });
   it('lets the approver cancel a previewed unavailable target and create a fresh offer', async () => {
     let next = offer;
     runtime.personalPairingOffer = async () => next;

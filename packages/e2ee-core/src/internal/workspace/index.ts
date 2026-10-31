@@ -15,7 +15,11 @@ import { makeStreamsUpdateBinding } from '../content/streams';
 import { runWorkspaceKeyRound, type WorkspaceKeyRoundCursors } from './key-round';
 import { makeWorkspaceOperations } from './operations';
 import { WorkspaceControl } from './control';
-import { makeWorkspaceRecovery, type WorkspaceRecoveryInput } from '../recovery';
+import {
+  makeWorkspaceRecovery,
+  type RecoveryCredentialRegistration,
+  type WorkspaceRecoveryInput,
+} from '../recovery';
 import { disposeEpochKey } from '../foundation/epoch-key';
 import { E2eeWorkflows } from '../../workflows';
 import { EpochStagingStore } from '../../services/keys';
@@ -101,7 +105,18 @@ export interface WorkspaceResources {
 export type WorkspaceRecoveryConfiguration = Omit<
   WorkspaceRecoveryInput,
   'genesis' | 'personalSigner' | 'ledger' | 'submitOriginal' | 'installed'
->;
+> & {
+  /**
+   * The workspace submits through its ledger port, which carries no credential.
+   * Before R's admission is submitted, register R's credential hash with the
+   * service for that exact original record. Runs again on every retry of it; a
+   * failure stops the submission.
+   */
+  readonly registerRecoveryCredential: (input: {
+    readonly record: Uint8Array;
+    readonly recoveryCredentialHash: Uint8Array;
+  }) => Effect.Effect<void, unknown>;
+};
 type RecoveryOwner = Effect.Success<ReturnType<typeof makeWorkspaceRecovery>>;
 /** The new personal device a restore admits through the recovery device. */
 export interface WorkspaceRestoreRequest {
@@ -304,7 +319,7 @@ export const makeE2eeWorkspace = Effect.fn('E2eeWorkspace.acquire')(function* (
               signer,
               ledger,
               readEpochKey: (epoch) => history.read(epoch),
-            }),
+            }).pipe(Effect.provideService(VerifiedLedger, verified)),
             child
           );
           const state = yield* Scope.provide(
@@ -338,7 +353,15 @@ export const makeE2eeWorkspace = Effect.fn('E2eeWorkspace.acquire')(function* (
             personalSigner: signer,
             ledger,
             installed,
-            submitOriginal: Effect.fnUntraced(function* (record: Uint8Array) {
+            submitOriginal: Effect.fnUntraced(function* (
+              record: Uint8Array,
+              registration: RecoveryCredentialRegistration | null
+            ) {
+              if (registration)
+                yield* recoveryConfiguration.registerRecoveryCredential({
+                  record: new Uint8Array(record),
+                  recoveryCredentialHash: new Uint8Array(registration.recoveryCredentialHash),
+                });
               const resumed = yield* control.resume();
               const result = resumed ?? (yield* control.executeOriginal(record));
               if (

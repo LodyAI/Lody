@@ -1,8 +1,22 @@
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  encryptedAttachmentPath,
+  getSessionFileDownloadApiPath,
+  readEncryptedAttachment,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+import { SessionAttachmentTransfer } from '../src/lib/session-attachment-transfer';
+import { downloadSessionImageForPrompt } from '../src/lib/session-image-download';
 import {
   createCommandAttachmentTransfer,
+  createCloudE2eePort,
   createCloudSessionSharingPort,
   createCloudStreamsTokenPort,
 } from '../src/lib/cloud-cli-port';
@@ -420,9 +434,55 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     close: async () => {},
   };
   const packets: Record<string, unknown>[] = [];
-  vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+  const relayBase = 'https://paired-relay.test';
+  const attachmentToken = 'ce'.repeat(32);
+  const objects = new Map<string, Uint8Array>();
+  let revoked = false;
+  vi.stubGlobal('fetch', async (url: unknown, init: RequestInit) => {
+    if (String(url).startsWith(relayBase)) {
+      const headers = new Headers(init.headers);
+      expect(headers.get('Authorization')).toBe(`Bearer ${attachmentToken}`);
+      expect(String(url)).toMatch(/\/session-encrypted-(files|images)\//);
+      if (revoked) return new Response(null, { status: 403 });
+      if (init.method !== 'POST') {
+        const id = String(url).split('/').at(-1)!;
+        return new Response(objects.get(id) as Uint8Array<ArrayBuffer>);
+      }
+      expect(headers.get('x-file-name')).toBe('attachment.bin');
+      expect(headers.get('x-file-mime-type')).toBe('application/octet-stream');
+      const bytes = new Uint8Array(init.body as ArrayBuffer);
+      const fileId = `opaque-${objects.size}`;
+      objects.set(fileId, bytes);
+      return Response.json({
+        file: {
+          type: 'file',
+          fileId,
+          fileName: 'attachment.bin',
+          mimeType: 'application/octet-stream',
+          sizeBytes: bytes.length,
+          sha256: headers.get('x-file-sha256'),
+          textPreview: false,
+          transport: 'r2',
+          uploadedAt: 1,
+        },
+      });
+    }
     const body = JSON.parse(String(init.body));
     packets.push(body);
+    if (body.path === 'e2eeContent:contentStreamsToken') {
+      expect(body.args).toEqual([{ workspaceId, credential }]);
+      return Response.json({
+        status: 'success',
+        value: {
+          token: 'protected-streams-token',
+          attachmentToken,
+          bucketId: 'encrypted-bucket',
+          gatewayBaseUrl: 'https://streams.test',
+          expiresIn: 900,
+          expiresAt: 900_000,
+        },
+      });
+    }
     return Response.json({
       status: 'success',
       value: {
@@ -443,6 +503,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     machineId: 'machine',
     credential,
     authBaseUrl: 'https://synthetic.convex.cloud',
+    serverBaseUrl: relayBase,
     logger,
     client,
   });
@@ -463,10 +524,10 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       'bugReports',
       'sessionSharing',
       'prAssociation',
-      'attachmentUpload',
       'remotePreview',
     ] as const)
       expect(port[name]).toBeNull();
+    expect(port.attachmentUpload).toEqual({ serverBaseUrl: relayBase });
     const authorized = {
       status: 'authorized',
       userId: account,
@@ -496,7 +557,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       key: {
         genesis: 'ab'.repeat(32),
         epoch: 1,
-        publisher: 'cd'.repeat(32),
+        recordHash: 'cd'.repeat(32),
         commitment: 'ef'.repeat(32),
       },
     });
@@ -511,7 +572,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
         key: {
           genesis: 'ab'.repeat(32),
           epoch: 1,
-          publisher: 'cd'.repeat(32),
+          recordHash: 'cd'.repeat(32),
           commitment: 'ef'.repeat(32),
         },
       })
@@ -520,6 +581,73 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     expect(() => port.e2ee!.getHistory({ workspaceId: 'other', credential })).toThrow(
       'e2ee_binding_conflict'
     );
+    const token = async () => {
+      const result = await port.e2ee!.getContentToken({ workspaceId, credential });
+      if (!result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+      return result.attachmentToken;
+    };
+    const transfer = new SessionAttachmentTransfer(
+      credential,
+      port.attachmentUpload!.serverBaseUrl,
+      { token }
+    );
+    const scope = {
+      workspaceId: workspaceId as WorkspaceId,
+      sessionId: 'paired-session' as SessionId,
+    };
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'paired-attachments-'));
+    try {
+      const plaintext = Buffer.alloc(4 * 1024 * 1024 + 3, 0x61);
+      const filePath = path.join(directory, 'private.txt');
+      await fs.writeFile(filePath, plaintext);
+      const file = await transfer.validateSessionFileUploadPath(filePath);
+      const uploaded = await transfer.uploadValidatedSessionFile({ ...scope, file });
+      expect(uploaded.encryption!.parts).toHaveLength(2);
+      const received: Uint8Array[] = [];
+      for await (const bytes of readEncryptedAttachment({
+        ...scope,
+        encryption: uploaded.encryption!,
+        fetchPart: async (id) =>
+          fetch(
+            new URL(
+              encryptedAttachmentPath(
+                getSessionFileDownloadApiPath(scope.workspaceId, scope.sessionId, id)
+              ),
+              port.attachmentUpload!.serverBaseUrl
+            ),
+            { headers: { Authorization: `Bearer ${await token()}` } }
+          ),
+      }))
+        received.push(bytes);
+      expect(Buffer.concat(received)).toEqual(plaintext);
+      expect(Buffer.from(objects.get(uploaded.fileId)!)).not.toEqual(
+        plaintext.subarray(0, 4 * 1024 * 1024)
+      );
+      const imageBytes = Buffer.from([137, 80, 78, 71, 1, 2, 3]);
+      const imagePath = path.join(directory, 'private.png');
+      await fs.writeFile(imagePath, imageBytes);
+      const image = await transfer.uploadSessionImageFile({
+        ...scope,
+        file: await transfer.validateSessionImageUploadPath(imagePath),
+      });
+      const download = () =>
+        downloadSessionImageForPrompt({
+          ...scope,
+          imageId: image.imageId,
+          encryption: image.encryption,
+          expectedMimeType: image.mimeType,
+          serverBaseUrl: port.attachmentUpload!.serverBaseUrl,
+          token: credential,
+          attachmentToken: token,
+        });
+      expect((await download()).bytes).toEqual(imageBytes);
+      revoked = true;
+      await expect(download()).rejects.toThrow('Encrypted attachment unavailable');
+      await expect(transfer.uploadValidatedSessionFile({ ...scope, file })).rejects.toThrow('403');
+      expect(JSON.stringify(packets)).not.toContain('cliToken');
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
     deliver?.({ status: 'unauthorized', reason: 'Machine revoked; pair again' });
     expect(states.at(-1)).toEqual({
       status: 'unauthorized',
@@ -533,3 +661,116 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     vi.unstubAllEnvs();
   }
 });
+
+it('reads retained execution originals from the admitted encrypted stream with its device credential', async () => {
+  vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+  const logger: Logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    trace: () => {},
+    success: () => {},
+    setLevel: () => {},
+    child: () => logger,
+    close: async () => {},
+  };
+  const message = Uint8Array.of(9, 8, 7);
+  const grants: unknown[] = [];
+  vi.stubGlobal('fetch', async (input: string, init: RequestInit) => {
+    const url = new URL(input);
+    if (url.hostname === 'execution-fixture.convex.cloud') {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeContent:contentStreamsToken');
+      grants.push(body.args[0]);
+      return Response.json({
+        status: 'success',
+        value: {
+          token: 'content-token',
+          bucketId: 'encrypted-bucket',
+          gatewayBaseUrl: 'https://streams-fixture.example',
+          expiresIn: 300,
+          expiresAt: 2000000000000,
+        },
+      });
+    }
+    expect(url.pathname).toBe('/ds/encrypted-bucket/workspace%3As%3Asession');
+    expect(url.searchParams.get('direction')).toBe('backward');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer content-token');
+    return new Response(Uint8Array.from([1, 0, 3, ...message]), {
+      headers: {
+        'Content-Type': 'application/vnd.loro-streams.frames',
+        'Stream-Prev-Offset': '00000000000000000000',
+        'Stream-End-Offset': '00000000000000000003',
+        'Stream-At-Start': 'true',
+        'Stream-At-Retained-Start': 'true',
+      },
+    });
+  });
+  try {
+    const port = createCloudE2eePort({
+      authBaseUrl: 'https://execution-fixture.convex.cloud',
+      logger,
+    });
+    expect(
+      await port.readExecutionOriginPage!(
+        { workspaceId: 'workspace', credential: 'device-credential', docId: 'session-session' },
+        new AbortController().signal
+      )
+    ).toEqual({ messages: [message], before: '00000000000000000000', atStart: true });
+    expect(grants).toEqual([{ workspaceId: 'workspace', credential: 'device-credential' }]);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failure'] as const)(
+  'brands only fixed credential endpoint confirmation (%s)',
+  async (code) => {
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      trace: () => {},
+      success: () => {},
+      setLevel: () => {},
+      child: () => logger,
+      close: async () => {},
+    };
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeContent:contentStreamsToken');
+      expect(body.args[0]).toMatchObject({
+        workspaceId: 'workspace',
+        credential: 'synthetic-device-credential',
+      });
+      return Response.json({
+        status: 'error',
+        errorMessage: 'e2ee_member_removed',
+        errorData: { code },
+      });
+    });
+    try {
+      const port = createCloudE2eePort({
+        authBaseUrl: 'https://credential-fixture.convex.cloud',
+        logger,
+      });
+      const failure = await port.readExecutionOriginPage!(
+        {
+          workspaceId: 'workspace',
+          credential: 'synthetic-device-credential',
+          docId: 'session-session',
+        },
+        new AbortController().signal
+      ).catch((cause: unknown) => cause);
+      expect(isCloudE2eeMemberRemoved(failure)).toBe(code === 'e2ee_member_removed');
+      expect(isCloudE2eeDeviceRevoked(new Error('SDK wrapper', { cause: failure }))).toBe(
+        code === 'e2ee_device_revoked'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+);

@@ -64,6 +64,7 @@
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@opencode/codemode": "2.2.0",
     "@types/better-sqlite3": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/diff": "^7.0.0",
@@ -74,6 +75,7 @@
     "@types/ws": "^8.18.1",
     "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "5.0.2",
+    "acorn": "8.15.0",
     "acp-extension-claude": "workspace:*",
     "acp-extension-codex": "workspace:*",
     "acp-extension-core": "workspace:*",
@@ -118,9 +120,11 @@
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.7.1",
     "ws": "^8.18.3",
+    "yaml": "2.8.2",
     "yauzl": "^3.4.0",
     "zod": "catalog:",
-    "zstd-stream": "^1.1.0"
+    "zstd-stream": "^1.1.0",
+    "@lody/e2ee-machine-sharing": "workspace:*"
   },
   "files": [
     "dist",

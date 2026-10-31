@@ -332,7 +332,11 @@ function TeamHostSession({
   profiles?: ReadonlyMap<string, { name: string | null }>;
 }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ role: string; members: Member[] } | null>(null);
+  const [state, setState] = useState<{
+    runtime: E2eeWorkspaceRuntime;
+    role: string;
+    members: Member[];
+  } | null>(null);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -343,6 +347,7 @@ function TeamHostSession({
         if (stopped) return;
         if (
           status.deviceKind !== 'personal' ||
+          status.hasDeviceCredential !== true ||
           !['owner', 'admin'].includes(status.memberRole ?? '')
         ) {
           setState(null);
@@ -350,6 +355,7 @@ function TeamHostSession({
         }
         const history = hostLedgerHistory(view);
         setState({
+          runtime,
           role: status.memberRole!,
           members: Array.from(history.view.inspectState().members.entries()).map(
             ([membershipId, member], index) => ({
@@ -374,7 +380,7 @@ function TeamHostSession({
       clearTimeout(timer);
     };
   }, [runtime, workspaceId, labels, profiles, t]);
-  return state ? (
+  return state?.runtime === runtime ? (
     <E2eeTeamSettings
       runtime={runtime}
       workspaceId={workspaceId}

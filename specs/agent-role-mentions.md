@@ -9,6 +9,10 @@ In every composer, including plain chat, GitHub projects and Local Projects, a
 user can mention a Role on any authorized machine. A Role on another machine
 than a Local Project or local worktree cannot reach that filesystem, so it runs
 as an independent Session on its own machine rather than as a child Session.
+When that Local Project's GitHub repository is enabled in the workspace, the
+Session works in that repository, cloned on the Role's machine from its default
+branch, as if the user had dispatched the Role from that GitHub project;
+otherwise it is a plain chat.
 Agents dispatching Roles reach the machines the executing machine's owner may
 use, never more than the human driving the Turn may use.
 

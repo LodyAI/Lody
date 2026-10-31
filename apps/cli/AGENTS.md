@@ -47,6 +47,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
+- Shared start/probe/load promises share only in-flight attempts or successes; a failure must not be
+  cached until restart. An unprovable local fact degrades its own action instead of blocking unrelated
+  work, and every user-path wait is bounded ([rules](../../.agents/docs/failure-containment.md#rules)).
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).
@@ -78,10 +81,10 @@ execution/consent rules. These rules also bind CLI callers outside that director
   its current model. Validate effort against the TARGET model using
   `getModelEffortChoices` (the stored per-model declaration first, then
   `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
-  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
-  model rejections always emit `agent_warning` in the GUI. Claude Fable
-  models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
+  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Treat
+  every concrete selection as required. Refusal, contradiction, unsupported operations and
+  unknown outcomes fail before prompt submission for every provider. Publish confirmed partial
+  state without rollback, await local persistence, and never retry through a second protocol.
 - INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
   received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a

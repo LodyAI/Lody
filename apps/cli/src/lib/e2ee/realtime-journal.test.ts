@@ -1,3 +1,5 @@
+import { Effect, Fiber } from 'effect';
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from './agent-execution';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -23,6 +25,7 @@ import {
   type RealtimeJournalRequest,
   type RealtimeStartPermit,
 } from './realtime-journal';
+import { decideEncryptedDerivation } from './derivation-limits';
 
 const request: RealtimeJournalRequest = {
   genesis: 'synthetic-genesis',
@@ -1394,5 +1397,474 @@ describe('host-only E2EE realtime journal', () => {
         record: { state: 'uncertain' },
       });
     }
+  });
+  describe('shared agent execution admission', () => {
+    const intent = {
+      workspaceId: 'synthetic-workspace',
+      sessionId: 'session',
+      userTurnId: 'user-turn',
+      requesterUserId: 'user',
+    };
+    const key = {
+      genesis: 'synthetic-genesis',
+      workspaceId: 'synthetic-workspace',
+      targetMachineId: 'synthetic-machine',
+      requestId: 'agent-start:user-turn',
+    };
+    const gate = (open: () => RealtimeJournal, expiresAt = 1000) =>
+      makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: open,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt,
+          }),
+        authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
+      });
+
+    it('denies a verified original when no authorization capability is available', async () => {
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+      });
+      expect(await Effect.runPromise(execution.claim(intent))).toEqual({ state: 'denied' });
+      expect(journal.read(key)).toBeNull();
+    });
+
+    it('checks the current policy fence immediately before the durable start', async () => {
+      let current = true;
+      let authorized = false;
+      const read = journal.read.bind(journal);
+      vi.spyOn(journal, 'read').mockImplementation((storedKey) => {
+        if (authorized) current = false; // Explicit known withdrawal between authorization and claim.
+        return read(storedKey);
+      });
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspace, _requester, localProjectId) =>
+          Effect.sync(() => {
+            expect(localProjectId).toBe('actual-local-project');
+            authorized = true;
+            return { _tag: 'Authorized' as const, isCurrent: () => current };
+          }),
+      });
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, localProjectIds: ['actual-local-project'] })
+        )
+      ).toEqual({ state: 'denied' });
+      expect(read(key)).toBeNull();
+    });
+
+    it.each([
+      [['owner', 'owner'], 'owner'],
+      [['owner', 'member'], 'member'],
+    ] as const)(
+      'keeps owner identity across project grants only when every grant names the owner (%j)',
+      async (principals, expected) => {
+        let index = 0;
+        const execution = makeEncryptedAgentExecution({
+          genesis: key.genesis,
+          workspaceId: key.workspaceId,
+          targetMachineId: key.targetMachineId,
+          journal: () => journal,
+          resolveVerifiedOriginal: () =>
+            Effect.succeed({
+              requesterDevice: 'ab'.repeat(32),
+              requesterCryptoUserId: '1e'.repeat(32),
+              expiresAt: 1000,
+            }),
+          authorizeExecution: () =>
+            Effect.sync(() => ({
+              _tag: 'Authorized' as const,
+              principal: principals[index++] ?? 'member',
+            })),
+        });
+        expect(
+          await Effect.runPromise(
+            execution.claim({ ...intent, localProjectIds: ['first', 'second'] })
+          )
+        ).toMatchObject({ state: 'claimed', principal: expected });
+      }
+    );
+
+    it('requires every project the turn reaches to be shared before the durable start', async () => {
+      const asked: (string | undefined)[] = [];
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspace, _requester, localProjectId) =>
+          Effect.sync(() => {
+            asked.push(localProjectId);
+            return localProjectId === 'private'
+              ? { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' }
+              : { _tag: 'Authorized' as const };
+          }),
+      });
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, localProjectIds: ['shared', 'private', 'shared'] })
+        )
+      ).toEqual({ state: 'denied', reason: 'e2ee_machine_not_shared' });
+      expect(asked).toEqual(['shared', 'private']);
+      expect(journal.read(key)).toBeNull();
+    });
+
+    it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
+      const first = gate(() => journal, 100);
+      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });
+      now = 1;
+      const retry = gate(() => new RealtimeJournal(filename, () => now));
+      expect(await Effect.runPromise(retry.claim(intent))).toMatchObject({ state: 'expired' });
+      expect(journal.read(key)).toMatchObject({ state: 'received', expiresAt: 100 });
+    });
+
+    it('binds the business intent to its turn and session, independently of display account IDs', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      for (const changed of [
+        { ...intent, sessionId: 'other-session' },
+        { ...intent, workspaceId: 'other-workspace' },
+      ]) {
+        await expect(Effect.runPromise(execution.claim(changed))).rejects.toMatchObject({
+          code: 'identity_conflict',
+        });
+      }
+      const before = journal.read(key);
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, requesterUserId: 'another-display-account' })
+        )
+      ).toEqual({ state: 'uncertain' });
+      expect(journal.read(key)?.frame).toEqual(before?.frame);
+      expect(journal.read(key)?.state).toBe('uncertain');
+    });
+
+    it.each(['received', 'uncertain', 'completed'] as const)(
+      'preserves exact older %s evidence without binding display accounts',
+      async (state) => {
+        const frame = Buffer.from(
+          JSON.stringify([1, intent.sessionId, intent.userTurnId, 'earlier-display-account'])
+        );
+        const earlierRequest = { ...key, requester: 'ab'.repeat(32), expiresAt: 1000, frame };
+        journal.receive(earlierRequest);
+        if (state !== 'received') {
+          const result = journal.claim(earlierRequest);
+          if (result.state !== 'claimed') throw new Error('missing initial claim');
+          if (state === 'completed')
+            journal.finish(result.permit, Buffer.from('original settlement'));
+        }
+        const reopened = gate(() => new RealtimeJournal(filename, () => now));
+        expect(
+          await Effect.runPromise(
+            reopened.claim({ ...intent, requesterUserId: 'new-display-account' })
+          )
+        ).toMatchObject({ state: state === 'received' ? 'claimed' : state });
+        expect(Buffer.from(journal.read(key)?.frame ?? [])).toEqual(frame);
+        if (state === 'completed')
+          expect(journal.read(key)).toMatchObject({
+            state: 'completed',
+            outcome: Uint8Array.from(Buffer.from('original settlement')),
+          });
+        expect(
+          await Effect.runPromise(reopened.claim({ ...intent, requesterUserId: undefined }))
+        ).toEqual({ state: state === 'completed' ? 'completed' : 'uncertain' });
+      }
+    );
+
+    it('refuses a late authorization after the workspace closes without consuming a start', async () => {
+      const entered = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      let open = true;
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        isExecutionOpen: () => open,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: () =>
+          Effect.promise(async () => {
+            entered.resolve();
+            await released.promise;
+            return { _tag: 'Authorized' as const };
+          }),
+      });
+      const pending = Effect.runPromise(execution.claim(intent));
+      await entered.promise;
+      open = false;
+      released.resolve();
+      expect(await pending).toEqual({ state: 'denied' });
+      expect(journal.read(key)).toBeNull();
+    });
+
+    it('cancels authorization without consuming execution evidence', async () => {
+      let entered: () => void = () => {};
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const blocked = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: () => Effect.sync(entered).pipe(Effect.andThen(Effect.never)),
+      });
+      const fiber = Effect.runFork(blocked.claim(intent));
+      await ready;
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      expect(journal.read(key)).toBeNull();
+      expect((await Effect.runPromise(gate(() => journal).claim(intent))).state).toBe('claimed');
+    });
+
+    it('retains userTurnId fences across explicit journal reset', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      journal.reset();
+      const successor = gate(() => new RealtimeJournal(filename, () => now));
+      await expect(Effect.runPromise(successor.claim(intent))).rejects.toMatchObject({
+        code: 'archived_request',
+      });
+      expect(
+        (await Effect.runPromise(successor.claim({ ...intent, userTurnId: 'new-user-turn' }))).state
+      ).toBe('claimed');
+    });
+
+    it('never provisions over a missing used execution log', async () => {
+      const execution = gate(lazyExecutionJournal(filename, () => now));
+      await Effect.runPromise(execution.claim(intent));
+      rmSync(filename);
+      const restarted = gate(lazyExecutionJournal(filename, () => now));
+      await expect(Effect.runPromise(restarted.claim(intent))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      expect(readdirSync(directory)).not.toContain('journal.sqlite');
+      expect(readdirSync(directory)).toContain('journal.sqlite.control.sqlite');
+    });
+
+    it('retries only completion storage after a result write fails', async () => {
+      const execution = gate(() => journal);
+      const claim = await Effect.runPromise(execution.claim(intent));
+      if (claim.state !== 'claimed') throw new Error('Missing execution claim');
+      const finish = vi.spyOn(journal, 'finish').mockImplementationOnce(() => {
+        throw new RealtimeJournalError('storage');
+      });
+      await expect(Effect.runPromise(execution.complete(claim.permit))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('uncertain');
+      await Effect.runPromise(execution.complete(claim.permit));
+      expect(journal.read(key)).toMatchObject({
+        state: 'completed',
+        outcome: Uint8Array.from(Buffer.from('{"state":"settled"}')),
+      });
+      finish.mockRestore();
+    });
+  });
+
+  describe('shared-member derivation on the same machine', () => {
+    const self = 'ee'.repeat(32);
+    const member = 'aa'.repeat(32);
+    const owner = 'bb'.repeat(32);
+    const origin = { sessionId: 'origin-session', userTurnId: 'origin-turn' };
+    const derived = {
+      workspaceId: 'synthetic-workspace',
+      sessionId: 'child-session',
+      userTurnId: 'child-turn',
+      requesterUserId: 'display-owner-account',
+      localProjectIds: ['private-project'],
+    };
+    type Original = {
+      requesterDevice: string;
+      requesterCryptoUserId: string;
+      expiresAt: number;
+      derivedFrom?: { sessionId: string; userTurnId: string };
+    };
+    const originals = new Map<string, Original>();
+    const authorized: Array<[string, string | undefined]> = [];
+    // The member may use only `shared-project`; the machine owner may use anything.
+    const gate = (rows: Map<string, Original> = originals) =>
+      makeEncryptedAgentExecution({
+        genesis: 'synthetic-genesis',
+        workspaceId: 'synthetic-workspace',
+        targetMachineId: 'synthetic-machine',
+        journal: () => journal,
+        selfDevice: self,
+        resolveVerifiedOriginal: (intent) =>
+          Effect.succeed(rows.get(`${intent.sessionId}/${intent.userTurnId}`)),
+        authorizeExecution: (_workspace, device, project) =>
+          Effect.sync(() => {
+            authorized.push([device, project]);
+            if (device === self || device === owner)
+              return { _tag: 'Authorized' as const, principal: 'owner' as const };
+            if (device === member && (project === undefined || project === 'shared-project'))
+              return { _tag: 'Authorized' as const, principal: 'member' as const };
+            return { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
+          }),
+      });
+    const signed = (requesterDevice: string, extra: Partial<Original> = {}): Original => ({
+      requesterDevice,
+      requesterCryptoUserId: '1e'.repeat(32),
+      expiresAt: Date.now() + 60_000,
+      ...extra,
+    });
+    beforeEach(() => {
+      originals.clear();
+      authorized.length = 0;
+      originals.set('origin-session/origin-turn', signed(member));
+    });
+
+    it("runs a derived input with the member's own rights, never the machine owner's", async () => {
+      originals.set('child-session/child-turn', signed(self, { derivedFrom: origin }));
+      const execution = gate();
+      // A project shared with the member starts, as that member, and derives nothing further.
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...derived, localProjectIds: ['shared-project'] })
+        )
+      ).toMatchObject({ state: 'claimed', principal: 'derived' });
+      expect(authorized).toEqual([[member, 'shared-project']]);
+      // The machine-authored input cannot reach a project the member may not use.
+      originals.set('child-session/other-turn', signed(self, { derivedFrom: origin }));
+      expect(
+        await Effect.runPromise(execution.claim({ ...derived, userTurnId: 'other-turn' }))
+      ).toEqual({ state: 'denied', reason: 'e2ee_machine_not_shared' });
+      expect(authorized.at(-1)).toEqual([member, 'private-project']);
+    });
+
+    it('rejects forged, chained, unverifiable, expired and over-limit derivations', async () => {
+      const deny = async (row: Original | undefined, rows = originals) => {
+        const userTurnId = `turn-${rows.size}-${Math.random()}`;
+        if (row) rows.set(`child-session/${userTurnId}`, row);
+        return Effect.runPromise(
+          gate(rows).claim({ ...derived, userTurnId, localProjectIds: ['shared-project'] })
+        );
+      };
+      // Only this machine authors derivations; a member cannot claim one for itself.
+      expect(await deny(signed(member, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      // One level: the origin may not itself be derived or machine-authored.
+      originals.set('origin-session/origin-turn', signed(self, { derivedFrom: origin }));
+      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      originals.set('origin-session/origin-turn', signed(self));
+      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      // An origin that cannot be verified (absent, edited, other workspace) is refused.
+      originals.delete('origin-session/origin-turn');
+      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      // Started more than 15 minutes after the origin's signed deadline.
+      originals.set(
+        'origin-session/origin-turn',
+        signed(member, { expiresAt: Date.now() - 15 * 60_000 - 1_000 })
+      );
+      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'expired' });
+      // At most twenty starts per origin.
+      originals.set('origin-session/origin-turn', signed(member));
+      const execution = gate();
+      for (let index = 0; index < 21; index++) {
+        const userTurnId = `bounded-${index}`;
+        originals.set(`child-session/${userTurnId}`, signed(self, { derivedFrom: origin }));
+        const result = await Effect.runPromise(
+          execution.claim({ ...derived, userTurnId, localProjectIds: ['shared-project'] })
+        );
+        expect(result.state).toBe(index < 20 ? 'claimed' : 'denied');
+      }
+      expect(authorized.every(([device]) => device === member)).toBe(true);
+    });
+
+    it('decides at write time: owner unchanged, member only from its active turn on this machine', () => {
+      const decide = (
+        live: 'owner' | 'member' | undefined,
+        verified: 'owner' | 'member' | 'denied',
+        targetMachineId = 'machine'
+      ) => decideEncryptedDerivation({ live, verified, targetMachineId, machineId: 'machine' });
+      expect(decide('owner', 'denied', 'other-machine')).toBe('owner');
+      expect(decide(undefined, 'owner')).toBe('owner');
+      expect(decide('member', 'member')).toBe('member');
+      expect(() => decide('member', 'member', 'other-machine')).toThrow(
+        'e2ee_derivation_cross_machine_unsupported'
+      );
+      // Ended or over-limit member turns, unverifiable origins and mismatches fail closed.
+      for (const [live, verified] of [
+        [undefined, 'member'],
+        [undefined, 'denied'],
+        ['member', 'denied'],
+        ['member', 'owner'],
+      ] as const)
+        expect(() => decide(live, verified)).toThrow('e2ee_derivation_denied');
+    });
+
+    it('classifies the driving turn by its verified signer and reports member origins', async () => {
+      const execution = gate();
+      expect(await Effect.runPromise(execution.classifyOrigin(origin))).toBe('member');
+      originals.set('origin-session/origin-turn', signed(owner));
+      expect(await Effect.runPromise(execution.classifyOrigin(origin))).toBe('owner');
+      originals.set('origin-session/origin-turn', signed(self));
+      expect(await Effect.runPromise(execution.classifyOrigin(origin))).toBe('owner');
+      originals.set('origin-session/origin-turn', signed(self, { derivedFrom: origin }));
+      expect(await Effect.runPromise(execution.classifyOrigin(origin))).toBe('denied');
+      originals.delete('origin-session/origin-turn');
+      expect(await Effect.runPromise(execution.classifyOrigin(origin))).toBe('denied');
+      // A member's own turn reports its verified device for derivation and agent control.
+      originals.set('member-session/member-turn', signed(member));
+      expect(
+        await Effect.runPromise(
+          execution.claim({
+            ...derived,
+            sessionId: 'member-session',
+            userTurnId: 'member-turn',
+            localProjectIds: ['shared-project'],
+          })
+        )
+      ).toMatchObject({
+        state: 'claimed',
+        principal: 'member',
+        origin: { requesterDevice: member },
+      });
+      expect(
+        await Effect.runPromise(execution.authorizeAgentControl(member, ['shared-project']))
+      ).toBe(true);
+      expect(
+        await Effect.runPromise(execution.authorizeAgentControl(member, ['private-project']))
+      ).toBe(false);
+    });
   });
 });

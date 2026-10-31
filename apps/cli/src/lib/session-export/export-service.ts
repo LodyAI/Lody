@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { isLoroRepoDocDeleted, type SessionMeta, type WorkspaceId } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { buildSessionArtifacts, toExportSessionSummary } from './formatters';
@@ -18,6 +19,7 @@ type WorkspaceDescriptor = {
   id: string;
   slug: string | null;
   name: string;
+  contentMode?: string;
 };
 
 export type ExportWorkspaceDataOptions = {
@@ -190,40 +192,49 @@ export async function exportWorkspaceData(
 
   await writeJson(path.join(options.outputDir, 'sessions', 'index.json'), sessionIndex);
 
-  const scheduleRepository = new ScheduleRepository(
-    options.manager.repo,
-    options.workspace.id as WorkspaceId
-  );
-  const scheduleIds = await listWorkspaceScheduleIds(
-    options.manager,
-    options.workspace.id as WorkspaceId
-  );
   const scheduleIndex: { scheduleId: string; title: string }[] = [];
-  for (const id of scheduleIds) {
-    const document = await scheduleRepository.read(id);
-    if (!document) {
-      warnings.push(`Schedule ${id} is unavailable in the local replica.`);
-      continue;
+  if (
+    workspaceSupports(
+      { mode: options.workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'schedules'
+    )
+  ) {
+    const scheduleRepository = new ScheduleRepository(
+      options.manager.repo,
+      options.workspace.id as WorkspaceId
+    );
+    const scheduleIds = await listWorkspaceScheduleIds(
+      options.manager,
+      options.workspace.id as WorkspaceId
+    );
+    for (const id of scheduleIds) {
+      const document = await scheduleRepository.read(id);
+      if (!document) {
+        warnings.push(`Schedule ${id} is unavailable in the local replica.`);
+        continue;
+      }
+      const directory = path.join(
+        options.outputDir,
+        'schedules',
+        encodeExportPathSegment(id, 'schedule')
+      );
+      await writeJson(path.join(directory, 'schedule.json'), document);
+      await writeText(
+        path.join(directory, 'schedule.md'),
+        `# ${document.definition.title}\n\n${document.prompt}\n`
+      );
+      scheduleIndex.push({ scheduleId: id, title: document.definition.title });
     }
-    const directory = path.join(
-      options.outputDir,
-      'schedules',
-      encodeExportPathSegment(id, 'schedule')
+    await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
+    const scheduleRegistry = await options.manager.repo.openFlockDoc(
+      getScheduleRegistryFlockDocId(options.workspace.id as WorkspaceId)
     );
-    await writeJson(path.join(directory, 'schedule.json'), document);
-    await writeText(
-      path.join(directory, 'schedule.md'),
-      `# ${document.definition.title}\n\n${document.prompt}\n`
-    );
-    scheduleIndex.push({ scheduleId: id, title: document.definition.title });
+    await writeJson(path.join(options.outputDir, 'schedules', 'registry.json'), [
+      ...scheduleRegistry.flock.scan(),
+    ]);
+  } else {
+    await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
   }
-  await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
-  const scheduleRegistry = await options.manager.repo.openFlockDoc(
-    getScheduleRegistryFlockDocId(options.workspace.id as WorkspaceId)
-  );
-  await writeJson(path.join(options.outputDir, 'schedules', 'registry.json'), [
-    ...scheduleRegistry.flock.scan(),
-  ]);
 
   let usageExported = false;
   try {

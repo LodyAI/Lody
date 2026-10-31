@@ -1,3 +1,6 @@
+import { providerBindingFingerprint, type ProviderBinding } from './automation-observations';
+import { CommandTimedOut } from '@lody/shared/node/process';
+import { TURN_BUDGETS } from './turn-budgets';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
 import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
@@ -142,6 +145,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
+  private releaseExternalMcpServers?: () => Promise<void>;
   public terminalManager: TerminalManager;
 
   constructor(
@@ -205,21 +209,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
+  peekHostWorkdir(): string | null {
+    const candidate = this.fixedWorkdir ?? getDefaultSessionWorkdir(this.sessionId);
+    return fs.statSync(candidate, { throwIfNoEntry: false })?.isDirectory() ? candidate : null;
+  }
+
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
+  }
+
+  getExecutionScope(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'> {
+    return {
+      project: this.config.project,
+      projectRun: this.config.projectRun,
+      parentSessionId: this.config.parentSessionId,
+    };
   }
 
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
     await this.sandbox.applyLimits(limits);
   }
 
-  watchInboxRecoveryResources(
-    persist: (identity: import('./session-sandbox').SessionRecoveryResources) => void
-  ): Promise<() => void> {
-    if (!this.sandbox.watchRecoveryResources)
-      return Promise.reject(new Error('Complete Session resource ownership is unavailable'));
-    return this.sandbox.watchRecoveryResources(persist);
-  }
   async getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo> {
     let accounting: SessionMonitorRuntimeInfo['accounting'];
     try {
@@ -333,6 +343,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // Capture references before any async work, since onExit handlers may null them out
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
+    const configurationGeneration = this.agentClient?.configurationGeneration;
 
     // The sandbox as a whole also reaches terminal commands and groups whose
     // leader already exited. It tracks the per-process trees too, so ending
@@ -370,7 +381,12 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       throw new Error(`Session ${this.sessionId} sandbox cleanup is unresolved`, { cause: error });
     }
 
-    await this.credentials.release();
+    for (const outcome of await Promise.allSettled([
+      this.credentials.release(),
+      this.cleanupExternalMcpServers(),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
@@ -381,6 +397,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
+      configurationGeneration,
       exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
@@ -432,6 +449,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitHubCredentials(): SessionCredentials {
     return this.credentials;
+  }
+
+  getProviderBinding(): ProviderBinding | undefined {
+    const config = this.config;
+    if (!config.agentConfigId) return undefined;
+    return {
+      bindingId: config.agentConfigId,
+      fingerprint: providerBindingFingerprint({
+        id: config.agentConfigId,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        env: config.env,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        codexAuth: config.codexAuth,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+      }),
+    };
   }
 
   getMemoryBinding(): SessionConfig['memory'] {
@@ -544,6 +579,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    this.releaseExternalMcpServers = callbacks.releaseExternalMcpServers;
+    const releaseMcp = callbacks.releaseExternalMcpServers;
+    let established = false;
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
     const loginShellEnv = await getLoginShellEnvLegacy();
     callbacks.abortSignal?.throwIfAborted();
@@ -657,7 +695,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         this.logger.debug(
           `[${this.sessionId}] ACP agent process exited with code ${code} signal ${signal}`
         );
-        this.agentProcess = null;
+        if (this.agentProcess === agentProcessHandle) this.agentProcess = null;
+        if (established)
+          void this.cleanupExternalMcpServers(releaseMcp).catch(() => {
+            this.logger.error(`[${this.sessionId}] MCP connection cleanup failed.`);
+          });
         void agentProcessHandle
           .inspectExit(code, signal)
           .then((violation) => {
@@ -820,7 +862,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         }
       );
     try {
-      return await runCodexRefreshStartupWithRetry({
+      const result = await runCodexRefreshStartupWithRetry({
         attempt: () => startAttempt(false),
         retryAttempt: callbacks.revalidateManagedCodexProfile
           ? () => startAttempt(true)
@@ -832,10 +874,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             `[${this.sessionId}] Retrying Codex session startup after refresh contention`
           ),
       });
+      established = true;
+      if (!this.agentProcess) await this.cleanupExternalMcpServers(releaseMcp);
+      return result;
     } catch (error) {
       await cleanupFailedAttempt();
+      await this.cleanupExternalMcpServers(releaseMcp);
       throw error;
     }
+  }
+
+  private async cleanupExternalMcpServers(release = this.releaseExternalMcpServers): Promise<void> {
+    await release?.();
+    if (this.releaseExternalMcpServers === release) this.releaseExternalMcpServers = undefined;
+  }
+
+  async validateMcpRequester(userId: string): Promise<void> {
+    if (!this.config.mcpServerIds?.length || userId === this.config.requesterUserId) return;
+    await this.terminate(true);
+    throw new Error(
+      'The MCP user changed. Start a new turn to use this user’s local authorization.'
+    );
   }
 
   getAcpCapabilities(): AcpCapabilitiesResult | null {
@@ -913,8 +972,47 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             );
           });
 
+          let timedOut = false;
+          const observation =
+            !isAI &&
+            command === 'git' &&
+            ([
+              'status',
+              'diff',
+              'rev-parse',
+              'rev-list',
+              'merge-base',
+              'ls-files',
+              'log',
+              'show',
+            ].includes(args[0] ?? '') ||
+              (args[0] === 'branch' && args[1] === '--show-current'));
+          const timeout = observation
+            ? setTimeout(() => {
+                timedOut = true;
+                this.logger.warn(
+                  `[${this.sessionId}] Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`
+                );
+                void processHandle.terminate(true).then(
+                  () => {
+                    cleanup();
+                    reject(
+                      new CommandTimedOut({
+                        command: 'git',
+                        message: `Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`,
+                      })
+                    );
+                  },
+                  (error: unknown) => {
+                    cleanup();
+                    reject(error);
+                  }
+                );
+              }, TURN_BUDGETS.gitObservationMs)
+            : undefined;
           const cleanup = () => {
-            this.activeProcess = null;
+            clearTimeout(timeout);
+            if (this.activeProcess === processHandle) this.activeProcess = null;
             if (parser) {
               parser.end();
               parser.removeListener('data', this.handleParserData);
@@ -923,6 +1021,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           };
 
           processHandle.onClose((code: number | null, signal: NodeJS.Signals | null) => {
+            if (timedOut) return;
             cleanup();
             void processHandle
               .inspectExit(code, signal)
@@ -964,7 +1063,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                 }
                 if (isAI) {
                   await this.credentials.release();
-                  this.emit('exit', { sessionId: this.sessionId, exitCode });
+                  this.emit('exit', {
+                    sessionId: this.sessionId,
+                    exitCode,
+                    configurationGeneration: this.agentClient?.configurationGeneration,
+                  });
                 }
                 // stderr is decoded but not used in return value (only logged above)
                 void stderr;
@@ -976,6 +1079,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           });
 
           processHandle.onError((error) => {
+            if (timedOut) return;
             cleanup();
             reject(error);
           });

@@ -11,6 +11,9 @@ Translation: current
 
 两种主题行为一致。没有匹配的选择时保持展开；标签变化不能擅自选择其他标签。实例互不影响，包括相同的旧 `layoutId`。尺寸变化或省略新建会话操作时，保留可用宽度与安全区布局。
 
+原生宿主确认所有操作均能安全放入侧栏时，侧栏替代底部导航，并保留标签选中状态
+和操作。对话框或菜单打开时侧栏暂停；底部导航仍是回退方式。
+
 ## 证据
 
 [组件](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [决策与验证边界](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.zh.md)

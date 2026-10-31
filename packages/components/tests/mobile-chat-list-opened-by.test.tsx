@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { MobileChatListCard } from '../src/components/mobile/mobile-chat-list';
+import {
+  dateBucketIdFor,
+  groupChats,
+  MobileChatList,
+  MobileChatListCard,
+} from '../src/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '../src/components/mobile/mobile-project-screen';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
 import { initI18n } from '../src/i18n';
@@ -285,5 +290,97 @@ describe('mobile chat list opened-by tree', () => {
       }),
     ]);
     expect(titles(list)).toEqual(['Session pinned', 'Session unpinned', 'Session unpinned-child']);
+  });
+});
+
+describe('mobile project buckets follow the opener', () => {
+  /** A Local Project opener whose Roles ran elsewhere: a plain chat and a GitHub repo. */
+  const items = (): MobileConversationItem[] => [
+    makeItem({
+      id: 'remote-chat',
+      openedBySessionId: 'opener',
+      openedByRowSessionId: 'opener',
+      latestMessageAt: NOW,
+    }),
+    makeItem({
+      id: 'repo-child',
+      kind: 'github',
+      projectKey: 'loro-dev/lody',
+      projectLabel: 'loro-dev/lody',
+      openedBySessionId: 'opener',
+      openedByRowSessionId: 'opener',
+      latestMessageAt: NOW - HOUR,
+    }),
+    makeItem({
+      id: 'opener',
+      kind: 'local',
+      projectKey: 'machine-1:project-1',
+      projectLabel: 'Project One',
+      latestMessageAt: NOW - 2 * HOUR,
+    }),
+    makeItem({ id: 'plain-chat', latestMessageAt: NOW - 3 * HOUR }),
+  ];
+
+  it('moves opened Sessions into the project bucket of their opener', () => {
+    expect(
+      groupChats(items(), 'project', NOW).map(({ id, items: bucket }) => [
+        id,
+        bucket.map((chat) => chat.id),
+      ])
+    ).toEqual([
+      ['machine-1:project-1', ['remote-chat', 'repo-child', 'opener']],
+      ['__no-project__', ['plain-chat']],
+    ]);
+  });
+
+  it('dates a whole opened-by tree by its freshest member', () => {
+    const DAY = 24 * HOUR;
+    const chats = [
+      makeItem({
+        id: 'fresh-child',
+        openedBySessionId: 'old-opener',
+        openedByRowSessionId: 'old-opener',
+        latestMessageAt: NOW,
+      }),
+      makeItem({ id: 'old-opener', latestMessageAt: NOW - 40 * DAY }),
+      makeItem({
+        id: 'old-child',
+        openedBySessionId: 'old-opener',
+        openedByRowSessionId: 'old-opener',
+        latestMessageAt: NOW - 45 * DAY,
+      }),
+      makeItem({ id: 'old-plain', latestMessageAt: NOW - 40 * DAY }),
+    ];
+    // Bucket ids come from the same function, so the case holds in any time zone.
+    expect(dateBucketIdFor(NOW - 40 * DAY, NOW)).not.toBe(dateBucketIdFor(NOW, NOW));
+    expect(
+      groupChats(chats, 'date', NOW).map(({ id, items: bucket }) => [
+        id,
+        bucket.map((chat) => chat.id),
+      ])
+    ).toEqual([
+      [dateBucketIdFor(NOW, NOW), ['fresh-child', 'old-opener', 'old-child']],
+      [dateBucketIdFor(NOW - 40 * DAY, NOW), ['old-plain']],
+    ]);
+  });
+
+  it('indents them under the opener and keeps the bucket named after its own project', async () => {
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <MobileChatList chats={items()} groupBy="project" />
+        </Provider>
+      );
+    });
+    const rowTitles = Array.from(
+      container.querySelectorAll<HTMLElement>('.mobile-project-conversation-row')
+    ).map((row) => row.textContent?.trim() ?? '');
+    expect(rowTitles.slice(0, 3)).toEqual([
+      expect.stringContaining('Session opener'),
+      expect.stringContaining('Session remote-chat'),
+      expect.stringContaining('Session repo-child'),
+    ]);
+    expect(container.textContent).toContain('Project One');
+    expect(container.textContent).not.toContain('loro-dev/lody');
   });
 });

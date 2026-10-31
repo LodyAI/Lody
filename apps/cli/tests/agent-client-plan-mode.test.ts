@@ -1,3 +1,8 @@
+import { daemonLossObserver } from '../src/lib/e2ee/client-loss-observer';
+vi.hoisted(() => {
+  Object.assign(globalThis, { __LODY_E2E_DAEMON_LOSS__: true });
+  process.env.LODY_E2E = '1';
+});
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ACPSessionId,
@@ -75,6 +80,10 @@ function createTestClient(options?: {
   // Simulate session startup by setting internal fields directly
   // @ts-expect-error - accessing private field for test setup
   client.acpSessionId = 'acp-test' as ACPSessionId;
+  // @ts-expect-error - synthetic legacy session handshake
+  client.hasLegacyModes = true;
+  // @ts-expect-error - synthetic connection identity
+  client.configGeneration = 'test-connection';
 
   return {
     client,
@@ -237,98 +246,32 @@ describe('AgentClient plan mode permission restoration', () => {
   });
 
   describe('permission mode routing', () => {
-    it('does not treat current_mode_update as Codex plan-mode control state', async () => {
-      const { client } = createTestClient();
-      const setSessionModeSpy = vi.fn(async () => ({}));
-      // @ts-expect-error - accessing private field for test setup
-      client.connection = { setSessionMode: setSessionModeSpy };
-
-      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
-      setSessionModeSpy.mockClear();
-
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
-
-      expect(setSessionModeSpy).not.toHaveBeenCalled();
-    });
-
-    it('does not restore mode when agent transitions between non-plan modes', async () => {
-      const { client } = createTestClient();
-      const setSessionModeSpy = vi.fn(async () => ({}));
-      // @ts-expect-error - accessing private field for test setup
-      client.connection = { setSessionMode: setSessionModeSpy };
-
-      // User selects default mode
-      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
-      setSessionModeSpy.mockClear();
-
-      // Agent transitions from default to acceptEdits (not from plan)
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
-
-      // Should NOT trigger a mode restore
-      expect(setSessionModeSpy).not.toHaveBeenCalled();
-    });
-
-    it('does not restore mode when agent exits plan to the same mode user selected', async () => {
-      const { client } = createTestClient();
-      const setSessionModeSpy = vi.fn(async () => ({}));
-      // @ts-expect-error - accessing private field for test setup
-      client.connection = { setSessionMode: setSessionModeSpy };
-
-      // User selects acceptEdits mode
-      await client.setSessionMode('acp-test' as ACPSessionId, 'acceptEdits');
-      setSessionModeSpy.mockClear();
-
-      // Agent enters plan mode
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
-
-      // Agent exits plan mode → transitions to acceptEdits (same as user's selection)
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
-
-      // Should NOT trigger a mode restore since modes already match
-      expect(setSessionModeSpy).not.toHaveBeenCalled();
-    });
-
-    it('keeps plan mode separate from session/set_mode permission routing', async () => {
-      const { client } = createTestClient();
-      const setSessionModeSpy = vi.fn(async () => ({}));
-      // @ts-expect-error - accessing private field for test setup
-      client.connection = { setSessionMode: setSessionModeSpy };
-
-      // User selects default mode
-      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
-
-      // Agent enters plan mode
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
-
-      // Agent exits plan mode → transitions to acceptEdits
-      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
-
-      expect(setSessionModeSpy).toHaveBeenCalledTimes(1);
-      expect(setSessionModeSpy).toHaveBeenCalledWith({
-        sessionId: 'acp-test',
-        modeId: 'default',
-      });
-    });
-
-    it('does not track user-selected mode for auto-restore', async () => {
-      const { client } = createTestClient();
-      const setSessionModeSpy = vi.fn(async () => ({}));
-      // @ts-expect-error - accessing private field for test setup
-      client.connection = { setSessionMode: setSessionModeSpy };
-
-      await client.setSessionMode('acp-test' as ACPSessionId, 'acceptEdits');
-      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
-
-      expect(setSessionModeSpy).toHaveBeenNthCalledWith(1, {
-        sessionId: 'acp-test',
-        modeId: 'acceptEdits',
-      });
-      expect(setSessionModeSpy).toHaveBeenNthCalledWith(2, {
-        sessionId: 'acp-test',
-        modeId: 'default',
-      });
-    });
+    it.each([
+      { selected: 'default', observed: ['plan', 'acceptEdits'] },
+      { selected: 'default', observed: ['acceptEdits'] },
+      { selected: 'acceptEdits', observed: ['plan', 'acceptEdits'] },
+    ])(
+      'keeps agent-confirmed modes after selecting $selected and observing $observed',
+      async ({ selected, observed }) => {
+        const { client } = createTestClient();
+        let upstreamMode = '';
+        // @ts-expect-error - synthetic protocol boundary
+        client.connection = {
+          setSessionMode: async ({ modeId }: { modeId: string }) => {
+            upstreamMode = modeId;
+            return {};
+          },
+        };
+        await client.setSessionMode('acp-test' as ACPSessionId, selected);
+        expect(client.getRuntimeConfiguration().modeId).toBe(selected);
+        for (const mode of observed) {
+          upstreamMode = mode;
+          await client.sessionUpdate(makeCurrentModeUpdateNotification(mode));
+          expect(client.getRuntimeConfiguration().modeId).toBe(mode);
+          expect(upstreamMode).toBe(mode);
+        }
+      }
+    );
   });
 
   describe('context window usage updates', () => {
@@ -365,7 +308,20 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['resolve', 'reject'] as const)(
       'keeps cancelled raw prompts pending until they %s',
       async (outcome) => {
-        const { client } = createTestClient();
+        const { client } = createTestClient({ workspaceId: 'e2e-probe' as WorkspaceId });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-probe', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const raw = Promise.withResolvers<PromptResponse>();
         // @ts-expect-error - focused transport-boundary setup
         client.connection = { prompt: () => raw.promise, cancel: async () => {} };
@@ -377,6 +333,7 @@ describe('AgentClient plan mode permission restoration', () => {
         await expect(local).rejects.toThrow('Agent prompt aborted');
 
         const drain = client.pendingPromptCompletion;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(1);
         expect(drain).not.toBeNull();
         let drained = false;
         void drain?.then(() => {
@@ -388,6 +345,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome === 'resolve') raw.resolve({ stopReason: 'cancelled' });
         else raw.reject(new Error('ACP connection closed'));
         await drain;
+        expect(daemonLossObserver.inspect('e2e-probe')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );
@@ -395,7 +353,23 @@ describe('AgentClient plan mode permission restoration', () => {
     it.each(['original', 'steer'] as const)(
       'drains both Claude handoff requests when %s finishes first',
       async (first) => {
-        const { client } = createTestClient({ agentType: 'claude' });
+        const { client } = createTestClient({
+          agentType: 'claude',
+          workspaceId: 'e2e-handoff' as WorkspaceId,
+        });
+        daemonLossObserver.register(
+          { workspaceId: 'e2e-handoff', machineId: 'machine', accountId: 'account' },
+          () => ({
+            intakeClosed: false,
+            pending: {
+              processorActive: 0,
+              processorQueued: 0,
+              watcherChecks: 0,
+              executionTurns: 0,
+              executionBookkeeping: 0,
+            },
+          })
+        );
         const original = Promise.withResolvers<PromptResponse>();
         const steered = Promise.withResolvers<PromptResponse>();
         let steerId = '';
@@ -428,6 +402,7 @@ describe('AgentClient plan mode permission restoration', () => {
         if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
         outcome.application.release();
         await application;
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(2);
         const drain = client.pendingPromptCompletion;
         let drained = false;
         void drain?.then(() => {
@@ -441,10 +416,12 @@ describe('AgentClient plan mode permission restoration', () => {
           await steer.completion;
         }
         expect(drained).toBe(false);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(1);
         expect(client.pendingPromptCompletion).not.toBeNull();
         original.resolve({ stopReason: 'end_turn' });
         steered.resolve({ stopReason: 'end_turn' });
         await Promise.all([initial, steer.completion, drain]);
+        expect(daemonLossObserver.inspect('e2e-handoff')?.pending.executionBookkeeping).toBe(0);
         expect(client.pendingPromptCompletion).toBeNull();
       }
     );
@@ -630,15 +607,19 @@ describe('AgentClient plan mode permission restoration', () => {
       );
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        limitName: null,
-        planName: '"pro"',
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 18,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            limitName: null,
+            planName: '"pro"',
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 18,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
@@ -657,19 +638,23 @@ describe('AgentClient plan mode permission restoration', () => {
       await expect(client.extMethod('_acp_ext:session_rate_limits', limits)).resolves.toEqual({});
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        planName: null,
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 3,
-            windowDurationSeconds: 18000,
-            resetsAtEpochSeconds: 1777288209,
-          },
-          {
-            usedPercent: 82,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            planName: null,
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 3,
+                windowDurationSeconds: 18000,
+                resetsAtEpochSeconds: 1777288209,
+              },
+              {
+                usedPercent: 82,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
@@ -1179,7 +1164,7 @@ describe('AgentClient plan mode permission restoration', () => {
       });
     });
 
-    it('falls back to legacy session/set_model only for method-not-found', async () => {
+    it('reports an advertised config method refusal without falling back to legacy model mutation', async () => {
       const { client } = createTestClient({ cliType: 'registry', agentType: 'hybrid' });
       const setSessionConfigOptionSpy = vi.fn(async () => {
         throw Object.assign(new Error('Method not found'), { code: -32601 });
@@ -1208,13 +1193,11 @@ describe('AgentClient plan mode permission restoration', () => {
         availableModels: [{ modelId: 'new', name: 'New' }],
       };
 
-      await client.unstable_setSessionModel('acp-test' as ACPSessionId, 'new');
-
-      expect(setSessionConfigOptionSpy).toHaveBeenCalledTimes(1);
-      expect(requestSpy).toHaveBeenCalledWith('session/set_model', {
-        sessionId: 'acp-test',
-        modelId: 'new',
-      });
+      await expect(
+        client.unstable_setSessionModel('acp-test' as ACPSessionId, 'new')
+      ).rejects.toThrow('Method not found');
+      expect(requestSpy).not.toHaveBeenCalled();
+      expect(client.getRuntimeConfiguration().modelId).toBe('old');
     });
 
     it('rejects model changes when the session advertises no switching surface', async () => {
@@ -1224,7 +1207,7 @@ describe('AgentClient plan mode permission restoration', () => {
 
       await expect(
         client.unstable_setSessionModel('acp-test' as ACPSessionId, 'unknown')
-      ).rejects.toThrow('[ACP_MODEL_SWITCH_UNSUPPORTED]');
+      ).rejects.toMatchObject({ reason: 'unsupported', field: 'model' });
       expect(client.currentModel).toBeUndefined();
     });
 

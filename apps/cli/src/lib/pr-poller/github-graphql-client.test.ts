@@ -430,6 +430,58 @@ describe('GitHubGraphQlClient', () => {
     });
   }
 
+  it('reads workflow attempts for the requested HEAD, retains coverage gaps and rejects another repository', async () => {
+    const sha = 'a'.repeat(40);
+    let repository = 'owner/repo';
+    let count = 1;
+    const client = makeClient(async (input, options) => {
+      expect(String(input)).toBe(
+        `https://api.github.com/repos/owner/repo/actions/runs?per_page=100&head_sha=${sha}`
+      );
+      expect(new Headers(options?.headers).get('authorization')).toBe('Bearer synthetic-token');
+      return new Response(
+        JSON.stringify({
+          total_count: count,
+          workflow_runs: [
+            {
+              id: 7,
+              run_attempt: 2,
+              workflow_id: 3,
+              head_sha: sha,
+              head_branch: 'feature',
+              status: 'completed',
+              conclusion: 'failure',
+              updated_at: '2026-10-25T00:00:00Z',
+              html_url: 'https://github.com/owner/repo/actions/runs/7',
+              repository: { full_name: repository },
+              head_repository: { full_name: 'owner/repo' },
+              pull_requests: [{ number: 11 }],
+            },
+          ],
+        }),
+        { headers: { 'x-ratelimit-remaining': '4999', 'x-ratelimit-limit': '5000' } }
+      );
+    });
+    expect(await client.executeWorkflows('owner/repo', sha, 'synthetic-token')).toMatchObject({
+      kind: 'success',
+      batch: {
+        workflowGap: false,
+        workflowRuns: [
+          { runId: 7, attempt: 2, headSha: sha, repository: 'owner/repo', prNumbers: [11] },
+        ],
+      },
+    });
+    count = 101;
+    expect(await client.executeWorkflows('owner/repo', sha, 'synthetic-token')).toMatchObject({
+      kind: 'success',
+      batch: { workflowGap: true },
+    });
+    repository = 'someone/else';
+    expect(await client.executeWorkflows('owner/repo', sha, 'synthetic-token')).toMatchObject({
+      kind: 'network-error',
+    });
+  });
+
   it('posts the batch query with the bearer token and parses the success response', async () => {
     const fetchFn = vi.fn<typeof fetch>(
       async () =>

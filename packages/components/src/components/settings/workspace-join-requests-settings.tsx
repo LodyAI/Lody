@@ -1,3 +1,7 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
@@ -7,7 +11,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { useCloudAction, useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudAction, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
@@ -95,13 +99,15 @@ const styles = stylex.create({
 
 export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
-  const state = useCloudQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
+  const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
     workspaceId,
   });
-  const rotateLink = useCloudMutation(cloudOperations.workspaceJoinRequests.rotateLink);
-  const revokeLink = useCloudMutation(cloudOperations.workspaceJoinRequests.revokeLink);
+  const rotateLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.rotateLink);
+  const revokeLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.revokeLink);
   const refreshSeatTerms = useCloudAction(cloudOperations.billing.purchaseWorkspaceMemberSeat);
-  const reviewRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.reviewRequest);
+  const reviewRequest = useLegacyWorkspaceMutation(
+    cloudOperations.workspaceJoinRequests.reviewRequest
+  );
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const seatPreview = useCloudQuery(cloudOperations.billing.getWorkspaceSeatInvitePreview, {
     workspaceId,

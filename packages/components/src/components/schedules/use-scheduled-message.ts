@@ -56,15 +56,33 @@ function persist(key: string, draft: Draft | null) {
   }
 }
 
+// React can detach and reattach subscriptions within the same commit. Keep the
+// atom identity across that handoff and count observers in every Jotai store.
+function evictAfterLastObserver(evict: () => void) {
+  let observers = 0;
+  let generation = 0;
+  return () => {
+    observers += 1;
+    generation += 1;
+    return () => {
+      observers -= 1;
+      const released = ++generation;
+      queueMicrotask(() => {
+        if (observers === 0 && generation === released) evict();
+      });
+    };
+  };
+}
+
 // The persisted draft survives navigation; empty observer caches need not.
 const draftAtoms = atomFamily((key: string): PrimitiveAtom<Draft | null> => {
   const value = atom(read(key));
-  value.onMount = () => () => draftAtoms.remove(key);
+  value.onMount = evictAfterLastObserver(() => draftAtoms.remove(key));
   return value;
 });
 const savingAtoms = atomFamily((key: string): PrimitiveAtom<boolean> => {
   const value = atom(false);
-  value.onMount = () => () => savingAtoms.remove(key);
+  value.onMount = evictAfterLastObserver(() => savingAtoms.remove(key));
   return value;
 });
 

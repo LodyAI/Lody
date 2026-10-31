@@ -28,6 +28,18 @@ describe('getSessionFileErrorPresentation', () => {
     ).toMatchObject({ kind: 'outside-workspace' });
   });
 
+  it('explains encrypted-workspace file refusals instead of a filesystem denial', () => {
+    for (const message of [
+      'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+      'Encrypted workspaces do not yet support remote machine operations.',
+    ])
+      expect(getSessionFileErrorPresentation(message, 'permission-denied', t)).toEqual({
+        kind: 'content-unavailable',
+        title: 'Not available in this encrypted workspace',
+        description: message,
+      });
+  });
+
   it('uses structured provider reasons for actionable file errors', () => {
     expect(getSessionFileErrorPresentation('Text too large', 'text-too-large', t)).toMatchObject({
       kind: 'too-large',

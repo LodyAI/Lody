@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -457,6 +458,11 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     accordion,
   } = props;
   const { t } = useTranslation();
+  const contentMode = useAtomValue(workspaceContentModeAtom);
+  const ordinarySharing =
+    !contentMode?.descriptor ||
+    !('contentMode' in contentMode.descriptor) ||
+    contentMode.descriptor.contentMode !== 'e2ee';
   const isMobile = useIsMobile();
   const monitoredOnline = useMachineOnlineStatus(machine.id) === 'online';
   // The accordion list already owns the workspace-wide presence snapshot. Reuse
@@ -502,7 +508,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
 
   const manageableOwnMachine = isOwn && !readOnly;
   const shareControlVisible =
-    !isMobile && !renaming && manageableOwnMachine && !!onSharedWithTeamChange;
+    !isMobile && !renaming && manageableOwnMachine && ordinarySharing && !!onSharedWithTeamChange;
   const restartVisible = !isMobile && !renaming && !readOnly && !!onRestartDaemon;
   const revokeVisible =
     !isMobile && !renaming && !readOnly && canRevokeCredentials && !!onRevokeCredentials;
@@ -799,28 +805,31 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                         {t('workspace.machines.editName', 'Edit machine name')}
                       </Menu.Item>
                     )}
-                    {isMobile && manageableOwnMachine && onSharedWithTeamChange && (
-                      <Menu.Item
-                        closeOnClick={false}
-                        onClick={() => {
-                          if (sharing) return;
-                          void handleSharedToggle(!effectiveShared);
-                        }}
-                        disabled={sharing}
-                        icon={Users}
-                        endContent={
-                          <Switch
-                            checked={effectiveShared}
-                            disabled={sharing}
-                            aria-hidden
-                            tabIndex={-1}
-                            className={stylex.props(styles.switchInMenu).className}
-                          />
-                        }
-                      >
-                        {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                      </Menu.Item>
-                    )}
+                    {isMobile &&
+                      manageableOwnMachine &&
+                      ordinarySharing &&
+                      onSharedWithTeamChange && (
+                        <Menu.Item
+                          closeOnClick={false}
+                          onClick={() => {
+                            if (sharing) return;
+                            void handleSharedToggle(!effectiveShared);
+                          }}
+                          disabled={sharing}
+                          icon={Users}
+                          endContent={
+                            <Switch
+                              checked={effectiveShared}
+                              disabled={sharing}
+                              aria-hidden
+                              tabIndex={-1}
+                              className={stylex.props(styles.switchInMenu).className}
+                            />
+                          }
+                        >
+                          {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                        </Menu.Item>
+                      )}
                     {isMobile &&
                       isOwn &&
                       (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
@@ -1186,6 +1195,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
   return allowed || props.isLocal ? (
     <SupportedMachineDetailPane {...props} />
   ) : (
-    <WorkspaceFeatureNotice feature="rpc" />
+    <>
+      {props.mode === 'devices' ? props.footer : null}
+      <WorkspaceFeatureNotice feature="rpc" />
+    </>
   );
 }

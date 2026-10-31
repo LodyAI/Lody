@@ -24,3 +24,5 @@ Error Tracking。共享 PostHog 的 `before_send` 现在过滤符合
 现有 provider 测试直接调用 `before_send`，覆盖序列化的 `ConvexError`、嵌套的
 action/query 消息、混合异常链及无关事件。本地测试不能证明生产环境已经停止接收；
 客户端收到更新后的代码才会生效。
+
+加密及未知范围在过滤后只报固定诊断，见[工作区遥测隐私](2026-10-29-workspace-telemetry-privacy.zh.md)。

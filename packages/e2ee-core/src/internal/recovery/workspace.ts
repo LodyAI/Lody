@@ -18,10 +18,12 @@ import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/sta
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
 import { canonical, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import { deriveRecoveryAccessCredential } from './credential';
 import { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 import {
   wipeRecoveryPackage,
   type RecoveryEntryReference,
+  type RecoveryPrivatePackage,
   type RecoveryVault,
   type RecoveryVaultLocalStore,
 } from './vault';
@@ -31,6 +33,8 @@ export type RecoverySubmitResult = {
   readonly outcome: 'Committed' | 'Conflict' | 'Pending';
   readonly record: Uint8Array;
 };
+/** SHA-256 of R's derived service access credential, registered with R's admission append. */
+export type RecoveryCredentialRegistration = { readonly recoveryCredentialHash: Uint8Array };
 /** The current epoch-key envelope addressed to a recovery device, as fetched during restore. */
 export type RecoveryEnvelope =
   | { readonly sender: Bytes.SigningPublicKey; readonly frame: Uint8Array }
@@ -43,7 +47,13 @@ export interface WorkspaceRecoveryInput {
   readonly membershipId: Bytes.MembershipId;
   readonly personalSigner: DeviceSigner;
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
-  readonly submitOriginal: (record: Uint8Array) => Effect.Effect<RecoverySubmitResult, unknown>;
+  /** Submit the exact original record. R's own admission carries the hash of R's
+   * derived access credential so the service can register it with that append;
+   * every other record (for example a revocation) passes null. */
+  readonly submitOriginal: (
+    record: Uint8Array,
+    registration: RecoveryCredentialRegistration | null
+  ) => Effect.Effect<RecoverySubmitResult, unknown>;
   readonly fetchCurrentEnvelope: (
     recipient: Bytes.SigningPublicKey,
     epoch: number,
@@ -174,7 +184,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   };
   const useIdentity = <A, E, R>(
     ref: RecoveryEntryReference,
-    work: (identity: RecoveryIdentity) => Effect.Effect<A, E, R>
+    work: (identity: RecoveryIdentity, bundle: RecoveryPrivatePackage) => Effect.Effect<A, E, R>
   ) =>
     Effect.acquireUseRelease(
       vault.readEntry(ref),
@@ -187,7 +197,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           )
             return yield* vaultError('authentication');
           const identity = yield* importRecoveryIdentity(bundle);
-          return yield* work(identity);
+          return yield* work(identity, bundle);
         }),
       (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
     );
@@ -392,14 +402,19 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       progress = state.value!;
     }
     const reference = progress.reference!;
-    return yield* useIdentity(reference, (identity) =>
+    return yield* useIdentity(reference, (identity, bundle) =>
       Effect.gen(function* () {
+        const registration = yield* attempt(() => {
+          const derived = deriveRecoveryAccessCredential(bundle);
+          derived.credential.fill(0);
+          return { recoveryCredentialHash: derived.credentialHash };
+        });
         let view = yield* current();
         // The record may have committed before this process died, while its P09
         // result still awaits acknowledgement. Reconcile that original before
         // advancing local stage even when the registered R is already visible.
         if (progress.record && progress.stage === 'registration' && active(view, identity)) {
-          const resumed = yield* submit(new Uint8Array(progress.record));
+          const resumed = yield* submit(new Uint8Array(progress.record), registration);
           if (!bytesEqual(resumed.record, progress.record))
             return yield* vaultError('authentication');
           if (resumed.outcome !== 'Committed')
@@ -438,7 +453,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             });
             progress = state.value!;
           }
-          const result = yield* submit(new Uint8Array(progress.record!));
+          const result = yield* submit(new Uint8Array(progress.record!), registration);
           if (!bytesEqual(result.record, progress.record!))
             return yield* vaultError('authentication');
           if (result.outcome !== 'Committed')
@@ -607,7 +622,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           const view = yield* current();
           if (!active(view, oldIdentity)) {
             if (intent.revoke) {
-              const reconciled = yield* submit(new Uint8Array(intent.revoke));
+              const reconciled = yield* submit(new Uint8Array(intent.revoke), null);
               if (!bytesEqual(reconciled.record, intent.revoke))
                 return yield* vaultError('authentication');
               return reconciled.outcome;
@@ -628,7 +643,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             };
             yield* persistIntent();
           }
-          const outcome = yield* submit(new Uint8Array(intent.revoke!));
+          const outcome = yield* submit(new Uint8Array(intent.revoke!), null);
           if (!bytesEqual(outcome.record, intent.revoke!))
             return yield* vaultError('authentication');
           if (outcome.outcome !== 'Committed') return outcome.outcome;

@@ -1,42 +1,25 @@
-import { sha256 } from '@noble/hashes/sha2.js';
 import type Database from 'better-sqlite3';
 import { isAbsolute } from 'node:path';
-import { Data, Effect, Result, Schema } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 import * as Bytes from '../../internal/foundation/bytes';
 import { bytesEqual } from '../../internal/foundation/cbor';
 import { MAX_CONTENT_BYTES } from '../../internal/foundation/content-format';
 import { openSqliteStore } from './store';
 
-/** Failure of the reference snapshot publication journal; `code` names the reason. */
-export class SnapshotPublicationError extends Data.TaggedError('SnapshotPublicationError')<{
-  readonly code:
-    | 'invalid-input'
-    | 'closed'
-    | 'storage'
-    | 'corrupt'
-    | 'conflict'
-    | 'busy'
-    | 'capacity';
-}> {}
-interface SnapshotPublicationIdentity {
-  readonly offset: string;
-  readonly signer: string;
-  readonly digest: string;
-  readonly issuedAt: number;
-  readonly expiresAt: number;
-}
-/** One stored snapshot publication: its identity, state (Pending, Accepted, current) and, while retained, its body. */
-export type SnapshotPublicationRow = SnapshotPublicationIdentity &
-  (
-    | { readonly phase: 'Pending'; readonly body: Uint8Array }
-    | { readonly phase: 'Accepted'; readonly body: Uint8Array | null }
-  );
-type Original = Omit<SnapshotPublicationIdentity, 'digest'> & { readonly body: Uint8Array };
+import {
+  SnapshotPublicationError,
+  snapshotPublicationDigest,
+  type SnapshotPublicationRow,
+  type SnapshotPublicationIdentity,
+  type SnapshotPublicationOriginal as Original,
+} from '../../services/snapshot-publication';
+export {
+  SnapshotPublicationError,
+  snapshotPublicationDigest,
+  type SnapshotPublicationRow,
+} from '../../services/snapshot-publication';
 const APP = 0x4c455350;
 const fail = (code: SnapshotPublicationError['code']) => new SnapshotPublicationError({ code });
-/** SHA-256 identity of a snapshot publication body. */
-export const snapshotPublicationDigest = (body: Uint8Array) =>
-  Buffer.from(sha256(body)).toString('hex');
 const validOffset = (offset: unknown): offset is string =>
   typeof offset === 'string' &&
   offset.length > 0 &&

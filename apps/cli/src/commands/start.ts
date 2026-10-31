@@ -73,6 +73,7 @@ import { createLocalCloudPort, type CloudPort, type PlatformKind } from '@lody/p
 import { createCloudCliPort } from '@/lib/cloud-cli-port';
 import { configureManagedAgentRuntimeManager } from '@/agent/managed-agent-runtime';
 import { configureManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
 
 type StartAuthMethod =
   | 'e2ee_machine_service'
@@ -235,9 +236,9 @@ export const startCommand = new Command('start')
 
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
-      kimi: 'managed-runtime',
+      kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
       pi: 'managed-runtime',
-      grok: 'managed-runtime',
+      grok: hasBuiltinAgentCredentials('grok') && 'configured',
       devin: 'managed-runtime',
       claude: checkClaude(),
       codex: checkCodex(),
@@ -247,8 +248,8 @@ export const startCommand = new Command('start')
     );
     logCliDetectionResults(logger, cliAvailability);
     captureAgentServiceEvent('agent_service_cli_detection', {
-      kimi_available: true,
-      grok_available: true,
+      kimi_available: Boolean(cliAvailability.kimi),
+      grok_available: Boolean(cliAvailability.grok),
       claude_available: Boolean(cliAvailability.claude),
       codex_available: Boolean(cliAvailability.codex),
     });
@@ -581,6 +582,9 @@ async function startAgentService(
 
   let cloudPort: CloudPort;
   if (options.pairedWorkspace) {
+    if (!LODY_SERVER_URL) {
+      throw new Error('Cloud platform startup requires LODY_SERVER_URL');
+    }
     const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
     const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
     const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
@@ -591,6 +595,7 @@ async function startAgentService(
       machineId,
       credential: paired.credential,
       authBaseUrl: paired.bootstrap.deploymentUrl,
+      serverBaseUrl: LODY_SERVER_URL,
       logger,
     });
   } else if (platformKind === 'local') {
@@ -656,6 +661,7 @@ async function startAgentService(
     await lease?.close();
   };
   const stopDaemonAndApplication = async () => {
+    await fleet.prepareForShutdown();
     const failures: unknown[] = [];
     for (const stop of [
       () => startupTimeSync?.stop(),

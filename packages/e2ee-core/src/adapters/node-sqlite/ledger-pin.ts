@@ -1,5 +1,6 @@
 import { Effect, Layer, Result } from 'effect';
 import * as Bytes from '../../internal/foundation/bytes';
+import { bytesEqual } from '../../internal/foundation/cbor';
 import { keyId } from '../../internal/foundation/identifiers';
 import { LocalStoreError } from '../../services/errors';
 import { LedgerPinStore } from '../../services/ledger';
@@ -39,6 +40,7 @@ export const sqliteLedgerPinStore = (options: SqliteFileOptions) =>
           if (row?.genesis !== genesis) throw fail('corrupt');
         },
       });
+      // Additive, local-only metadata. A missing observation never starts a fresh window on a pinned reopen.
       const select = db.prepare('SELECT genesis,head,count FROM ledger_pin WHERE id=1');
       const decode = () => {
         const row = select.get() as { genesis: unknown; head: unknown; count: unknown } | undefined;
@@ -66,7 +68,45 @@ export const sqliteLedgerPinStore = (options: SqliteFileOptions) =>
               ? error
               : fail(isSqliteCorruption(error) ? 'corrupt' : db.open ? 'storage' : 'closed'),
         });
+      const observation = () => {
+        decode();
+        db.exec(
+          'CREATE TABLE IF NOT EXISTS epoch_write_observations(id INTEGER PRIMARY KEY CHECK(id=1),blob BLOB NOT NULL)'
+        );
+        const row = db.prepare('SELECT blob FROM epoch_write_observations WHERE id=1').get() as
+          | { blob: unknown }
+          | undefined;
+        if (!row) return null;
+        if (!(row.blob instanceof Uint8Array) || row.blob.length > 1024 * 1024)
+          throw fail('corrupt');
+        return new Uint8Array(row.blob);
+      };
       return LedgerPinStore.of({
+        writeGrace: {
+          read: () => sql(observation),
+          compareAndSet: (expected, next) =>
+            sql(() =>
+              db
+                .transaction(() => {
+                  const current = observation();
+                  if (
+                    expected === null
+                      ? current !== null
+                      : current === null || !bytesEqual(current, expected)
+                  )
+                    return false;
+                  if (!(next instanceof Uint8Array) || next.length > 1024 * 1024)
+                    throw fail('corrupt');
+                  db.prepare(
+                    'INSERT INTO epoch_write_observations(id,blob) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET blob=excluded.blob'
+                  ).run(next);
+                  const saved = observation();
+                  if (!saved || !bytesEqual(saved, next)) throw fail('corrupt');
+                  return true;
+                })
+                .immediate()
+            ),
+        },
         read: () => sql(decode),
         write: (checkpoint) =>
           sql(() =>

@@ -1,6 +1,10 @@
 import { probeLocalProjectMember } from './project-member-probe';
 import { NodeFileSystem } from '@effect/platform-node-shared';
-import { checkoutProjectSubmodule, persistProjectSubmoduleBranch } from './project-submodules';
+import {
+  checkoutProjectSubmodule,
+  persistProjectSubmoduleBranch,
+  findProjectSubmoduleReference,
+} from './project-submodules';
 import {
   FileLockCleanupFailed,
   LockOwnershipLost,
@@ -57,6 +61,17 @@ export const worktreeGitLegacy = {
   probeLocalProjectMember: (rootPath: string, options: PlatformFacadeOptions = {}) =>
     executeLegacy(
       probeLocalProjectMember(rootPath).pipe(Effect.provide(NodeFileSystem.layer)),
+      options
+    ),
+  findProjectSubmoduleReference: (
+    repositoryPath: string,
+    expectedRepositoryUrl: string,
+    options: PlatformFacadeOptions = {}
+  ) =>
+    executeLegacy(
+      findProjectSubmoduleReference(repositoryPath, expectedRepositoryUrl).pipe(
+        Effect.provide(NodeFileSystem.layer)
+      ),
       options
     ),
   persistProjectSubmoduleBranch: (

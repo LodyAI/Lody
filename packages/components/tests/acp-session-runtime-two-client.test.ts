@@ -1,14 +1,21 @@
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   resolveSessionAcpRuntimeConfig,
+  ACP_CAPABILITY_CACHE_VERSION,
   sessionDocSchema,
   type SessionDoc,
   type SessionHistoryInput,
   type SessionId,
+  type AgentConfigId,
+  type MachineMeta,
+  type AcpCommandSummary,
 } from '@lody/shared';
+import { useAvailableCommands } from '../src/hooks/use-available-commands';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
   resolveAcpSessionConfigSelection,
@@ -82,6 +89,77 @@ const resolveComposerValues = (
   ).configOptionValues;
 
 describe('ACP runtime config across two clients', () => {
+  it('shows probe commands before startup, isolates projects, syncs actual commands and honors empty lists', () => {
+    let preview: AcpCommandSummary[] = [{ name: 'help' }];
+    const project = (id: string) => {
+      const doc = new LoroDoc();
+      const mirror = new Mirror({
+        doc,
+        schema: sessionDocSchema,
+        throwOnValidationError: true,
+        initialState: { session: { id: id as SessionId }, history: [], mq: [] },
+      });
+      return { doc, mirror };
+    };
+    const a = project('project-a');
+    const b = project('project-b');
+    const reader = project('project-a-reader');
+    const menu = (mirror: typeof a.mirror) => {
+      function Menu() {
+        const commands = useAvailableCommands(
+          {
+            configId: 'provider' as AgentConfigId,
+            cliType: 'builtin',
+            agentType: 'pi',
+            machine: {
+              acpCapabilities: {
+                provider: {
+                  cliType: 'builtin',
+                  agentType: 'pi',
+                  cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+                  modes: [],
+                  models: [],
+                  fetchedAt: 1,
+                  availableCommands: preview,
+                },
+              },
+            } as unknown as MachineMeta,
+          },
+          mirror.getState().acpRuntimeConfig?.availableCommands
+        );
+        return createElement('span', null, commands.map((command) => command.name).join(','));
+      }
+      return renderToStaticMarkup(createElement(Menu));
+    };
+    const publish = (mirror: typeof a.mirror, names: string[]) =>
+      mirror.setState((state) => ({
+        ...state,
+        acpRuntimeConfig: {
+          acpSessionId: 'native',
+          basedOnUserTurnId: 'turn-1',
+          revision: 1,
+          availableCommands: names.map((name) => ({ name })),
+        },
+      }));
+    expect(menu(a.mirror)).toBe('<span>help</span>');
+    publish(a.mirror, ['review-a']);
+    publish(b.mirror, ['review-b']);
+    expect(menu(a.mirror)).toBe('<span>review-a</span>');
+    expect(menu(b.mirror)).toBe('<span>review-b</span>');
+    preview = [{ name: 'refreshed-help' }];
+    expect(menu(a.mirror)).toBe('<span>review-a</span>');
+    expect(menu(b.mirror)).toBe('<span>review-b</span>');
+    expect(menu(reader.mirror)).toBe('<span>refreshed-help</span>');
+    reader.doc.import(a.doc.export({ mode: 'snapshot' }));
+    expect(menu(reader.mirror)).toBe('<span>review-a</span>');
+    publish(a.mirror, []);
+    reader.doc.import(a.doc.export({ mode: 'update', from: reader.doc.version() }));
+    expect(menu(a.mirror)).toBe('<span></span>');
+    expect(menu(reader.mirror)).toBe('<span></span>');
+    expect(menu(b.mirror)).toBe('<span>review-b</span>');
+    for (const { mirror } of [a, b, reader]) mirror.dispose();
+  });
+
   it("syncs Plan exit to both clients without publishing A's unsent High choice", () => {
     const docA = new LoroDoc();
     const mirrorA = new Mirror({
@@ -111,7 +189,7 @@ describe('ACP runtime config across two clients', () => {
     mirrorA.setState((state) => ({
       ...state,
       acpRuntimeConfig: {
-        acpSessionId: 'acp-session-1',
+        acpSessionId: 'acp-session-1', generation: 'connection-1', state: 'ready',
         basedOnUserTurnId: userTurnId,
         revision: 1,
         configOptionValues: {
@@ -124,16 +202,8 @@ describe('ACP runtime config across two clients', () => {
 
     const stateA = mirrorA.getState();
     const stateB = mirrorB.getState();
-    const runtimeA = resolveSessionAcpRuntimeConfig(
-      stateA.history,
-      stateA.mq,
-      stateA.acpRuntimeConfig
-    );
-    const runtimeB = resolveSessionAcpRuntimeConfig(
-      stateB.history,
-      stateB.mq,
-      stateB.acpRuntimeConfig
-    );
+    const runtimeA = resolveSessionAcpRuntimeConfig(stateA.acpRuntimeConfig);
+    const runtimeB = resolveSessionAcpRuntimeConfig(stateB.acpRuntimeConfig);
     expect(runtimeA).toEqual(runtimeB);
     expect(runtimeB?.configOptionValues).toEqual({
       collaboration_mode: 'default',

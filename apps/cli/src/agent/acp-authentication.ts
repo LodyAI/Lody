@@ -788,12 +788,17 @@ export class AcpAuthenticationManager {
       options.onProgress?.({ status: 'error', error: message });
       return { success: false, disposition: 'error', error: message };
     } finally {
-      await releaseProfile?.();
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      if (this.runningByAgentType.get(options.agentType) === running) {
-        this.runningByAgentType.delete(options.agentType);
+      try {
+        await releaseProfile?.();
+      } catch {
+        this.logger.warn(
+          'Codex authentication process record cleanup failed; retained for recovery'
+        );
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (this.runningByAgentType.get(options.agentType) === running) {
+          this.runningByAgentType.delete(options.agentType);
+        }
       }
     }
   }

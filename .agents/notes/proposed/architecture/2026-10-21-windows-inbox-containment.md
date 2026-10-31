@@ -13,14 +13,13 @@ Windows startup recovery cannot safely infer whole-tree release from recorded ro
 PIDs: descendants may outlive their parent and PID reuse changes identity. Stage 2
 proposes acquisition-time Windows Job Object or equivalent controlled-container
 ownership, with durable generation identities and verifiable whole-container exit.
-It is not implemented by the [manual recovery change](../../implemented/bug-fix/2026-10-21-manual-inbox-recovery.md).
-Legacy or uncertain records must continue to use the explicit offline flow.
+It is not implemented by the [manual recovery change](../../archived/bug-fix/2026-10-21-manual-inbox-recovery.md).
+The [availability decision](../../implemented/bug-fix/2026-10-29-inbox-no-durable-block.md) replaces offline proof and durable admission blocking; this proposal concerns future cleanup containment only.
 
 ## Revisit trigger and proposed boundary
 
 Revisit when recurring Windows stale ownership or repeated manual-recovery friction
-justifies native containment work. Do not remove the Windows fail-closed guard as a
-shortcut. The [Windows Job Object contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+justifies native containment work. Release proof no longer gates input. The [Windows Job Object contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 describes process association, child inheritance, breakaway and termination behavior;
 using a Job name or observing a parent exit is not itself proof of safe recovery.
 
@@ -36,7 +35,7 @@ using a Job name or observing a parent exit is not itself proof of safe recovery
 - Prove actual whole-container/tree exit, including descendants whose root exited.
   Permission errors, unavailable probes and interrupted journaling remain unknown.
   Recovery rechecks exact ownership/snapshot under SQLite CAS before clearing it.
-- Keep legacy records on manual recovery. Never replay unknown submissions or
+- Legacy records no longer block input. Never replay unknown submissions or
   infer provider success from a resource-release receipt.
 
 ## Acceptance before shipping
@@ -45,7 +44,7 @@ Native Windows tests must exercise root exit with surviving descendants, nested
 children, breakaway attempts, suspended/spawn-time acquisition races, PID reuse,
 reused ACP across turns, interrupted journaling, permission errors, failed cleanup,
 restart and changed ownership during recovery. Assert both safety and availability:
-confirmed release permits successors, uncertainty retains ownership, independent
+successors remain available under uncertainty, independent
 cleanup still completes, and already submitted/unknown input never replays.
 Design review must identify supported Windows versions and how external requests
 outside the process container retain their own release evidence.

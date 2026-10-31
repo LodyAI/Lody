@@ -6,11 +6,11 @@
  * connection is open. So instead of deleting in place from the settings page, we
  * persist a flag and reload: a full reload closes every IndexedDB connection,
  * then `maybeClearLodyCacheOnBoot()` runs BEFORE the runtime reopens the repo DB
- * — at which point nothing holds a `lody*` database open and the delete succeeds.
+ * — at which point recoverable replica deletes can succeed.
  *
  * Two levels exist, both driven by the same boot flag:
  *
- * - **cache** (Settings → Clear cache): recoverable `lody*` caches only. The user
+ * - **cache** (Settings → Clear cache): explicitly known recoverable caches only. The user
  *   stays signed in and keeps their preferences.
  * - **hard** (crash screen → "Clear all data and sign out"): every local trace of
  *   the install — auth token, preferences, cookies, all IndexedDB databases, all
@@ -31,7 +31,6 @@ import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
 import { isWarmWindow } from './desktop-window';
-import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 import { ROOST_HISTORY_CACHE_DB } from './roost-history-cache';
 import { SESSION_INPUT_DATABASE } from './session-input-storage';
 import {
@@ -78,8 +77,23 @@ const KNOWN_INDEXEDDB_NAMES = [
   'lody:repo-file-paths',
   'lody:repo-issues-prs',
   'lody:github-pr-cache',
+  'lody:github-review-comments',
   'lody:project-skills',
 ];
+
+/** Only these replicas are reconstructible. Unknown databases may hold custody,
+ * trust pins or unacknowledged originals, even when named lody*. Keep the same
+ * policy for enumeration and explicit late callers; application registration
+ * cannot protect a database when cache recovery runs before application boot. */
+const REBUILDABLE_DATABASE_PREFIXES = ['lody-loro-repo-db-', 'lody-loro-stream-cursors-'];
+function isRecoverableDatabase(name: string): boolean {
+  return (
+    name !== SESSION_INPUT_DATABASE &&
+    name !== CLIENT_LOG_DATABASE &&
+    (KNOWN_INDEXEDDB_NAMES.includes(name) ||
+      REBUILDABLE_DATABASE_PREFIXES.some((prefix) => name.startsWith(prefix)))
+  );
+}
 
 /**
  * Per-workspace IndexedDB names (`lody-loro-repo-db-<id>`,
@@ -226,14 +240,14 @@ async function deleteDatabases(names: string[]): Promise<string[]> {
 }
 
 /**
- * Delete every `lody*` IndexedDB database and Cache Storage entry, plus the
+ * Delete known rebuildable IndexedDB databases and `lody*` Cache Storage entries, plus the
  * localStorage connection-state caches (Streams JWT/gateway, workspace-info
  * map, cursor-bypass markers — see `LOCAL_STORAGE_CACHE_KEYS`). Preserves the
  * localStorage auth token, language, and preferences — this clears recoverable
  * local cache (Loro replica, stream cursors, mention/PR/skill/eager-sync caches,
  * image caches), not the user's session or settings.
  *
- * @param extraNames Additional IndexedDB names to delete unconditionally — e.g.
+ * @param extraNames Additional known rebuildable IndexedDB names to delete — e.g.
  *   the current workspace's databases, in case its info isn't cached yet. All
  *   visited workspaces are already covered via the cached workspace-info map.
  */
@@ -248,7 +262,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     try {
       const databases = (await indexedDB.databases?.()) ?? [];
       for (const database of databases) {
-        if (database.name && database.name.startsWith('lody')) {
+        if (database.name && isRecoverableDatabase(database.name)) {
           names.add(database.name);
         }
       }
@@ -259,14 +273,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     // A Shortcut outbox may contain the only copy of an offline save. Only the
     // explicitly destructive hard reset below may remove these databases. The
     // client log is what explains why a clear was needed, so it stays too.
-    failed = await deleteDatabases(
-      [...names].filter(
-        (name) =>
-          !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) &&
-          name !== SESSION_INPUT_DATABASE &&
-          name !== CLIENT_LOG_DATABASE
-      )
-    );
+    failed = await deleteDatabases([...names].filter(isRecoverableDatabase));
   }
 
   if (typeof caches !== 'undefined') {
@@ -697,11 +704,7 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
   const failed = await deleteDatabases(
-    extraNames.filter(
-      (name) =>
-        mode === 'hard' ||
-        (!name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) && name !== SESSION_INPUT_DATABASE)
-    )
+    extraNames.filter((name) => mode === 'hard' || isRecoverableDatabase(name))
   );
   if (failed.length > 0) recordLateClearFailures(failed.length);
 }

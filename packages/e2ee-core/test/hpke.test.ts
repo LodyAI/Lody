@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
+import { DhkemX25519HkdfSha256 as JsX25519 } from '@hpke/dhkem-x25519';
 import * as Public from '../src/protocol';
 import { copyEpochKeyBytes } from '../src/internal/foundation/epoch-key';
 import vector from './hpke-vector.json';
@@ -97,6 +98,28 @@ describe('fixed Base HPKE epoch primitive through the public entry', () => {
     ).toBe(r.pt);
   });
 
+  it('wipes the JS KEM ephemeral private backing buffer after success or rejection', async () => {
+    deterministicRandom();
+    const owned: Uint8Array[] = [];
+    const serialize = JsX25519.prototype.serializePrivateKey;
+    vi.spyOn(JsX25519.prototype, 'serializePrivateKey').mockImplementation(async function (
+      this: JsX25519,
+      ...args
+    ) {
+      const buffer = await serialize.apply(this, args);
+      owned.push(new Uint8Array(buffer));
+      return buffer;
+    });
+    expect(await Effect.runPromise(Public.sealEpochKeyHpke(recipient, key, context))).toEqual(
+      payload()
+    );
+    const low = new Uint8Array(32);
+    low[0] = 1;
+    await failure(Public.sealEpochKeyHpke(ok(Public.Bytes.encryptionPublicKey(low)), key, context));
+    expect(owned.length).toBeGreaterThan(0);
+    for (const privateBytes of owned) expect(privateBytes).toEqual(new Uint8Array(32));
+  });
+
   it('matches independently encoded epoch AAD and Python HPKE bytes', async () => {
     deterministicRandom();
     expect(hex(ok(Public.epochHpkeAad(context)))).toBe(v.aad);
@@ -107,6 +130,20 @@ describe('fixed Base HPKE epoch primitive through the public entry', () => {
     );
     expect(hex(copyEpochKeyBytes(opened))).toBe(v.pt);
     expect(Object.keys(opened)).toEqual([]);
+  });
+
+  it('seals the existing fixed bytes without native X25519', async () => {
+    deterministicRandom();
+    const original = globalThis.crypto.subtle.importKey.bind(globalThis.crypto.subtle);
+    vi.spyOn(globalThis.crypto.subtle, 'importKey').mockImplementation((...args) => {
+      const name = typeof args[2] === 'string' ? args[2] : args[2].name;
+      if (name === 'X25519')
+        return Promise.reject(new DOMException('X25519 unsupported', 'NotSupportedError'));
+      return original(...args);
+    });
+    expect(await Effect.runPromise(Public.sealEpochKeyHpke(recipient, key, context))).toEqual(
+      payload()
+    );
   });
 
   it('runs with host secure randomness, fresh seals and non-extractable native private keys', async () => {

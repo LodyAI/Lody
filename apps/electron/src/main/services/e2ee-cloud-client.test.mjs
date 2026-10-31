@@ -1,4 +1,4 @@
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
@@ -795,7 +795,7 @@ for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
     )
   })
 
-void test('only authenticated whole-member rejection carries the terminal local deletion signal', async () => {
+void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(
       Effect.scoped(
@@ -818,6 +818,10 @@ void test('only authenticated whole-member rejection carries the terminal local 
             assert.equal(
               result.failure instanceof E2eeMemberRemovedError,
               code === 'e2ee_member_removed'
+            )
+            assert.equal(
+              result.failure instanceof E2eeDeviceRevokedError,
+              code === 'e2ee_device_revoked'
             )
             assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
           }

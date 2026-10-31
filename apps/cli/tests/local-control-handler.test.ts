@@ -1,3 +1,4 @@
+import { AUTOMATION_CONTROL_PATH } from '@lody/shared/automations';
 import { createHash, randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
@@ -73,6 +74,40 @@ const createSessionRequest = (): LocalSessionControlRequest => ({
 });
 
 describe('LocalControlHandler', () => {
+  it('routes validated automation commands to their machine owner and rejects foreign or malformed requests', async () => {
+    const accepted: unknown[] = [];
+    const handler = new LocalControlHandler({
+      machineId: 'machine-1',
+      logger,
+      dispatchSession: vi.fn(),
+      dispatchProject: vi.fn(),
+      dispatchAutomation: async (command) => {
+        accepted.push(command);
+        return { ok: true, result: { rules: [] } };
+      },
+    });
+    const command = {
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      command: { type: 'list' },
+    };
+    const send = (body: unknown) =>
+      handler.handle({
+        path: AUTOMATION_CONTROL_PATH,
+        rawBody: JSON.stringify(body),
+        requestId: 1,
+      });
+    expect(await send({ ...command, machineId: 'other' })).toMatchObject({ status: 403 });
+    expect(await send({ ...command, command: { type: 'upsert', rule: {} } })).toMatchObject({
+      status: 400,
+    });
+    expect(accepted).toEqual([]);
+    expect(await send(command)).toMatchObject({
+      status: 200,
+      payload: { ok: true, result: { rules: [] } },
+    });
+    expect(accepted).toEqual([command]);
+  });
   it.each([
     {
       machineId: 'machine-1',

@@ -39,6 +39,15 @@ export interface SessionConfig {
   magpieGatewayUrl?: string;
   project?: ProjectRef;
   projectRun?: import('@lody/shared').SessionProjectRun;
+  /**
+   * Encrypted turns: rejects execution inputs outside the authorized project scope.
+   * Called on every Project group or parent project read from synced metadata,
+   * because those can change after authorization.
+   */
+  authorizeExecutionInputs?: (input: {
+    project?: ProjectRef;
+    projectRun?: import('@lody/shared').SessionProjectRun;
+  }) => Promise<void>;
   // undefined means create a new session
   sessionId?: SessionId;
   // promptBuildConfig: PromptBuildConfig;
@@ -128,5 +137,6 @@ export interface SessionErrorEvent {
  */
 export interface SessionExitEvent {
   sessionId: SessionId;
+  configurationGeneration?: string;
   exitCode: number;
 }

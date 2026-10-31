@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { assertSessionConfigRevision } from '@lody/shared';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -42,12 +44,15 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
+  getWorkspaceFlockDocId,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
+  type MessageQueueItemInput,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
+  getReadableAcpCapabilityCacheEntry,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -127,6 +132,7 @@ import type { RateLimit } from 'acp-extension-core';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
   createCliSqliteRepoStore,
+  hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
@@ -354,7 +360,7 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -375,6 +381,7 @@ export type LoroRepoPersistReason =
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
   sessions: Map<SessionId, SessionDocument> = new Map();
+  private readonly sessionDocCleanup = new Map<SessionId, Promise<void>>();
   machine: MachineDocument | null = null;
   private readonly workspaceId: WorkspaceId;
   private readonly userId: string;
@@ -405,7 +412,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -418,12 +425,33 @@ export class LoroDocumentManager {
     return this.encryptedWorkspace !== undefined;
   }
 
+  async getEncryptedAttachmentToken(): Promise<string> {
+    if (!this.encryptedWorkspace?.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+    return this.encryptedWorkspace.attachmentToken();
+  }
+
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
     await this.catalogSync?.hold(flockDocId);
   }
 
   async catalogBaselineReady(flockDocId: string | undefined, timeoutMs: number): Promise<boolean> {
     return this.catalogSync ? this.catalogSync.ready(flockDocId, timeoutMs) : true;
+  }
+
+  /** Projects the existing reader owner, including daemon calls outside Session ALS. */
+  hasWorkspaceCatalogReader(): boolean {
+    return this.catalogSync !== undefined;
+  }
+
+  /** Past remote receipt, not current connectivity or a fresh authorization verdict. */
+  hasPersistedWorkspaceCatalog(): boolean {
+    return (
+      this.sqliteRepoStore !== null &&
+      hasPersistedFlockRemoteState(
+        this.sqliteRepoStore.dbPath,
+        getWorkspaceFlockDocId(this.workspaceId)
+      )
+    );
   }
 
   static async create(
@@ -441,7 +469,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -1209,6 +1237,14 @@ export class LoroDocumentManager {
     }
   }
 
+  /** Observation of the machine catalog already owned by the runtime. */
+  peekLocalProjectRootPath(
+    machineId: MachineId,
+    localProjectId: import('@lody/shared').LocalProjectId
+  ): string | null {
+    return this.machineFlockSync.peekLocalProjectRootPath(machineId, localProjectId);
+  }
+
   async syncMachineFlockDoc(
     machineId: MachineId,
     options: { timeoutMs?: number; reason?: string; scheduleRetry?: boolean } = {}
@@ -1478,6 +1514,25 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
+    if (existing?.isDestroyed) {
+      try {
+        await withTimeout(
+          this.cleanSessionDoc(sessionId),
+          1_000,
+          `Session ${sessionId} cleanup still pending`
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[${sessionId}] Session document cleanup retry failed: ${formatErrorMessage(error)}`
+        );
+        // A failed backend disposal can still own a writer. Retry next time;
+        // only a released backend permits a new wrapper on the same storage.
+        if (this.sessionDocCleanup.has(sessionId) || existing.getSessionBackend()) throw error;
+        if (this.sessions.get(sessionId) === existing) this.sessions.delete(sessionId);
+      }
+      // Concurrent callers share both cleanup and the normal initialization below.
+      return this.getOrCreateSessionDoc(sessionId, options);
+    }
     if (existing) {
       if (options.historyBackend) {
         await createSessionBackend(existing, { historyBackend: options.historyBackend });
@@ -1948,17 +2003,16 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = null;
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
-    // Await and destroy any in-flight session doc inits so they don't
-    // re-register themselves after cleanup has run.
-    for (const [sessionId, pending] of this.pendingSessionDocs) {
+    const failures: unknown[] = presenceCleanupFailure ? [presenceCleanupFailure] : [];
+    const attempt = async (scope: string, close: () => Promise<unknown>) => {
       try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveSessionStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+        await close();
+      } catch (cause) {
+        failures.push(new Error(`${scope}: cleanup failed; persistence unconfirmed`, { cause }));
       }
-    }
+    };
+    // An init rejection has no registered doc. A destroy rejection must be reported.
+    await Promise.allSettled(this.pendingSessionDocs.values());
     this.pendingSessionDocs.clear();
     this.localDocRoomBridges.clear();
     for (const bridge of this.localFlockRoomBridges.values()) {
@@ -1966,16 +2020,24 @@ export class LoroDocumentManager {
     }
     this.localFlockRoomBridges.clear();
 
-    for (const sessionDoc of this.sessions.values()) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveSessionStatus });
+    for (const sessionId of this.sessions.keys()) {
+      await attempt(`Session ${sessionId}`, () =>
+        this.cleanSessionDoc(sessionId, { preserveStatus: options.preserveSessionStatus })
+      );
     }
-    await this.machine?.destroy();
+    await attempt('Machine document', async () => this.machine?.destroy());
     this.machine = null;
     this.sessions.clear();
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    if (failures.length) {
+      presenceCleanupFailure = new AggregateError(failures, 'Workspace cleanup failed');
+      this.logger.warn(
+        `[${this.workspaceId}] ${failures.map((error) => formatErrorMessage(error)).join('; ')}`
+      );
+    }
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
@@ -2000,28 +2062,26 @@ export class LoroDocumentManager {
     this.machineMonitorRuntime?.clearProvider();
   }
 
-  async cleanSessionDoc(
-    sessionId: SessionId,
-    options: { preserveStatus?: boolean } = {}
-  ): Promise<void> {
-    // Also await any in-flight init for this session
-    const pending = this.pendingSessionDocs.get(sessionId);
-    if (pending) {
-      try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveStatus });
-        this.sessions.delete(sessionId);
-      } catch {
-        // Init failed — nothing to clean up
+  cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
+    const active = this.sessionDocCleanup.get(sessionId);
+    if (active) return active;
+    const cleanup = (async () => {
+      const pending = this.pendingSessionDocs.get(sessionId);
+      if (pending) await pending.catch(() => undefined);
+      const sessionDoc = this.sessions.get(sessionId);
+      if (sessionDoc) {
+        await sessionDoc.destroy(options);
+        if (this.sessions.get(sessionId) === sessionDoc) this.sessions.delete(sessionId);
       }
-      this.pendingSessionDocs.delete(sessionId);
-    }
-
-    const sessionDoc = this.sessions.get(sessionId);
-    if (sessionDoc) {
-      await sessionDoc.destroy({ preserveStatus: options.preserveStatus });
-      this.sessions.delete(sessionId);
-    }
+    })();
+    this.sessionDocCleanup.set(sessionId, cleanup);
+    void cleanup
+      .finally(() => {
+        if (this.sessionDocCleanup.get(sessionId) === cleanup)
+          this.sessionDocCleanup.delete(sessionId);
+      })
+      .catch(() => undefined);
+    return cleanup;
   }
 }
 
@@ -2059,9 +2119,19 @@ const acpRuntimeConfigEqual = (
   right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
 ): boolean =>
   left.acpSessionId === right.acpSessionId &&
+  left.generation === right.generation &&
+  left.state === right.state &&
+  left.error?.code === right.error?.code &&
+  left.error?.message === right.error?.message &&
   left.basedOnUserTurnId === right.basedOnUserTurnId &&
   left.modeId === right.modeId &&
   left.modelId === right.modelId &&
+  JSON.stringify(
+    left.availableCommands?.map(({ name, description }) => ({ name, description }))
+  ) ===
+    JSON.stringify(
+      right.availableCommands?.map(({ name, description }) => ({ name, description }))
+    ) &&
   configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
 
 /**
@@ -2122,6 +2192,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
   /** Serialize async ACP runtime patches so history reads cannot race a newer patch. */
+  private acpRuntimeConfigGeneration: string | undefined;
+  private persistedAcpRuntimeConfigRevision: number | undefined;
   private acpRuntimeConfigPatchSerial: Promise<unknown> = Promise.resolve();
   private destroyed = false;
   /** Backend bound during initialization; subscriptions must use this instance. */
@@ -2806,78 +2878,121 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     });
   }
 
+  isAcpConfigurationConfirmed(generation: string | undefined): boolean {
+    const current = this.mirror?.getState().acpRuntimeConfig;
+    return (
+      generation !== undefined &&
+      this.acpRuntimeConfigGeneration === generation &&
+      current?.generation === generation &&
+      current.revision === this.persistedAcpRuntimeConfigRevision &&
+      (current.state === 'ready' || current.state === 'failed')
+    );
+  }
+
+  /** Called only when a local execution owner attaches, never by remote readers. */
+  async invalidateStoredAcpRuntimeConfig(): Promise<void> {
+    if (this.acpRuntimeConfigGeneration || !this.mirror) return;
+    this.mirror.setState((state) => {
+      const current = state.acpRuntimeConfig;
+      if (current?.generation && current.state !== 'unknown') {
+        current.state = 'unknown';
+        current.revision += 1;
+        current.error = {
+          code: 'ACP_CONFIG_RESTARTED',
+          message: 'Agent configuration will be confirmed on the next connection.',
+        };
+      }
+      return state;
+    });
+    await this.flushLocalWrites();
+  }
+
+  /** Serialize first acceptance with publication; a Roost receipt skips this on retry. */
+  acceptWithConfigRevision<A>(
+    input: { configRevision?: number },
+    accept: () => Promise<A>
+  ): Promise<A> {
+    const next = this.acpRuntimeConfigPatchSerial.then(() => {
+      if (
+        input.configRevision !== undefined &&
+        !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
+      ) {
+        throw new Error('SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.');
+      }
+      assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
+      return accept();
+    });
+    this.acpRuntimeConfigPatchSerial = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  }
+
+  retireAcpRuntimeConfig(generation: string): Promise<boolean> {
+    const current = this.mirror?.getState().acpRuntimeConfig;
+    if (!current || current.generation !== generation) return Promise.resolve(false);
+    return this.applyAcpRuntimeConfigPatch('', {
+      acpSessionId: current.acpSessionId,
+      generation,
+      state: 'unknown',
+      error: {
+        code: 'ACP_CONFIG_DISCONNECTED',
+        message: 'Agent configuration will be confirmed on the next connection.',
+      },
+    }).then((changed) => {
+      if (this.acpRuntimeConfigGeneration === generation)
+        this.acpRuntimeConfigGeneration = undefined;
+      return changed;
+    });
+  }
+
+  /** Only the execution owner can establish a live connection generation. */
+  beginAcpRuntimeConfig(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    if (!patch.generation)
+      return Promise.reject(new Error('ACP configuration generation is required'));
+    const replacing = this.acpRuntimeConfigGeneration !== patch.generation;
+    this.acpRuntimeConfigGeneration = patch.generation;
+    return this.writeAcpRuntimeConfig(basedOnUserTurnId, patch, replacing);
+  }
+
   applyAcpRuntimeConfigPatch(
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
-    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
-      if (!this.mirror) {
-        throw new Error('SessionDocument not initialized');
-      }
+    return this.writeAcpRuntimeConfig(basedOnUserTurnId, patch, false);
+  }
 
-      const durablePatch: SessionAcpRuntimeConfigPatch =
-        patch.configOptionValues === undefined
-          ? patch
+  private writeAcpRuntimeConfig(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch,
+    replace: boolean
+  ): Promise<boolean> {
+    const next = this.acpRuntimeConfigPatchSerial.then(() => {
+      if (!this.mirror) throw new Error('SessionDocument not initialized');
+      if (!patch.generation || patch.generation !== this.acpRuntimeConfigGeneration) return false;
+      const current = this.mirror.getState().acpRuntimeConfig as
+        | SessionAcpRuntimeConfigSnapshot
+        | undefined;
+      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+        ...(!replace && current?.generation === patch.generation ? current : {}),
+        ...patch,
+        basedOnUserTurnId: basedOnUserTurnId || current?.basedOnUserTurnId || '',
+        ...(patch.configOptionValues === undefined
+          ? {}
           : {
-              ...patch,
               configOptionValues: Object.fromEntries(
                 Object.entries(patch.configOptionValues).filter(
-                  ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+                  ([id]) => !isSensitiveAcpConfigOptionId(id)
                 )
               ),
-            };
-
-      const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
-      if (!history) {
-        throw new Error('Session history is not initialized');
-      }
-      const count = await history.count();
-      const rows = await history.readDirectory(0, count);
-      const userTurnIndex = new Map<string, number>();
-      let latestUserTurnIndex = -1;
-      for (const row of rows) {
-        if (row.state !== 'ready' || row.scalars?.role !== 'user' || !row.turnId) continue;
-        userTurnIndex.set(row.turnId, row.position);
-        latestUserTurnIndex = row.position;
-      }
-
-      const state = this.mirror?.getState();
-      if (!state) throw new Error('SessionDocument not initialized');
-      const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
-      if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
-        return false;
-      }
-
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
-      const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
-      if (currentTurnIndex > incomingTurnIndex) {
-        return false;
-      }
-
-      const continuesCurrentSnapshot =
-        current?.acpSessionId === durablePatch.acpSessionId &&
-        current.basedOnUserTurnId === basedOnUserTurnId;
-      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
-        ...(continuesCurrentSnapshot
-          ? {
-              ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
-              ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
-              ...(current.configOptionValues !== undefined
-                ? { configOptionValues: current.configOptionValues }
-                : {}),
-            }
-          : {}),
-        ...durablePatch,
-        basedOnUserTurnId,
+            }),
       };
-      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
-        return false;
-      }
-
-      const nextSnapshot: SessionAcpRuntimeConfigSnapshot = {
-        ...nextWithoutRevision,
-        revision: (current?.revision ?? 0) + 1,
-      };
+      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) return false;
+      const nextSnapshot = { ...nextWithoutRevision, revision: (current?.revision ?? 0) + 1 };
       this.mirror.setState((prev) => {
         prev.acpRuntimeConfig = nextSnapshot;
         return prev;
@@ -3411,7 +3526,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return first;
   }
 
-  async pushMessageQueue(item: Omit<MessageQueueItem, '$cid'>): Promise<void> {
+  async pushMessageQueue(item: MessageQueueItemInput): Promise<void> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3423,6 +3538,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
           ? `queue:${item.userTurnId.trim()}`
           : undefined);
+      const prior = operationId
+        ? mq.find((queued) => queued.operationId === operationId)
+        : undefined;
+      if (prior) {
+        if (
+          prior.userTurnId !== item.userTurnId ||
+          prior.userId !== item.userId ||
+          prior.task !== item.task ||
+          !isDeepStrictEqual(prior.acpSessionConfig, item.acpSessionConfig) ||
+          !isDeepStrictEqual(prior.project, item.project)
+        )
+          throw new Error('Queue operation identity conflict');
+        return prev;
+      }
       // @ts-ignore - mq is read-only in type but writable at runtime
       prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
       return prev;
@@ -3544,7 +3673,12 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async flushLocalWrites(): Promise<void> {
+    const revision = this.mirror?.getState().acpRuntimeConfig?.revision;
     await this.repo.flush();
+    this.persistedAcpRuntimeConfigRevision = Math.max(
+      this.persistedAcpRuntimeConfigRevision ?? -1,
+      revision ?? -1
+    );
   }
 }
 
@@ -3716,7 +3850,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       modes: normalizedModes,
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
-      availableCommands: availableCommands?.length ? availableCommands : undefined,
+      availableCommands,
       authMethods: options.authMethods,
       sessionFork,
       acknowledgedSteer,
@@ -3746,6 +3880,11 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       existing.sourceVersion === entry.sourceVersion
     ) {
       entry.authMethods = existing.authMethods;
+    }
+    // Only probes replace the preview. Omission preserves the latest same-runtime
+    // probe, read beside the write so concurrent session starts cannot roll it back.
+    if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {
+      entry.availableCommands = getReadableAcpCapabilityCacheEntry(existing)?.availableCommands;
     }
     // The per-model row holds no timestamp, so an unchanged declaration is
     // skipped by the row comparison and costs no write or sync.

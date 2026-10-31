@@ -71,10 +71,14 @@ XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
 starts from application bootstrap. The explicit E2EE IPC methods create
 or reopen an account-bound local pending request and workspace runtime; they expose public state and room-bound content seal/open; device access credentials stay in main, with no arbitrary signing or content-key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
-The encrypted adapter enables only Meta, Loro session documents and the owning workspace/machine Flocks; unsupported rooms and plaintext side channels stay closed.
+The encrypted adapter enables Meta, Loro documents and the owning workspace/machine/Code Collab index and signal Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
+
+New content seals prefer installed current keys inside core, never renderer hints.
+Only genuine absence permits retained published keys within the durable fifteen-minute
+observation budget; exhaustion fails for retry. Keep sealed old frames and history. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 
 All installed/candidate binding fields are authenticated AAD and encrypted in the
 core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
@@ -114,3 +118,7 @@ server labels never establish native identity. [Decision](../../../../.agents/no
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
+Only the exact server code `e2ee_device_revoked` (`E2eeDeviceRevokedError`) is a
+device revocation. It reuses the same device-bound receipt and cleanup, records its
+reason, and reports `e2ee_device_revoked` until a re-pair replaces the key.
+[Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).

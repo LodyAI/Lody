@@ -57,7 +57,7 @@ Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `create
 
 ## Shared ACP runtime config contains no secrets
 
-`SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the
+`SessionDocument.beginAcpRuntimeConfig` and `applyAcpRuntimeConfigPatch` are the durable boundary for the
 workspace-shared runtime baseline. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like
@@ -102,6 +102,10 @@ observer-lease driven; never start OS probes permanently or persist snapshots.
 
 Share Promise Repo; close readers first. Timeouts end waiters.
 Retry baseline errors in-place. Role writes confirm remote sync.
+Default MCP fallback requires an actual persisted remote cursor for that workspace
+Flock, not local rows or an empty checkpoint generation. Keep the pinned SQLite
+checkpoint reader read-only; cover receipt, restart and purge through real Streams
+persistence when changing this SDK-format compatibility boundary.
 
 ## Machine Flock writes for this machine are local-first
 

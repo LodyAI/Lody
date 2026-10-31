@@ -30,3 +30,6 @@ The existing provider suite exercises the actual `before_send` callback with
 serialized `ConvexError` messages, nested action/query messages, mixed chains,
 and unrelated events. Production ingestion is not verified by this local test;
 the filter takes effect only after clients receive the updated bundle.
+
+Encrypted and unknown scopes now report only fixed diagnostics after filtering; see
+[workspace telemetry privacy](2026-10-29-workspace-telemetry-privacy.md).

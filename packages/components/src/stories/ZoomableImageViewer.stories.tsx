@@ -56,11 +56,14 @@ const GALLERY_IMAGES = [
 function ViewerHarness({
   images,
   initiallyOpen = true,
+  allowAnnotation = false,
 }: {
   images: { key: string; src: string }[];
   initiallyOpen?: boolean;
+  allowAnnotation?: boolean;
 }) {
   const [index, setIndex] = useState<number | null>(initiallyOpen ? 0 : null);
+  const [annotatedKey, setAnnotatedKey] = useState('');
 
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-muted/20">
@@ -71,16 +74,30 @@ function ViewerHarness({
       <Button onClick={() => setIndex(1)} disabled={images.length < 2}>
         before.png
       </Button>
+      {annotatedKey && <p>Annotating {annotatedKey}</p>}
       <ZoomableImageViewer
         open={index !== null}
         onClose={() => setIndex(null)}
         images={images}
         index={index ?? 0}
         onIndexChange={setIndex}
+        onAnnotate={
+          allowAnnotation
+            ? (item) => {
+                setAnnotatedKey(item.key);
+                setIndex(null);
+              }
+            : undefined
+        }
       />
     </div>
   );
 }
+
+export const AnnotateGallery: Story = {
+  args: { open: true, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
+  render: () => <ViewerHarness images={GALLERY_IMAGES} allowAnnotation />,
+};
 
 /** One image: no arrows, close button only. Matches the file preview. */
 export const SingleImage: Story = {

@@ -1,18 +1,20 @@
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '@lody/shared';
 import { isScheduledMessageFile } from './scheduled-message-files';
+import { v5 as uuidv5 } from 'uuid';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildScheduleRegistryRow,
+  canonicalScheduleJson,
   ScheduleDefinitionSchema,
   zonedLocalInputToInstant,
   type ScheduleDocument,
+  type ScheduleRuntimeRow,
 } from '@lody/shared';
 import { findNextDispatchableUserTurn } from '@/session/session-dispatch-logic';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import { ScheduleStore } from './schedule-store';
 import {
   ScheduleConfigurationError,
@@ -56,13 +58,11 @@ function harness(d = document()) {
   let disabled = false;
   let accepted = false;
   let finished = false;
-  const slots = new AgentExecutionSlots();
   const ports: ScheduleEnginePorts<{ prompt: string }> = {
     workspaceId: 'workspace',
     machineId: 'machine',
     userId: 'owner',
     store,
-    slots,
     now: () => now,
     ready: () => ready,
     disabled: () => disabled,
@@ -82,7 +82,6 @@ function harness(d = document()) {
   const engine = new ScheduleEngine(ports);
   return {
     store,
-    slots,
     d,
     ports,
     engine,
@@ -126,7 +125,6 @@ describe('Schedule worker handoff', () => {
     ]);
     h.time(Date.parse('2026-10-01T09:22:00Z'));
     const restarted = new ScheduleEngine(h.ports);
-    restarted.restoreOccupancy();
     await restarted.evaluate();
     expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
     expect(h.store.history('workspace', 'schedule')[0]?.scheduledFor).toBe(instant);
@@ -146,7 +144,6 @@ describe('Schedule worker handoff', () => {
     h.finished();
     await h.engine.evaluate();
     expect(h.store.unfinished('workspace')).toEqual([]);
-    expect(h.slots.isBusy('agent')).toBe(false);
   });
   it('keeps prepared history inert if paused before the pointer handoff', async () => {
     const h = harness();
@@ -180,14 +177,13 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
     expect(h.store.unfinished('workspace')[0]?.state).toBe('dispatched');
   });
-  it('retries frozen preparation, releases failed reservation, and preserves attempt age', async () => {
+  it('retries frozen preparation and preserves attempt age', async () => {
     const h = harness();
     h.ports.materialize = vi
       .fn()
       .mockRejectedValueOnce(new Error('temporary storage failure'))
       .mockResolvedValue(undefined);
     await h.engine.evaluate();
-    expect(h.slots.isBusy('agent')).toBe(false);
     const run = h.store.unfinished('workspace')[0]!;
     expect(run.state).toBe('retry_wait');
     expect(run.retryAt).toBe(90_000);
@@ -196,38 +192,21 @@ describe('Schedule worker handoff', () => {
     h.time(90_000);
     await h.engine.evaluate();
     expect(h.ports.prepare).toHaveBeenCalledTimes(1);
-    expect(h.ports.dispatch).toHaveBeenCalledWith({ prompt: 'original' });
+    expect(h.ports.dispatch).toHaveBeenCalledWith(
+      { prompt: 'original' },
+      expect.objectContaining({ runKey: run.runKey })
+    );
     expect(h.store.get(run.runKey)?.plannedAt).toBe(60_000);
   });
-  it('retains only the newest unprepared run and waits for another slot occupant', async () => {
-    const h = harness();
-    expect(h.slots.reserve('agent', 'other-work')).toBe(true);
-    await h.engine.evaluate();
-    h.time(180_000);
-    await h.engine.evaluate();
-    expect(h.ports.prepare).not.toHaveBeenCalled();
-    expect(h.store.unfinished('workspace')).toHaveLength(1);
-    expect(h.store.unfinished('workspace')[0]?.scheduledFor).toBe(180_000);
-    expect(
-      h.store.history('workspace', 'schedule').find((run) => run.scheduledFor === 60_000)?.errorCode
-    ).toBe('SUPERSEDED');
-    h.slots.release('agent', 'other-work');
-    await h.engine.evaluate();
-    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
-  });
-
-  it('releases a restored preparation reservation when scheduling is disabled, retaining the input', async () => {
+  it('retains prepared input when scheduling is disabled', async () => {
     const h = harness();
     h.ports.materialize = async () => {
       h.ready(false);
     };
     await h.engine.evaluate();
-    h.engine.restoreOccupancy();
-    expect(h.slots.isBusy('agent')).toBe(true);
     h.ready(true);
     h.disabled(true);
     await h.engine.evaluate();
-    expect(h.slots.reserve('agent', 'task:other')).toBe(true);
     expect(h.store.unfinished('workspace')[0]).toMatchObject({
       state: 'session_prepared',
       prepared: { prompt: 'original' },
@@ -238,18 +217,46 @@ describe('Schedule worker handoff', () => {
     );
   });
 
-  it('does not reopen future definitions on every timer tick', async () => {
+  it('caches future definitions and dispatches each interval slot once while earlier runs are unfinished', async () => {
     const h = harness();
+    // Carry the real ledger identity through the handoff, so a second dispatch
+    // of the same slot cannot hide behind an unchanged ledger or prompt.
+    const sent: string[] = [];
+    h.ports.prepare = async (run) => ({ prompt: run.runKey });
+    h.ports.dispatch = async ({ prompt }) => {
+      sent.push(prompt);
+    };
+    h.ports.isDispatched = async ({ prompt }) => sent.includes(prompt);
     h.time(1);
     h.ports.read = vi.fn(async () => h.d);
     await h.engine.evaluate();
+    // activeFrom and the interval anchor are both zero: this catches up slot 0.
+    const first = h.store.history('workspace', 'schedule')[0]!;
+    expect(first).toMatchObject({ scheduledFor: 0, state: 'dispatched', attempts: 1 });
+    expect(sent).toEqual([first.runKey]);
     h.ports.read = vi.fn(async () => h.d);
     h.time(15_000);
     await h.engine.evaluate();
     expect(h.ports.read).not.toHaveBeenCalled();
+    expect(sent).toEqual([first.runKey]);
     h.time(60_000);
     await h.engine.evaluate();
-    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+    const second = h.store.history('workspace', 'schedule')[0]!;
+    expect(second).toMatchObject({ scheduledFor: 60_000, state: 'dispatched', attempts: 1 });
+    expect(second.runKey).not.toBe(first.runKey);
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(second.userTurnId).not.toBe(first.userTurnId);
+    expect(h.store.unfinished('workspace')).toHaveLength(2);
+    expect(sent).toEqual([first.runKey, second.runKey]);
+
+    await Promise.all([h.engine.evaluate(), h.engine.evaluate()]);
+    await h.engine.stop();
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    await restarted.evaluate();
+    expect(sent).toEqual([first.runKey, second.runKey]);
+    expect(h.store.history('workspace', 'schedule')).toEqual([second, first]);
+    await restarted.stop();
   });
   it('waits for target permission recovery without spending attempts or losing the slot', async () => {
     const h = harness();
@@ -264,7 +271,6 @@ describe('Schedule worker handoff', () => {
       attempts: 0,
       errorCode: 'PROJECT_UNAVAILABLE',
     });
-    expect(h.slots.isBusy('agent')).toBe(false);
     expect(h.ports.publish).toHaveBeenLastCalledWith(
       expect.objectContaining({ queueState: 'blocked', blockedCode: 'PROJECT_UNAVAILABLE' })
     );
@@ -285,21 +291,31 @@ describe('Schedule worker handoff', () => {
   });
   it('publishes one complete projection and settles its own subscription wake', async () => {
     const h = harness();
-    h.slots.restore('agent', 'another');
     let last = '';
+    const writes: ScheduleRuntimeRow[] = [];
     h.ports.publish = vi.fn(async (runtime) => {
-      const value = JSON.stringify(runtime);
+      // Match schedule-workspace's write suppression: property insertion order
+      // and the observation timestamp do not constitute a Registry change.
+      const value = canonicalScheduleJson({ ...runtime, updatedAt: 0 });
       if (last !== value) {
         last = value;
+        writes.push(runtime);
         void h.engine.evaluate();
       }
     });
     await h.engine.evaluate();
     expect(h.ports.publish).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(last)).toMatchObject({
-      queueState: 'waiting_for_agent',
-      nextScheduledAt: 120_000,
-    });
+    expect(writes).toEqual([
+      expect.objectContaining({
+        lastDispatch: expect.objectContaining({ scheduledFor: 60_000 }),
+        nextScheduledAt: 120_000,
+      }),
+    ]);
+    expect(h.ports.publish).toHaveBeenNthCalledWith(1, writes[0]);
+    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { scheduledFor: 60_000, state: 'dispatched', attempts: 1 },
+    ]);
   });
 });
 
@@ -344,6 +360,124 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
     return d;
   }
+  function legacyQuotaMessage(version = 1) {
+    const d = message();
+    const reset = 59_000;
+    d.definition.scheduleId = uuidv5(
+      JSON.stringify([
+        version === 1 ? 'claude-quota-continue' : 'claude-quota-continue-v2',
+        'workspace',
+        'chat',
+        reset,
+      ]),
+      uuidv5.URL
+    );
+    d.definition.activationId = uuidv5('activation', d.definition.scheduleId);
+    d.definition.activeFrom = 60_000;
+    d.prompt = 'continue';
+    d.message = { inputBlocks: [{ type: 'text', text: 'continue' }] };
+    return d;
+  }
+  it.each([1, 2])(
+    'drops a version %s unassociated quota reservation without delivering it',
+    async (version) => {
+      const d = legacyQuotaMessage(version);
+      const h = harness(d);
+      await h.engine.evaluate();
+      expect(h.store.history('workspace', d.definition.scheduleId)).toMatchObject([
+        { state: 'skipped', errorCode: 'LEGACY_QUOTA_UNASSOCIATED' },
+      ]);
+      expect(h.ports.dispatch).not.toHaveBeenCalled();
+      expect(h.ports.publish).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          messageState: 'failed',
+          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
+        })
+      );
+      await new ScheduleEngine(h.ports).evaluate();
+      expect(h.ports.dispatch).not.toHaveBeenCalled();
+    }
+  );
+  it('preserves a legacy reservation with an already prepared or delivered input', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], {
+      state: 'claimed',
+      prepared: { prompt: 'continue' },
+    });
+    expect(h.store.unfinishedForSession('workspace', 'chat')).toHaveLength(1);
+    expect(h.store.unfinishedForSession('workspace', 'other-chat')).toEqual([]);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).toHaveBeenCalledOnce();
+  });
+  it('drops an unprepared legacy reservation waiting to retry', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], { state: 'retry_wait', retryAt: 90_000 });
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]).toMatchObject({
+      state: 'skipped',
+      errorCode: 'LEGACY_QUOTA_UNASSOCIATED',
+    });
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+  });
+  it('reconciles an already delivered legacy input without dispatching again', async () => {
+    const d = legacyQuotaMessage();
+    const h = harness(d);
+    h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
+    const run = h.store.unfinished('workspace')[0];
+    if (!run) throw new Error('missing scheduled run');
+    h.store.transition(run.runKey, ['pending'], {
+      state: 'claimed',
+      prepared: { prompt: 'continue' },
+    });
+    h.accepted();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).not.toHaveBeenCalled();
+  });
+  it('keeps ordinary and edited scheduled messages', async () => {
+    const d = legacyQuotaMessage();
+    d.prompt = 'different message';
+    d.message = { inputBlocks: [{ type: 'text', text: 'different message' }] };
+    const h = harness(d);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
+    expect(h.ports.dispatch).toHaveBeenCalledOnce();
+  });
+  it('drops a resumed legacy quota shortcut without a failed Turn identity', async () => {
+    const d = legacyQuotaMessage();
+    d.definition.activationId = 'resumed';
+    const h = harness(d);
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', d.definition.scheduleId)[0]).toMatchObject({
+      state: 'skipped',
+      errorCode: 'LEGACY_QUOTA_UNASSOCIATED',
+    });
+  });
+  it('records a discarded quota handoff without retrying after restart', async () => {
+    const h = harness(message());
+    h.ports.dispatch = async () => 'discarded';
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { state: 'skipped', errorCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED' },
+    ]);
+    await new ScheduleEngine(h.ports).evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageState: 'failed',
+        blockedCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED',
+      })
+    );
+  });
   it.each([
     ['message', 'message'],
     ['task', 'message'],
@@ -370,11 +504,8 @@ describe('One-time complete messages', () => {
       expect(sent).toEqual(['schedule']);
       expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
       // Restart while the first conversation is still running. Its delivery must
-      // neither repeat nor occupy another conversation's message admission.
-      h.ports.slots = new AgentExecutionSlots();
+      // neither repeat nor block another conversation's admission.
       const restarted = new ScheduleEngine(h.ports);
-      restarted.restoreOccupancy();
-      expect(h.ports.slots.isBusy('agent')).toBe(firstKind === 'task');
       documents.push(next);
       h.time(60_001);
       await restarted.evaluate();
@@ -386,9 +517,8 @@ describe('One-time complete messages', () => {
     }
   );
 
-  it('waits for its own busy chat and sends once after it becomes idle, regardless of another agent slot', async () => {
+  it('waits for its own busy chat and sends once after it becomes idle', async () => {
     const h = harness(message());
-    h.slots.reserve('agent', 'unrelated-task');
     let busy = true;
     const sent: string[] = [];
     h.ports.validateTarget = async () => {
@@ -411,7 +541,6 @@ describe('One-time complete messages', () => {
     await h.engine.evaluate();
     expect(sent).toEqual(['Frozen message']);
     expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
-    expect(h.slots.isBusy('agent')).toBe(true);
   });
 
   it('retains frozen blocks in the ledger and restores sent status without sending again', async () => {

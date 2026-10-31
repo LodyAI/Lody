@@ -1,4 +1,9 @@
-import { readProjectDefaultMcpIds, syncMcpCatalog } from '@/lib/workspace-mcp-store';
+import {
+  readProjectDefaultMcpIds,
+  syncMcpCatalog,
+  waitForMcpDefaultCatalog,
+} from '@/lib/workspace-mcp-store';
+import { getDaemonWorkspace } from '@/lib/session-command-environment';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import {
   getMachineRoomId,
@@ -39,7 +44,6 @@ import {
   type PreparedSessionInput,
 } from '@/lib/prepared-session-input';
 import { Command, Option } from 'commander';
-import { sessionInboxRecoveryCommand } from './session-inbox-recovery';
 import {
   SessionDiscoveryFilterShape,
   matchesSessionDiscovery,
@@ -182,6 +186,29 @@ export type DelegatedSessionRequester = {
 };
 
 /** Delegation without provenance must never be recorded as human input. */
+/**
+ * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
+ * work is unchanged; a shared member's derivation returns the origin to record as
+ * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
+ * daemon cannot verify is refused rather than written as machine-owned work.
+ */
+async function classifyDelegatedEncryptedInput(
+  manager: LoroDocumentManager,
+  delegatedRequester: DelegatedSessionRequester | undefined,
+  targetMachineId: string
+): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
+  const author = delegatedRequester.author;
+  const daemon = getDaemonWorkspace();
+  if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
+    throw new Error('e2ee_derivation_unavailable');
+  const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
+  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
+    'member'
+    ? origin
+    : undefined;
+}
+
 const resolveSessionInputAuthor = (
   userId: string,
   delegatedRequester?: DelegatedSessionRequester
@@ -1373,7 +1400,16 @@ export async function appendUserPromptHistory(args: {
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
-}): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
+  /** Offer the turn to a running turn: write `pending_apply` without activation. */
+  steer?: boolean;
+  /** Encrypted shared-member derivation origin; part of the signed input. */
+  derivedFrom?: { sessionId: string; userTurnId: string };
+}): Promise<{
+  id: string;
+  timestamp: string;
+  inputConfig?: SessionTurnInputConfig;
+  existingStatus?: SessionHistory['status'];
+}> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
@@ -1402,6 +1438,7 @@ export async function appendUserPromptHistory(args: {
         id: historyId,
         timestamp: existing.timestamp,
         ...(existing.inputConfig ? { inputConfig: existing.inputConfig } : {}),
+        existingStatus: existing.status,
       };
     }
   }
@@ -1411,15 +1448,17 @@ export async function appendUserPromptHistory(args: {
     role: 'user',
     author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
-    status: 'pending',
+    status: args.steer ? 'pending_apply' : 'pending',
     read: false,
     userId,
     items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
+    ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
     fileDiff: [],
     finished: true,
   };
-  await backend.appendUserTurn(entry);
+  if (args.steer) await backend.appendHistoryTurn(entry);
+  else await backend.appendUserTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -3426,7 +3465,16 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
     dispatchConfig.mcpServerIds !== undefined
       ? [...dispatchConfig.mcpServerIds]
       : await (async () => {
-          if (!args.localOnly) await syncMcpCatalog(args.manager, args.workspaceId);
+          if (!args.localOnly) {
+            if (
+              getDaemonWorkspace()?.manager === args.manager ||
+              args.manager.hasWorkspaceCatalogReader?.()
+            ) {
+              await waitForMcpDefaultCatalog(args.manager, args.workspaceId);
+            } else {
+              await syncMcpCatalog(args.manager, args.workspaceId);
+            }
+          }
           return readProjectDefaultMcpIds(
             args.manager.repo,
             args.workspaceId,
@@ -3736,7 +3784,10 @@ export async function prepareSessionInput(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
@@ -3779,10 +3830,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    options.delegatedRequester,
+    targetMachine.id
+  );
   const userTurn: SessionHistoryInput = {
     id: options.userTurnId ?? uuidV4(),
     role: 'user',
     timestamp: meta.createdAt,
+    ...(derivedFrom ? { derivedFrom } : {}),
     // Legacy daemons only understand pending input. Host-owned automation
     // always uses the inert prepared protocol; remote creates negotiate it.
     status:
@@ -4006,6 +4063,8 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
+    /** Agent chat: steer a running turn on this daemon instead of queueing behind it. */
+    steerActiveTurn?: boolean;
   },
   delegatedRequester?: DelegatedSessionRequester,
   input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
@@ -4101,13 +4160,29 @@ export async function sendSessionChatResult(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
+  const environment = getSessionCommandEnvironment();
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    delegatedRequester,
+    session.machineId
+  );
+  // A shared member's derivation never steers another principal's running turn.
+  const steerTurnId =
+    orchestration?.steerActiveTurn && !derivedFrom
+      ? environment?.host.readActiveTurnId(sessionId)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
+    steer: steerTurnId !== undefined,
+    ...(derivedFrom ? { derivedFrom } : {}),
     inputBlocks,
     sessionDoc,
     prompt,
@@ -4135,6 +4210,34 @@ export async function sendSessionChatResult(
     knownHistory: quotaHistory,
   });
   const userTurnId = userTurn.id;
+  const result = {
+    sessionId,
+    machineId: session.machineId,
+    workspaceId: workspace.id as WorkspaceId,
+    userTurnId,
+  };
+  // A steer is never activated here: the owning daemon applies it, requeues a
+  // proven refusal as a follow-up, or records `delivery_unknown`. An existing
+  // `pending_apply` turn is a steer already offered; activating it could run it twice.
+  if (userTurn.existingStatus === 'pending_apply') return result;
+  if (
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    environment &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    await environment.host.steerSession({
+      sessionId,
+      expectedTurnId: steerTurnId,
+      userTurnId,
+      userId: requesterUserId,
+      timestamp: userTurn.timestamp,
+      inputConfig: userTurn.inputConfig,
+    });
+    return result;
+  }
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
@@ -5672,7 +5775,6 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRenameCommand)
   .addCommand(sessionArchiveCommand)
   .addCommand(sessionRestoreCommand)
-  .addCommand(sessionInboxRecoveryCommand)
   .addCommand(sessionDeleteCommand);
 
 export async function readSessionMcpIdsForAuthoring(

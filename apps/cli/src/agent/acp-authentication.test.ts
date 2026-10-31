@@ -15,6 +15,7 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import * as profileUsage from './codex-profile-process-usage';
 import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 
@@ -141,6 +142,57 @@ describe('AcpAuthenticationManager', () => {
       );
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps authentication retry available when profile record cleanup fails', async () => {
+    vi.useFakeTimers();
+    const profile = {
+      home: '/synthetic/profile',
+      profile: { mode: 'chatgpt', profileId: 'synthetic' },
+    } as Parameters<typeof profileUsage.registerCodexProfileProcess>[0];
+    vi.spyOn(getCodexProfileStore(), 'isReady').mockResolvedValue(false);
+    vi.spyOn(getCodexProfileStore(), 'markChatgptReady').mockResolvedValue(undefined);
+    let cleanupFails = true;
+    const release = Object.assign(
+      async () => {
+        if (cleanupFails) throw new Error('disk unavailable');
+      },
+      {
+        token: 'synthetic',
+        recordNativePid: () => {},
+        abandonBeforeSpawn: async () => {},
+      }
+    );
+    vi.spyOn(profileUsage, 'registerCodexProfileProcess').mockResolvedValue(release);
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      resolveLoginShellEnv: async () => ({}),
+      resolveAuthenticationProcessLaunch: async () => ({
+        command: '/test/codex',
+        args: [],
+        env: {},
+      }),
+      nodeProcess: fakeNodeProcess(() => {
+        const child = createFakeChild();
+        queueMicrotask(() => {
+          child.exitCode = 0;
+          child.emit('exit', 0, null);
+        });
+        return child;
+      }),
+    });
+    for (const requestId of ['first', 'retry']) {
+      expect(
+        await manager.authenticate({
+          requestId,
+          cliType: 'builtin',
+          agentType: 'codex',
+          codexProfile: profile,
+        })
+      ).toEqual({ success: true, disposition: 'authenticated' });
+      expect(manager.cancel(requestId).disposition).toBe('not-running');
+      expect(vi.getTimerCount()).toBe(0);
+      cleanupFails = false;
     }
   });
 

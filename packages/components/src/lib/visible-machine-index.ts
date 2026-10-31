@@ -23,6 +23,8 @@ export type VisibleMachineIndex = {
   machines: Map<MachineId, MachineViewMeta>;
   accessByMachineId: Map<MachineId, MachineVisibilityAccess>;
   isLoading: boolean;
+  /** Encrypted only: owner-signed shared project ids of other members' visible machines. */
+  sharedProjectIdsByMachineId?: ReadonlyMap<MachineId, readonly string[]>;
 };
 
 function selectAccessRow(
@@ -94,4 +96,17 @@ export function buildVisibleMachineIndex({
     accessByMachineId,
     isLoading,
   };
+}
+
+/**
+ * Encrypted shared machines are exposed for selection and execution only. Surfaces
+ * that write to a machine's catalog automatically or need ordinary machine RPC
+ * (fenced in encrypted workspaces) use this view of the index.
+ */
+export function withoutEncryptedSharedMachines<A>(
+  machines: ReadonlyMap<MachineId, A>,
+  index: Pick<VisibleMachineIndex, 'sharedProjectIdsByMachineId'>
+): Map<MachineId, A> {
+  const shared = index.sharedProjectIdsByMachineId;
+  return new Map([...machines].filter(([machineId]) => !shared?.has(machineId)));
 }

@@ -438,6 +438,20 @@ export class CoordinatorWorkflow {
           error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
         };
       }
+      if (userTurn?.status === 'delivery_unknown') {
+        // An Agent chat steer whose provider verdict is uncertain. Never replay it:
+        // the requesting Agent decides whether resending is safe.
+        return {
+          status: 'failed',
+          ...(item.label ? { label: item.label } : {}),
+          target: item.target,
+          error: makeLodyError(
+            'STEER_DELIVERY_UNKNOWN',
+            'The steer into the running target Turn may or may not have been applied; resend only if duplicate work is acceptable.',
+            false
+          ),
+        };
+      }
       if (userTurn?.status === 'canceled') {
         return {
           status: 'cancelled',

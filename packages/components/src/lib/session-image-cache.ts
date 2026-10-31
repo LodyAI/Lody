@@ -1,3 +1,5 @@
+import { assertEncryptedImageReference } from '@lody/shared';
+import { protectedAttachmentBlob } from './encrypted-session-attachment';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 import type { SessionImageResizeFit } from '@lody/shared';
 import { SESSION_IMAGE_RESIZE_DEFAULT_WIDTH } from '@lody/shared';
@@ -139,6 +141,8 @@ const blobToDataUrl = (blob: Blob): Promise<string> =>
   });
 
 type GetSessionImageCacheEntryArgs = {
+  encryption?: import('@lody/shared').EncryptedAttachment;
+  attachmentToken?: () => Promise<string>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   imageId: string;
@@ -221,9 +225,10 @@ const getSessionImageCacheEntry = async (
     thumbnailQuality,
   } = args;
 
+  if (args.encryption) assertEncryptedImageReference(args.imageId, args.encryption);
   const originalUrl = buildSessionImageDownloadUrl(workspaceId, sessionId, imageId);
   const requestUrl =
-    variant === 'thumbnail'
+    variant === 'thumbnail' && !args.encryption
       ? buildSessionImageThumbnailUrl(workspaceId, sessionId, imageId, {
           width: thumbnailWidth ?? SESSION_IMAGE_RESIZE_DEFAULT_WIDTH,
           height: thumbnailHeight,
@@ -231,7 +236,7 @@ const getSessionImageCacheEntry = async (
           quality: thumbnailQuality,
         })
       : originalUrl;
-  const key = getCacheKey(workspaceId, sessionId, imageId, variant, requestUrl);
+  const key = getCacheKey(workspaceId, sessionId, imageId, variant, requestUrl) + (args.encryption ? `:encrypted:${args.encryption.resourceId}` : '');
   const cached = imageCache.get(key);
   if (cached) {
     touchCacheEntry(cached);
@@ -251,7 +256,14 @@ const getSessionImageCacheEntry = async (
     return await pending;
   }
 
+  const requestGeneration = cacheGeneration;
   const requestPromise = (async () => {
+    if (args.encryption) {
+      const blob = await protectedAttachmentBlob({ ...args, encryption: args.encryption });
+      if (requestGeneration !== cacheGeneration) throw new Error('Image request retired');
+      return writeBlobToMemoryCache(key, blob);
+    }
+
     const persistedBlob = await readBlobFromPersistentCache(requestUrl);
     if (persistedBlob) {
       return writeBlobToMemoryCache(key, persistedBlob);

@@ -1,7 +1,7 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   getMachineRoomId,
@@ -25,7 +25,9 @@ export function useMachineActions(params: {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const teamSharingAvailable = useAppCapability('teamSharing');
-  const setMachineSharedWithTeam = useCloudMutation(cloudOperations.machines.setMachineSharedWithTeam);
+  const setMachineSharedWithTeam = useLegacyWorkspaceMutation(
+    cloudOperations.machines.setMachineSharedWithTeam
+  );
 
   const renameMachine = useCallback(
     async (machineId: MachineId, newName: string) => {

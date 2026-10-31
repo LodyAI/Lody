@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CircleAlert, Clock, Pencil, Trash2, X } from 'lucide-react';
 import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { toIntlLocale } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queueSurface } from './surface';
@@ -10,7 +11,8 @@ import { IconAction, MoreTrigger } from './message-queue-row';
 
 export type ScheduledQueueItem = {
   scheduleId: string;
-  title: string;
+  /** The message's own text; its schedule title is not shown in the queue. */
+  content: string;
   at: number;
   timeZone: string;
   state: 'pending' | 'failed';
@@ -40,9 +42,11 @@ export function ScheduledQueueRow({
   const { t, i18n } = useTranslation();
   const mobile = useIsMobile();
   const failed = item.state === 'failed';
-  const upcoming = formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language);
+  // i18next may report `zh_CN`, which Intl rejects; normalize before any locale call.
+  const locale = toIntlLocale(i18n.language);
+  const upcoming = formatUpcoming(item.at, item.timeZone, Date.now(), locale);
   // It opens the line, so a relative label ("tomorrow 9:00 AM") starts capitalized.
-  const time = upcoming.charAt(0).toLocaleUpperCase(i18n.language) + upcoming.slice(1);
+  const time = upcoming.charAt(0).toLocaleUpperCase(locale) + upcoming.slice(1);
   const editTime = onEditTime ?? onOpen;
   const timeLabel = [
     time,
@@ -57,7 +61,7 @@ export function ScheduledQueueRow({
   return (
     <div
       data-scheduled-row=""
-      title={item.title}
+      title={item.content}
       {...stylex.props(queueSurface.row, roomy && queueSurface.roomyRow)}
     >
       <span {...stylex.props(roomy && queueSurface.leading)}>
@@ -87,7 +91,7 @@ export function ScheduledQueueRow({
           {failed ? <CircleAlert size={12} strokeWidth={2} aria-hidden="true" /> : null}
           {time}
         </button>{' '}
-        {item.title}
+        {item.content}
       </div>
       {hasActions ? (
         <div {...stylex.props(queueSurface.actions, roomy && queueSurface.roomyActions)}>

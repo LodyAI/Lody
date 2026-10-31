@@ -10,6 +10,120 @@ const context = {
 } as const;
 
 describe('desktop E2EE content epoch safety', () => {
+  it('observes a failed new seal only for a verified missing current key, without changing its failure', async () => {
+    let failure = new Error('installed key unavailable');
+    const sources: Array<'seal' | 'seal-complete' | undefined> = [];
+    const draft = new LoroDoc();
+    draft.getText('draft').insert(0, 'local edit remains here');
+    draft.commit();
+    const access = createDesktopE2eeContent({
+      runtime: {
+        seal: async () => {
+          throw failure;
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+      onKeyUpdateRequired: (source) => {
+        sources.push(source);
+        if (source === 'seal') throw new Error('observer failure');
+      },
+    });
+    try {
+      const room =
+        access.content.mode === 'protected'
+          ? access.content.resolve({ kind: 'doc', docId: 'session' })
+          : undefined;
+      if (!room || room.mode !== 'protected') throw new Error('expected protected room');
+      const request = {
+        context,
+        plaintext: draft.export({ mode: 'update' }),
+        additionalData: () => Uint8Array.of(3),
+      };
+      // A generic save/transport failure with no missing-key status is unrelated.
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual([]);
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: false });
+      // IO failures during the grace are not a missing-key deadline signal.
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual([]);
+      failure = new Error(
+        "Error invoking remote method 'e2ee.seal': Error: e2ee_key-update-required"
+      );
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      failure = Object.assign(new Error('current key required'), { code: 'key-update-required' });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      failure = new Error('e2ee_device_revoked');
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      failure = new Error('installed key unavailable');
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      expect(draft.getText('draft').toString()).toBe('local edit remains here');
+    } finally {
+      await access.close();
+      draft.free();
+    }
+  });
+  it.each([false, true])(
+    'advertises only real purpose-bound RPC capabilities (%s)',
+    async (supported) => {
+      const host = (supported
+        ? {
+            prepareFeatureRpc: async () => ({}),
+            acceptFeatureRpcResponse: async () => null,
+            prepareDispatch: async () => ({}),
+            acceptDispatchResponse: async () => ({}),
+          }
+        : {}) as unknown as E2eeWorkspaceRuntime;
+      const access = createDesktopE2eeContent({
+        runtime: host,
+        workspaceId: 'workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => null,
+      });
+      try {
+        expect(access.e2ee.supportsRpc).toBe(supported);
+        if (!supported)
+          await expect(access.e2ee.prepareFeatureRpc({} as never)).rejects.toThrow(
+            'e2ee_rpc_unavailable'
+          );
+      } finally {
+        await access.close();
+      }
+    }
+  );
+  it('derives the file write role from verified ledger status and drops it on close', async () => {
+    const access = createDesktopE2eeContent({
+      runtime: {} as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    const seen: string[] = [];
+    const unsubscribe = access.e2ee.codeCollabRole.subscribe(() =>
+      seen.push(access.e2ee.codeCollabRole.get())
+    );
+    // No verified status yet: fail closed.
+    expect(access.e2ee.codeCollabRole.get()).toBe('read');
+    const status = { epoch: 0, rotationRequired: false, hasCurrentKey: true };
+    access.updateStatus({ ...status, memberRole: 'member' });
+    access.updateStatus({ ...status, memberRole: 'member' });
+    access.updateStatus({ ...status, memberRole: 'guest' });
+    access.updateStatus({ ...status, memberRole: 'admin' });
+    expect(seen).toEqual(['write', 'read', 'write']);
+    await access.close();
+    expect(access.e2ee.codeCollabRole.get()).toBe('read');
+    expect(seen).toEqual(['write', 'read', 'write', 'read']);
+    unsubscribe();
+  });
   it('does not hydrate a previous epoch token when a retired provider left a cache row', async () => {
     const entries = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -38,7 +152,8 @@ describe('desktop E2EE content epoch safety', () => {
     let successor: typeof first | undefined;
     try {
       expect(await first.getToken()).toBe('epoch-token-1');
-      expect(entries.size).toBeGreaterThan(0);
+      // A stale row can still exist from an older client that persisted tokens.
+      entries.set('stale-epoch-row', 'epoch-token-1');
       access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
       await access.transition({
         // Even a cache row that could not be removed cannot select the next token.
@@ -51,6 +166,51 @@ describe('desktop E2EE content epoch safety', () => {
       await first.close();
       await successor?.close();
       await access.close();
+      vi.unstubAllGlobals();
+    }
+  });
+  it('mints a fresh content token for a recreated runtime instead of hydrating storage', async () => {
+    const entries = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
+    });
+    let issued = 0;
+    const runtime = {
+      contentStreamsToken: async () => ({
+        token: `content-token-${++issued}`,
+        bucketId: 'encrypted-content',
+        gatewayBaseUrl: 'https://streams.example.com',
+        expiresIn: 480,
+        expiresAt: 1_900_000_000_000,
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const open = () =>
+      createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'recreated-runtime-workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+    const first = open();
+    const firstProvider = first.e2ee.createTokenProvider(new AbortController().signal);
+    expect(await firstProvider.getToken()).toBe('content-token-1');
+    await firstProvider.close();
+    await first.close();
+    // RuntimeProvider recreates the workspace runtime with the same epoch. The
+    // successor's transports read its bucket before any request, so the token must
+    // come from the native host, which also re-checks admission, not from storage.
+    const second = open();
+    const secondProvider = second.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await secondProvider.getToken()).toBe('content-token-2');
+      expect(second.e2ee.bucketId()).toBe('encrypted-content');
+      expect(entries.size).toBe(0);
+    } finally {
+      await secondProvider.close();
+      await second.close();
       vi.unstubAllGlobals();
     }
   });
@@ -155,6 +315,53 @@ describe('desktop E2EE content epoch safety', () => {
     }
   });
 
+  it('reports E2E transport effects from the provider seal/open the live transport calls', async () => {
+    const reports: { workspaceId: string; effects: Record<string, unknown> }[] = [];
+    vi.stubGlobal('window', {
+      __LODY_E2E_CLIENT_LOSS__: true,
+      ipc: { send: (_channel: string, payload: (typeof reports)[number]) => reports.push(payload) },
+    });
+    let readable = true;
+    const access = createDesktopE2eeContent({
+      runtime: {
+        seal: async () => ({ header: new Uint8Array([3]), sealed: new Uint8Array([1]) }),
+        openContent: async () => {
+          if (!readable) throw new Error('e2ee_member_removed');
+          return new Uint8Array([7]);
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'effects-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+    });
+    try {
+      if (access.content.mode !== 'protected') throw new Error('expected protected content');
+      const room = access.content.resolve({ kind: 'doc', docId: 'session' });
+      if (room.mode !== 'protected') throw new Error('expected protected room');
+      await room.config.provider.seal({
+        context,
+        plaintext: new Uint8Array([7]),
+        additionalData: (header: Uint8Array) => header,
+      });
+      const frame = {
+        context,
+        header: new Uint8Array([3]),
+        sealed: new Uint8Array([1]),
+        additionalData: new Uint8Array([2]),
+      };
+      await room.config.provider.open(frame);
+      readable = false;
+      await expect(room.config.provider.open(frame)).rejects.toThrow('e2ee_member_removed');
+      expect(reports.at(-1)).toMatchObject({
+        workspaceId: 'effects-workspace',
+        effects: { contentWrites: 1, contentReadEvents: 1, pendingWrites: 0 },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      await access.close();
+    }
+  });
   it('keeps one selected snapshot epoch across a concurrent key transition', async () => {
     const entered = Promise.withResolvers<void>(),
       release = Promise.withResolvers<void>();
@@ -266,11 +473,16 @@ describe('desktop E2EE content epoch safety', () => {
   });
 });
 
-it.each(['token', 'snapshot'] as const)(
-  'native member removal from %s retires content without waiting on the failed request',
-  async (source) => {
-    let retire = () => {};
-    const retired = new Promise<void>((resolve) => {
+it.each([
+  ['token', 'e2ee_member_removed'],
+  ['snapshot', 'e2ee_member_removed'],
+  ['token', 'e2ee_device_revoked'],
+  ['snapshot', 'e2ee_device_revoked'],
+] as const)(
+  'native access loss from %s (%s) retires content without waiting on the failed request',
+  async (source, code) => {
+    let retire = (_reason: string) => {};
+    const retired = new Promise<string>((resolve) => {
       retire = resolve;
     });
     const access = createDesktopE2eeContent({
@@ -278,11 +490,11 @@ it.each(['token', 'snapshot'] as const)(
       genesisHash: '11'.repeat(32),
       epoch: 0,
       authToken: () => 'synthetic-login',
-      onMemberRemoved: () => retire(),
+      onMemberRemoved: (reason) => retire(reason),
       runtime: {
         contentStreamsToken: async () => {
           throw new Error(
-            "Error invoking remote method 'e2ee.contentStreamsToken': Error: e2ee_member_removed"
+            `Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`
           );
         },
       } as unknown as E2eeWorkspaceRuntime,
@@ -295,7 +507,7 @@ it.each(['token', 'snapshot'] as const)(
           'https://synthetic.invalid/stream/doc',
           true
         );
-      await retired;
+      expect(await retired).toBe(code);
       expect(await access.content.snapshotUpload?.canUpload()).toBe(false);
       const room = access.content.resolve({ kind: 'doc', docId: 'session' });
       if (room.mode !== 'protected') throw new Error('expected protected room');
@@ -305,10 +517,93 @@ it.each(['token', 'snapshot'] as const)(
           plaintext: new Uint8Array([1]),
           additionalData: (header) => header,
         })
-      ).rejects.toThrow('e2ee_member_removed');
+      ).rejects.toThrow(code);
     } finally {
       await token.close();
       await access.close();
     }
   }
 );
+
+describe('shared portable content lifetime', () => {
+  it.each(['attachment', 'dispatch'] as const)(
+    'rejects a late %s result after the content bridge retires',
+    async (channel) => {
+      let enter!: () => void, finish!: () => void;
+      const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        }),
+        released = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      const runtime = {
+        contentStreamsToken: async () => {
+          enter();
+          await released;
+          return { attachmentToken: 'synthetic-attachment' };
+        },
+        prepareDispatch: async () => {
+          enter();
+          await released;
+          return { requestId: 'synthetic-request', frameHex: 'ciphertext-original' };
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      const access = createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+      const work =
+        channel === 'attachment'
+          ? access.e2ee.attachmentToken()
+          : access.e2ee.prepareDispatch('machine', {
+              sessionId: 'session',
+              userTurnId: 'turn',
+              userId: 'user',
+              timestamp: '2026-10-29T00:00:00.000Z',
+              inputConfig: {},
+            });
+      try {
+        await entered;
+        await access.close();
+        finish();
+        await expect(work).rejects.toThrow('e2ee_closed');
+      } finally {
+        finish();
+        await work.catch(() => {});
+        await access.close();
+      }
+    }
+  );
+
+  it('gets a protected token when AbortSignal.any is unavailable', async () => {
+    const any = Object.getOwnPropertyDescriptor(AbortSignal, 'any')!;
+    Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined });
+    const runtime = {
+      contentStreamsToken: async () => ({
+        token: 'portable-token',
+        bucketId: 'protected-content',
+        gatewayBaseUrl: 'https://streams.example.test',
+        expiresIn: 900,
+        expiresAt: 1_900_000_000_000,
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'portable-token-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'account-token',
+    });
+    const provider = access.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await provider.getToken()).toBe('portable-token');
+    } finally {
+      await provider.close();
+      await access.close();
+      Object.defineProperty(AbortSignal, 'any', any);
+    }
+  });
+});
