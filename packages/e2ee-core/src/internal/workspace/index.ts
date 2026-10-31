@@ -319,7 +319,7 @@ export const makeE2eeWorkspace = Effect.fn('E2eeWorkspace.acquire')(function* (
               signer,
               ledger,
               readEpochKey: (epoch) => history.read(epoch),
-            }),
+            }).pipe(Effect.provideService(VerifiedLedger, verified)),
             child
           );
           const state = yield* Scope.provide(

@@ -55,7 +55,8 @@
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain already sealed old-epoch sends and historical reads. New seals use the verified current
-  epoch in core; a missing current key fails for retry, never falls back to an older key.
+  epoch in core when installed. Only genuine absence permits the newest retained published key
+  within core’s durable fifteen-minute observation budget; exhaustion fails for retry.
   Provider epoch hints are not encryption authority; rotationRequired alone is only a hint.
   A rejected dispatch or feature request naming a newer epoch, or missing its current-epoch key,
   signed by a current ledger device, joins

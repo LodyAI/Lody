@@ -667,6 +667,7 @@ function publicE2eeFailure(error: unknown): Error {
     'conflict',
     'local-evidence-conflict',
     'snapshot-history-required',
+    'key-update-required',
     'closed',
     'corrupt',
     'invalid-input',

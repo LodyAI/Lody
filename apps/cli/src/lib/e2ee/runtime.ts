@@ -587,7 +587,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               )
             ),
         readEpochKey: (epoch) => history.read(epoch),
-      }),
+      }).pipe(Effect.provideService(VerifiedLedger, verified)),
     realtimeBinding: (resource: string) =>
       makeRealtimeContentBinding({
         genesis,

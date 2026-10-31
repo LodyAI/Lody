@@ -1301,11 +1301,12 @@ describe('machine E2EE local runtime', () => {
         };
         expect(await host.content.snapshotUpload.canUpload()).toBe(true);
         if (rotation === 'epoch') {
-          await expect(protection.config.provider.seal(snapshotInput)).rejects.toMatchObject({
-            code: 'missing-read-key',
-          });
-          expect((await stream.appendWriteOnly()).ok).toBe(false);
-          expect(frames).toHaveLength(0);
+          const graceSnapshot = await protection.config.provider.seal(snapshotInput);
+          expect(
+            Result.getOrThrow(inspectContentFrame(graceSnapshot.sealed, 'doc-snapshot')).epoch
+          ).toBe(0);
+          expect((await stream.appendWriteOnly()).ok).toBe(true);
+          expect(frames.length).toBeGreaterThan(0);
           expect(doc.getText('draft').toString()).toBe('retained local edit');
           releaseReceive.resolve();
           await recovery;
@@ -3984,6 +3985,12 @@ describe('machine E2EE local runtime', () => {
 
   it('installs a committed staged epoch on a machine after the publisher scope is gone', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-staged-epoch-'));
+    let elapsed = 0;
+    const realClock = Effect.runSync(Clock.Clock);
+    const clock: Clock.Clock = Object.assign(Object.create(realClock), {
+      currentTimeMillisUnsafe: () => 1_800_000_000_000 + elapsed,
+      monotonicTimeNanosUnsafe: () => BigInt(elapsed) * 1_000_000n,
+    });
     try {
       const fixture = await execute(setup(directory, 2, join(directory, 'machine'), true, true));
       const stagedGroup = fixture.stagedGroup;
@@ -4041,7 +4048,17 @@ describe('machine E2EE local runtime', () => {
               0
             );
             const old = yield* runtime.binding('doc:after-rotation', 'loro', 0);
-            expect(Result.isFailure(yield* Effect.result(old.seal(request)))).toBe(true);
+            elapsed = reopened ? 900_000 : 899_999;
+            const outcome = yield* Effect.result(old.seal(request));
+            if (reopened)
+              expect(outcome).toMatchObject({
+                _tag: 'Failure',
+                failure: { code: 'key-update-required' },
+              });
+            else
+              expect(
+                Result.getOrThrow(inspectContentFrame(Result.getOrThrow(outcome).sealed)).epoch
+              ).toBe(0);
             if (!retained) throw new Error('missing pre-rotation original');
             expect(
               yield* old.open({ ...request, ...retained, additionalData: new Uint8Array([3]) })
@@ -4060,7 +4077,7 @@ describe('machine E2EE local runtime', () => {
             });
             expect(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch).toBe(1);
             expect(sealed.sealed.length).toBeGreaterThan(2);
-          })
+          }).pipe(Effect.provideService(Clock.Clock, clock))
         );
     } finally {
       await rm(directory, { recursive: true, force: true });

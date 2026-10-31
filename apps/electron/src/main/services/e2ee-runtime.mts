@@ -91,6 +91,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'invalid-input'
     | 'corrupt'
     | 'snapshot-history-required'
+    | 'key-update-required'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
@@ -163,6 +164,7 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
+      if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
       if (reason === 'invalid-input') return fail('invalid-input')
@@ -1062,7 +1064,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               signer: device,
               ledger: () => verified.current(),
               readEpochKey: (epoch) => history.read(epoch)
-            }).pipe(Scope.provide(scope))
+            }).pipe(Effect.provideService(VerifiedLedger, verified), Scope.provide(scope))
             bindings.set(descriptor.resource, value)
           }
           return value
