@@ -92,8 +92,11 @@ A notification failure cannot replay Agent execution.
   from resetting an already-applied effort. A refused required selection fails the input
   before prompting, while retaining the agent's actual partial changes. The execution
   service rejects stale human revisions against the loaded Loro session at first acceptance;
-  this does not require a preexisting native connection after restart. Missing revisions
-  load through the existing room sync within the configuration budget or fail visibly.
+  this does not require a preexisting native connection after restart. A versioned input
+  with a missing session baseline loads it through existing room sync within the
+  configuration budget or fails visibly. Historical inputs without `configRevision`
+  retain legacy admission, including those without `inputConfig`; no fields are invented
+  and encrypted origin matching remains unchanged.
   Approved system derivations and durable Inbox receipts preserve frozen queue/retry requirements.
 - `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
   guidance only after execution verifies this Session's temporary branch in an ordinary

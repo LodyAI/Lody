@@ -2993,8 +2993,13 @@ describe('SessionExecutionService', () => {
       | 'stale-config'
       | 'reopened-config'
       | 'derived-config'
+      | 'legacy-missing-revision'
+      | 'legacy-missing-input-config'
+      | 'legacy-missing-snapshot'
   ) => {
-    const configCase = ['stale-config', 'reopened-config', 'derived-config'].includes(mode);
+    const legacyCase = mode.startsWith('legacy-missing-');
+    const configCase =
+      legacyCase || ['stale-config', 'reopened-config', 'derived-config'].includes(mode);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -3165,7 +3170,9 @@ describe('SessionExecutionService', () => {
             prompt: 'hi',
             cliType: 'builtin',
             agentType: 'codex',
-            ...(configCase ? { configRevision: 1, modeId: 'plan', modelId: 'old-model' } : {}),
+            ...(configCase && !legacyCase
+              ? { configRevision: 1, modeId: 'plan', modelId: 'old-model' }
+              : {}),
           };
           if (mode === 'derived-config')
             Object.assign(inputConfig, {
@@ -3184,7 +3191,7 @@ describe('SessionExecutionService', () => {
           row.set('userId', user);
           row.set('timestamp', new Date().toISOString());
           row.set('status', 'pending');
-          row.set('inputConfig', inputConfig);
+          if (mode !== 'legacy-missing-input-config') row.set('inputConfig', inputConfig);
           row.set('items', [{ type: 'text', text: 'hi' }]);
           if (backfillFailure) {
             const next = source.getList('history').insertContainer(1, new LoroMap());
@@ -3499,25 +3506,28 @@ describe('SessionExecutionService', () => {
       if (configCase) {
         // This owner reads only the session imported through the real protected provider above.
         const read = await sessionDoc.sessionData.history.readTurn('turn-user-1');
-        if (read.state !== 'ready' || !read.turn.inputConfig)
-          throw new Error('Missing verified turn');
-        await sessionDoc.beginAcpRuntimeConfig('', {
-          acpSessionId: 'acp-config',
-          generation: 'verified-owner',
-          state: 'ready',
-          modeId: 'plan',
-          modelId: 'old-model',
-        });
-        await sessionDoc.flushLocalWrites();
-        if (mode !== 'reopened-config')
-          await sessionDoc.applyAcpRuntimeConfigPatch('', {
+        if (read.state !== 'ready') throw new Error('Missing verified turn');
+        const signedConfig = read.turn.inputConfig;
+        if (!legacyCase && !signedConfig) throw new Error('Missing verified input config');
+        if (mode !== 'legacy-missing-snapshot') {
+          await sessionDoc.beginAcpRuntimeConfig('', {
             acpSessionId: 'acp-config',
             generation: 'verified-owner',
             state: 'ready',
-            modeId: 'default',
-            modelId: 'new-model',
+            modeId: 'plan',
+            modelId: 'old-model',
           });
-        await sessionDoc.flushLocalWrites();
+          await sessionDoc.flushLocalWrites();
+          if (mode !== 'reopened-config')
+            await sessionDoc.applyAcpRuntimeConfigPatch('', {
+              acpSessionId: 'acp-config',
+              generation: 'verified-owner',
+              state: 'ready',
+              modeId: 'default',
+              modelId: 'new-model',
+            });
+          await sessionDoc.flushLocalWrites();
+        }
         if (mode === 'reopened-config') {
           await lody.documentManager.cleanSessionDoc(sessionId);
           sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
@@ -3604,7 +3614,7 @@ describe('SessionExecutionService', () => {
             } as never,
             applyAcpModeAndModel: () =>
               Effect.promise(async () => {
-                if (mode === 'reopened-config') {
+                if (mode === 'reopened-config' || mode === 'legacy-missing-snapshot') {
                   await sessionDoc.beginAcpRuntimeConfig('', {
                     acpSessionId: 'acp-config',
                     generation: 'reopened-native',
@@ -3629,8 +3639,57 @@ describe('SessionExecutionService', () => {
             userName: 'Synthetic',
             userEmail: 'synthetic@example.test',
             userTurnId: 'turn-user-1',
-            acpSessionConfig: read.turn.inputConfig,
+            acpSessionConfig: signedConfig ?? {
+              prompt: 'hi',
+              cliType: 'builtin',
+              agentType: 'codex',
+            },
           } as const;
+          if (legacyCase) {
+            expect(signedConfig?.configRevision).toBeUndefined();
+            if (mode === 'legacy-missing-input-config') expect(signedConfig).toBeUndefined();
+            if (mode === 'legacy-missing-snapshot')
+              expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toEqual({});
+            // The watcher freezes exactly the verified historical input, before trusted
+            // request defaults are added. Missing config must not bypass origin matching.
+            await service.dispatchPreparedSessionTurn({
+              sessionId,
+              sessionDoc,
+              userTurnId: 'turn-user-1',
+              invocation: {
+                sourceTurnId: 'turn-user-1',
+                requesterUserId: user,
+                inputConfig: signedConfig ?? {},
+              },
+              dispatchSource: 'crdt',
+              accessPromise: Promise.resolve({ outcome: 'allowed' }),
+              requestPromise: Promise.resolve({ mode: 'continue', request }),
+              onAccessAllowed: async () => {},
+              onAccessDenied: async () => {
+                throw new Error('Unexpected machine denial');
+              },
+              onAccessIndeterminate: async () => {
+                throw new Error('Unexpected machine access retry');
+              },
+            });
+            expect(submitted).toEqual(['configuration-applied', 'prompt']);
+            const completed = await sessionDoc.sessionData.history.readTurn('turn-user-1');
+            expect(completed).toMatchObject({ state: 'ready', turn: { status: 'handled' } });
+            if (completed.state !== 'ready') throw new Error('Missing completed legacy turn');
+            expect(completed.turn.inputConfig).toEqual(signedConfig);
+            expect(
+              (await sessionDoc.sessionData.history.readAll())
+                .flatMap((turn) => turn.items ?? [])
+                .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+            ).toEqual([]);
+            expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toMatchObject(
+              mode === 'legacy-missing-snapshot'
+                ? { revision: 1, modeId: 'plan', modelId: 'old-model' }
+                : { revision: 2, modeId: 'default', modelId: 'new-model' }
+            );
+            return;
+          }
+          if (!read.turn.inputConfig) throw new Error('Missing verified config');
           if (mode !== 'stale-config') {
             if (mode === 'derived-config') {
               // Internal owner admission is synthetic; encrypted Automations policy is not enabled.
@@ -3828,6 +3887,15 @@ describe('SessionExecutionService', () => {
     runProductionSignedTurn('reopened-config'));
   it('accepts approved derived work with its inherited revision through production encrypted Loro', () =>
     runProductionSignedTurn('derived-config'));
+
+  it.each([
+    'legacy-missing-revision',
+    'legacy-missing-input-config',
+    'legacy-missing-snapshot',
+  ] as const)(
+    'executes verified encrypted legacy data without inventing missing fields (%s)',
+    (mode) => runProductionSignedTurn(mode)
+  );
 
   it('executes the real UI account ID through production Lody construction without injected authorization', () =>
     runProductionSignedTurn('account'));
@@ -13059,6 +13127,73 @@ describe('Operation Inbox execution boundary', () => {
           state: 'ready',
           turn: { status: 'failed' },
         });
+      } finally {
+        peer.clientDoc.free();
+        await f.close();
+      }
+    }
+  );
+
+  it.each(['revision', 'inputConfig', 'runtimeSnapshot'] as const)(
+    'executes ordinary legacy data with a missing %s without requiring revision confirmation',
+    async (missing) => {
+      const prompts: string[] = [];
+      const f = inboxExecutionFixture(async () => {
+        prompts.push('prompt');
+        return { stopReason: 'end_turn' };
+      });
+      const peer = await revisionInput(f);
+      try {
+        await peer.advanceOwner();
+        const config = { ...f.message.acpSessionConfig };
+        await f.doc.appendUserTurn({
+          id: 'legacy-input',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          timestamp: '2026-10-31T00:02:00Z',
+          items: [{ type: 'text', text: config.prompt }],
+          ...(missing === 'inputConfig' ? {} : { inputConfig: config }),
+        });
+        if (missing === 'runtimeSnapshot') {
+          f.doc.handle!.doc.getMap('acpRuntimeConfig').clear();
+          f.doc.handle!.doc.commit();
+          expect((await f.doc.getDocState())?.acpRuntimeConfig).toEqual({});
+        }
+        await f.service.dispatchPreparedSessionTurn({
+          sessionId: f.message.sessionId,
+          sessionDoc: f.doc,
+          userTurnId: 'legacy-input',
+          invocation: {
+            sourceTurnId: 'legacy-input',
+            requesterUserId: 'user-1',
+            inputConfig: missing === 'inputConfig' ? {} : config,
+          },
+          dispatchSource: 'crdt',
+          accessPromise: Promise.resolve({ outcome: 'allowed' }),
+          requestPromise: Promise.resolve({
+            mode: 'continue',
+            request: { ...f.message, userTurnId: 'legacy-input', acpSessionConfig: config },
+          }),
+          onAccessAllowed: async () => {},
+          onAccessDenied: async () => {
+            throw new Error('Unexpected machine denial');
+          },
+          onAccessIndeterminate: async () => {
+            throw new Error('Unexpected machine access retry');
+          },
+        });
+        expect(prompts).toEqual(['prompt']);
+        expect(peer.active).toEqual({ modeId: 'default', modelId: 'new-model' });
+        const completed = await f.doc.sessionData.history.readTurn('legacy-input');
+        expect(completed).toMatchObject({ state: 'ready', turn: { status: 'handled' } });
+        if (completed.state !== 'ready') throw new Error('Missing legacy input');
+        expect(completed.turn.inputConfig).toEqual(missing === 'inputConfig' ? undefined : config);
+        expect(
+          (await f.doc.sessionData.history.readAll())
+            .flatMap((turn) => turn.items ?? [])
+            .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+        ).toEqual([]);
       } finally {
         peer.clientDoc.free();
         await f.close();
