@@ -711,10 +711,10 @@ it.each([
       await ctx.settle();
       act(() => ctx.handle.current!.scrollRowToTop(40, { smooth: false, offset: 0 }));
       await ctx.settle();
-      act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
       ctx.harness.nativeScrollTo(ctx.harness.scrollTop - 120);
       await ctx.settle();
-      act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
       const top = ctx.harness.scrollTop;
       const row = () =>
         ctx.viewport().querySelector<HTMLElement>('[data-row-key="t40"]')!.parentElement!;
@@ -730,16 +730,16 @@ it.each([
       expect(ctx.handle.current!.scrollSize).toBe(8200);
       expect(ctx.scrolls.at(-1)).toBe(top + 200);
       // Catch the old fling: a touch alone must not absorb its pending shift.
-      act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
       rowHeights.set('t35', 400);
       await ctx.settle();
       expect(ctx.harness.scrollTop).toBe(top);
       expect(ctx.harness.writes.length).toBe(writes);
       expect(row().getBoundingClientRect().top).toBe(line);
-      act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
       expect(ctx.handle.current!.scrollOffset).toBe(top + 300);
       const reports = ctx.scrolls.length;
-      act(() => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await act(() => ctx.viewport().dispatchEvent(new Event('scrollend')));
       await ctx.settle();
       expect(ctx.harness.scrollTop).toBe(top + 300);
       expect(ctx.scrolls.length).toBe(reports);

@@ -234,10 +234,10 @@ it('reports the actual visible turns while touch growth shifts the content origi
         changedTouches: contacts,
       });
     };
-    act(() => viewport.dispatchEvent(touch('touchstart', 100)));
+    await act(() => viewport.dispatchEvent(touch('touchstart', 100)));
     frames.nativeScrollTo(frames.scrollTop - 120);
     await settle();
-    act(() => viewport.dispatchEvent(touch('touchend', 160)));
+    await act(() => viewport.dispatchEvent(touch('touchend', 160)));
     grown = true;
     await settle();
     const physical = frames.scrollTop;
@@ -264,7 +264,7 @@ it('reports the actual visible turns while touch growth shifts the content origi
     await settle();
     expect(ranges.at(-1)).toEqual(actual());
     const before = ranges.at(-1);
-    act(() => viewport.dispatchEvent(new Event('scrollend')));
+    await act(() => viewport.dispatchEvent(new Event('scrollend')));
     await settle();
     expect(frames.scrollTop).toBe(physical + 536);
     expect(ranges.at(-1)).toEqual(before);
