@@ -15,9 +15,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   credentials and approval on reopen. Never re-sign or switch a session on unknown
   results. Only independently verified current ledger admission permits receiving keys.
 - Keep genuine ledger and historical reads usable under independent key/repair failures.
-  New seals select the verified current epoch inside core, never an old hint or
-  retained-key fallback. Missing current keys fail for retry; sealed old frames
-  remain usable. Rotation advice alone never blocks sends, and malformed remote input never retires
+  New seals prefer the installed current epoch inside core, never a cached hint.
+  Only a genuinely missing key permits retained-published-key writes within core’s
+  durable fifteen-minute observation budget; exhaustion fails for retry. Sealed old frames remain usable. Rotation advice alone never blocks sends, and malformed remote input never retires
   a healthy local store. No plaintext, fresh namespace or memory-only fallback.
 - Enter custody writer ownership before allocating identity and through actual
   native settlement, then release before network. Only the same fiber may reenter.

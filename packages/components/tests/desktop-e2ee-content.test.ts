@@ -12,7 +12,7 @@ const context = {
 describe('desktop E2EE content epoch safety', () => {
   it('observes a failed new seal only for a verified missing current key, without changing its failure', async () => {
     let failure = new Error('installed key unavailable');
-    const sources: Array<'seal' | undefined> = [];
+    const sources: Array<'seal' | 'seal-complete' | undefined> = [];
     const draft = new LoroDoc();
     draft.getText('draft').insert(0, 'local edit remains here');
     draft.commit();
@@ -47,7 +47,14 @@ describe('desktop E2EE content epoch safety', () => {
       await expect(room.config.provider.seal(request)).rejects.toBe(failure);
       expect(sources.filter((source) => source === 'seal')).toEqual([]);
       access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: false });
+      // IO failures during the grace are not a missing-key deadline signal.
       await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual([]);
+      failure = new Error(
+        "Error invoking remote method 'e2ee.seal': Error: e2ee_key-update-required"
+      );
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      failure = Object.assign(new Error('current key required'), { code: 'key-update-required' });
       await expect(room.config.provider.seal(request)).rejects.toBe(failure);
       expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
       failure = new Error('e2ee_device_revoked');

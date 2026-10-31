@@ -1005,6 +1005,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: (source) => {
                 if (disposed || retired) return;
+                if (source === 'seal-complete') {
+                  setKeyReceptionWait((previous) =>
+                    previous?.workspaceId === effectiveWorkspaceId ? null : previous
+                  );
+                  return;
+                }
                 setKeyUpdateWorkspace(effectiveWorkspaceId);
                 if (source === 'seal')
                   setKeyReceptionWait((previous) =>
@@ -1255,16 +1261,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     <>
       {keyUpdateWorkspace === runtime?.workspaceId &&
         runtime?.workspaceId === effectiveWorkspaceId &&
-        runtime?.workspaceSlug === workspaceSlug && (
-          <div role={keyReceptionWait?.workspaceId === effectiveWorkspaceId ? undefined : 'status'}>
-            {keyReceptionWait?.workspaceId === effectiveWorkspaceId ? (
-              <WorkspaceKeyReceptionNotice
-                workspaceId={effectiveWorkspaceId}
-                waiting={keyReceptionWait}
-              />
-            ) : (
-              t('e2ee.content.keyUpdateRequired')
-            )}{' '}
+        runtime?.workspaceSlug === workspaceSlug &&
+        keyReceptionWait?.workspaceId === effectiveWorkspaceId && (
+          <div>
+            <WorkspaceKeyReceptionNotice
+              workspaceId={effectiveWorkspaceId}
+              waiting={keyReceptionWait}
+            />{' '}
             <button type="button" onClick={() => retryKeyUpdateRef.current()}>
               {t('e2ee.content.retryKeyUpdate')}
             </button>

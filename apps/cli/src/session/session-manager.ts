@@ -220,6 +220,8 @@ export interface ISession {
   /** Existing host path only; never creates a directory or prepares a runtime. */
   peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
+  /** Machine-held inputs that chose this process's directories; synced metadata may differ. */
+  getExecutionScope?(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'>;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
@@ -683,6 +685,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             });
             let directories: string[] = [];
             await owner.updateProjectRun(ownerId, async (snapshot) => {
+              await config.authorizeExecutionInputs?.({ projectRun: snapshot });
               const roots = await resolveProjectFileRoots(
                 session.getWorkdir(),
                 snapshot,
@@ -1110,6 +1113,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.parentSessionId ?? config.sessionId
       );
       config.projectRun = (await ownerDoc.getMetaState())?.projectRun;
+      if (config.projectRun)
+        await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     }
     // Resolve each repository before enrolling a managed credential lease. The same
     // pinned receipt is used by materialization, refresh, PR observation and restore.
@@ -1121,6 +1126,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         logger: this.logger,
       });
       await owner.updateProjectRun(config.parentSessionId ?? config.sessionId!, async (run) => {
+        await config.authorizeExecutionInputs?.({ projectRun: run });
         const resolved = await resolveProjectGroupRepositories(run, {
           machineId: this.machineId,
           resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
@@ -1416,6 +1422,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     const parentMeta = await parentSessionDoc.getMetaState();
     const parentProject = parentMeta?.project ?? config.project;
+    await config.authorizeExecutionInputs?.({ project: parentProject });
     const localParentWorktreeSource = this.resolveLocalWorktreeSource(
       parentProject,
       config.workdir
@@ -1639,6 +1646,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
     config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    if (config.projectRun)
+      await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)
       await sessionDoc.setRepoFullName(config.githubRepo);
 
@@ -1659,6 +1668,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             )
           ),
         allowManagedClone: this.cloudPort.githubTokens !== null,
+        authorizeRun: async (run) => {
+          await config.authorizeExecutionInputs?.({ projectRun: run });
+        },
         brokerAuth: (source) => this.resolveHostGitBrokerAuth(source, config, credentials),
         setup: async (member, memberWorkdir) => {
           const localProjectId =
@@ -1924,6 +1936,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           this.machineId,
           localProjectId,
           {
+            verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
                 reason: 'session-fork-workdir-resolve',
@@ -1941,6 +1954,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'session-fork-local-project-resolve',

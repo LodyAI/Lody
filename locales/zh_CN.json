@@ -5816,6 +5816,7 @@
   "e2ee.remoteMachine.osProtection": "密钥由机器的系统安全存储保护。",
   "e2ee.remoteMachine.machine": "机器：{{id}}",
   "e2ee.remoteMachine.error": "配对尚未完成。请检查连接后重试，已有授权会保留。",
+  "e2ee.remoteMachine.keyRevoked": "这台机器之前的身份已被撤销，需要重新生成身份后再配对。请创建新命令，并在机器上用更新后的 Lody 运行；它会在配对前生成新身份。",
   "e2ee.remoteMachine.status.pending": "等待机器连接。",
   "e2ee.remoteMachine.status.claimed": "已连接，请核对下方摘要。",
   "e2ee.remoteMachine.status.admitting": "正在核对授权。继续操作会对账原请求。",

@@ -275,6 +275,13 @@ export type ResolveLocalProjectRootPathRetryOptions = {
    * flag is load-bearing — it is what keeps the room's rejoin loop alive.
    */
   requestSync?: () => Promise<unknown>;
+  /**
+   * Encrypted workspaces: any member can write a synced registry row, but this machine
+   * derived each ID from the canonical root it registered. A row whose `rootPath` no
+   * longer hashes to its ID is treated as missing, so a rewritten path cannot redirect
+   * an authorized project to another directory.
+   */
+  verifyProjectIdentity?: boolean;
   /** Total reads including the first. Default: LODY_LOCAL_PROJECT_RESOLVE_MAX_ATTEMPTS or 4. */
   maxAttempts?: number;
   /** Wait between attempts. Default: LODY_LOCAL_PROJECT_RESOLVE_RETRY_DELAY_MS or 400. */
@@ -361,7 +368,16 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
       localProjectId
     );
     if (rootPath !== null) {
-      return rootPath;
+      if (!options.verifyProjectIdentity) return rootPath;
+      // Same native canonicalization as registration (`prepareProject`) and root
+      // reconciliation, so on-disk case and symlinks hash identically on every host.
+      try {
+        return localProjectsLegacy.createLocalProjectId(rootPath) === localProjectId
+          ? rootPath
+          : null;
+      } catch {
+        return null;
+      }
     }
     if (attempt >= maxAttempts) {
       return null;

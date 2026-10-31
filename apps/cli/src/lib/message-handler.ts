@@ -10563,6 +10563,17 @@ export class MessageHandler {
     this.historyWatchAbort.abort();
   }
 
+  inspectClientLoss() {
+    const watcher = this.sessionDispatchWatcher.inspectClientLoss();
+    const execution = this.executionService.inspectClientLoss();
+    return {
+      watcherStopped: watcher.stopped,
+      watcherChecks: watcher.pending,
+      executionTurns: execution.turns,
+      executionBookkeeping: execution.bookkeeping,
+    };
+  }
+
   /**
    * Flush pending ACP updates and tear down session resources.
    */

@@ -7,6 +7,8 @@ import {
   type KeyReceptionNoticeClock,
   type KeyReceptionWait,
 } from '../src/components/workspace-key-reception-notice';
+import { createDesktopE2eeContent } from '../src/providers/desktop-e2ee-content';
+import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { initI18n } from '../src/i18n';
 
 (
@@ -75,6 +77,79 @@ describe('workspace key reception notice', () => {
       expect(document.activeElement).toBe(input);
     }
   );
+
+  it('starts its delay only after the host exhausts grace, then clears on key installation', async () => {
+    let waiting: KeyReceptionWait | null = null;
+    let installed = false;
+    let resumed = false;
+    const access = createDesktopE2eeContent({
+      workspaceId: 'A',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+      runtime: {
+        seal: async () => {
+          if (!installed && !resumed && Date.now() >= 900_000)
+            throw new Error('e2ee_key-update-required');
+          return { header: Uint8Array.of(3), sealed: Uint8Array.of(installed ? 1 : 0) };
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      onKeyUpdateRequired: (source) => {
+        if (source === 'seal') waiting ??= { workspaceId: 'A' };
+        if (source === 'seal-complete') waiting = null;
+      },
+      onPhase: (phase) => {
+        if (phase === 'ready' || phase === 'closed') waiting = null;
+      },
+    });
+    try {
+      access.updateStatus({ epoch: 1, hasCurrentKey: false, rotationRequired: false });
+      if (access.content.mode !== 'protected') throw new Error('protected content expected');
+      const room = access.content.resolve({ kind: 'doc', docId: 'draft' });
+      if (room.mode !== 'protected') throw new Error('protected room expected');
+      const request = {
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch',
+        } as const,
+        plaintext: Uint8Array.of(23),
+        additionalData: () => Uint8Array.of(3),
+      };
+      await advance(899_999);
+      await room.config.provider.seal(request);
+      await render(waiting);
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      await advance(1);
+      await expect(room.config.provider.seal(request)).rejects.toThrow('e2ee_key-update-required');
+      await render(waiting);
+      await advance(29_999);
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      await advance(1);
+      expect(container.querySelector('[role="status"]')?.textContent).toBe(
+        'Receiving a new encryption key…'
+      );
+      // Another eligible retained key can resume saves before current-key receipt.
+      resumed = true;
+      await room.config.provider.seal(request);
+      await render(waiting);
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      resumed = false;
+      await expect(room.config.provider.seal(request)).rejects.toThrow('e2ee_key-update-required');
+      await render(waiting);
+      await advance(30_000);
+      expect(container.querySelector('[role="status"]')).not.toBeNull();
+      installed = true;
+      await access.transition({
+        install: async () => ({ epoch: 1, hasCurrentKey: true, rotationRequired: false }),
+      });
+      await render(waiting);
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      expect(container.querySelector('input')?.value).toBe('local edit');
+    } finally {
+      await access.close();
+    }
+  });
 
   it('never shows another workspace’s wait and gives a new episode its own delay', async () => {
     const waiting = { workspaceId: 'A' };

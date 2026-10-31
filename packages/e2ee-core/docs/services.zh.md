@@ -217,6 +217,8 @@ logout 和安装替换保留旧交换。Receive/key/outbox、repair、snapshot j
 WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器或用户不会清除存储；
 持久身份保护丢失仍由宿主按已批准 custody 合同处理。
 
+`LedgerPinStore.writeGrace` 可选地存储有界、仅含计时信息的字节，使用原子 CAS 并持久读回。SQLite 和 IndexedDB 在已绑定 pin 旁实现，读取返回独立副本，冲突不修改行。缺失或损坏的观察记录、未知的时钟连续性不能在已有 pin 重开时授予新宽限。该日志不包含 key，也不是账本/写入权限；不提供时禁用旧 key 宽限。
+
 ## 浏览器保管与安装
 
 `browserClientWriter({ accountId, workspaceId })` 在 `WorkspaceScope` 下提供

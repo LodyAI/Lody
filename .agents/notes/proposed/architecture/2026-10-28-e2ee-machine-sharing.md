@@ -2,7 +2,7 @@
 
 Status: proposed
 Translation: current
-PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.com/LodyAI/Lody/pull/2018), [#2033](https://github.com/LodyAI/Lody/pull/2033), [#2144](https://github.com/LodyAI/Lody/pull/2144)
+PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.com/LodyAI/Lody/pull/2018), [#2033](https://github.com/LodyAI/Lody/pull/2033), [#2144](https://github.com/LodyAI/Lody/pull/2144), [#2147](https://github.com/LodyAI/Lody/pull/2147)
 
 [中文](2026-10-28-e2ee-machine-sharing.zh.md)
 
@@ -182,3 +182,44 @@ observed is the owner-approved unknown window. The host test pins both halves: t
 fresh grant survives an unobserved withdrawal, and the host's own verified read denies
 at once. A send that a sender knew was withdrawn is refused before any write; a sender
 that cannot verify still relies on that window.
+
+## Project scope at the receiving machine
+
+A member granted project P1 on a shared machine could run in an unshared project P2:
+the CLI claimed execution before it recorded the turn's project, so the gate received
+no project and checked only the machine switch. The claim now authorizes every local
+project the turn can reach, resolved on the machine before any worktree, process or
+prompt. That set unites the request, synced Session metadata, the live process's own
+machine-held configuration, a child Tab's parent, and Project group members, including
+every local copy that an unpinned repository member may use. Any one unshared project
+denies. Extra sources only add projects to check, so a member editing synced metadata
+cannot remove the project a live process actually uses. Directories come only from
+this machine's registry by ID; no requested path, working directory or worktree path
+is accepted, so there is no caller-controlled subdirectory or symlink to escape
+through. Same-member execution is unchanged.
+
+Two follow-ups close what an independent review found. A restore no longer rereads
+synced metadata after authorization: it starts from the project, Project group and
+parent it authorized, and create and restore recompute the scope immediately before a
+process starts, refusing anything outside the authorized set. Registry rows are synced,
+so any member can write them; in encrypted workspaces a row counts only while its
+`rootPath` still hashes to its project ID, which this machine derived from the canonical
+root it registered. A rewritten path therefore resolves as missing instead of
+redirecting an authorized project. Registration, root reconciliation and this check all
+canonicalize through `localProjectsLegacy` with the native `realpath`, so on-disk case on
+a case-insensitive volume hashes the same each time; the non-native Effect path layer
+never creates IDs and must not be used for this check.
+
+The session manager also rereads synced Project groups and parent projects while it
+prepares directories, so that reread happens after the claim. Every such read now
+passes `SessionConfig.authorizeExecutionInputs`, which recomputes the scope for the
+snapshot actually used and rejects any project outside the authorized set before a
+member is resolved or a directory is prepared.
+
+A projectless conversation (`kind: 'none'`, a Lody-managed chat directory or managed
+GitHub clone) needs only the machine switch. The draft foundations Spec makes absent
+projects private and requires "actual local projects" to have their own switch, while
+enabling a project also enables its machine. A machine switch therefore admits work
+that touches no registered local project. Project switches select where a member may
+start work; agents are not sandboxed, so they are not a filesystem isolation boundary.
+The whitepaper leaves per-directory isolation to future work.

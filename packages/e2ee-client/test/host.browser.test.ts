@@ -123,6 +123,9 @@ it.each(['chromium', 'webkit'] as const)(
         usableEpoch: 0,
         rotationRequired: false,
       });
+      expect((await call(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(record(await call(page, 'sealOldHint')).epoch).toBe(0);
+      expect((await call(page, 'graceExpired')).ok).toBe(true);
       expect((await call(page, 'seal')).ok).toBe(false);
       expect((await call(page, 'openBody')).value).toEqual([72, 105]);
       expect((await call(page, 'stagingUnavailable')).ok).toBe(true);

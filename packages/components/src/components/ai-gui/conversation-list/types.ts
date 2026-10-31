@@ -17,12 +17,15 @@ export type ConversationRowComponent = ComponentType<ConversationRowComponentPro
  * the outline, visible-turn reports and native selection read positions and
  * issue commands only through this handle.
  *
- * `scrollOffset` is the viewport's scrollTop; item offsets start at the rows
- * container's top (the viewport's top padding is not included; the view
- * measures that delta itself).
+ * `scrollOffset` and `scrollSize` use unshifted layout coordinates, including
+ * the viewport inset. `contentOffset` is the unshifted rows-container origin;
+ * subtract it before passing viewport positions to `findItemIndex`, whose item
+ * offsets start at that origin. Temporary native-touch shifts never change
+ * this contract; neither getter should be compared to the DOM's physical offset.
  */
 export interface ConversationListHandle {
   readonly scrollOffset: number;
+  readonly contentOffset: number;
   readonly scrollSize: number;
   readonly viewportSize: number;
   findItemIndex(offset: number): number;
