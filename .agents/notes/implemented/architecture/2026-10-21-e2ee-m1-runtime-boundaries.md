@@ -73,6 +73,7 @@ historical E2E hang's exact resource nor a real OS keychain or packaged close.
 Quit phase/resource diagnostics supply that missing distinction on a later run.
 Generic account/runtime failures retain one private main-only cause in the existing
 diagnostic slot; public errors and logs still omit it.
+The bounded terminal drain and its evidence are in [PR #2162](https://github.com/LodyAI/Lody/pull/2162).
 
 Retained origins compact after 64 added records across reopen. Successful, verified rebuilding closes the replaced feed scope and removes only its SQLite file/sidecars; originals, pins and conflicting evidence are preserved. IPC publishes the full ledger at initial local display and at the final page or an upgrade stop, rather than each page.
 
