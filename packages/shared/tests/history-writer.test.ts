@@ -70,6 +70,82 @@ describe('single history writer', () => {
     }
   });
 
+  it('retains unchanged containers inside a compensated range and receives their delayed peer edits', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    for (const name of ['prefix', 'one', 'gap', 'two', 'suffix']) writer.append(entry(name));
+    const gap = doc.getList('history').get(2) as LoroMap;
+    const text = ((gap.get('items') as LoroList).get(0) as LoroMap).get('text') as LoroText;
+    const rollback = writer.updateSelectedWithRollback(
+      () => [1, 3],
+      (rows) =>
+        rows.map((row) =>
+          row.id === 'one' || row.id === 'two' ? { ...row, status: 'handled' } : row
+        )
+    );
+    const peer = new Loro();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    (peer.getContainerById(text.id) as LoroText).update('delayed peer edit');
+    peer.commit();
+    rollback();
+    expect((doc.getList('history').get(2) as LoroMap).id).toBe(gap.id);
+    expect(writer.readStored()).toEqual(['prefix', 'one', 'gap', 'two', 'suffix'].map(entry));
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    expect(writer.readStored()[2]?.items).toEqual([{ type: 'text', text: 'delayed peer edit' }]);
+  });
+
+  it.each(['local', 'synchronized'] as const)(
+    'compensates a selected range while preserving a %s append with a restored ID',
+    (source) => {
+      const doc = new Loro(),
+        writer = createHistoryWriter(doc);
+      writer.append(entry('prefix'));
+      const old = { ...entry('tail'), items: [{ type: 'text' as const, text: 'original' }] };
+      writer.append(old);
+      const prefix = doc.getList('history').get(0) as LoroMap;
+      const rollback = writer.updateSelectedWithRollback(
+        () => [1],
+        (rows) => [rows[0]!, entry('replacement')]
+      );
+      const late = {
+        ...entry('tail'),
+        items: [{ type: 'text' as const, text: 'late body'.repeat(10000) }],
+        inputConfig: { modelId: 'late-model', mcpServerIds: [] },
+      };
+      if (source === 'local') writer.append(late);
+      else {
+        const peer = new Loro();
+        peer.import(doc.export({ mode: 'snapshot' }));
+        createHistoryWriter(peer).append(late);
+        doc.import(peer.export({ mode: 'update', from: doc.version() }));
+      }
+      const appended = doc.getList('history').get(2) as LoroMap;
+      appended.set('futureField', { preserved: true });
+      doc.commit();
+      const json = LoroMap.prototype.toJSON;
+      const unread = new Set([prefix.id, appended.id]);
+      const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        if (unread.has(this.id)) throw new Error('Unowned body read');
+        return json.call(this);
+      });
+      try {
+        rollback();
+      } finally {
+        guard.mockRestore();
+      }
+      expect(writer.readStored()).toEqual([
+        entry('prefix'),
+        old,
+        { ...late, futureField: { preserved: true } },
+      ]);
+      expect((doc.getList('history').get(0) as LoroMap).id).toBe(prefix.id);
+      expect((doc.getList('history').get(2) as LoroMap).id).toBe(appended.id);
+      const restored = writer.readStored();
+      expect(rollback).toThrow();
+      expect(writer.readStored()).toEqual(restored);
+    }
+  );
+
   it('updates and compensates a selected range while preserving an unread prefix and later appends', () => {
     const doc = new Loro(),
       writer = createHistoryWriter(doc);

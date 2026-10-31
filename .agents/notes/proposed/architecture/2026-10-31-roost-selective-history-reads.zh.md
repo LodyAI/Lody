@@ -53,6 +53,8 @@ Owner RPC 协商 `sessionHistoryInspection` v2。元数据、最新 goal、限�
 
 Loro 的 `HistoryWriter.updateSelected` 展开选中位置后调用现有 reducer；元数据占位记录省略了存储扩展字段，因此规划阶段拒绝修改这些记录。范围补偿保存变更前像，检查完整浅成员信息和本次操作回执；写前 ID 集合用于识别新插入记录允许的自动 seen/read 变化。
 
+补偿只在已验证的范围内用完整前像进行写入对齐。区间内未变记录以及前后缀保留原容器身份，迟到的同步编辑仍合入原记录。后来追加的同 ID 记录不参与恢复对齐。
+
 Roost 结构编辑使用 SDK 成员 manifest 引用已有物理段，重新插入的业务 ID 使用新物理 primary 别名。有界私有准备生成封存根，最终激活同事务提交根引用、分支 revision 和回执。立即补偿恢复旧 head，已有后续追加时通过另一次目标成员修改完成补偿。
 
 重放和诊断使用同一查询／owner 接口；新 Fork metadata 发布期间，worktree 记录沿用已绑定后端。
