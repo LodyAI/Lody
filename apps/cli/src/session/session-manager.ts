@@ -88,7 +88,11 @@ import {
 } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
-import type { LodyPromptSuggestion, RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type {
+  LodyPromptSuggestion,
+  RateLimitsSnapshot,
+  SessionUsageUpdate,
+} from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -209,6 +213,7 @@ export interface ISession {
   createAgent(config: CreateAgentConfig): Promise<string>;
   getAcpCapabilities?(): AcpCapabilitiesResult | null;
   getAcpCapabilitySourceVersion?(): string | null;
+  getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
   getWorkdir(): string;
   /**
@@ -220,6 +225,8 @@ export interface ISession {
   /** Existing host path only; never creates a directory or prepares a runtime. */
   peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
+  /** Machine-held inputs that chose this process's directories; synced metadata may differ. */
+  getExecutionScope?(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'>;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
@@ -285,14 +292,14 @@ export interface CreateAgentConfig {
   forkSessionTurnId?: string;
   abortSignal?: AbortSignal;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
-  onUpdateMessage: (message: AcpSessionNotification) => void;
+  onUpdateMessage: (message: AcpSessionNotification, generation?: string) => void;
   onRequestPermission: (
     requestId: string,
     request: RequestPermissionRequest
   ) => Promise<RequestPermissionResponse>;
   onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (limits: RateLimit) => void;
+  onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => void;
   onPromptSuggestion?: (suggestion: LodyPromptSuggestion) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
@@ -317,10 +324,13 @@ export type AgentStartConfig = {
   forkSessionTurnId?: string;
   /** Let a higher-level saga publish the ACP id with the complete target meta. */
   deferAcpSessionIdPersistence?: boolean;
+  /** A native continuation cannot adopt a replacement conversation or replay history. */
+  requireExactResume?: boolean;
 };
 
 export type SessionTerminatedEvent = {
   sessionId: SessionId;
+  configurationGeneration?: string;
   exitCode?: number;
   [key: string]: unknown;
 };
@@ -331,7 +341,11 @@ interface SessionManagerEvents {
   error: (error: SessionErrorEvent) => void;
   exit: (exit: SessionExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
-  onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
+  onACPUpdateMessage: (
+    sessionId: SessionId,
+    message: AcpSessionNotification,
+    generation?: string
+  ) => void;
   onUsageUpdate: (event: {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
@@ -344,7 +358,8 @@ interface SessionManagerEvents {
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
     cliType: string,
-    limits: RateLimit
+    snapshot: RateLimitsSnapshot,
+    binding: import('./automation-observations').ProviderBinding | undefined
   ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
@@ -683,6 +698,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             });
             let directories: string[] = [];
             await owner.updateProjectRun(ownerId, async (snapshot) => {
+              await config.authorizeExecutionInputs?.({ projectRun: snapshot });
               const roots = await resolveProjectFileRoots(
                 session.getWorkdir(),
                 snapshot,
@@ -730,8 +746,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       forkSessionTurnId: options?.forkSessionTurnId,
       abortSignal: options?.abortSignal,
       onStartupStage: options?.onStartupStage,
-      onUpdateMessage: (update) => {
-        this.emit('onACPUpdateMessage', sessionId, update);
+      onUpdateMessage: (update, generation) => {
+        this.emit('onACPUpdateMessage', sessionId, update, generation);
       },
       onRequestPermission: (requestId, request) => {
         if (!this.requestPermissionHandler) {
@@ -761,7 +777,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onPromptSuggestion: (suggestion) => {
         this.emit('onPromptSuggestion', sessionId, suggestion);
       },
-      onRateLimitUpdate: (limits: RateLimit) => {
+      onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => {
         if (
           config.agentConfigId ||
           (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType))
@@ -771,7 +787,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             this.machineId,
             config.agentConfigId,
             config.agentType,
-            limits
+            snapshot,
+            session.getProviderBinding?.()
           );
         }
       },
@@ -991,6 +1008,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
       }
 
+      if (
+        agentStart?.requireExactResume &&
+        (!requestedResumeSessionId || acpSessionId !== requestedResumeSessionId)
+      )
+        throw new Error('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
       this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
       if (!agentStart?.deferAcpSessionIdPersistence) {
         await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1110,6 +1132,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.parentSessionId ?? config.sessionId
       );
       config.projectRun = (await ownerDoc.getMetaState())?.projectRun;
+      if (config.projectRun)
+        await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     }
     // Resolve each repository before enrolling a managed credential lease. The same
     // pinned receipt is used by materialization, refresh, PR observation and restore.
@@ -1121,6 +1145,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         logger: this.logger,
       });
       await owner.updateProjectRun(config.parentSessionId ?? config.sessionId!, async (run) => {
+        await config.authorizeExecutionInputs?.({ projectRun: run });
         const resolved = await resolveProjectGroupRepositories(run, {
           machineId: this.machineId,
           resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
@@ -1416,6 +1441,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     const parentMeta = await parentSessionDoc.getMetaState();
     const parentProject = parentMeta?.project ?? config.project;
+    await config.authorizeExecutionInputs?.({ project: parentProject });
     const localParentWorktreeSource = this.resolveLocalWorktreeSource(
       parentProject,
       config.workdir
@@ -1639,6 +1665,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
     config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    if (config.projectRun)
+      await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)
       await sessionDoc.setRepoFullName(config.githubRepo);
 
@@ -1659,6 +1687,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             )
           ),
         allowManagedClone: this.cloudPort.githubTokens !== null,
+        authorizeRun: async (run) => {
+          await config.authorizeExecutionInputs?.({ projectRun: run });
+        },
         brokerAuth: (source) => this.resolveHostGitBrokerAuth(source, config, credentials),
         setup: async (member, memberWorkdir) => {
           const localProjectId =
@@ -1924,6 +1955,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           this.machineId,
           localProjectId,
           {
+            verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
                 reason: 'session-fork-workdir-resolve',
@@ -1941,6 +1973,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'session-fork-local-project-resolve',
@@ -2049,6 +2082,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,
+        configurationGeneration: event.configurationGeneration,
       };
       this.emit('terminated', terminatedEvent);
     };

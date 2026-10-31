@@ -23,6 +23,8 @@
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
+  undefined fields must not make an unchanged encrypted original fail equality.
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -57,7 +59,7 @@
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
-- Config uses its owner signal; fence mutations after interrupt.
+- Configuration application composes native Effect under the Turn owner. Await local publication before prompting; connection generations fence observations independently of history. First owner acceptance checks the captured revision; existing receipts skip that check. Matched steer never mutates configuration.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
@@ -96,7 +98,7 @@
   ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
-- Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
+- Fork and continuation share `resolveSessionAcpTargetId`; publish the target agent’s confirmed configuration after fork, never the source’s current or historical configuration.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit
   display projections stay outside compensation.

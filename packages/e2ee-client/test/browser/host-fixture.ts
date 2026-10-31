@@ -27,6 +27,7 @@ import {
 } from '@lody/e2ee-core/adapters/indexeddb';
 import {
   Bytes,
+  inspectContentFrame,
   hashRecordBytes,
   signGenesisRecord,
   verifyLedger,
@@ -118,6 +119,7 @@ let offer: PersonalPairingOffer,
 let databasePrefix = 'personal';
 const FIXED_NOW = 1_800_000_000_000;
 let fixedClock: Clock.Clock;
+let graceElapsed = 0;
 let controlledClock:
   | {
       advance(ms: number): Effect.Effect<void>;
@@ -153,6 +155,7 @@ export async function boot(
   controlledClose = false,
   prefix = 'personal'
 ) {
+  graceElapsed = 0;
   databasePrefix = prefix;
   mode = input;
   events = [];
@@ -206,12 +209,12 @@ export async function boot(
       } else controlledClock = undefined;
       fixedClock = yield* Clock.clockWith((clock) =>
         Effect.succeed({
-          currentTimeMillisUnsafe: () => FIXED_NOW,
-          currentTimeMillis: Effect.succeed(FIXED_NOW),
+          currentTimeMillisUnsafe: () => FIXED_NOW + graceElapsed,
+          currentTimeMillis: Effect.sync(() => FIXED_NOW + graceElapsed),
           currentTimeNanosUnsafe: () => BigInt(FIXED_NOW) * 1_000_000n,
           currentTimeNanos: Effect.succeed(BigInt(FIXED_NOW) * 1_000_000n),
-          monotonicTimeNanosUnsafe: () => 0n,
-          monotonicTimeNanos: Effect.succeed(0n),
+          monotonicTimeNanosUnsafe: () => BigInt(graceElapsed) * 1_000_000n,
+          monotonicTimeNanos: Effect.sync(() => BigInt(graceElapsed) * 1_000_000n),
           sleep: controlledSleep ?? clock.sleep.bind(clock),
         })
       );
@@ -272,7 +275,7 @@ export async function boot(
               bucketId: badToken ? 'lody' : 'protected-fixture',
               gatewayBaseUrl: 'https://streams.example.test',
               expiresIn: 900,
-              expiresAt: FIXED_NOW + 900000,
+              expiresAt: FIXED_NOW + graceElapsed + 900000,
             };
           }),
         custody: (binding, candidateRequest) =>
@@ -846,6 +849,12 @@ export async function invoke(action: string) {
             return yield* session!.status();
           case 'wrongOffer':
             return yield* host.prepare({ ...offer, genesisHash: '77'.repeat(32) });
+          case 'graceLastMillisecond':
+            graceElapsed = 899_999;
+            return true;
+          case 'graceExpired':
+            graceElapsed = 900_000;
+            return true;
           case 'rotateRemote': {
             const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72))),
               genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
@@ -910,8 +919,13 @@ export async function invoke(action: string) {
             return yield* session!.keyRound();
           case 'keyRound':
             return yield* session!.keyRound();
-          case 'seal': {
-            const doc = yield* session!.document('doc:1', 'loro');
+          case 'seal':
+          case 'sealOldHint': {
+            const doc = yield* session!.document(
+              'doc:1',
+              'loro',
+              action === 'sealOldHint' ? 0 : 'current'
+            );
             const sealed = yield* doc.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
@@ -925,7 +939,7 @@ export async function invoke(action: string) {
               'sealed',
               JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
             );
-            return true;
+            return { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
           }
           case 'openBody': {
             const doc = yield* session!.document('doc:1', 'loro');
@@ -1225,10 +1239,11 @@ export async function runtimeInvoke(action: string) {
         value = true;
         break;
       case 'seal':
+      case 'sealOldHint':
       case 'sealMutable': {
         const status = await runtime.status(offer.workspaceId);
         const input = {
-          epoch: status.writeEpoch ?? status.epoch,
+          epoch: action === 'sealOldHint' ? 0 : (status.writeEpoch ?? status.epoch),
           room: { kind: 'doc' as const, docId: '1' },
           context: runtimeContext,
           plaintext: Uint8Array.of(72, 105),
@@ -1245,7 +1260,7 @@ export async function runtimeInvoke(action: string) {
           'runtime-sealed',
           JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
         );
-        value = true;
+        value = { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
         break;
       }
       case 'openBody': {

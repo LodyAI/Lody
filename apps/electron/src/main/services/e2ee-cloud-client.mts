@@ -1,6 +1,6 @@
 import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
 import type { SharingRemote } from '@lody/e2ee-machine-sharing'
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
 import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
@@ -165,6 +165,7 @@ function requestFailure(error: unknown): BackendError {
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   if (code === 'e2ee_member_removed') return new E2eeMemberRemovedError()
+  if (code === 'e2ee_device_revoked') return new E2eeDeviceRevokedError()
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'

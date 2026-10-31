@@ -1,3 +1,4 @@
+import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
@@ -38,6 +39,16 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   logger: Logger;
   builtinAgentConfigCliTypes?: CliType[];
   supportRegistryAgentTypes?: string[];
@@ -82,6 +93,8 @@ export class Lody {
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
   private startReceipt?: Promise<void>;
+  private clientLossReceipt?: ReturnType<typeof daemonLossObserver.register>;
+  private clientLossRpcStopped = false;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
@@ -119,10 +132,17 @@ export class Lody {
           if (!owner) return;
           owner.encryptedRevocation =
             reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
-          await owner.startReceipt?.catch(() => undefined);
-          if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
-          else await owner.cleanup();
-          if (!owner.startReceipt) await owner.documentManager.cleanUp();
+          owner.clientLossReceipt?.loss(owner.encryptedRevocation);
+          try {
+            await owner.startReceipt?.catch(() => undefined);
+            if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+            else await owner.cleanup();
+            if (!owner.startReceipt) await owner.documentManager.cleanUp();
+            owner.clientLossReceipt?.retired();
+          } catch (cause) {
+            owner.clientLossReceipt?.failed();
+            throw cause;
+          }
         },
       });
       // Unimplemented channels cannot inherit their ordinary plaintext sinks.
@@ -134,6 +154,7 @@ export class Lody {
           notifications: null,
           attachmentUpload: null,
           remotePreview: null,
+          remoteAutomation: undefined,
           sessionSharing: null,
           prAssociation: null,
           githubTokens: null,
@@ -184,12 +205,23 @@ export class Lody {
             userTurnId,
             at: Date.now(),
           }),
-        resolveVerifiedOriginal: (intent) => {
-          const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
-          return e2ee && typeof e2ee.resolveVerifiedExecutionOriginal === 'function'
-            ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
-            : Effect.succeed(undefined);
+        resolveVerifiedOriginal: (intent, lookup) => {
+          const owner = manager;
+          const loaded = owner?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          if (!e2ee || typeof e2ee.resolveVerifiedExecutionOriginal !== 'function')
+            return Effect.succeed(undefined);
+          const resolve = e2ee.resolveVerifiedExecutionOriginal;
+          if (loaded || !lookup?.origin || !owner) return resolve(intent, loaded, lookup);
+          // A derivation origin may live in a session this daemon has not opened yet.
+          return Effect.tryPromise({
+            try: () => owner.getOrCreateSessionDoc(intent.sessionId as SessionId),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.flatMap((session) => resolve(intent, session.handle?.doc, lookup)),
+            Effect.catch(() => Effect.succeed(undefined))
+          );
         },
+        ...(typeof e2ee.signingPublicKey === 'string' ? { selfDevice: e2ee.signingPublicKey } : {}),
       });
     }
     // Commands the daemon executes may touch Sessions owned by other machines; their
@@ -238,6 +270,21 @@ export class Lody {
     });
     const lody = new Lody(options, manager, encryptedExecution);
     lody.encryptedWorkspace = e2ee;
+    if (e2ee)
+      lody.clientLossReceipt = daemonLossObserver.register(
+        {
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+        },
+        () => {
+          const work = lody.runtime.inspectClientLoss();
+          return work
+            ? { ...work, intakeClosed: work.intakeClosed && lody.clientLossRpcStopped }
+            : null;
+        },
+        e2ee.inspectClientLossAuthority
+      );
     resolveRemovalOwner(lody);
     return lody;
   }
@@ -291,6 +338,7 @@ export class Lody {
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
+        remoteAutomation: options.remoteAutomation,
         cloudPort: options.cloudPort,
       },
       logger: this.logger,
@@ -507,6 +555,7 @@ export class Lody {
     this.builtinAgentConfigRetryAttempt = 0;
     try {
       await this.encryptedWorkspace?.stopRpc();
+      this.clientLossRpcStopped = true;
     } finally {
       await this.runtime.cleanup();
     }
@@ -562,6 +611,12 @@ export class Lody {
 
   hasAutomationSessionWork(sessionId: SessionId): boolean {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
+  }
+
+  getAutomationSessionAuthority() {
+    const handler = this.runtime.getMessageHandler();
+    if (!handler) throw new Error('AUTOMATION_SESSION_OWNER_UNAVAILABLE');
+    return handler.getAutomationSessionAuthority();
   }
 
   hasAutomationTurnWork(sessionId: SessionId): boolean {

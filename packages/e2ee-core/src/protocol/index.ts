@@ -190,6 +190,7 @@ export { epochDeliveryId } from '../internal/keys/delivery';
 
 // Recovery
 export {
+  deriveRecoveryAccessCredential,
   generateRecoveryPackage,
   importRecoveryIdentity,
   parseRecoveryFile,
@@ -200,6 +201,7 @@ export {
   vaultCiphertextDigest,
   sameVaultCiphertext,
   RecoveryVaultError,
+  type RecoveryAccessCredential,
   type RecoveryIdentity,
   type RecoveryPrivatePackage,
   type VerifiedPasskeyPrf,

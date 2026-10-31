@@ -1,6 +1,7 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -1119,10 +1120,12 @@ const SessionDetail = ({
   });
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
     bottomBorder: true,
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
@@ -3074,7 +3077,18 @@ const SessionDetail = ({
     [router, workspaceSlug]
   );
 
-  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const confirmAndArchiveSession = useArchiveSessionWithConfirmation(archiveSession);
+  const archiveSessionWithConfirmation = useCallback(
+    async (...args: Parameters<typeof confirmAndArchiveSession>) => {
+      try {
+        return await confirmAndArchiveSession(...args);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return false;
+      }
+    },
+    [confirmAndArchiveSession]
+  );
   const requestArchiveConfirmation = useArchiveConfirmationRequest();
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {
@@ -7452,4 +7466,15 @@ const SessionDetail = ({
   );
 };
 
-export default SessionDetail;
+export default function SessionDetailWithHistoryAccess(props: Parameters<typeof SessionDetail>[0]) {
+  return (
+    <SessionHistoryAccessBoundary
+      sessionId={props.sessionId}
+      urlTab={props.urlTab}
+      onMobileBack={props.onMobileBack}
+      onMobilePresented={props.onMobilePresented}
+    >
+      <SessionDetail {...props} />
+    </SessionHistoryAccessBoundary>
+  );
+}

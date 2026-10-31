@@ -12,6 +12,9 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 - Recheck the current ledger and actual local project before admitting new work.
   Known withdrawal denies immediately; unknown changes have a RAM-only read-start
   lifetime strictly shorter than 15 minutes on wall and monotonic clocks.
+- A verified denial in the accepted pin stays known through failed refreshes and restarts;
+  only a newer verified head releases it. It needs only historical issuer authority, so a
+  later signer revocation does not void it. It never grants execution.
 
 - `inspectCache` observes retained RAM objects only. It never initializes a lazy
   owner, reads a clock, refreshes a policy or establishes current authorization.

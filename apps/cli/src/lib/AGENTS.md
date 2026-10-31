@@ -50,6 +50,21 @@
 - INVARIANT: agent PATH merges keep the session's `gh` shim dir first
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
 
+## Encrypted workspace catalog
+
+- `local-workspace-catalog.ts` keeps encrypted discovery in account/machine-bound
+  `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
+  Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
+  the sidecar or account/machine-bound `.e2ee-invalid` marker.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
+  Persist ordinary remote-list results; return degraded receipts with current auth/revocation
+  checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
+  writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
+  v1 fields; stale sidecars cannot bootstrap. Fleet keeps scoped recoverable issues, bounded
+  retries and pending signature until healthy receipt.
+
 ## Local Loro data plane
 
 Read [loro/AGENTS.md](loro/AGENTS.md) before enumerating rooms, publishing presence,
@@ -59,7 +74,11 @@ writing machine Flock rows, or reacting to reconnection. Before changing
 `LoroDocumentManager` options, scheduler and bulk-writer limits, sender-enforced
 framing, the RAW-chunk `createJsonLineSplitter` requirement, renderer room lifetime.
 The room engine remains explicitly Legacy; outbound work uses the single native
-process writer facade, and cleanup awaits its release receipt. Two are never negotiable: a renderer joining a Session Doc room must not call
+process writer facade, and cleanup awaits its release receipt. Workspace engines share that
+writer, so Fleet shutdown closes it only after every workspace runtime and data-plane
+connection owner has released, and a retained failed owner keeps it open for recovery
+([ordering](../../../../.agents/notes/implemented/architecture/2026-10-12-effect-local-presence-writer.md)).
+Two are never negotiable: a renderer joining a Session Doc room must not call
 `getOrCreateSessionDoc` or retain a live cloud room, and the CLI's cloud room status is
 never pushed to renderers as local room health.
 

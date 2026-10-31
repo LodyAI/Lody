@@ -1,3 +1,8 @@
+import {
+  daemonLossObserver,
+  daemonLossProbeEnabled,
+  readDaemonLossAuthority,
+} from './client-loss-observer';
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
 import {
@@ -8,6 +13,9 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import { getLogger } from '../../utils/logger';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -88,6 +96,73 @@ async function readRemoval(directory: string) {
     throw cause;
   }
 }
+const RevokedDevice = Removed.omit({ membershipId: true });
+const machineDevicePath = (directory: string, genesisHash: string) =>
+  join(directory, 'custody', `${genesisHash}.machine.device`);
+/**
+ * The verified ledger keeps a revoked device's keys in its history, and core never
+ * readmits them. Before a new offer, retire this workspace's identity when it is
+ * known revoked: a device-bound receipt from the daemon, or the service's exact
+ * `e2ee_device_revoked` answer to this identity's own credential. Any other outcome
+ * is unknown and keeps the identity. The original is archived for historical
+ * evidence, never deleted or reused; other workspaces and membership are untouched.
+ */
+async function retireRevokedMachineIdentity(options: {
+  accountId: string;
+  workspaceId: string;
+  genesisHash: string;
+  keyring?: MachineKeyring;
+  cloud?: Pick<CloudE2eePort, 'getContentToken'>;
+}) {
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
+  const device = machineDevicePath(directory, options.genesisHash);
+  if (!existsSync(device)) return;
+  const cloud = options.cloud;
+  const revoked = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(directory, 'custody'),
+          requireOsProtection: existsSync(`${directory}.require-os`),
+          keyring: options.keyring,
+        });
+        const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
+        const current = yield* custody.openDevice(genesis);
+        const key = hex(current.publicKey.toBytes());
+        const receipt = yield* Effect.promise(async () => {
+          try {
+            return RevokedDevice.parse(
+              JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
+            );
+          } catch {
+            return null;
+          }
+        });
+        if (receipt?.genesisHash === options.genesisHash && receipt.signingPublicKey === key)
+          return key;
+        if (!cloud) return undefined;
+        const credential = yield* custody.deviceCredential(genesis, current.publicKey);
+        const exact = yield* Effect.tryPromise({
+          try: () => cloud.getContentToken({ workspaceId: options.workspaceId, credential }),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.match({
+            onSuccess: () => false,
+            onFailure: (cause) => isCloudE2eeDeviceRevoked(cause),
+          })
+        );
+        return exact ? key : undefined;
+      })
+    ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  );
+  if (!revoked) return;
+  await rename(
+    device,
+    join(directory, 'custody', `${options.genesisHash}-${revoked}.machine-revoked.device`)
+  );
+}
+
 /** Only after the caller's workspace owners drain. The pairing mutex excludes a
  * replacement identity during the exact-key check and deletion. Keep a public
  * terminal receipt so interrupted erasure retries before any later attachment. */
@@ -260,7 +335,12 @@ function mailbox(
 }
 
 /** @deprecated Promise entry for the existing same-user control consumer. */
-export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof prepareMachine>[0]) {
+export async function prepareCliE2eeMachineLegacy(
+  options: Parameters<typeof prepareMachine>[0] & {
+    /** Lets a new offer learn this identity's exact revocation; absent stays offline. */
+    cloud?: Pick<CloudE2eePort, 'getContentToken'>;
+  }
+) {
   const priorRemoval = await readRemoval(
     cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
   );
@@ -276,7 +356,10 @@ export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof pre
       Effect.gen(function* () {
         yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
         return yield* Effect.tryPromise({
-          try: () => prepareMachine(options),
+          try: async () => {
+            await retireRevokedMachineIdentity(options);
+            return prepareMachine(options);
+          },
           catch: (error) => error,
         });
       })
@@ -563,6 +646,9 @@ async function openWorkspaceOwned(
   await original.close();
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
     Effect.runPromise(work.pipe(Scope.provide(scope)));
+  let clientLossAuthority:
+    | { view: import('@lody/e2ee-core/protocol').LedgerView; generation: number }
+    | undefined;
   const opened = await run(
     Effect.gen(function* () {
       const custody = yield* makeCliE2eeCustody({
@@ -588,6 +674,17 @@ async function openWorkspaceOwned(
         custody,
         device,
         genesisRecord: bytes(binding.genesisRecordHex),
+        ...(daemonLossProbeEnabled
+          ? {
+              onVerifiedLedger: (
+                view: import('@lody/e2ee-core/protocol').LedgerView,
+                generation: number
+              ) => {
+                clientLossAuthority = { view, generation };
+                daemonLossObserver.changed();
+              },
+            }
+          : {}),
         mailbox: mailbox(options.cloud, options.workspaceId, credential),
         staging: readEpochGroup
           ? {
@@ -751,6 +848,24 @@ async function openWorkspaceOwned(
     Date.now
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
+  // Realtime dispatch, the durable execution origin and feature requests reopen frames.
+  const catchUpLedger = makeLedgerCatchUp({
+    genesis: binding.genesisHash,
+    resource: e2eeRpcResource,
+    ledger: () => opened.runtime.executionLedger(),
+    catchUp: async () => {
+      // An older round may finish after an independent authority read advances
+      // the ledger. Join it without extending it, then receive the current key
+      // through the same refresh owner if it is still missing. Never reset retries.
+      await (refresh ?? refreshInBackground(false));
+      if (closed) return;
+      const status = await run(opened.runtime.status());
+      if (!closed && !status.hasCurrentKey) await refreshInBackground(false);
+    },
+    // Two epoch integers and an outcome only; never the frame or its plaintext.
+    observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
+  });
+  const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
@@ -944,8 +1059,8 @@ async function openWorkspaceOwned(
     ledgerBlocked = true;
     clearLedgerRetry();
     removalRecorded = (async () => {
-      if (!memberRemoved) return;
-      const removedStatus = await run(opened.runtime.status());
+      if (!memberRemoved && !deviceRevoked) return;
+      const removedStatus = memberRemoved ? await run(opened.runtime.status()) : undefined;
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
@@ -959,11 +1074,18 @@ async function openWorkspaceOwned(
                 opened.credential
             )
               return;
-            const receipt = Removed.parse({
-              genesisHash: options.genesisHash,
-              signingPublicKey: opened.signingPublicKey,
-              membershipId: removedStatus.membershipId,
-            });
+            // A revoked device keeps membership: its receipt only retires this identity
+            // so the next pairing creates a new one; it never erases the workspace.
+            const receipt = removedStatus
+              ? Removed.parse({
+                  genesisHash: options.genesisHash,
+                  signingPublicKey: opened.signingPublicKey,
+                  membershipId: removedStatus.membershipId,
+                })
+              : RevokedDevice.parse({
+                  genesisHash: options.genesisHash,
+                  signingPublicKey: opened.signingPublicKey,
+                });
             yield* Effect.promise(async () => {
               const temporary = join(
                 directory,
@@ -974,7 +1096,10 @@ async function openWorkspaceOwned(
                 await file.writeFile(JSON.stringify(receipt));
                 await file.sync();
                 await file.close();
-                await rename(temporary, join(directory, 'removed.json'));
+                await rename(
+                  temporary,
+                  join(directory, removedStatus ? 'removed.json' : 'revoked-device.json')
+                );
               } finally {
                 await file.close().catch(() => undefined);
                 await unlink(temporary).catch(() => undefined);
@@ -1174,6 +1299,17 @@ async function openWorkspaceOwned(
       if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
       return result.attachmentToken;
     },
+    inspectClientLossAuthority: (requesterDevice: string, membershipId?: string) =>
+      daemonLossProbeEnabled
+        ? readDaemonLossAuthority(
+            clientLossAuthority,
+            opened.signingPublicKey,
+            requesterDevice,
+            membershipId
+          )
+        : null,
+    /** This machine's signing key: the only author of derived inputs. */
+    signingPublicKey: opened.signingPublicKey,
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,
@@ -1182,11 +1318,19 @@ async function openWorkspaceOwned(
     authorizeScheduleExecution,
     authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
       run(authorizeScheduleExecution(request, doc)),
-    resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc?: LoroDoc) =>
+    resolveVerifiedExecutionOriginal: (
+      intent: EncryptedExecutionIntent,
+      doc?: LoroDoc,
+      lookup: { readonly origin?: boolean } = {}
+    ) =>
       Effect.scoped(
         Effect.gen(function* () {
           if (closed || intent.workspaceId !== options.workspaceId) return undefined;
-          const fromDoc = doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
+          // Origin lookups and this machine's own inputs always use the signed row,
+          // whose `derivedFrom` the dispatch fast path cannot carry.
+          const fromDoc = lookup.origin
+            ? undefined
+            : doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
           // This original cache is an accelerator, never the actual-start journal.
           // Its local I/O fault cannot block the independently signed durable origin.
           const cached = yield* rpc
@@ -1200,21 +1344,24 @@ async function openWorkspaceOwned(
             const state = view.inspectState();
             const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
             if (!machineId) return undefined;
-            const verified = yield* rpc.openDispatch(machineId, rpcOriginal);
+            const verified = yield* dispatchNative.openDispatch(machineId, rpcOriginal);
             if (
               verified.args.sessionId !== intent.sessionId ||
               verified.args.userTurnId !== intent.userTurnId ||
               !isDeepStrictEqual(verified.args.inputConfig ?? {}, intent.inputConfig ?? {})
             )
               return undefined;
-            const device = state.devices.get(verified.requesterDevice);
-            const member = device && state.members.get(hex(device.membershipId.toBytes()));
-            if (!member) return undefined;
-            return {
-              requesterDevice: verified.requesterDevice,
-              requesterCryptoUserId: hex(member.userId.toBytes()),
-              expiresAt: verified.expiresAt,
-            };
+            // A self-authored input may be derived; only its signed row says so.
+            if (verified.requesterDevice !== opened.signingPublicKey) {
+              const device = state.devices.get(verified.requesterDevice);
+              const member = device && state.members.get(hex(device.membershipId.toBytes()));
+              if (!member) return undefined;
+              return {
+                requesterDevice: verified.requesterDevice,
+                requesterCryptoUserId: hex(member.userId.toBytes()),
+                expiresAt: verified.expiresAt,
+              };
+            }
           }
           if (!doc) return undefined;
           return yield* executionOrigins.resolve(
@@ -1231,7 +1378,8 @@ async function openWorkspaceOwned(
                 );
                 return yield* contentBinding.openAuthenticated(request);
               }),
-            originRecovery?.recover
+            originRecovery?.recover,
+            lookup
           );
         })
       ),
@@ -1270,7 +1418,7 @@ async function openWorkspaceOwned(
                   workspaceId: options.workspaceId,
                   genesis: binding.genesisHash,
                   machineId,
-                  native: rpc,
+                  native: dispatchNative,
                   journal: rpcJournal,
                   authorize: opened.executionAuthorization.authorizeExecution,
                   isOpen: () => !closed,
@@ -1283,7 +1431,7 @@ async function openWorkspaceOwned(
                       workspaceId: options.workspaceId,
                       genesis: binding.genesisHash,
                       machineId,
-                      native: rpc,
+                      native: dispatchNative,
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,

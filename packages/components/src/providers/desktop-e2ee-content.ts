@@ -1,4 +1,5 @@
-import { isE2eeMemberRemoved } from '../lib/e2ee-member-removal';
+import { e2eeAccessLoss, type E2eeAccessLoss } from '../lib/e2ee-member-removal';
+import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } from '@lody/shared';
@@ -24,17 +25,21 @@ export function createE2eeContent(input: {
   epoch: number;
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
-  onKeyUpdateRequired?: () => void;
-  onMemberRemoved?: () => void;
+  /** `seal` marks an explicit exhausted/unavailable-grace failure with verified missing-current-key status. */
+  onKeyUpdateRequired?: (source?: 'seal' | 'seal-complete') => void;
+  /** Credential-authenticated member removal or revocation of this device. */
+  onMemberRemoved?: (reason: E2eeAccessLoss) => void;
   onSnapshotRecoveryChange?: (pending: boolean) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
-  let memberRemoved = false,
+  let statusEpoch = input.epoch;
+  let currentKeyMissing = false;
+  let lost: E2eeAccessLoss | null = null,
     closed = false;
   const assertOpen = () => {
-    if (closed || memberRemoved) throw new Error('e2ee_closed');
+    if (closed || lost) throw new Error('e2ee_closed');
   };
   const withinContent = async <A>(work: () => Promise<A>): Promise<A> => {
     assertOpen();
@@ -43,18 +48,21 @@ export function createE2eeContent(input: {
     return value;
   };
   const observeRemoval = (error: unknown) => {
-    if (!isE2eeMemberRemoved(error)) return false;
-    if (!memberRemoved) {
+    const reason = e2eeAccessLoss(error);
+    if (!reason) return false;
+    if (!lost) {
       setMemberRole(null);
-      memberRemoved = true;
+      lost = reason;
       try {
-        input.onMemberRemoved?.();
+        input.onMemberRemoved?.(reason);
       } catch {
         /* Retirement never holds the token request. */
       }
     }
     return true;
   };
+  // E2E-only: absent outside an automation window whose main registered the probe.
+  const effects = clientLossEffects(input.workspaceId);
   const recovering = new Set<string>();
   const requested = new Map<string, number>();
   const recovery = (stream: string, pending: boolean) => {
@@ -94,7 +102,7 @@ export function createE2eeContent(input: {
   let memberRole: E2eeRuntimeStatus['memberRole'] = null;
   const roleListeners = new Set<() => void>();
   const codeCollabRole = (): 'read' | 'write' =>
-    !closed && !memberRemoved && memberRole && memberRole !== 'guest' ? 'write' : 'read';
+    !closed && !lost && memberRole && memberRole !== 'guest' ? 'write' : 'read';
   const setMemberRole = (next: E2eeRuntimeStatus['memberRole']) => {
     const before = codeCollabRole();
     memberRole = next;
@@ -114,6 +122,10 @@ export function createE2eeContent(input: {
     memberRole?: E2eeRuntimeStatus['memberRole'];
   }) => {
     if (closed) return;
+    if (status.epoch >= statusEpoch) {
+      statusEpoch = status.epoch;
+      currentKeyMissing = status.hasCurrentKey === false;
+    }
     setMemberRole(status.memberRole ?? null);
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
@@ -130,7 +142,7 @@ export function createE2eeContent(input: {
         ),
       // SDK schedules only after local writes, suppresses a competing writer,
       // and checks the remote snapshot before exporting a new one.
-      canUpload: () => !closed && !memberRemoved && transition.phase() !== 'closed',
+      canUpload: () => !closed && !lost && transition.phase() !== 'closed',
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
     },
@@ -139,19 +151,57 @@ export function createE2eeContent(input: {
         (epoch) =>
           ({
             maxSealOverheadBytes: 4096,
-            seal: (request) => {
-              if (memberRemoved) return Promise.reject(new Error('e2ee_member_removed'));
+            seal: async (request) => {
+              if (lost) return Promise.reject(new Error(lost));
               const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
               const additionalData = request.additionalData(header);
-              return input.runtime.seal(input.workspaceId, {
-                epoch,
-                room,
-                context: request.context,
-                plaintext: request.plaintext,
-                additionalData,
-              });
+              const seal = () =>
+                input.runtime.seal(input.workspaceId, {
+                  epoch,
+                  room,
+                  context: request.context,
+                  plaintext: request.plaintext,
+                  additionalData,
+                });
+              try {
+                const value = await (effects ? effects.track('write', seal) : seal());
+                if (currentKeyMissing) {
+                  try {
+                    input.onKeyUpdateRequired?.('seal-complete');
+                  } catch {
+                    /* A notice cannot turn a completed save into a failure. */
+                  }
+                }
+                return value;
+              } catch (error) {
+                if (
+                  !closed &&
+                  !lost &&
+                  !e2eeAccessLoss(error) &&
+                  ((error instanceof Error &&
+                    /^(?:Error invoking remote method 'e2ee[.:]seal': Error: )?e2ee_key-update-required$/.test(
+                      error.message
+                    )) ||
+                    (typeof error === 'object' &&
+                      error !== null &&
+                      'code' in error &&
+                      error.code === 'key-update-required')) &&
+                  currentKeyMissing &&
+                  transition.needsUpdate()
+                ) {
+                  try {
+                    input.onKeyUpdateRequired?.('seal');
+                  } catch {
+                    /* Observation must not replace the failed save or alter its retry. */
+                  }
+                }
+                throw error;
+              }
             },
-            open: (request) => input.runtime.openContent(input.workspaceId, { room, ...request }),
+            open: (request) => {
+              const open = () => input.runtime.openContent(input.workspaceId, { room, ...request });
+              return effects ? effects.track('read', open) : open();
+            },
           }) satisfies PayloadProtectionProvider
       )
     ),
@@ -251,7 +301,7 @@ export function createE2eeContent(input: {
       ),
       attachmentToken: () =>
         withinContent(async () => {
-          if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
+          if (lost || transition.phase() === 'closed') throw new Error('e2ee_closed');
           const result = await input.runtime
             .contentStreamsToken(input.workspaceId)
             .catch((error) => {

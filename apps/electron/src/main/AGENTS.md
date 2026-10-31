@@ -76,6 +76,10 @@ The encrypted adapter enables Meta, Loro documents and the owning workspace/mach
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
 
+New content seals prefer installed current keys inside core, never renderer hints.
+Only genuine absence permits retained published keys within the durable fifteen-minute
+observation budget; exhaustion fails for retry. Keep sealed old frames and history. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+
 All installed/candidate binding fields are authenticated AAD and encrypted in the
 core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
 `retainDevice(actualGenesis, prepared)` before any network/CAS; failed preparations
@@ -114,3 +118,7 @@ server labels never establish native identity. [Decision](../../../../.agents/no
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
+Only the exact server code `e2ee_device_revoked` (`E2eeDeviceRevokedError`) is a
+device revocation. It reuses the same device-bound receipt and cleanup, records its
+reason, and reports `e2ee_device_revoked` until a re-pair replaces the key.
+[Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).

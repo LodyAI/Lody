@@ -9,6 +9,7 @@ import { totalmem } from 'node:os'
 import { basename, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
+import type { AutomationControlRequest } from '@lody/shared/automations'
 import {
   signalChildTreeNowLegacy,
   startProcessLegacy,
@@ -837,6 +838,10 @@ export class CliService {
           )
         )
     )
+  }
+
+  async sendLocalAutomationControl(message: AutomationControlRequest) {
+    return await Effect.runPromise(this.localControlClient.automationControl(message))
   }
 
   async activateLocalE2eeDevice(message: LocalE2eeActivateRequest) {

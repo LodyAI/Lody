@@ -54,7 +54,7 @@ export function MachineSharingController({
       const id = ++readId.current;
       setLoading(true);
       try {
-        if (!runtime?.readMachineSharing) throw new Error('e2ee_unavailable');
+        if (!runtime?.readMachineSharing) throw new Error('e2ee_machine_sharing_unsupported');
         const next = await runtime.readMachineSharing(workspaceId, machineId);
         if (!active.current || id !== readId.current) return undefined;
         setView(next);
@@ -78,8 +78,13 @@ export function MachineSharingController({
       } catch (cause) {
         if (active.current && id === readId.current) {
           const known = sharingIssue(cause);
-          setIssue(known === 'notOwned' || known === 'notShared' ? known : 'unavailable');
-          if (known === 'notOwned' || known === 'notShared') setView(undefined);
+          setIssue(
+            known === 'notOwned' || known === 'notShared' || known === 'unsupported'
+              ? known
+              : 'unavailable'
+          );
+          if (known === 'notOwned' || known === 'notShared' || known === 'unsupported')
+            setView(undefined);
         }
         return undefined;
       } finally {

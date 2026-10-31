@@ -1,10 +1,13 @@
 import { AndroidEmulatorService } from '@/android-emulator/service';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
+import { AcpConfiguration, AcpConfigurationError } from '@/agent/acp-configuration';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
   type EncryptedAttachment,
 } from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { decideEncryptedDerivation } from './e2ee/derivation-limits';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
@@ -12,6 +15,7 @@ import {
   readWorkspaceFlockRowsFromFlock,
 } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -283,7 +287,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
-import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
+import { getAcpRuntimeConfigPatch } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
 import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
@@ -298,7 +302,7 @@ import {
   type ImageGenerationBeginEvent,
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
@@ -607,6 +611,16 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   encryptedWorkspace?: boolean;
   encryptedExecution?: EncryptedAgentExecution;
   token: string;
@@ -798,6 +812,8 @@ export class MessageHandler {
     pressureReason: null,
   });
   private executionService: SessionExecutionService;
+  /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
+  private readonly encryptedExecution?: EncryptedAgentExecution;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
@@ -1681,51 +1697,76 @@ export class MessageHandler {
     await backend.appendHistoryTurn(systemNotice);
   }
 
-  private async applyAcpModeAndModel(
+  private applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
       acpSessionId: ACPSessionId | null;
       agentClient: AgentClient | null;
     },
     config: AcpSessionRunConfig,
-    context: {
-      sessionDoc: SessionDocument;
-      basedOnUserTurnId?: string;
-      signal?: AbortSignal;
-    }
-  ): Promise<void> {
-    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
-      session,
-      config,
-      logger: this.logger,
-      signal: context.signal,
-    });
-
-    if (runtimeConfigPatch && context.basedOnUserTurnId) {
-      const basedOnUserTurnId = context.basedOnUserTurnId;
-      const persistRuntimeConfig = async (): Promise<void> => {
-        await this.awaitTurnHistoryGate(session.sessionId);
-        if (context.signal?.aborted) return;
-        const backend = await this.getSessionBackend(context.sessionDoc);
-        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
-      };
-      void persistRuntimeConfig().catch((error) => {
-        this.logger.warn(
-          `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
+    context: { sessionDoc: SessionDocument; basedOnUserTurnId?: string }
+  ): Effect.Effect<void, unknown> {
+    return Effect.gen(function* () {
+      const client = session.agentClient;
+      if (!client || !session.acpSessionId)
+        return yield* Effect.fail(new AcpConfigurationError('session', 'unknown'));
+      const service = client.getConfiguration();
+      const initial = yield* service.read;
+      const turnId = context.basedOnUserTurnId ?? '';
+      const write = (patch: import('@lody/shared').SessionAcpRuntimeConfigPatch) =>
+        Effect.tryPromise({
+          try: async () => {
+            await context.sessionDoc.applyAcpRuntimeConfigPatch(turnId, patch);
+            await context.sessionDoc.flushLocalWrites();
+          },
+          catch: (cause) => new AcpConfigurationError('persistence', 'unknown', { cause }),
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: TURN_BUDGETS.configurationMs,
+            orElse: () => Effect.fail(new AcpConfigurationError('persistence', 'unknown')),
+          })
         );
+      yield* Effect.tryPromise({
+        try: () =>
+          context.sessionDoc.beginAcpRuntimeConfig(turnId, {
+            ...initial,
+            state: 'applying',
+            error: undefined,
+          }),
+        catch: (cause) => new AcpConfigurationError('persistence', 'unknown', { cause }),
       });
-    }
-
-    if (warningSelections.length > 0) {
-      // Not awaited: this is reporting, and the prompt hot path must not block
-      // on a history write.
-      void this.recordAgentWarning(session.sessionId, {
-        message: `The agent rejected part of the requested run configuration (${warningSelections.join(
-          ', '
-        )}) and is using its own values instead. Reasoning effort and fast mode depend on the selected model.`,
-        source: 'configWarning',
-      });
-    }
+      yield* applyAcpSessionRunConfig(config).pipe(
+        Effect.provideService(AcpConfiguration, service),
+        Effect.timeoutOrElse({
+          duration: TURN_BUDGETS.configurationMs,
+          orElse: () => Effect.fail(new AcpConfigurationError('session', 'unknown')),
+        }),
+        Effect.flatMap((confirmed) => write({ ...confirmed, state: 'ready', error: undefined })),
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            const actual = yield* service.read;
+            yield* write({
+              ...actual,
+              state: error.reason === 'unknown' ? 'unknown' : 'failed',
+              error: { code: `ACP_CONFIG_${error.reason.toUpperCase()}`, message: error.message },
+            });
+            return yield* Effect.fail(error);
+          })
+        ),
+        Effect.onInterrupt(() =>
+          write({
+            acpSessionId: initial.acpSessionId,
+            generation: initial.generation,
+            state: 'unknown',
+            error: {
+              code: 'ACP_CONFIG_INTERRUPTED',
+              message: 'Configuration confirmation was interrupted.',
+            },
+          })
+        )
+      );
+      return undefined;
+    });
   }
 
   private resolveServerBaseUrl(): string {
@@ -3063,8 +3104,9 @@ export class MessageHandler {
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
+    this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
-      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedExecution: this.encryptedExecution,
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
@@ -3093,8 +3135,9 @@ export class MessageHandler {
       observePromptContentForTurn: (sessionId, turnId) =>
         this.observePromptContentForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      applyAcpModeAndModel: async (session, acpConfig, context) =>
-        await this.applyAcpModeAndModel(
+      isAcpConfigurationConfirmed: (doc, generation) => doc.isAcpConfigurationConfirmed(generation),
+      applyAcpModeAndModel: (session, acpConfig, context) =>
+        this.applyAcpModeAndModel(
           session as {
             sessionId: SessionId;
             acpSessionId: ACPSessionId | null;
@@ -3409,6 +3452,8 @@ export class MessageHandler {
           success: true,
           runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
         }),
+        getAutomationControl: config.remoteAutomation?.handshake,
+        controlAutomation: config.remoteAutomation?.control,
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3850,7 +3895,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
@@ -3917,7 +3965,48 @@ export class MessageHandler {
 
     // ACP updates are delivered out-of-band from the agent process and must be merged into the
     // session history. We buffer them briefly to reduce the number of CRDT writes.
-    this.sessionManager.on('onACPUpdateMessage', (sessionId, update) => {
+    this.sessionManager.on('onACPUpdateMessage', (sessionId, update, generation) => {
+      if (getAcpRuntimeConfigPatch(update)) {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        if (!client || !generation || client.configurationGeneration !== generation) return;
+        const target = this.store.getCurrentACPUpdateTarget(sessionId);
+        if (
+          target &&
+          !this.deletedSessionIds.has(sessionId) &&
+          !this.store.recordSuppressedAcpReplay(sessionId)
+        ) {
+          this.recordTurnEvent(sessionId, target.turnEpoch, false);
+        }
+        const { state: _state, ...snapshot } = client.getRuntimeConfiguration();
+        void this.workspaceDocument
+          .getOrCreateSessionDoc(sessionId)
+          .then(async (doc) => {
+            await doc.applyAcpRuntimeConfigPatch('', snapshot);
+            try {
+              await doc.flushLocalWrites();
+            } catch (error) {
+              await doc.applyAcpRuntimeConfigPatch('', {
+                acpSessionId: snapshot.acpSessionId,
+                generation,
+                state: 'unknown',
+                error: {
+                  code: 'ACP_CONFIG_PERSISTENCE',
+                  message: 'Could not save the agent configuration.',
+                },
+              });
+              throw error;
+            }
+          })
+          .catch((error) => {
+            this.logger.error(`[${sessionId}] ACP configuration persistence failed`, error);
+            void this.recordAgentWarning(sessionId, {
+              source: 'configWarning',
+              message:
+                'Could not save the agent configuration. The next input must confirm it again.',
+            });
+          });
+        return;
+      }
       this.enqueueACPUpdate(sessionId, update);
     });
 
@@ -3952,10 +4041,13 @@ export class MessageHandler {
         machineId: MachineId,
         agentConfigId: AgentConfigId | undefined,
         cliType: string,
-        limits: RateLimit
+        snapshot: import('acp-extension-core').RateLimitsSnapshot,
+        binding: import('@/session/automation-observations').ProviderBinding | undefined
       ) => {
-        if (agentConfigId) this.executionService.noteProviderRateLimitsUpdate(agentConfigId);
-        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
+        if (agentConfigId)
+          this.executionService.noteProviderRateLimitsUpdate(agentConfigId, binding, snapshot);
+        for (const limits of snapshot.rateLimits)
+          void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
@@ -4005,6 +4097,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.retireConfiguration(exit.sessionId, exit.configurationGeneration);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -4024,6 +4117,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.retireConfiguration(event.sessionId, event.configurationGeneration);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;
@@ -4042,6 +4136,19 @@ export class MessageHandler {
         }
       })();
     });
+  }
+
+  private retireConfiguration(sessionId: SessionId, generation: string | undefined): void {
+    if (!generation) return;
+    void this.workspaceDocument
+      .getOrCreateSessionDoc(sessionId)
+      .then(async (doc) => {
+        await doc.retireAcpRuntimeConfig(generation);
+        await doc.flushLocalWrites();
+      })
+      .catch((error) =>
+        this.logger.error(`[${sessionId}] Could not persist retired configuration`, error)
+      );
   }
 
   private getMachineFlockDocIdForMachine(): string {
@@ -5328,20 +5435,9 @@ export class MessageHandler {
     let failedGroupPersisted = 0;
     try {
       sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const backend = await this.getSessionBackend(sessionDoc);
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
-          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
-            group.updates.map((update) => update.notification)
-          );
-          if (runtimeConfigPatch && group.target.userTurnId) {
-            await backend.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
-          } else if (runtimeConfigPatch) {
-            this.logger.debug(
-              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
-            );
-          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,
@@ -6252,7 +6348,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
@@ -6926,6 +7025,30 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
+  private async classifyEncryptedDerivation(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'> {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_derivation_unavailable');
+    const live = this.executionService.reserveEncryptedDerivation(
+      origin.sessionId as SessionId,
+      origin.userTurnId
+    );
+    if (live?.kind === 'owner') return 'owner';
+    // The signed origin decides; a live member reservation alone is not proof.
+    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
+      () => 'denied' as const
+    );
+    return decideEncryptedDerivation({
+      live: live?.kind,
+      verified,
+      targetMachineId: target.machineId,
+      machineId: this.machineId,
+    });
+  }
+
   private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {
     const invocation = this.executionService.getActiveInvocationContext(sessionId);
     return invocation
@@ -6947,6 +7070,12 @@ export class MessageHandler {
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
+          ...(this.encryptedExecution
+            ? {
+                classifyEncryptedDerivation: (origin, target) =>
+                  this.classifyEncryptedDerivation(origin, target),
+              }
+            : {}),
         },
         run
       );
@@ -7277,7 +7406,22 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        // Encrypted: act as the turn's verified principal; a shared member controls
+        // only within that member's own rights for the turn's projects.
+        const control = this.encryptedExecution
+          ? this.executionService.getEncryptedControlPrincipal(sessionId)
+          : ({ kind: 'owner' } as const);
+        const controlAllowed =
+          control?.kind === 'owner' ||
+          (control?.kind === 'member' &&
+            this.encryptedExecution !== undefined &&
+            (await Effect.runPromise(
+              this.encryptedExecution.authorizeAgentControl(
+                control.requesterDevice,
+                control.localProjectIds
+              )
+            ).catch(() => false)));
+        if (!invocation?.requesterUserId || !controlAllowed) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -7968,8 +8112,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
+    // An encrypted shared member's display account is not an identity to attribute.
     const invokingUserId =
-      dispatchContext.source === 'local'
+      dispatchContext.source === 'local' &&
+      (!this.encryptedExecution ||
+        this.executionService.getEncryptedControlPrincipal(message.sessionId)?.kind === 'owner')
         ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
         : undefined;
     const response = await this.previewService.reportCandidate(message, invokingUserId);
@@ -10615,6 +10762,17 @@ export class MessageHandler {
     this.historyWatchAbort.abort();
   }
 
+  inspectClientLoss() {
+    const watcher = this.sessionDispatchWatcher.inspectClientLoss();
+    const execution = this.executionService.inspectClientLoss();
+    return {
+      watcherStopped: watcher.stopped,
+      watcherChecks: watcher.pending,
+      executionTurns: execution.turns,
+      executionBookkeeping: execution.bookkeeping,
+    };
+  }
+
   /**
    * Flush pending ACP updates and tear down session resources.
    */
@@ -11029,6 +11187,26 @@ export class MessageHandler {
       this.hasSessionActivePresence(sessionId) ||
       this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
     );
+  }
+
+  private automationSessionAuthority: SessionAutomationAuthority | undefined;
+  getAutomationSessionAuthority(): SessionAutomationAuthority {
+    return (this.automationSessionAuthority ??= new SessionAutomationAuthority({
+      manager: this.workspaceDocument,
+      execution: this.executionService,
+      machineId: this.machineId,
+      hasOtherWork: (sessionId) =>
+        this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+        this.hasSessionActivePresence(sessionId) ||
+        this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+      hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
+      nativeActivity: (sessionId) => {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        return client ? client.getNativeActivityObservation() : 'idle';
+      },
+      author: (sessionId) =>
+        this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+    }));
   }
 
   /**

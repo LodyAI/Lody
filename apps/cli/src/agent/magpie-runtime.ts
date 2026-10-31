@@ -24,10 +24,44 @@ const modelSchema = z.object({
     .optional(),
   context_window: z.number().int().positive().max(100_000_000).optional(),
   max_output_tokens: z.number().int().positive().max(100_000_000).optional(),
-  modalities: z.object({ input: z.array(z.string().max(32)).max(8) }).optional(),
+  // Capability metadata is extended information, not an OpenAI list requirement.
+  modalities: z.object({ input: z.array(z.string().max(32)).max(8).optional() }).optional(),
 });
-const catalogSchema = z.object({ data: z.array(modelSchema).min(1).max(2048) });
+const catalogSchema = z.object({ data: z.array(z.unknown()).min(1).max(2048) });
 export type MagpieModel = z.infer<typeof modelSchema>;
+
+/** Missing capability metadata falls back to text-only, never to an image claim. */
+const acceptsImageInput = (model: MagpieModel) =>
+  model.modalities?.input?.includes('image') ?? false;
+
+/** Validate each entry separately so one bad model names itself instead of the catalog. */
+function parseMagpieCatalog(payload: unknown): MagpieModel[] {
+  const catalog = catalogSchema.safeParse(payload);
+  if (!catalog.success) throw new Error('Magpie returned an invalid or empty model catalog');
+  const models: MagpieModel[] = [];
+  const problems: string[] = [];
+  catalog.data.data.forEach((entry, index) => {
+    const parsed = modelSchema.safeParse(entry);
+    if (parsed.success) {
+      models.push(parsed.data);
+      return;
+    }
+    const id =
+      typeof entry === 'object' && entry !== null && 'id' in entry && typeof entry.id === 'string'
+        ? ` ${entry.id}`
+        : '';
+    for (const issue of parsed.error.issues) {
+      const field = issue.path.length ? issue.path.join('.') : '<entry>';
+      problems.push(`data[${index}]${id}: ${field} ${issue.message}`);
+    }
+  });
+  if (problems.length) {
+    const shown = problems.slice(0, 3).join('; ');
+    const rest = problems.length > 3 ? ` (+${problems.length - 3} more)` : '';
+    throw new Error(`Magpie returned an invalid model catalog: ${shown}${rest}`);
+  }
+  return models;
+}
 
 /** Bound bytes before decoding; never follow a gateway redirect to a different service. */
 async function readJson(url: string, signal: AbortSignal, fetcher: typeof fetch): Promise<unknown> {
@@ -65,43 +99,10 @@ export async function readMagpieModels(
     .object({ name: z.literal('magpie') })
     .safeParse(await readJson(`${base}/api/hello`, bounded, fetcher));
   if (!hello.success) throw new Error('The local endpoint is not Magpie');
-  const parsed = catalogSchema.safeParse(await readJson(`${base}/v1/models`, bounded, fetcher));
-  if (!parsed.success) throw new Error('Magpie returned an invalid or empty model catalog');
-  if (new Set(parsed.data.data.map((m) => m.id)).size !== parsed.data.data.length)
+  const models = parseMagpieCatalog(await readJson(`${base}/v1/models`, bounded, fetcher));
+  if (new Set(models.map((m) => m.id)).size !== models.length)
     throw new Error('Magpie returned duplicate models');
-  return parsed.data.data;
-}
-
-export function buildMagpieCodexCatalog(models: readonly MagpieModel[]) {
-  return {
-    models: models.map((m, i) => ({
-      slug: m.id,
-      display_name: m.display_name ?? m.id,
-      description: `${m.display_name ?? m.id} via Magpie`,
-      base_instructions:
-        'You are a coding assistant. Help the user complete their software development tasks accurately and safely.',
-      default_reasoning_level:
-        m.supported_reasoning_levels?.find((l) => l.effort === 'medium')?.effort ??
-        m.supported_reasoning_levels?.[0]?.effort ??
-        null,
-      supported_reasoning_levels: (m.supported_reasoning_levels ?? []).map((l) => ({
-        ...l,
-        description: l.effort,
-      })),
-      shell_type: 'unified_exec',
-      visibility: 'list',
-      supported_in_api: true,
-      priority: i,
-      support_verbosity: false,
-      default_verbosity: null,
-      apply_patch_tool_type: 'freeform',
-      truncation_policy: { mode: 'tokens', limit: 10000 },
-      experimental_supported_tools: [],
-      input_modalities: m.modalities?.input.includes('image') ? ['text', 'image'] : ['text'],
-      context_window: m.context_window ?? 128000,
-      supports_parallel_tool_calls: true,
-    })),
-  };
+  return models;
 }
 
 export function buildMagpiePiCatalog(gateway: string, models: readonly MagpieModel[]) {
@@ -115,7 +116,7 @@ export function buildMagpiePiCatalog(gateway: string, models: readonly MagpieMod
           id: m.id,
           name: m.display_name ?? m.id,
           reasoning: m.reasoning ?? false,
-          input: m.modalities?.input.includes('image') ? ['text', 'image'] : ['text'],
+          input: acceptsImageInput(m) ? ['text', 'image'] : ['text'],
           contextWindow: m.context_window ?? 128000,
           maxTokens: m.max_output_tokens ?? 8192,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -148,7 +149,7 @@ export function buildMagpieKimiConfig(gateway: string, models: readonly MagpieMo
         `display_name = ${quoted(m.display_name ?? m.id)}`,
         `max_context_size = ${m.context_window ?? 128000}`,
         `max_output_size = ${m.max_output_tokens ?? 8192}`,
-        `capabilities = ${stringArray(['tool_use', ...(m.modalities?.input.includes('image') ? ['image_in'] : []), ...(m.reasoning || efforts.length ? ['thinking'] : [])])}`,
+        `capabilities = ${stringArray(['tool_use', ...(acceptsImageInput(m) ? ['image_in'] : []), ...(m.reasoning || efforts.length ? ['thinking'] : [])])}`,
         ...(efforts.length
           ? [
               `support_efforts = ${stringArray(efforts)}`,
@@ -169,7 +170,7 @@ export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieMo
     `session_summary = ${quoted(`magpie/${models[0]!.id}`)}`,
     `prompt_suggestion = ${quoted(`magpie/${models[0]!.id}`)}`,
     `web_search = ${quoted(`magpie/${models[0]!.id}`)}`,
-    `image_description = ${quoted(`magpie/${models.find((m) => m.modalities?.input.includes('image'))?.id ?? models[0]!.id}`)}`,
+    `image_description = ${quoted(`magpie/${models.find(acceptsImageInput)?.id ?? models[0]!.id}`)}`,
     '[features]',
     'campaigns = false',
     ...models.flatMap((m) => [
@@ -279,21 +280,18 @@ export async function prepareMagpieRuntime(
       env: { PI_CODING_AGENT_DIR: directory },
     };
   }
-  // Content-addressed catalogs keep concurrent launches on their exact snapshot.
-  const catalog = buildMagpieCodexCatalog(models);
-  const catalogPath = join(
-    directory,
-    `models-${createHash('sha256').update(JSON.stringify(catalog)).digest('hex').slice(0, 24)}.json`
-  );
-  await writeAtomic(catalogPath, catalog);
+  // Codex reads the catalog Magpie serves in Codex's own shape, so capability
+  // metadata is mapped once, on the side that knows the vendor's answer, the
+  // user's per-model override and Codex's field vocabulary. `agent=lody` keeps
+  // the models picked for Lody in Magpie rather than Codex's own picks.
   const config = JSON.stringify({
     model_provider: 'magpie',
     model: first.id,
-    model_catalog_json: catalogPath,
     model_providers: {
       magpie: {
         name: 'Magpie',
         base_url: `${base}/v1`,
+        model_catalog_url: `${base}/v1/codex/models?agent=lody`,
         env_key: 'OPENAI_API_KEY',
         wire_api: 'responses',
         requires_openai_auth: false,

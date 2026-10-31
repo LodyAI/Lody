@@ -3894,6 +3894,46 @@ describe('Production Roost immutable input acceptance', () => {
     });
   });
 
+  it('checks configuration revision only at first owner acceptance, including across restart', async () => {
+    const fixture = await nativeFixture();
+    await fixture.doc.beginAcpRuntimeConfig('', {
+      acpSessionId: 'acp-config' as never,
+      generation: 'connection-1',
+      state: 'ready',
+      modeId: 'default',
+    });
+    await fixture.doc.flushLocalWrites();
+    const input = {
+      ...nativeUser('revision-accepted'),
+      inputConfig: { prompt: 'implement', configRevision: 1 },
+    };
+    const accept = inputPort(fixture).acceptAndDispatch;
+    if (!accept) throw new Error('Expected combined input dispatch');
+    await accept(input);
+    await fixture.doc.applyAcpRuntimeConfigPatch('', {
+      acpSessionId: 'acp-config' as never,
+      generation: 'connection-1',
+      state: 'ready',
+      modeId: 'plan',
+    });
+    await fixture.doc.flushLocalWrites();
+    await expect(accept({ ...input, id: 'stale-first-accept' })).rejects.toThrow(
+      'SESSION_CONFIG_CHANGED'
+    );
+    expect(await fixture.backend.readTurn('stale-first-accept')).toMatchObject({
+      state: 'missing',
+    });
+    expect(
+      (await fixture.doc.getDocState())?.humanInputReceipts?.['stale-first-accept']
+    ).toBeUndefined();
+    await expect(accept(input)).resolves.toMatchObject({ status: 'accepted' });
+    const sessionId = fixture.doc.sessionId;
+    await fixture.close();
+    const reopened = await nativeFixture(sessionId);
+    await expect(inputPort(reopened).accept(input)).resolves.toMatchObject({ status: 'accepted' });
+    expect((await reopened.backend.readHistory()).map((turn) => turn.id)).toEqual([input.id]);
+  });
+
   it('commits human provenance and activation with ordinary acceptance and preserves a newer pointer on retry', async () => {
     const fixture = await nativeFixture();
     const first = nativeUser('combined-first'),

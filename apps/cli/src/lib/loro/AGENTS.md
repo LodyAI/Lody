@@ -57,7 +57,7 @@ Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `create
 
 ## Shared ACP runtime config contains no secrets
 
-`SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the
+`SessionDocument.beginAcpRuntimeConfig` and `applyAcpRuntimeConfigPatch` are the durable boundary for the
 workspace-shared runtime baseline. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like

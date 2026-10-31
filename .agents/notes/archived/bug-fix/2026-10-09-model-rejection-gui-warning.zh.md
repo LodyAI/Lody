@@ -1,6 +1,7 @@
 # 在 GUI 中显示被拒绝的模型选择
 
 Status: implemented
+Archived: 2026-10-31
 Translation: current
 PR: [#1341](https://github.com/LodyAI/Lody/pull/1341)
 
@@ -19,7 +20,7 @@ Codex 和 Claude 拒绝模型选择时，错误原先只进入 debug 日志，�
 effort、Fast 和 Plan 不匹配仍保持隐藏。
 [编排 Spec](../../../../specs/session-orchestration.zh.md#运行时拒绝模型)
 以 draft 记录这一保证的变更。
-[模型能力决定](../architecture/2026-09-29-per-model-acp-capability-row.zh.md)
+[模型能力决定](../../implemented/architecture/2026-09-29-per-model-acp-capability-row.zh.md)
 继续负责 effort 和 Fast 的发现与校验。
 
 `applyAcpSessionRunConfig` 将标量 `modelId` 和模型 config option 的拒绝都写入

@@ -12,6 +12,13 @@ import type { E2eeFeatureInput } from '@lody/shared/e2ee-rpc';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { callEncryptedReadFeature } from '@lody/loro-streams-rpc';
 import { makeEncryptedStreamsChannel } from '@lody/loro-streams-rpc/e2ee-streams';
+import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
+import {
+  E2EE_MACHINE_NOT_SHARED,
+  EncryptedPrepareTimeout,
+} from '../lib/encrypted-dispatch-outcome';
+
+const PREPARE_DEADLINE_MS = 200;
 
 type Call =
   | { kind: 'dispatch'; input: E2eeDispatchInput }
@@ -47,6 +54,28 @@ export function createEncryptedDispatchLegacy(options: {
   let closed = false;
   let device: string | undefined;
   let flight: Fiber.Fiber<Channel, unknown> | undefined;
+  // E2E-only: count a turn dispatch when the stream client appended its frame.
+  const effects = clientLossEffects(options.workspaceId);
+  const dispatches = new Set<string>();
+  // Machines whose withdrawal this runtime saw the host verify. Only a later successful
+  // preparation clears one; timeouts and unverifiable answers keep it known.
+  const withdrawn = new Set<string>();
+  const observeAppends = (client: LoroStreamsJsonStreamClient): LoroStreamsJsonStreamClient => {
+    if (!effects) return client;
+    return new Proxy(client, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property, target);
+        if (property !== 'appendJson' || typeof value !== 'function')
+          return typeof value === 'function' ? value.bind(target) : value;
+        return async (...args: unknown[]) => {
+          const result: unknown = await value.apply(target, args);
+          const id = (args[1] as { id?: unknown } | undefined)?.id;
+          if (typeof id === 'string' && dispatches.delete(id)) effects.turnDispatched();
+          return result;
+        };
+      },
+    });
+  };
   const channel = (prepared: E2eePreparedDispatch) =>
     Effect.gen(function* () {
       if (closed || (device && device !== prepared.requesterDevice))
@@ -55,10 +84,12 @@ export function createEncryptedDispatchLegacy(options: {
         device = prepared.requesterDevice;
         flight = yield* Effect.forkIn(
           Effect.gen(function* () {
-            const client = yield* Effect.tryPromise({
-              try: () => options.client(controller.signal),
-              catch: () => new Error('e2ee_rpc_transport'),
-            });
+            const client = observeAppends(
+              yield* Effect.tryPromise({
+                try: () => options.client(controller.signal),
+                catch: () => new Error('e2ee_rpc_transport'),
+              })
+            );
             return yield* makeEncryptedStreamsChannel<Call, Reply>({
               workspaceId: options.workspaceId,
               requesterDevice: prepared.requesterDevice,
@@ -110,12 +141,38 @@ export function createEncryptedDispatchLegacy(options: {
     prepare: async (machineId: string, input: E2eeDispatchInput) => {
       if (closed) throw new Error('e2ee_rpc_closed');
       const started = Date.now();
-      const original = await Effect.runPromise(
-        Effect.tryPromise({
-          try: () => options.prepare(machineId, input),
-          catch: () => new Error('e2ee_rpc_prepare'),
-        }).pipe(Effect.timeout('200 millis'))
-      );
+      const native = Promise.resolve()
+        .then(() => options.prepare(machineId, input))
+        .then(
+          (prepared) => {
+            withdrawn.delete(machineId);
+            return prepared;
+          },
+          (cause: unknown) => {
+            // Keep the host's verified withdrawal distinct: senders refuse to write that input.
+            if (cause instanceof Error && /(?:^|: )e2ee_machine_not_shared$/.test(cause.message))
+              withdrawn.add(machineId);
+            throw new Error(
+              withdrawn.has(machineId) ? E2EE_MACHINE_NOT_SHARED : 'e2ee_rpc_prepare'
+            );
+          }
+        );
+      native.catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const original = await Promise.race([
+        native,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                withdrawn.has(machineId)
+                  ? new Error(E2EE_MACHINE_NOT_SHARED)
+                  : new EncryptedPrepareTimeout(native)
+              ),
+            PREPARE_DEADLINE_MS
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
       if (closed) throw new Error('e2ee_rpc_closed');
       console.debug('[e2ee-rpc-timing]', {
         stage: 'send',
@@ -125,14 +182,21 @@ export function createEncryptedDispatchLegacy(options: {
       });
       return {
         original,
-        send: () =>
-          Effect.runPromise(
-            Effect.gen(function* () {
-              const client = yield* channel(original);
-              const result = yield* client.send(original, { kind: 'dispatch', input });
-              return result && 'type' in result ? result : null;
-            })
-          ),
+        send: () => {
+          const send = () =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                const client = yield* channel(original);
+                const result = yield* client.send(original, { kind: 'dispatch', input });
+                return result && 'type' in result ? result : null;
+              })
+            );
+          if (!effects) return send();
+          dispatches.add(original.requestId);
+          return effects.track('dispatch', send).finally(() => {
+            dispatches.delete(original.requestId);
+          });
+        },
       };
     },
     requestFeature,

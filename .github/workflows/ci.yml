@@ -218,8 +218,8 @@ jobs:
           node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
             --group "$GROUP" --shard "$SHARD" "${full[@]}"
 
-  # Conversation scrolling in a real browser: the components Playwright specs
-  # for hydration and the conversation scroll engine, against Storybook. Runs
+  # Conversation rendering and header interaction in a real browser: hydration,
+  # scrolling and read-only history actions against Storybook. Runs
   # when the components test group runs. Not part of the required Tests check
   # until it has proven stable on CI; see
   # .agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md.
@@ -311,6 +311,7 @@ jobs:
         run: |
           pnpm --filter @lody/components exec playwright test \
             tests/e2e/session-chat-hydration.spec.ts \
+            tests/e2e/session-history-header.spec.ts \
             tests/e2e/conversation-scroll-engine.spec.ts \
             --workers=1
 

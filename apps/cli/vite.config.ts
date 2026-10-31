@@ -9,6 +9,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const inlineEnv = {
+  __LODY_E2E_DAEMON_LOSS__: JSON.stringify(
+    process.env.LODY_E2E_DAEMON_LOSS_BUILD === '1' &&
+      !process.env.LODY_ENV &&
+      !process.env.LODY_RELEASE_CHANNEL
+  ),
   // The public bundle is local-only. Deployment endpoints must never be baked
   // into it from a developer shell or an untracked environment file.
   'process.env.LODY_PLATFORM': JSON.stringify('local'),

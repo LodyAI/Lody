@@ -42,6 +42,19 @@ import {
 } from '@lody/shared';
 import { z } from 'zod';
 import {
+  remoteAutomationHandshakeSchema,
+  remoteAutomationOperationSchema,
+  remoteAutomationProofSchema,
+  remoteAutomationEncryptedResponseSchema,
+  remoteAutomationSecretEnvelopeSchema,
+  remoteAutomationRpcResultSchema,
+  type RemoteAutomationHandshake,
+  type RemoteAutomationOperation,
+  type RemoteAutomationProof,
+  type RemoteAutomationRpcResult,
+  type RemoteAutomationEncryptedResponse,
+} from '@lody/shared/automations';
+import {
   StreamsClient,
   type HeadStreamOutput,
   type StreamError,
@@ -174,6 +187,7 @@ import {
 import {
   encryptRpcSecret,
   getIosSimulatorViewerSecretContext,
+  getAutomationResponseSecretContext,
   type RpcSecretRecipient,
   getMachineAcpAuthenticationInputSecretContext,
   getMachineAcpAuthorizationCodeSecretContext,
@@ -256,6 +270,8 @@ export const normalizeLoroGatewayBaseUrl = (baseUrl?: string | null): string => 
 export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/status',
   'machine/preview-control',
+  'machine/automation-control',
+  'session/automation-control',
   'ios-simulator/control',
   'android-emulator/control',
   'machine/ping',
@@ -338,6 +354,25 @@ export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.ex
   method: z.literal('machine/preview-control'),
   params: z.object({}).strict(),
 }).strict();
+
+export const LoroMachineAutomationControlRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/automation-control'),
+  params: z.object({}).strict(),
+}).strict();
+
+export const LoroSessionAutomationControlRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/automation-control'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+export const LoroSessionAutomationControlPayloadSchema = z
+  .object({
+    sessionId: z.string().min(1).max(512),
+    requesterUserId: z.string().min(1).max(512),
+    operation: remoteAutomationOperationSchema,
+    proof: remoteAutomationProofSchema,
+    responseKey: RpcSecretPublicKeySchema,
+  })
+  .strict();
 
 export const LoroMachinePingRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/ping'),
@@ -555,6 +590,7 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
  */
 export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
+  method === 'session/automation-control' ||
   method === 'file/preview' ||
   method === 'file/download-chunk' ||
   method === 'session/history-read' ||
@@ -785,6 +821,8 @@ export const LoroLocalProjectControlRpcRequestSchema = BaseRpcRequestSchema.exte
 export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineStatusRpcRequestSchema,
   LoroMachinePreviewControlRpcRequestSchema,
+  LoroMachineAutomationControlRpcRequestSchema,
+  LoroSessionAutomationControlRpcRequestSchema,
   LoroMachinePingRpcRequestSchema,
   LoroMachineRestartRpcRequestSchema,
   LoroMachineUpgradeRpcRequestSchema,
@@ -1637,6 +1675,9 @@ const base64UrlToBytes = (value: string): Uint8Array => {
 };
 
 export type LoroMachineRpcResult =
+  | RemoteAutomationHandshake
+  | RemoteAutomationRpcResult
+  | RemoteAutomationEncryptedResponse
   | MachineStatusResponse
   | MachinePreviewControlResponse
   | MachinePingResponse
@@ -1726,6 +1767,20 @@ const toLegacyRpcErrorResponse = (
   historyContext?: { sessionId: string; operation?: SessionHistoryWriteOperation },
   historyFailure?: SessionHistoryRpcFailure
 ): LoroMachineRpcResult => {
+  if (method === 'machine/automation-control')
+    return {
+      type: 'machine/automation-control_response',
+      machineId,
+      success: false,
+      error: `${error.code}: ${error.message}`,
+    };
+  if (method === 'session/automation-control')
+    return {
+      type: 'session/automation-control_response',
+      sessionId: previewContext?.sessionId ?? '',
+      success: false,
+      error: `${error.code}: ${error.message}`,
+    };
   if (method === 'machine/preview-control') {
     return {
       type: 'machine/preview-control_response',
@@ -2082,6 +2137,10 @@ const parseRpcSuccessResult = async (
     const parsed = MachinePreviewControlResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachinePreviewControlResponse) : null;
   }
+  if (response.method === 'machine/automation-control') {
+    const parsed = remoteAutomationHandshakeSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
   if (response.method === 'machine/ping') {
     const parsed = MachinePingResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachinePingResponse) : null;
@@ -2175,6 +2234,10 @@ const parseRpcSuccessResult = async (
       envelope.data,
       expectedCodeCollabOwnerSessionId
     );
+    if (response.method === 'session/automation-control') {
+      const parsed = remoteAutomationEncryptedResponseSchema.safeParse(decrypted);
+      return parsed.success ? parsed.data : null;
+    }
     if (response.method === 'session/history-read' || response.method === 'session/history-watch') {
       const parsed = SessionHistoryReadResponseSchema.safeParse(decrypted);
       return parsed.success ? (parsed.data as SessionHistoryReadResponse) : null;
@@ -2879,6 +2942,48 @@ export class LoroStreamsMachineRpcClient {
       timeoutMs: options?.timeoutMs ?? 15_000,
       params: {},
     })) as MachinePreviewControlResponse | null;
+  }
+
+  async requestAutomationControlHandshake(options?: {
+    timeoutMs?: number;
+  }): Promise<RemoteAutomationHandshake | null> {
+    return (await this.sendRequest({
+      method: 'machine/automation-control',
+      timeoutMs: options?.timeoutMs ?? 15_000,
+      params: {},
+    })) as RemoteAutomationHandshake | null;
+  }
+
+  async requestSessionAutomationControl(options: {
+    sessionId: string;
+    ownerSessionId: string;
+    requesterUserId: string;
+    operation: RemoteAutomationOperation;
+    proof: RemoteAutomationProof;
+    responseRecipient: RpcSecretRecipient;
+    timeoutMs?: number;
+  }): Promise<RemoteAutomationRpcResult | null> {
+    const { timeoutMs, ownerSessionId, responseRecipient, ...params } = options;
+    const result = await this.sendRequest({
+      method: 'session/automation-control',
+      timeoutMs: timeoutMs ?? 30_000,
+      ownerSessionId,
+      params: { ...params, responseKey: responseRecipient.publicKey },
+    });
+    if (!result || ('type' in result && result.type === 'session/automation-control_response'))
+      return result as RemoteAutomationRpcResult | null;
+    const encrypted = remoteAutomationEncryptedResponseSchema.parse(result);
+    const plaintext = await responseRecipient.decrypt(
+      encrypted.payload,
+      getAutomationResponseSecretContext({
+        workspaceId: this.options.workspaceId,
+        machineId: this.options.machineId,
+        sessionId: params.sessionId,
+        requestId: params.proof.requestId,
+      }),
+      remoteAutomationSecretEnvelopeSchema
+    );
+    return remoteAutomationRpcResultSchema.parse(JSON.parse(plaintext));
   }
 
   async requestMachinePing(options: {
@@ -3725,7 +3830,7 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status' | 'machine/preview-control';
+          method: 'machine/status' | 'machine/preview-control' | 'machine/automation-control';
           timeoutMs: number;
           params: {};
         }
@@ -3983,6 +4088,18 @@ export class LoroStreamsMachineRpcClient {
           params: FilePreviewV3Request;
         }
       | {
+          method: 'session/automation-control';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: {
+            sessionId: string;
+            requesterUserId: string;
+            operation: RemoteAutomationOperation;
+            proof: RemoteAutomationProof;
+            responseKey: import('@lody/shared').RpcSecretPublicKey;
+          };
+        }
+      | {
           method: 'session/preview-create';
           timeoutMs: number;
           params: {
@@ -4075,6 +4192,7 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'file/download-chunk' ||
       args.method === 'session/history-read' ||
       args.method === 'session/history-watch' ||
+      args.method === 'session/automation-control' ||
       args.method === 'session/history-write'
         ? args.ownerSessionId
         : undefined;
@@ -4149,6 +4267,7 @@ export class LoroStreamsMachineRpcClient {
       previewContext:
         args.method === 'session/preview-create' ||
         args.method === 'session/preview-revoke' ||
+        args.method === 'session/automation-control' ||
         args.method === 'session/preview-status' ||
         args.method === 'ios-simulator/control' ||
         args.method === 'android-emulator/control'
@@ -4224,6 +4343,7 @@ export class LoroStreamsMachineRpcClient {
       switch (args.method) {
         case 'machine/status':
         case 'machine/preview-control':
+        case 'machine/automation-control':
           request = { ...envelope, method: args.method, params: {} };
           break;
         case 'machine/ping':
@@ -4376,6 +4496,13 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'android-emulator/control':
           request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/automation-control':
+          request = {
+            ...envelope,
+            method: args.method,
+            params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
+          };
           break;
         case 'ios-simulator/control':
           request = { ...envelope, method: args.method, params: args.params };

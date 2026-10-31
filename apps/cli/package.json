@@ -65,6 +65,7 @@
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@opencode/codemode": "2.2.0",
     "@types/better-sqlite3": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/diff": "^7.0.0",
@@ -79,6 +80,7 @@
     "@yume-chan/adb-scrcpy": "2.3.2",
     "@yume-chan/scrcpy": "2.3.0",
     "@yume-chan/stream-extra": "2.6.1",
+    "acorn": "8.15.0",
     "acp-extension-claude": "workspace:*",
     "acp-extension-codex": "workspace:*",
     "acp-extension-core": "workspace:*",
@@ -123,6 +125,7 @@
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.7.1",
     "ws": "^8.18.3",
+    "yaml": "2.8.2",
     "yauzl": "^3.4.0",
     "zod": "catalog:",
     "zstd-stream": "^1.1.0"

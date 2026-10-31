@@ -53,3 +53,19 @@ export function selectHighOwners(
   });
   return new Set(candidates.slice(0, options.highOwnerCap).map((c) => c.ownerSessionId));
 }
+
+/** Entrusted CI needs observations within its admission freshness window, regardless of UI presence. */
+export function statusRefreshInterval(
+  lane: PrPollLane,
+  workflowDemand: boolean,
+  config: {
+    highIntervalMs: number;
+    lowStatusIntervalMs: number;
+  }
+): number {
+  return workflowDemand
+    ? Math.min(config.highIntervalMs, config.lowStatusIntervalMs)
+    : lane === 'high'
+      ? config.highIntervalMs
+      : config.lowStatusIntervalMs;
+}

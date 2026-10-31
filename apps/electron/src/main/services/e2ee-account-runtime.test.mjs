@@ -1,5 +1,5 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
@@ -27,7 +27,8 @@ import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
 import * as memberJoining from './e2ee-member-join.mts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
-import { desktopE2eeFailure } from './e2ee-diagnostics.mts'
+import { desktopE2eeFailure, rememberDesktopE2eeFailure } from './e2ee-diagnostics.mts'
+import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console, env = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
@@ -52,13 +53,18 @@ async function load(relative, dependencies, console = globalThis.console, env = 
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
-          : id === '../../services/e2ee-member-join.mjs'
-            ? memberJoining
-            : id === '../../services/e2ee-cloud-errors.mjs'
-              ? { E2eeMemberRemovedError }
-              : id === '../../services/e2ee-personal-pairing.mjs'
-                ? { PersonalPairingOfferSchema }
-                : require(id)
+          : id === './e2ee-diagnostics.mjs'
+            ? { rememberDesktopE2eeFailure }
+            : id === '../../services/e2ee-member-join.mjs'
+              ? memberJoining
+              : id === '../../services/e2ee-cloud-errors.mjs'
+                ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
+                : id === '../../services/e2ee-personal-pairing.mjs'
+                  ? { PersonalPairingOfferSchema }
+                  : id === '../../services/e2ee-client-loss-probe'
+                    ? // Production default: the E2E probe is disabled and forwards work.
+                      { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
+                    : require(id)
     }
   )
   return exports
@@ -490,6 +496,24 @@ void test('only unavailable custody exposes the availability fallback code', asy
     corrupt.api.withDesktopE2eeAccount(() => Effect.void),
     /e2ee_corrupt/
   )
+  const native = await account()
+  const original = new Error('synthetic private native failure')
+  for (const [source, operation] of [
+    ['account-operation', () => native.api.withDesktopE2eeAccount(() => Effect.fail(original))],
+    [
+      'runtime-operation',
+      () => native.api.runDesktopE2eeOperation('account', Effect.fail(original))
+    ]
+  ]) {
+    await assert.rejects(operation(), (error) => {
+      assert.equal(error.message, 'e2ee_host_operation_failed')
+      assert.equal(error.cause, undefined)
+      return true
+    })
+    assert.equal(desktopE2eeFailure().source, source)
+    assert.equal(desktopE2eeFailure().cause, original)
+  }
+  await native.api.closeDesktopE2eeAccount()
 })
 
 void test('main cached identity follows resolved sessions, transport failures and definitive sign-out without a new query', async () => {
@@ -783,7 +807,12 @@ async function personalJoinFixture(t) {
   }
   let lockDepth = 0
   const rows = new Map()
-  const relay = { statusFailure: null, loseCancelReceipt: false, memberRemoved: false }
+  const relay = {
+    statusFailure: null,
+    loseCancelReceipt: false,
+    memberRemoved: false,
+    deviceRevoked: false
+  }
   const remote = (work) =>
     Effect.try({
       try: () => {
@@ -799,10 +828,13 @@ async function personalJoinFixture(t) {
   }
   const client = {
     history: () => Effect.fail(new Error('unauthorized history')),
+    // An unclassified rejection (raw error text) must never authorize deletion.
     contentStreamsToken: () =>
       relay.memberRemoved
         ? Effect.fail(new E2eeMemberRemovedError())
-        : Effect.fail(new Error('e2ee_device_revoked')),
+        : relay.deviceRevoked
+          ? Effect.fail(new E2eeDeviceRevokedError())
+          : Effect.fail(new Error('e2ee_device_revoked')),
     memberCreateInvitation: () => Effect.fail(new E2eeMemberRemovedError()),
     memberPending: () => Effect.fail(new E2eeMemberRemovedError()),
     memberRead: () => Effect.fail(new E2eeMemberRemovedError()),
@@ -996,6 +1028,52 @@ async function personalJoinFixture(t) {
   }
   return { open, rows, relay, db, workspaceId, append, admit, client, remote }
 }
+
+void test('a confirmed link invitation closes through the quit barrier and reopens its committed encrypted identity', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('link-owner')
+  await owner.create()
+  const before = await owner.ipc.status(f.workspaceId)
+  let published
+  f.client.memberCreateInvitation = ({ offer }) =>
+    f.remote(() => {
+      published = structuredClone(offer)
+      return { offer }
+    })
+  const invitation = await owner.ipc.createMemberInvitation({
+    workspaceId: f.workspaceId,
+    mode: 'link'
+  })
+  assert.deepEqual(invitation, published)
+  let didQuit = false
+  const barrier = createDesktopQuitBarrier({
+    stop: async () =>
+      assert.deepEqual(
+        await drainMainProcessQuitResources([{ name: 'e2ee', close: owner.close }]),
+        []
+      ),
+    quit: () => {
+      didQuit = true
+    },
+    reportFailure: (error) => {
+      throw error
+    }
+  })
+  await barrier({ preventDefault() {} })
+  assert.equal(didQuit, true)
+  const reopened = await f.open('link-owner')
+  await reopened.attach()
+  const after = await reopened.ipc.status(f.workspaceId)
+  for (const key of [
+    'genesisHash',
+    'headHash',
+    'length',
+    'epoch',
+    'hasCurrentKey',
+    'hasDeviceCredential'
+  ])
+    assert.deepEqual(after[key], before[key], key)
+})
 
 void test('personal join IPC bridges the control-page observation outside the account lock and retains an offline proof', async (t) => {
   const f = await personalJoinFixture(t)
@@ -1933,7 +2011,7 @@ void test('real preload bridge admits only confirmed trusted reset IPC and archi
     electron: {
       ipcRenderer: { on: () => {}, invoke: (channel, input) => ipc[channel.split('.')[1]](input) }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   await ipc.open('workspace')
@@ -1992,6 +2070,45 @@ void test('credential-authenticated member removal drains and deletes through th
     0
   )
   await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
+})
+
+void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('revoked-ipc')
+  await owner.create()
+  const status = await owner.ipc.status(f.workspaceId)
+  f.relay.deviceRevoked = true
+  await assert.rejects(owner.ipc.contentStreamsToken(f.workspaceId), /^Error: e2ee_device_revoked$/)
+  assert.equal(owner.readers.has(f.workspaceId), false)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  await assert.rejects(
+    owner.ipc.seal(f.workspaceId, {
+      epoch: 0,
+      room: { kind: 'meta' },
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch'
+      },
+      plaintext: new Uint8Array([1]),
+      additionalData: new Uint8Array([2])
+    }),
+    /e2ee_not_open|e2ee_device_revoked/
+  )
+  assert.equal(
+    f.db(
+      owner,
+      'creations.sqlite',
+      (db) => db.prepare('SELECT count(*) AS n FROM creations').get().n
+    ),
+    0
+  )
+  await assert.rejects(readFile(join(owner.path, 'workspaces', f.workspaceId, 'history.sqlite')), {
+    code: 'ENOENT'
+  })
+  // A later open, with a freshly constructed owner, reports the persisted reason.
+  await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'device_revoked')
+  assert.ok(status.signingPublicKey)
 })
 
 void test('credential-authenticated joining management uses exact-identity removal cleanup through IPC', async (t) => {
@@ -2198,7 +2315,7 @@ void test('remote commands use workspace custody and never create an account con
         invoke: (channel, ...args) => ipc[channel.split('.')[1]](...args)
       }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   for (const [workspaceId, expected] of [

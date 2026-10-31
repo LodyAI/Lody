@@ -375,6 +375,38 @@ describe('WorkspaceGitService', () => {
     });
   }, 180_000);
 
+  it('lets an encrypted guard reject the Project group snapshot it actually read', async () => {
+    const { meta, workspaceDocument } = fixture();
+    meta.set(owner, { projectRun: projectRun() });
+    const resolved: string[] = [];
+    const seen: SessionProjectRun[] = [];
+    await expect(
+      materializeProjectGroup({
+        sessionId: owner,
+        machineId: 'machine',
+        workspaceDocument,
+        logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+        resolveLocalRoot: async (id) => {
+          resolved.push(id);
+          return null;
+        },
+        brokerAuth: async () => undefined,
+        allowManagedClone: true,
+        setup: async () => {},
+        authorizeRun: async (run) => {
+          seen.push(run);
+          throw new Error('e2ee_machine_not_shared');
+        },
+      })
+    ).rejects.toThrow('e2ee_machine_not_shared');
+    expect(seen.map((run) => Object.keys(run.members))).toEqual([
+      Object.keys(projectRun().members),
+    ]);
+    expect(resolved).toEqual([]);
+    // Nothing was published from the rejected snapshot.
+    expect(meta.get(owner)?.projectRun).toEqual(projectRun());
+  });
+
   it('serializes owner and child member mutations and recovers after a failed mutation', async () => {
     const { service, meta } = fixture();
     meta.set(owner, { projectRun: projectRun() });

@@ -51,6 +51,7 @@ export type UseAcpSessionConfigSelectionStateArgs = {
   preferenceRevision: string;
   preferences: AcpSessionConfigPreferences;
   runtimePreferences?: AcpSessionConfigPreferences | null;
+  inheritDefaults?: boolean;
   preserveUnsentUserEdits?: boolean;
   /** Existing-session intent: only local accepted sends consume captured edits. */
   draftScope?: SessionRunConfigDraftScope;
@@ -85,6 +86,7 @@ export function useAcpSessionConfigSelectionState({
   preferenceRevision,
   preferences,
   runtimePreferences,
+  inheritDefaults = false,
   preserveUnsentUserEdits = false,
   draftScope,
 }: UseAcpSessionConfigSelectionStateArgs): AcpSessionConfigSelectionHandle {
@@ -145,10 +147,11 @@ export function useAcpSessionConfigSelectionState({
   const selection = useMemo<AcpSessionConfigSelectionInputs>(
     () => ({
       edits,
+      inheritDefaults,
       preferences: effectivePreferences,
       runtimePreferences: effectiveRuntimePreferences,
     }),
-    [edits, effectivePreferences, effectiveRuntimePreferences]
+    [edits, inheritDefaults, effectivePreferences, effectiveRuntimePreferences]
   );
   const candidates = useMemo(() => buildAcpSessionConfigCandidates(selection), [selection]);
 

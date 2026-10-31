@@ -1,3 +1,4 @@
+import { providerBindingFingerprint, type ProviderBinding } from './automation-observations';
 import { CommandTimedOut } from '@lody/shared/node/process';
 import { TURN_BUDGETS } from './turn-budgets';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
@@ -217,6 +218,14 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.config.parentSessionId;
   }
 
+  getExecutionScope(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'> {
+    return {
+      project: this.config.project,
+      projectRun: this.config.projectRun,
+      parentSessionId: this.config.parentSessionId,
+    };
+  }
+
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
     await this.sandbox.applyLimits(limits);
   }
@@ -334,6 +343,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // Capture references before any async work, since onExit handlers may null them out
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
+    const configurationGeneration = this.agentClient?.configurationGeneration;
 
     // The sandbox as a whole also reaches terminal commands and groups whose
     // leader already exited. It tracks the per-process trees too, so ending
@@ -387,6 +397,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
+      configurationGeneration,
       exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
@@ -438,6 +449,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitHubCredentials(): SessionCredentials {
     return this.credentials;
+  }
+
+  getProviderBinding(): ProviderBinding | undefined {
+    const config = this.config;
+    if (!config.agentConfigId) return undefined;
+    return {
+      bindingId: config.agentConfigId,
+      fingerprint: providerBindingFingerprint({
+        id: config.agentConfigId,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        env: config.env,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        codexAuth: config.codexAuth,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+      }),
+    };
   }
 
   getMemoryBinding(): SessionConfig['memory'] {
@@ -1034,7 +1063,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                 }
                 if (isAI) {
                   await this.credentials.release();
-                  this.emit('exit', { sessionId: this.sessionId, exitCode });
+                  this.emit('exit', {
+                    sessionId: this.sessionId,
+                    exitCode,
+                    configurationGeneration: this.agentClient?.configurationGeneration,
+                  });
                 }
                 // stderr is decoded but not used in return value (only logged above)
                 void stderr;

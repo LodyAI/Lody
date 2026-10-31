@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as acp from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 import type { ACPSessionId } from '@lody/shared';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,6 +28,28 @@ function session(sessionId: string, title: string): SessionInfo {
 }
 
 describe('history session catalog client', () => {
+  it('uses the Lody npm cache and surfaces startup stderr for an npx history process', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'history-npx-'));
+    const executable = path.join(root, 'npx');
+    try {
+      await writeFile(
+        executable,
+        '#!/bin/sh\nread -r request\nprintf "npm error code ETARGET\\ncache=%s\\n" "$npm_config_cache" >&2\nexit 1\n'
+      );
+      await chmod(executable, 0o755);
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+      await expect(
+        listHistorySessionsForLocalProject({
+          provider: { cliType: 'custom', agentType: 'custom', customAcp: { command: executable } },
+          rootPath: root,
+          logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger,
+        })
+      ).rejects.toThrow(/ETARGET[\s\S]*cache=.*npm-cache/);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('releases its process registration when removal wins before environment preparation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'codex-history-use-'));
     let cleaned = false;

@@ -83,6 +83,8 @@ minimumReleaseAge: 10080
 
 # Keep approved upgrades and grandfathered versions exact; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Allow the approved CodeMode release for the automation interpreter.
+  - '@opencode/codemode@2.2.0'
   # Reviewed security patches for GHSA-xjj6-f33q-929c and GHSA-px85-f4q5-jh77.
   - 'undici@6.29.1 || 7.30.1 || 8.12.2'
   - 'storybook@10.6.2'
@@ -261,6 +263,8 @@ onlyBuiltDependencies:
 overrides:
   # Tango Consumable needs one class identity across ADB and scrcpy streams.
   '@yume-chan/stream-extra': 2.6.1
+  # CodeMode tools and Lody must share the same Effect runtime and schema identity.
+  '@opencode/codemode>effect': 4.0.2
   # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
   'undici@>=6.23.0 <6.29.1': 6.29.1
   'undici@>=7.18.0 <7.30.1': 7.30.1

@@ -91,6 +91,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'invalid-input'
     | 'corrupt'
     | 'snapshot-history-required'
+    | 'key-update-required'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
@@ -105,6 +106,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
 }> {}
@@ -162,8 +164,10 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
+      if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
           ? 'local-evidence-conflict'
@@ -267,8 +271,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         if (observed) yield* openedEntry.observe(observed, proof)
         return openedEntry
       }
-      if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
-        return yield* fail('member_removed')
+      const removed = yield* options.bootstrap.removedReason(workspaceId)
+      if (removed) return yield* fail(removed)
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
       const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
@@ -1044,25 +1048,24 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
         >()
-        const binding = Effect.fnUntraced(function* (
-          room: E2eeContentSeal['room'],
-          writeEpoch: number
-        ) {
+        const binding = Effect.fnUntraced(function* (room: E2eeContentSeal['room']) {
           const descriptor = yield* Effect.try({
             try: () => encryptedWorkspaceRoom(workspaceId, room),
             catch: () => fail('invalid-input')
           })
-          let value = bindings.get(`${descriptor.resource}:${writeEpoch}`)
+          let value = bindings.get(descriptor.resource)
           if (!value) {
             value = yield* makeStreamsUpdateBinding({
               ...descriptor,
               genesis,
-              writeEpoch,
+              // Renderer epochs are stale hints, never encryption authority.
+              // Core captures the verified current epoch when each seal starts.
+              writeEpoch: 'current',
               signer: device,
               ledger: () => verified.current(),
               readEpochKey: (epoch) => history.read(epoch)
-            }).pipe(Scope.provide(scope))
-            bindings.set(`${descriptor.resource}:${writeEpoch}`, value)
+            }).pipe(Effect.provideService(VerifiedLedger, verified), Scope.provide(scope))
+            bindings.set(descriptor.resource, value)
           }
           return value
         })
@@ -1078,7 +1081,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const provider = yield* binding(input.room, input.epoch)
+          // A future hint must fail for catch-up, never silently downgrade.
+          const view = yield* verified.current()
+          if (input.epoch > view.inspectState().epoch.number) return yield* fail('invalid-ledger')
+          const provider = yield* binding(input.room)
           return yield* provider.seal({ ...input, additionalData: () => input.additionalData })
         })
         const openContent = Effect.fnUntraced(function* (input: E2eeContentOpen) {
@@ -1089,8 +1095,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const view = yield* verified.current()
-          const provider = yield* binding(input.room, view.inspectState().epoch.number)
+          const provider = yield* binding(input.room)
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined
@@ -1774,12 +1779,26 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               ? (machineId) =>
                   Effect.gen(function* () {
                     const status = yield* entry.status()
-                    return (yield* entry.sharing.authorize(
+                    // A retained verified withdrawal answers locally; only a newer
+                    // verified read (machine-sharing views) can release it.
+                    if (
+                      yield* entry.sharing.knownDenial(
+                        machineId,
+                        status.signingPublicKey ?? '',
+                        undefined
+                      )
+                    )
+                      return false
+                    const decision = yield* entry.sharing.authorize(
                       machineId,
                       status.signingPublicKey ?? '',
                       undefined,
                       withSharingHistory(entry, workspaceId, remote, readHistory)
-                    )).allowed
+                    )
+                    // An unverifiable policy is not a known withdrawal.
+                    if (!decision.allowed && decision.reason === 'policy-unavailable')
+                      return yield* Effect.fail(new Error('e2ee_machine_sharing_unavailable'))
+                    return decision.allowed
                   })
               : undefined
           )

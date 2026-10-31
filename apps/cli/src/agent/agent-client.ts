@@ -1,3 +1,4 @@
+import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
 import type {
   LodyClientExtensionCapabilities,
   LodyWorktreeProject,
@@ -10,6 +11,13 @@ import { performance } from 'perf_hooks';
 import { Logger } from '@/utils/logger';
 import * as acp from '@agentclientprotocol/sdk';
 import { z } from 'zod';
+import { Effect } from 'effect';
+import {
+  AcpConfiguration,
+  AcpConfigurationError,
+  configurationRequestError,
+} from './acp-configuration';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import {
   LODY_EXTENSION_METHODS,
   LODY_TOOL_NAMES,
@@ -18,7 +26,6 @@ import {
   type LodyGoalCapability,
   type LodySessionActivityUpdate,
   type LodySubagentSnapshot,
-  type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
@@ -56,7 +63,6 @@ import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
 import { buildLodyMcpHttpHeaders } from '@/mcp/lody-mcp-http-protocol';
 import { TerminalManager, TerminalSpawnError } from '@/session/terminal-manager';
-import { reportError } from 'src/utils/telemetry';
 import { formatErrorMessage } from '@/utils/format-error';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
 import { startTraceSpan } from '@/utils/trace-span';
@@ -104,21 +110,6 @@ import {
   type GoalPromptControl,
 } from './goal-control';
 
-/**
- * Checks if an error is a transport-related error that may be transient.
- * These errors typically indicate the underlying process communication layer
- * is temporarily unavailable (e.g., "ProcessTransport is not ready for writing").
- */
-function isTransportError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message?.toLowerCase() ?? '';
-  return (
-    msg.includes('not ready for writing') ||
-    msg.includes('transport') ||
-    (msg.includes('process') && msg.includes('not ready'))
-  );
-}
-
 function isNodeErrorCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' &&
@@ -137,53 +128,6 @@ function summarizeAcpConfigOptions(options: acp.SessionConfigOption[]): string {
     .slice(0, 12)
     .map((option) => `${option.id}:${option.category ?? 'uncategorized'}`)
     .join(',');
-}
-
-/**
- * Wraps an async operation with retry logic for transient transport errors.
- * If the operation fails with a transport error, it will retry up to `maxRetries` times
- * with exponential backoff. On final transport error, logs a warning but does not throw
- * (graceful degradation). Non-transport errors are always rethrown to preserve failure semantics.
- */
-async function withTransportRetry<T>(
-  operation: () => Promise<T>,
-  logger: Logger,
-  operationName: string,
-  sessionId: string,
-  maxRetries: number = 2
-): Promise<T | undefined> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (err) {
-      const isTransport = isTransportError(err);
-
-      if (isTransport && attempt < maxRetries) {
-        const delayMs = 100 * (attempt + 1);
-        logger.debug(
-          `[${sessionId}] ${operationName} failed with transport error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delayMs}ms...`
-        );
-        await new Promise((r) => setTimeout(r, delayMs));
-        continue;
-      }
-
-      // Non-transport errors should be rethrown to preserve failure semantics
-      if (!isTransport) {
-        throw err;
-      }
-
-      // Final transport failure - log warning but don't throw (graceful degradation)
-      logger.debug(
-        `[${sessionId}] ${operationName} failed after ${attempt + 1} attempt(s) with transport error: ${formatErrorMessage(err)}`
-      );
-      void reportError(
-        `agent-client:${operationName}`,
-        err instanceof Error ? err : new Error(String(err))
-      );
-      return undefined;
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -236,15 +180,6 @@ function isAcpInvalidRequestError(error: unknown): boolean {
     error !== null &&
     'code' in error &&
     (error as { readonly code?: unknown }).code === -32600
-  );
-}
-
-function isAcpMethodNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { readonly code?: unknown }).code === -32601
   );
 }
 
@@ -592,14 +527,14 @@ export interface AgentClientOptions {
    */
   terminalEnabled?: boolean;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
-  onUpdateMessage(message: AcpSessionNotification): void;
+  onUpdateMessage(message: AcpSessionNotification, generation?: string): void;
   onRequestPermission(
     requestId: string,
     request: acp.RequestPermissionRequest
   ): Promise<acp.RequestPermissionResponse>;
   onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
-  onRateLimitUpdate?(limits: RateLimit): void;
+  onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
@@ -627,6 +562,9 @@ export type AcpWriteTextFileEvidence = {
 
 export class AgentClient implements acp.Client {
   private connection: acp.ClientSideConnection | null = null;
+  private configGeneration = randomUUID();
+  private currentModeId: string | undefined;
+  private hasLegacyModes = false;
   private lastSessionUpdateAtMs = Date.now();
   logger: Logger;
   private readonly terminalManager: TerminalManager;
@@ -663,6 +601,11 @@ export class AgentClient implements acp.Client {
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
   private legacySessionModelState: LegacySessionModelState | null = null;
   public currentModel?: ModelInfo;
+  private latestCapacityObservation: RateLimitsSnapshot | undefined;
+  private latestContextObservation: SessionContextWindowUsage | undefined;
+  getAutomationObservations() {
+    return { capacity: this.latestCapacityObservation, context: this.latestContextObservation };
+  }
   /**
    * Tool-call IDs identified by the canonical Lody tool name. We need this so the
    * follow-up `tool_call_update` notifications — which never repeat the title —
@@ -921,10 +864,12 @@ export class AgentClient implements acp.Client {
     return buildAskUserQuestionElicitationResponse(elicitation, response);
   }
   async sessionUpdate(params: acp.SessionNotification) {
+    const generation = this.configGeneration;
     const applicationBarrier = this.steerApplicationBarrier;
     if (applicationBarrier) {
       await applicationBarrier;
     }
+    if (generation !== this.configGeneration) return;
     if (
       this.acpSessionId !== null &&
       (params.sessionId as unknown as string) !== this.acpSessionId
@@ -981,6 +926,12 @@ export class AgentClient implements acp.Client {
       );
     }
 
+    if (notification.update.sessionUpdate === 'current_mode_update') {
+      this.currentModeId = notification.update.currentModeId;
+      const modeOption = this.findConfigOptionByCategory('mode');
+      if (modeOption)
+        this.retainLegacyConfigOptionValue(modeOption.id, notification.update.currentModeId);
+    }
     if (notification.update.sessionUpdate === 'config_option_update') {
       this.applyConfigOptionsState(notification.update.configOptions, true);
     }
@@ -1004,7 +955,7 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    this.options.onUpdateMessage(notification);
+    this.options.onUpdateMessage(notification, generation);
     return;
   }
 
@@ -1258,6 +1209,7 @@ export class AgentClient implements acp.Client {
       size >= 0 &&
       used >= 0
     ) {
+      this.latestContextObservation = { size, used };
       this.options.onContextWindowUsageUpdate?.({ size, used });
     }
     return true;
@@ -1636,9 +1588,8 @@ export class AgentClient implements acp.Client {
         }
         return;
       case 'rateLimits':
-        for (const rateLimit of event.snapshot.rateLimits) {
-          this.options.onRateLimitUpdate?.(rateLimit);
-        }
+        this.latestCapacityObservation = event.snapshot;
+        if (event.snapshot.rateLimits.length) this.options.onRateLimitUpdate?.(event.snapshot);
         return;
       case 'legacyProposedPlan':
         this.options.onUpdateMessage(
@@ -1850,12 +1801,17 @@ export class AgentClient implements acp.Client {
   }
 
   private applySessionResponseState(sessionResponse: acp.NewSessionResponse): void {
+    this.configGeneration = randomUUID();
+    this.currentModeId = sessionResponse.modes?.currentModeId;
+    this.hasLegacyModes = sessionResponse.modes !== undefined;
     this.availableCommands =
       readSessionAvailableCommands(sessionResponse) ?? this.availableCommands;
     // Drop config options the current version intentionally skips (e.g. the
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
     this.currentModel = undefined;
+    this.latestCapacityObservation = undefined;
+    this.latestContextObservation = undefined;
     this.applyConfigOptionsState(
       sessionResponse.configOptions ?? [],
       sessionResponse.configOptions !== undefined
@@ -1926,7 +1882,19 @@ export class AgentClient implements acp.Client {
     this.availableCommands = undefined;
     this.markSubagentsDisconnected();
     this.subagentSnapshots.clear();
-    const connection = new acp.ClientSideConnection(() => this, stream);
+    const connection = new acp.ClientSideConnection(
+      () =>
+        new Proxy(this, {
+          get: (client, key) => {
+            if (key === 'sessionUpdate')
+              return (params: acp.SessionNotification) =>
+                this.connection === connection ? client.sessionUpdate(params) : Promise.resolve();
+            const value = Reflect.get(client, key);
+            return typeof value === 'function' ? value.bind(client) : value;
+          },
+        }),
+      stream
+    );
     this.connection = connection;
     connection.signal.addEventListener(
       'abort',
@@ -2684,6 +2652,16 @@ export class AgentClient implements acp.Client {
     return activity.backgroundTaskCount > 0 ? 'background' : null;
   }
 
+  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {
+    if (
+      !this.reportsSessionActivity() ||
+      !this.nativeActivity ||
+      this.nativeActivity.sessionId !== this.acpSessionId
+    )
+      return 'unknown';
+    return this.getNativeWork() ?? 'idle';
+  }
+
   /** Raw prompts and steer submissions remain owned after their local waits end. */
   get pendingPromptCompletion(): Promise<void> | null {
     return this.pendingPrompts.size > 0
@@ -2692,6 +2670,7 @@ export class AgentClient implements acp.Client {
   }
 
   private trackPendingExecution(request: Promise<unknown>): void {
+    if (this.options.workspaceId) daemonLossObserver.trackRaw(this.options.workspaceId, request);
     this.pendingPrompts.add(request);
     const release = () => {
       this.pendingPrompts.delete(request);
@@ -2865,27 +2844,24 @@ export class AgentClient implements acp.Client {
         ? { sessionId, configId, type: 'boolean' as const, value }
         : { sessionId, configId, value };
     this.logger.debug(
-      `[${this.options.sessionId}] setSessionConfigOption called (configId=${configId} value=${value})`
+      `[${this.options.sessionId}] setSessionConfigOption called (configId=${configId})`
     );
     this.ensureSessionMatch(sessionId);
 
-    const result = await withTransportRetry(
-      async () => {
-        const promise = this.connection?.setSessionConfigOption(request);
-        if (promise) {
-          return await withSlowOperationWarning(
-            promise,
-            this.logger,
-            'connection.setSessionConfigOption',
-            this.options.sessionId
-          );
-        }
-        return undefined;
-      },
+    const connection = this.connection;
+    if (!connection?.setSessionConfigOption)
+      throw new AcpConfigurationError(configId, 'unsupported');
+    const generation = this.configGeneration;
+    const pending = connection.setSessionConfigOption(request);
+    this.trackPendingExecution(pending);
+    const result = await withSlowOperationWarning(
+      pending,
       this.logger,
-      'setSessionConfigOption',
+      'connection.setSessionConfigOption',
       this.options.sessionId
     );
+    if (generation !== this.configGeneration) throw new AcpConfigurationError(configId, 'unknown');
+    if (!result) throw new AcpConfigurationError(configId, 'unconfirmed');
 
     if (result?.configOptions !== undefined) {
       // The agent returns the full option list, which re-includes any filtered
@@ -2899,9 +2875,7 @@ export class AgentClient implements acp.Client {
       this.retainLegacyConfigOptionValue(configId, value);
     }
 
-    this.logger.debug(
-      `[${this.options.sessionId}] ACP session config option set: ${configId}=${value}`
-    );
+    this.logger.debug(`[${this.options.sessionId}] ACP session config option set: ${configId}`);
     return result?.configOptions;
   }
 
@@ -3012,124 +2986,110 @@ export class AgentClient implements acp.Client {
     return this.options.agentConfig?.agentType === 'codex';
   }
 
-  async setSessionMode(sessionId: ACPSessionId, modeId: string) {
-    this.logger.debug(`[${this.options.sessionId}] setSessionMode called (modeId=${modeId})`);
+  async setSessionMode(sessionId: ACPSessionId, modeId: string): Promise<void> {
     this.ensureSessionMatch(sessionId);
-
-    // `session/set_mode` is reserved for permission/sandbox mode. For agents
-    // that expose permission mode as a config option, route through
-    // setSessionConfigOption; Codex still exposes the protocol set_mode request directly.
-    const modeConfigOption = !this.shouldUseProtocolSetModeRouting()
+    const option = !this.shouldUseProtocolSetModeRouting()
       ? this.findConfigOptionByCategory('mode')
       : undefined;
-    if (modeConfigOption) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Using setSessionConfigOption for mode (configId=${modeConfigOption.id} value=${modeId})`
-      );
-      try {
-        await this.setSessionConfigOption(sessionId, modeConfigOption.id, modeId);
-        this.logger.debug(
-          `[${this.options.sessionId}] ACP session mode set via configOption: ${modeId}`
-        );
-        return;
-      } catch (err) {
-        this.logger.debug(
-          `[${this.options.sessionId}] setSessionConfigOption failed for mode, falling back to legacy setSessionMode: ${err}`
-        );
-        // Fall through to legacy setSessionMode path below
-      }
+    if (option) {
+      await this.setSessionConfigOption(sessionId, option.id, modeId);
+      return;
     }
-
-    this.logger.debug(
-      `[${this.options.sessionId}] Calling connection.setSessionMode (modeId=${modeId})`
-    );
-    await withTransportRetry(
-      async () => {
-        const setModePromise = this.connection?.setSessionMode({ sessionId, modeId });
-        if (setModePromise) {
-          await withSlowOperationWarning(
-            setModePromise,
-            this.logger,
-            'connection.setSessionMode',
-            this.options.sessionId
-          );
-        }
-      },
+    const connection = this.connection;
+    if (!this.hasLegacyModes || !connection?.setSessionMode) {
+      throw new AcpConfigurationError('mode', 'unsupported');
+    }
+    const generation = this.configGeneration;
+    const pending = connection.setSessionMode({ sessionId, modeId });
+    this.trackPendingExecution(pending);
+    await withSlowOperationWarning(
+      pending,
       this.logger,
-      'setSessionMode',
+      'connection.setSessionMode',
       this.options.sessionId
     );
-    this.logger.debug(`[${this.options.sessionId}] ACP session mode set: ${modeId}`);
+    if (generation !== this.configGeneration) throw new AcpConfigurationError('mode', 'unknown');
+    this.currentModeId = modeId;
+    const modeOption = this.findConfigOptionByCategory('mode');
+    if (modeOption) this.retainLegacyConfigOptionValue(modeOption.id, modeId);
   }
 
-  async unstable_setSessionModel(sessionId: ACPSessionId, modelId: string) {
-    this.logger.debug(
-      `[${this.options.sessionId}] unstable_setSessionModel called (modelId=${modelId})`
-    );
+  async unstable_setSessionModel(sessionId: ACPSessionId, modelId: string): Promise<void> {
     this.ensureSessionMatch(sessionId);
-
-    // Prefer the current configOptions API. A session that explicitly reports
-    // the legacy top-level `models` state may instead support `session/set_model`.
-    const modelConfigOption = this.findConfigOptionByCategory('model');
-    if (modelConfigOption) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Using setSessionConfigOption for model (configId=${modelConfigOption.id} value=${modelId})`
-      );
-      try {
-        const updatedConfigOptions = await this.setSessionConfigOption(
-          sessionId,
-          modelConfigOption.id,
-          modelId
-        );
-        if (!updatedConfigOptions) return;
-        this.currentModel = this.resolveModelInfo(modelId);
-        this.logger.debug(
-          `[${this.options.sessionId}] ACP session model set via configOption: ${modelId}`
-        );
-        return;
-      } catch (error) {
-        if (!this.legacySessionModelState || !isAcpMethodNotFoundError(error)) {
-          throw error;
-        }
-        this.logger.debug(
-          `[${this.options.sessionId}] setSessionConfigOption is unavailable; falling back to legacy session/set_model`
-        );
-      }
+    const option = this.findConfigOptionByCategory('model');
+    if (option) {
+      await this.setSessionConfigOption(sessionId, option.id, modelId);
+      return;
     }
-
-    if (!this.legacySessionModelState) {
-      throw new Error(
-        `[ACP_MODEL_SWITCH_UNSUPPORTED] Agent reported neither a model config option nor legacy session models`
-      );
-    }
-
     const connection = this.connection;
-    if (!connection) {
-      throw new Error('[ACP_MODEL_SWITCH_UNSUPPORTED] ACP connection is not available');
+    if (!this.legacySessionModelState || !connection) {
+      throw new AcpConfigurationError('model', 'unsupported');
     }
-    const switched = await withTransportRetry(
-      async () => {
-        const requestPromise = connection.request<unknown, { sessionId: string; modelId: string }>(
-          'session/set_model',
-          { sessionId, modelId }
-        );
-        await withSlowOperationWarning(
-          requestPromise,
-          this.logger,
-          'connection.request(session/set_model)',
-          this.options.sessionId
-        );
-        return true;
-      },
+    const generation = this.configGeneration;
+    const pending = connection.request<unknown, { sessionId: string; modelId: string }>(
+      'session/set_model',
+      { sessionId, modelId }
+    );
+    this.trackPendingExecution(pending);
+    await withSlowOperationWarning(
+      pending,
       this.logger,
-      'setSessionModel',
+      'connection.setSessionModel',
       this.options.sessionId
     );
-    if (!switched) return;
+    if (generation !== this.configGeneration) throw new AcpConfigurationError('model', 'unknown');
     this.currentModel = this.resolveModelInfo(modelId);
-    this.logger.debug(
-      `[${this.options.sessionId}] ACP session model set via legacy session/set_model: ${modelId}`
+  }
+
+  get configurationGeneration(): string {
+    return this.configGeneration;
+  }
+
+  getRuntimeConfiguration(): import('@lody/shared').SessionAcpRuntimeConfigPatch {
+    if (!this.acpSessionId) throw new AcpConfigurationError('session', 'unsupported');
+    const snapshot = getAcpRuntimeConfigPatchFromOptions(
+      this.acpSessionId as ACPSessionId,
+      this.configOptions
     );
+    return {
+      ...snapshot,
+      generation: this.configGeneration,
+      state: 'ready',
+      modeId: snapshot.modeId ?? this.currentModeId,
+      modelId: snapshot.modelId ?? this.currentModel?.modelId,
+      ...(this.availableCommands !== undefined
+        ? { availableCommands: this.availableCommands }
+        : {}),
+    };
+  }
+
+  getConfiguration(): AcpConfiguration['Service'] {
+    const sessionId = this.acpSessionId as ACPSessionId;
+    const generation = this.configGeneration;
+    const request = (field: string, run: () => Promise<unknown>) =>
+      Effect.tryPromise({
+        try: () => {
+          if (!sessionId || generation !== this.configGeneration)
+            throw new AcpConfigurationError(field, 'unknown');
+          return run();
+        },
+        catch: (cause) => configurationRequestError(field, cause),
+      }).pipe(Effect.asVoid);
+    return AcpConfiguration.of({
+      options: this.configOptions,
+      read: Effect.try({
+        try: () => {
+          if (generation !== this.configGeneration)
+            throw new AcpConfigurationError('session', 'unknown');
+          return this.getRuntimeConfiguration();
+        },
+        catch: (cause) => configurationRequestError('session', cause),
+      }),
+      setMode: (value) => request('mode', () => this.setSessionMode(sessionId, value)),
+      setModel: (value) => request('model', () => this.unstable_setSessionModel(sessionId, value)),
+      setOption: (id, value) =>
+        request(id, () => this.setSessionConfigOption(sessionId, id, value)),
+    });
   }
 
   private ensureSessionMatch(sessionId: ACPSessionId) {

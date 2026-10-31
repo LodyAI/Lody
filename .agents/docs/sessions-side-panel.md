@@ -8,7 +8,11 @@ pointer to this page live in
 this page is the full text of the rules summarised there.
 
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
-  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
+  mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). The desktop split's resize
+  handle paints nothing at rest: hover shows one centred ink block, keyboard focus a darker and
+  taller one, drag the darkest, and the block is a `ResizableHandle` child so it never shifts
+  panel geometry ([decision](../notes/implemented/feature/2026-10-31-session-sidebar-resize-handle.md)).
+  All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
   viewers never split the conversation surface: opt-in Files, All Changes, Browser, conditional PR,
   and file/conversation-diff/turn-diff tabs all live in the right panel under

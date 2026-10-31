@@ -1,3 +1,5 @@
+import { ClientCustodyError } from '@lody/e2ee-core/services';
+import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 // @vitest-environment jsdom
 
@@ -58,6 +60,23 @@ describe('encrypted workspace control page recovery', () => {
     expect(button('e2ee.control.repairLocal')).toBeUndefined();
     expect(button('e2ee.control.resetProgress')).toBeUndefined();
   });
+  it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+    'shows explicit %s custody guidance without destructive recovery',
+    (reason) => {
+      const props = render({
+        failure: classifyE2eeControlFailure(new ClientCustodyError({ reason })),
+      });
+      expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+        `e2ee.custody.${reason}.title`
+      );
+      expect(container!.textContent).toContain(`e2ee.custody.${reason}.help`);
+      expect(container!.textContent).not.toContain('e2ee.control.status.unreachable');
+      expect(button('e2ee.control.repairLocal')).toBeUndefined();
+      expect(button('e2ee.control.resetProgress')).toBeUndefined();
+      expect(props.onRepairLocal).not.toHaveBeenCalled();
+      expect(props.onResetProgress).not.toHaveBeenCalled();
+    }
+  );
   it('always marks the workspace as an encrypted developer preview', () => {
     render({});
     expect(container!.textContent).toContain('e2ee.control.badge');

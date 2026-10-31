@@ -17,11 +17,14 @@ export function RouteMessage({
   title,
   description = '',
   onRetry,
+  actionLabel,
 }: {
   gate: string | null;
   title: string;
   description?: string;
   onRetry?: () => void;
+  /** Replaces the Retry label for a terminal message's single explicit action. */
+  actionLabel?: string;
 }) {
   const { t } = useTranslation();
   const observationRef = useRef(useWorkspaceDataScopeState());
@@ -43,7 +46,7 @@ export function RouteMessage({
         {gate === null ? (
           onRetry ? (
             <Button variant="secondary" onClick={onRetry}>
-              {t('common.retry')}
+              {actionLabel ?? t('common.retry')}
             </Button>
           ) : null
         ) : (

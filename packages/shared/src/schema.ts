@@ -589,6 +589,7 @@ const acpSessionConfigSchema = schema
       resume: schema.String({ required: false }),
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
+      configRevision: schema.Number({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
       memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
@@ -597,6 +598,7 @@ const acpSessionConfigSchema = schema
       agentRoleRevision: schema.Number({ required: false }),
       agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
     },
     { required: false }
   )
@@ -702,6 +704,12 @@ export const sessionHistorySchema = schema.LoroMap({
       definitionFingerprint: schema.String({ required: false }),
       manualRunKey: schema.String({ required: false }),
     },
+    { required: false }
+  ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
     { required: false }
   ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
@@ -1281,9 +1289,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project'
+  'project' | 'acpSessionConfig'
 > & {
   project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };
 
 const sessionForkOperationDocSchema = schema.LoroMap(
@@ -1313,15 +1323,17 @@ const sessionForkOperationDocSchema = schema.LoroMap(
 );
 
 /**
- * ACP-reported runtime configuration after a Turn has started. This is shared
- * control state, not transcript content: `basedOnUserTurnId` supplies the
- * causal fence that prevents a late update from changing a newer Turn's
- * composer baseline.
+ * Execution-owned configuration. The connection generation fences observations;
+ * basedOnUserTurnId records provenance only and does not depend on history loading.
  */
 export type SessionAcpRuntimeConfigSnapshot = {
   acpSessionId: ACPSessionId;
   basedOnUserTurnId: string;
   revision: number;
+  /** Absent on pre-ownership snapshots, which are last-known data only. */
+  generation?: string;
+  state?: 'ready' | 'applying' | 'failed' | 'unknown';
+  error?: { code: string; message: string };
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
@@ -1339,6 +1351,9 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     acpSessionId: schema.String<ACPSessionId>(),
     basedOnUserTurnId: schema.String(),
     revision: schema.Number(),
+    generation: schema.String({ required: false }),
+    state: schema.String<'ready' | 'applying' | 'failed' | 'unknown'>({ required: false }),
+    error: schema.LoroMap({ code: schema.String(), message: schema.String() }, { required: false }),
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),

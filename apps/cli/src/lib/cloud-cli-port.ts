@@ -305,7 +305,16 @@ export function createCloudE2eePort(
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
     readEpochGroup: (input) =>
       client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
-        ...input,
+        workspaceId: input.workspaceId,
+        credential: input.credential,
+        // Native discovery also retains the publication signer. The wire key
+        // has exactly four fields; the receiver authenticates the originals.
+        key: {
+          genesis: input.key.genesis,
+          epoch: input.key.epoch,
+          commitment: input.key.commitment,
+          recordHash: input.key.recordHash,
+        },
         ...(options.token === undefined ? {} : { cliToken: options.token }),
       }),
     mailboxCall: async (method, input) => {
@@ -539,6 +548,24 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       logger: options.logger,
     }),
     attachmentUpload: { serverBaseUrl },
+    remoteAutomation: {
+      verifyControl: async (input) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL('/api/session-automation/verify', authSiteUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!response.ok) throw new Error(`Automation authorization failed (${response.status}).`);
+        return PreviewControlVerificationSchema.parse(await response.json());
+      },
+    },
     remotePreview: {
       simulatorIceServers: async (input) => {
         const response = await getCliHttpFetch({ logger: options.logger })(

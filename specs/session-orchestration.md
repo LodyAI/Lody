@@ -106,13 +106,11 @@ stored inherited-default markers remain readable; no storage migration is requir
 
 ## Runtime model rejection
 
-After acceptance, an agent rejection of the requested model must produce a
-GUI-visible `agent_warning` identifying that model, including for Codex and Claude.
-This applies to creation and subsequent turns, including resume, whether the model
-is supplied as `modelId` or through its advertised config option. Runtime state
-continues to reflect the agent's confirmed model. Reporting uses the existing
-asynchronous warning path; it does not stop the turn or guarantee display before
-the prompt starts.
+Required model selection follows [session configuration ownership](session-config-ownership.md).
+A refusal, contradiction or unknown outcome fails the input before prompt submission
+for every provider, including model config options and resume. Confirmed partial
+configuration remains visible; errors identify the field without exposing raw provider
+payloads. Reporting never substitutes another model and continues the rejected input.
 
 ## Frozen turn input
 

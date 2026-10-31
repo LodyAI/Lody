@@ -89,11 +89,7 @@ UserTurn 写入前，根据可用能力重新推导默认值。物化中断后�
 
 ## 运行时拒绝模型
 
-请求被接受后，如果 agent 拒绝所请求的模型，必须产生 GUI 可见的
-`agent_warning`，标明被拒绝的模型；Codex 和 Claude 同样适用。创建会话及后续
-Turn（包括 resume）均遵守这一规则，无论模型通过 `modelId` 还是 agent 公布的
-config option 传入。运行时状态仍反映 agent 确认的实际模型。报告复用现有异步
-警告路径，不中止 Turn，也不保证在 prompt 开始前完成显示。
+必要模型选择遵循[会话配置所有权](session-config-ownership.zh.md)。所有 provider 的拒绝、矛盾确认或未知结果都会在 prompt 提交前使输入失败，模型配置选项及恢复执行同样适用。已确认的部分配置保持可见；错误标识字段，不暴露 provider 原始载荷。不得替换模型并继续被拒绝的输入。
 
 ## 冻结 turn 输入
 

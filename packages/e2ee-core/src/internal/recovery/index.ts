@@ -17,10 +17,12 @@ export {
   type RecoveryPrivatePackage,
   type RecoveryEntryReference,
 } from './vault';
+export { deriveRecoveryAccessCredential, type RecoveryAccessCredential } from './credential';
 export { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 export {
   makeWorkspaceRecovery,
   type WorkspaceRecoveryInput,
+  type RecoveryCredentialRegistration,
   type RecoverySubmitResult,
   type RecoveryEnvelope,
 } from './workspace';

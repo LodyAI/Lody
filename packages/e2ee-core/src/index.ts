@@ -85,6 +85,7 @@ export {
   type RecoveryEntryReference,
   type RecoveryPrivatePackage,
   type WorkspaceRecoveryInput,
+  type RecoveryCredentialRegistration,
   type RecoverySubmitResult,
   type RecoveryEnvelope,
 } from './internal/recovery';

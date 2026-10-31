@@ -187,6 +187,12 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
   /** Local document access is independent of permission to transmit content. */
   waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
@@ -634,6 +640,8 @@ export type WorkspaceRuntimeInitFailure = {
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
   modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
+  /** Present for encrypted access loss, so the gate can route to re-pairing. */
+  workspaceId?: string;
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);
