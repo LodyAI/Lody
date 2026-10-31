@@ -161,6 +161,9 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
         return fail(
           error.message === 'e2ee_machine_not_owned' ? 'machine_not_owned' : 'machine_not_shared'
         )
+      // An unverifiable sharing policy is not a ledger failure.
+      if (error instanceof Error && error.message === 'e2ee_machine_sharing_unavailable')
+        return fail('sharing_unavailable')
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason

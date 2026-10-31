@@ -183,6 +183,14 @@ fresh grant survives an unobserved withdrawal, and the host's own verified read 
 at once. A send that a sender knew was withdrawn is refused before any write; a sender
 that cannot verify still relies on that window.
 
+A re-paired machine starts a new generation with no policy. An authenticated read that
+finds no head for the current generation, or its removal, is therefore the private
+default: a known denial (`machine-not-shared`), not an unknown outcome. Before this, a
+member's prepare reported the unknown result, which the desktop boundary mapped to
+`invalid-ledger`; the desktop now maps a genuinely unverifiable policy to
+`sharing_unavailable`. A later owner share in the new generation is read and admitted by
+the same process, because caches and pins are generation-scoped.
+
 ## Project scope at the receiving machine
 
 A member granted project P1 on a shared machine could run in an unshared project P2:
