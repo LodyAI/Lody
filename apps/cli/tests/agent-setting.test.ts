@@ -176,7 +176,9 @@ describe('resolveBuiltinACPSetting', () => {
     const input = { cliType: 'builtin' as const, agentType: 'deepseek', magpieGatewayUrl: gateway };
     vi.stubGlobal('fetch', async (url: string) =>
       Response.json(
-        url.endsWith('/api/hello') ? { name: 'magpie' } : { data: [{ id: 'synthetic/model' }] }
+        url.endsWith('/api/hello')
+          ? { name: 'magpie' }
+          : { data: [{ id: 'synthetic/vision', modalities: { input: ['text', 'image'] } }] }
       )
     );
     try {
@@ -187,9 +189,27 @@ describe('resolveBuiltinACPSetting', () => {
       });
       expect(launch.env).not.toHaveProperty('LODY_MAGPIE_GATEWAY');
       expect(launch.capabilitySourceVersion).toBe(getAcpCapabilitySourceVersion(input));
+      expect(launch.capabilitySourceVersion).toContain('+magpie-v2:');
       expect(launch.capabilitySourceVersion).not.toBe(
         getAcpCapabilitySourceVersion({ ...input, magpieGatewayUrl: 'http://127.0.0.1:3426' })
       );
+      // The gateway catalog is a launch input, not an environment overlay: the
+      // generated Harness layer has to declare the modalities it discovered.
+      const profileDir = join(dshHome, 'profiles', 'lody-acp');
+      const manifest = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'));
+      const bundle = manifest.dsh.profile.bundles.find((name: string) =>
+        name.startsWith('@lody/dsh-host-')
+      );
+      const generatedLayer = await readFile(
+        join(profileDir, 'node_modules', bundle, 'cordis.patch.yml'),
+        'utf8'
+      );
+      expect(generatedLayer).toContain('synthetic/vision');
+      // The catalog lives inside the row's JavaScript source, so compare the
+      // decoded expression instead of the YAML escaping around it.
+      const row = generatedLayer.split('- id: llm-deepseek\n')[1]?.split('\n')[0] ?? '';
+      const expression: unknown = JSON.parse(row.slice(row.indexOf('!!js ') + 5));
+      expect(String(expression)).toContain('"inputModalities":["text","image"]');
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

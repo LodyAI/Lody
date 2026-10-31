@@ -197,6 +197,15 @@ describe('Magpie runtime preparation', () => {
     const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, mixed);
     const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
     expect(g).toMatchObject({ models: { image_description: 'magpie/vision/model' } });
+    // The Harness resolves image support only from this catalog, so the gateway
+    // modalities must reach the launch, not just the deepseek environment.
+    const dsh = await prepareMagpieRuntime('deepseek', gateway, undefined, directory, mixed);
+    expect(dsh.modelCatalog).toEqual([
+      { id: 'declared-text/model', name: 'declared-text/model', inputModalities: ['text'] },
+      { id: 'output-only/model', name: 'output-only/model', inputModalities: ['text'] },
+      { id: 'bare/model', name: 'bare/model', inputModalities: ['text'] },
+      { id: 'vision/model', name: 'vision/model', inputModalities: ['text', 'image'] },
+    ]);
   });
   it('rejects an oversized response without accepting a partial catalog', async () => {
     const oversized: typeof fetch = async () => new Response('x'.repeat(2 * 1024 * 1024 + 1));

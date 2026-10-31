@@ -6,6 +6,8 @@ import { MAGPIE_TOKEN, normalizeMagpieGateway } from '@lody/shared';
 import { mergeLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
+import type { DeepSeekHarnessCatalogModel } from '@/agent/deepseek-harness-runtime';
+
 const modelSchema = z.object({
   id: z
     .string()
@@ -103,6 +105,27 @@ export async function readMagpieModels(
   if (new Set(models.map((m) => m.id)).size !== models.length)
     throw new Error('Magpie returned duplicate models');
   return models;
+}
+
+/**
+ * Map Magpie's advisory catalog onto the Harness `llm-deepseek.models` schema.
+ *
+ * The Harness reads model capabilities only from this configured catalog: its
+ * endpoint discovery yields bare ids, so a gateway catalog alone always
+ * resolves text-only and cannot advertise ACP image prompts.
+ */
+export function buildDeepSeekHarnessModels(
+  models: readonly MagpieModel[]
+): DeepSeekHarnessCatalogModel[] {
+  return models.map((m) => ({
+    id: m.id,
+    name: m.display_name ?? m.id,
+    // Report only what the catalog states; the Harness defaults stay in charge
+    // of anything Magpie leaves out, exactly as they do without this catalog.
+    ...(m.context_window ? { contextWindow: m.context_window } : {}),
+    ...(m.max_output_tokens ? { maxTokens: m.max_output_tokens } : {}),
+    inputModalities: acceptsImageInput(m) ? (['text', 'image'] as const) : (['text'] as const),
+  }));
 }
 
 export function buildMagpiePiCatalog(gateway: string, models: readonly MagpieModel[]) {
@@ -211,7 +234,15 @@ export async function prepareMagpieRuntime(
   signal?: AbortSignal,
   root = join(getLodyDataDir(), 'magpie'),
   fetcher: typeof fetch = fetch
-): Promise<{ env: Record<string, string>; args: string[] }> {
+): Promise<{
+  env: Record<string, string>;
+  args: string[];
+  /**
+   * The DeepSeek Harness needs the catalog in its own profile, not only in the
+   * environment: without it the provider cannot resolve image support.
+   */
+  modelCatalog?: DeepSeekHarnessCatalogModel[];
+}> {
   const base = normalizeMagpieGateway(gateway);
   if (!['claude', 'codex', 'pi', 'deepseek', 'kimi', 'grok', 'bub'].includes(agentType))
     throw new Error('Unsupported Magpie runtime');
@@ -230,7 +261,11 @@ export async function prepareMagpieRuntime(
       },
     };
   if (agentType === 'deepseek')
-    return { args: [], env: { DEEPSEEK_BASE_URL: `${base}/v1`, DEEPSEEK_API_KEY: MAGPIE_TOKEN } };
+    return {
+      args: [],
+      env: { DEEPSEEK_BASE_URL: `${base}/v1`, DEEPSEEK_API_KEY: MAGPIE_TOKEN },
+      modelCatalog: buildDeepSeekHarnessModels(models),
+    };
   if (agentType === 'bub') {
     // Python HTTP clients can inherit macOS system proxies even without HTTP_PROXY.
     const bypass = mergeLoopbackNoProxy(process.env.NO_PROXY, process.env.no_proxy);
