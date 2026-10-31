@@ -64,7 +64,7 @@ fifteen seconds. A pending native call retains its Scope, custody and original
 write receipts; a timeout never clears them or authorizes replacement. Once CLI
 and shell execution owners confirm release, unconfirmed main work is logged and
 main gives a presence-only warning marker at most one second to persist, then
-terminates with exit code 1. No UI runs on this exit path, including updates and
+terminates with exit code 1. No reporting UI runs after resource drain, including updates and
 OS shutdown/logout. Next launch attempts a nonmodal native notification; unavailable
 or failed delivery retains the marker. Startup claims the marker by rename before
 notification delivery, so delayed delivery cannot erase a subsequent quit's marker.
@@ -83,6 +83,28 @@ tests cover notification failure and a new quit during delayed startup delivery.
 Generic account/runtime failures retain one private main-only cause in the existing
 diagnostic slot; public errors and logs still omit it.
 The bounded terminal drain and its evidence are in [PR #2162](https://github.com/LodyAI/Lody/pull/2162).
+
+The renderer-unload veto has a separate native boundary: a synchronous confirmation
+inside `will-prevent-unload` blocks the JS deadline on macOS even with a visible
+parent. Quit uses an asynchronous parented sheet, keeps the original veto, and
+retries close only after Leave with a single-use approval. Navigation invalidates
+that approval; settlement aborts the sheet and late answers cannot affect a new
+document or quit. Non-quit close/reload keeps its previous confirmation policy.
+The deadline also settles an already destroyed window when its `closed` event is
+missing; previously that callback silently did nothing. Safe phase logs distinguish
+deadline registration, close entry/return, veto and sheet entry/return.
+
+An isolated Electron 44.9.3 macOS reproduction closes once, reopens a synthetic
+invitation page, completes the link action and injects an independent dirty-document
+veto. The old main thread samples in AppKit `runModalForWindow`; the new sheet
+returns control, accepts an explicit injected-clock signal and completes app.close
+without user action. The probe observes CDP dialogs without answering them so
+Electron owns its confirmation; Playwright 1.58.2's default auto-answer independently
+races a dialog already vetoed by Electron. This is not a full product journey.
+The reported run records only `Quit renderer closing`, so it cannot establish
+whether that run hit the veto or the missing-closed case. Neither candidate is
+presented as an observed historical stack. Owning window tests pin both paths and
+late-answer invalidation with fake clocks.
 
 Retained origins compact after 64 added records across reopen. Successful, verified rebuilding closes the replaced feed scope and removes only its SQLite file/sidecars; originals, pins and conflicting evidence are preserved. IPC publishes the full ledger at initial local display and at the final page or an upgrade stop, rather than each page.
 
