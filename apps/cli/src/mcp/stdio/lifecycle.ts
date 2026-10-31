@@ -59,8 +59,11 @@ export const stdioMcpConnectionLayer = (options: {
           if (options.stdin.readableEnded || options.stdin.destroyed) stop();
         }),
         () =>
-          // In SDK 2.0.0 stdio close synchronously detaches listeners and aborts
-          // SDK requests; it performs no asynchronous I/O or drain wait.
+          // SDK 2.1.0 close() synchronously detaches its stdin listeners and
+          // aborts SDK requests. It leaves one tagged stdout `error` listener
+          // so a late write cannot surface as an unhandled error. The next
+          // start() removes listeners carrying that tag. This release still
+          // removes every subscription the command itself installed.
           Effect.tryPromise({
             try: () => transport.close(),
             catch: (cause) => new StdioMcpFailure('close', cause),

@@ -6,10 +6,30 @@ import { describe, expect, it } from 'vitest';
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
 import { serveStdioMcp, stdioMcpConnectionLayer } from './stdio/lifecycle';
 
-function fixture(server = new McpServer({ name: 'test', version: '1' })) {
-  const stdin = new PassThrough();
-  const stdout = new PassThrough();
-  const signals = new EventEmitter();
+function isUpstreamStdoutSink(listener: (...args: unknown[]) => void): boolean {
+  // @modelcontextprotocol/server@2.1.0 dist/stdio.mjs assigns
+  // `listener[Symbol('swallowsErrorsAfterClose')] = true` inside close() and
+  // does not remove that listener. server@2.0.0 close() called
+  // `stdout.off('error', onStdoutError)` instead. The symbol is not exported.
+  const symbol = Object.getOwnPropertySymbols(listener).find(
+    (candidate) => candidate.description === 'swallowsErrorsAfterClose'
+  );
+  if (symbol === undefined) return false;
+  const tagged: Record<symbol, unknown> = listener;
+  return tagged[symbol] === true;
+}
+
+function fixture(
+  server = new McpServer({ name: 'test', version: '1' }),
+  shared?: {
+    readonly stdin: PassThrough;
+    readonly stdout: PassThrough;
+    readonly signals: EventEmitter;
+  }
+) {
+  const stdin = shared?.stdin ?? new PassThrough();
+  const stdout = shared?.stdout ?? new PassThrough();
+  const signals = shared?.signals ?? new EventEmitter();
   const connected = Promise.withResolvers<void>();
   const connect = server.connect.bind(server);
   server.connect = async (transport) => {
@@ -19,11 +39,20 @@ function fixture(server = new McpServer({ name: 'test', version: '1' })) {
   const program = serveStdioMcp.pipe(
     Effect.provide(stdioMcpConnectionLayer({ createServer: () => server, stdin, stdout, signals }))
   );
-  const expectReleased = () => {
+  const expectReleased = (options?: { readonly started?: boolean }) => {
     expect(stdin.listenerCount('data')).toBe(0);
     expect(stdin.listenerCount('end')).toBe(0);
+    expect(stdin.listenerCount('close')).toBe(0);
     expect(stdin.listenerCount('error')).toBe(0);
-    expect(stdout.listenerCount('error')).toBe(0);
+    const stdoutErrors = stdout.listeners('error');
+    const upstreamSinks = stdoutErrors.filter(isUpstreamStdoutSink);
+    const commandOwned = stdoutErrors.filter((listener) => !isUpstreamStdoutSink(listener));
+    expect(commandOwned).toEqual([]);
+    // A transport that never started installs nothing. After start(), 2.1.0
+    // leaves exactly one sink. start() removes listeners carrying the tag
+    // before adding its own, so a later cycle must not grow the count.
+    expect(upstreamSinks).toHaveLength(options?.started === false ? 0 : 1);
+    expect(stdoutErrors).toHaveLength(options?.started === false ? 0 : 1);
     expect(signals.listenerCount('SIGINT')).toBe(0);
     expect(signals.listenerCount('SIGTERM')).toBe(0);
     expect(server.server.transport).toBeUndefined();
@@ -231,6 +260,45 @@ describe('stdio MCP command lifetime', () => {
     const f = fixture();
     f.stdin.destroy();
     await Effect.runPromise(f.program);
+    f.expectReleased({ started: false });
+  });
+
+  it('keeps one upstream stdout sink across repeated start/close cycles', async () => {
+    const shared = {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      signals: new EventEmitter(),
+    };
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      const f = fixture(new McpServer({ name: 'test', version: '1' }), shared);
+      const command = Effect.runPromise(f.program);
+      await f.connected;
+      f.signals.emit('SIGTERM');
+      await command;
+      f.expectReleased();
+      expect(shared.stdout.listenerCount('error')).toBe(1);
+    }
+  });
+
+  it('swallows a late stdout error after close without an unhandled error', async () => {
+    const f = fixture();
+    const command = Effect.runPromise(f.program);
+    await f.connected;
+    f.signals.emit('SIGTERM');
+    await command;
     f.expectReleased();
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onRejection);
+    try {
+      expect(() => f.stdout.emit('error', new Error('late stdout'))).not.toThrow();
+      await Promise.resolve();
+      expect(rejections).toEqual([]);
+      f.expectReleased();
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
   });
 });
