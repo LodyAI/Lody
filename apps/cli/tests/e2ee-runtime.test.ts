@@ -6243,6 +6243,69 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
+  it('denies a shared start when a verified member removal lands while the sharing check yields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-sharing-removal-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3);
+          let current = fixture.current;
+          const memberEntry = [...current.inspectState().members].find(
+            ([, member]) => member.role === 'member'
+          );
+          if (!memberEntry) throw new Error('missing synthetic member');
+          const [memberId] = memberEntry;
+          const requester = [...current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === memberId
+          );
+          if (!requester) throw new Error('missing synthetic requester');
+          const [key, device] = requester;
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const record = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(record);
+            current = Result.getOrThrow(
+              extendLedger(current, [record], {
+                length: fixture.records.length,
+                head: hashRecordBytes(record),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          let removeDuringCheck = false;
+          const gate = yield* makeGate(() =>
+            Effect.gen(function* () {
+              // The owner's removal is verified and ingested while this check yields;
+              // the policy read itself still answers "shared".
+              if (removeDuringCheck) {
+                removeDuringCheck = false;
+                yield* append({ _tag: 'RemoveMember', membershipId: device.membershipId });
+              }
+              return { allowed: true, isCurrent: () => true };
+            })
+          );
+          const shared = yield* gate.authorizeExecution('workspace', key);
+          expect(shared).toMatchObject({ _tag: 'Authorized' });
+          removeDuringCheck = true;
+          const raced = yield* gate.authorizeExecution('workspace', key);
+          expect(raced).toMatchObject({ _tag: 'Denied', reason: 'not-authorized' });
+          // The grant from before the removal can no longer admit a start either.
+          expect(shared._tag === 'Authorized' && shared.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects rollback, corrupted pages and reads that exhaust their freshness budget; keeps other owners usable', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-isolation-'));
     try {

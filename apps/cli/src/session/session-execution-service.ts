@@ -332,6 +332,8 @@ type TurnRuntimeState = {
   turnId: string;
   userTurnId?: string;
   invocation?: TurnInvocation;
+  /** Encrypted only: whose authority admitted the claimed turn's verified signer. */
+  encryptedPrincipal?: 'owner' | 'member';
   inboxNotificationWork?: { userId: string; originTurnIds: string[] };
   goalControl?: GoalPromptControl;
   session?: ISession;
@@ -2411,6 +2413,8 @@ export class SessionExecutionService {
         // history/finalization catches up. Switch causal identity first.
         const switchInvocation = () => {
           runtime.notificationOutcome = undefined;
+          // A steered input carries no verified principal of its own here.
+          runtime.encryptedPrincipal = undefined;
           runtime.invocation = {
             sourceTurnId: options.userTurnId,
             requesterUserId: options.userId,
@@ -5002,6 +5006,7 @@ export class SessionExecutionService {
               }
               if (result.state === 'claimed') {
                 executionPermit = result.permit;
+                runtime.encryptedPrincipal = result.principal;
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
                 self.deps.logger.debug('[e2ee-rpc-timing]', {
@@ -5575,6 +5580,16 @@ export class SessionExecutionService {
       runtime.releaseFailure ||
       (runtime.inboxOwner?.input &&
         this.isInboxInputCanceled(sessionId, runtime.inboxOwner?.input.inputId))
+    ) {
+      return undefined;
+    }
+    // In encrypted workspaces the history row's userId is unauthenticated display
+    // data. Only a turn whose verified signer is this machine owner's own
+    // membership may lend an identity to derived work (MCP delegation, agent
+    // control); a shared member's turn, or one replaced by a steer, gets none.
+    if (
+      (this.deps.encryptedExecution || this.deps.encryptedWorkspace) &&
+      runtime.encryptedPrincipal !== 'owner'
     ) {
       return undefined;
     }

@@ -21,6 +21,11 @@
 - Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
+  A shared grant pins the ledger generation after its policy check, then rechecks the
+  signer and machine against that ledger; a later ingest fails `isCurrent()`.
+  Claims record the principal: only a turn signed by the owner's own membership lends
+  its identity to derived work (MCP, agent control). History `userId` is display data;
+  shared-member or steered turns expose no invocation identity.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
