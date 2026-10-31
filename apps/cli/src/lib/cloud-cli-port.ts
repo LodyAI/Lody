@@ -43,6 +43,7 @@ import { getCliHttpFetch } from '@/utils/http-transport';
 import {
   canUseMachineForCliToken,
   getWorkspaceBillingEntitlementForCliToken,
+  parseMachineWorkspaceEntitlement,
   registerMachineAccessForCliToken,
 } from './workspace';
 import { NotificationService } from './notifications';
@@ -680,6 +681,16 @@ export function createCloudE2eeMachinePort(options: {
     kind: 'cloud',
     e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
     attachmentUpload: { serverBaseUrl },
+    // Cooperative session/turn quotas select this workspace's plan with the machine's
+    // own device credential; the account API key path is never used here.
+    billing: {
+      getWorkspaceEntitlement: async (workspaceId) => {
+        if (workspaceId !== options.workspaceId) throw new Error('e2ee_binding_conflict');
+        return parseMachineWorkspaceEntitlement(
+          await client.query(api.e2eeMachinePairing.workspaceEntitlement, access)
+        );
+      },
+    },
     e2ee: {
       ...e2ee,
       ...(machineSharing

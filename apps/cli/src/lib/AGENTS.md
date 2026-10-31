@@ -22,6 +22,9 @@
   fail at their public boundary, and only contractually
   best-effort background effects may skip. Both halves are enforced by
   `scripts/check-platform-boundaries.mjs` + `tests/local-platform-zero-cloud.test.ts`.
+- A `--paired-workspace` machine port reads only its own workspace plan, with its device
+  credential (`e2eeMachinePairing.workspaceEntitlement`), for the cooperative quotas;
+  it never borrows an account API key.
 - Client-visible RPC references come from public `@lody/cloud-api`; generated server
   declarations and private workspace packages are forbidden. Prime the token provider
   before reading `getGatewayBaseUrl()`, and never let runtime transports or Machine RPC
