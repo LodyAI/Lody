@@ -17,7 +17,7 @@ core 已实现 vault-v1 恢复，但还没有产品使用它，所以丢失全�
 - 接受 RFC 8410 PKCS#8 恢复包规则；
 - 恢复成功后通知用户的设备和邮箱，不加其他关卡。
 
-记录这些决定的 [Spec](../../../../specs/e2ee/recovery-vault.zh.md) 修订在 owner 批准前保持 draft。
+记录这些决定的 [Spec](../../../../specs/e2ee/recovery-vault.zh.md) 修订已于 2026-10-31 获 owner 批准。
 私有后端目前还没有 `e2eeRecoveryVault` 存储。以上均未在真机上测试。
 
 ## 问题
@@ -25,7 +25,7 @@ core 已实现 vault-v1 恢复，但还没有产品使用它，所以丢失全�
 MVP 要求用户至少配对两台设备。保险库覆盖没有设备幸存的情况，但目前只有 `packages/e2ee-core`
 和 Lab 在使用它。[开放契约 note](../architecture/2026-10-15-e2ee-open-contracts.zh.md) 将保险库
 列为仅在 core 中实现。[#2125](https://github.com/LodyAI/Lody/pull/2125) 加了一个默认关闭的桌面
-闭环：创建账号保险库及其恢复文件，再检查文件。它在本修订批准前保持 draft。
+闭环：创建账号保险库及其恢复文件，再检查文件。它在按决定 2、3 调整前保持 draft。
 
 ## 决定与被否决的选项
 
@@ -96,4 +96,4 @@ Developer ID 应用，但没有端到端成功的报告。
 - 原生模块与关联域能否在 Developer ID 构建中工作；
 - 上面列出的后端工作。
 
-R 凭据参数属于本次 draft 修订，需要 owner 一并批准。
+owner 已随 Spec 修订一并批准 R 凭据参数。

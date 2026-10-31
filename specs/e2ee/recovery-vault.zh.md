@@ -1,6 +1,6 @@
 # 恢复 vault
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)
 Translation: current
 
 [English](recovery-vault.md)
@@ -9,7 +9,7 @@ Translation: current
 
 2026-10-28，owner Zixuan Chen（zxch3n）仅批准以下边界，见[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)（[批准记录更新 #2032](https://github.com/LodyAI/Lody/pull/2032)）：恢复设备登记保留现有账本 tag 4 和 `lody-e2ee/possess/v2\0` 字节，genesis 不变。加密恢复包使用 `formatVersion: 1`，保存恢复 generation 和可信账本材料；可信锚须由外部独立确认。加密包、其来源定位符或服务端响应本身不能建立可信锚，也不能证明账本最新。
 
-恢复验收前须导入 R 的密钥、独立确认可信锚、实际解密发给 R 的当前代信封，并根据账本承诺核对恢复出的代钥。R 的签名绑定加密公钥，但单凭签名不能证明加密私钥持有。包版本和上述边界已批准；保险库的其余设计及本 Spec 整体仍为 **draft**，恢复保险库不在 MVP 内。当前实现尚未加入包版本字段；批准不代表已部署或真机行为已通过验收。
+恢复验收前须导入 R 的密钥、独立确认可信锚、实际解密发给 R 的当前代信封，并根据账本承诺核对恢复出的代钥。R 的签名绑定加密公钥，但单凭签名不能证明加密私钥持有。包版本和上述边界于 2026-10-28 获批；2026-10-31 owner 批准了本 Spec 整体（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)）。恢复保险库仍不在 MVP 内。当前实现尚未加入包版本字段；批准不代表已部署或真机行为已通过验收。
 
 ## 恢复材料与密文
 
@@ -81,8 +81,7 @@ WebCrypto 没有原生句柄清零 API，适配器不得保留这些句柄或把
 
 ## 桌面产品接入
 
-2026-10-31，owner 经 E2EE 总调度对六个接入问题作出决定。本节记录这些决定，供审阅本次
-修订；在 owner 批准本修订前不视为已批准，Spec 保持 draft。调研、被否决选项与依据见
+2026-10-31，owner 经 E2EE 总调度对六个接入问题作出决定，并随本 Spec 其余部分一并批准本节。调研、被否决选项与依据见
 [桌面接入 note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.zh.md)。
 本节不改变 MVP 行为：所有能力都在默认关闭的开关之后，现有加密工作区、配对和账本行为不变。
 
@@ -138,5 +137,5 @@ Lab SQLite 实现不可变条目、索引 CAS 和事务内精确读回。桌面�
 Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控制解密，不是密码学双因素。
 
 外围约束见[白皮书](whitepaper.zh.md)、[权限账本](permission-ledger.zh.md)及
-[保护边界](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。本修订保持 draft
-供用户审批，测试通过及翻译完成都不批准 Spec，也不启用产品 E2EE。
+[保护边界](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。批准本修订不代表
+已实现、已部署或真机验收；测试通过及翻译完成都不启用产品 E2EE。

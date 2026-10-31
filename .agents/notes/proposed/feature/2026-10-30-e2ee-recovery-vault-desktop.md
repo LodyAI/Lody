@@ -18,8 +18,8 @@ the six integration questions, relayed by the E2EE coordinator:
 - the RFC 8410 PKCS#8 package rule is accepted;
 - a successful restore notifies the user's devices and email, with no extra gates.
 
-The [Spec](../../../../specs/e2ee/recovery-vault.md) revision recording these stays draft
-until the owner approves it. The private backend has no `e2eeRecoveryVault` storage yet.
+The owner approved the [Spec](../../../../specs/e2ee/recovery-vault.md) revision recording these
+on 2026-10-31. The private backend has no `e2eeRecoveryVault` storage yet.
 Nothing here has been tested on a real device.
 
 ## Problem
@@ -29,7 +29,7 @@ device survives, but only `packages/e2ee-core` and the Lab consume it. The
 [open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the vault
 as implemented in core only. [#2125](https://github.com/LodyAI/Lody/pull/2125) adds a
 default-off desktop loop: create the account vault and its file, then check a file. It
-remains a draft until this revision is approved.
+remains a draft until it follows decisions 2 and 3.
 
 ## Decisions and rejected options
 
@@ -115,5 +115,4 @@ unchanged. Several things remain unverified:
 - whether the native module and associated domain work in a Developer ID build;
 - the backend work listed above.
 
-The R credential parameters are part of this draft revision and need the owner's
-approval with it.
+The owner approved the R credential parameters with the Spec revision.

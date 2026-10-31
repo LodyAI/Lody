@@ -1,6 +1,6 @@
 # Recovery vault
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)
 Translation: current
 
 [中文](recovery-vault.zh.md)
@@ -9,7 +9,7 @@ Translation: current
 
 On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor must be independently confirmed. An encrypted package, its source locator or a server response alone does not establish that anchor or prove the latest ledger head.
 
-Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries are approved; the remaining vault design and this Spec as a whole remain **draft**, and the recovery vault is outside the MVP. The current implementation has not yet implemented the package version field; approval does not establish deployed or real-device behavior.
+Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries were approved on 2026-10-28; on 2026-10-31 the owner approved this Spec as a whole ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)). The recovery vault remains outside the MVP. The current implementation has not yet implemented the package version field; approval does not establish deployed or real-device behavior.
 
 ## Recovery material and ciphertext
 
@@ -107,8 +107,7 @@ separate operation and requires an up-to-date index CAS.
 ## Desktop product integration
 
 On 2026-10-31 the owner decided the six integration questions, relayed by the E2EE
-coordinator. This section records those decisions for review of this revision; it
-is not approved until the owner approves the revision, and the Spec stays draft.
+coordinator, and approved this section with the rest of the Spec.
 Research, rejected options and evidence are in the [desktop integration note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.md).
 Nothing here changes MVP behavior: every capability stays behind a default-off
 gate, and existing encrypted workspaces, pairing and ledgers behave as before.
@@ -193,5 +192,5 @@ decryption, rather than providing cryptographic two-factor protection.
 
 The [whitepaper](whitepaper.md), [permission ledger](permission-ledger.zh.md) and
 [host protection](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory) define the
-surrounding boundaries. This revision remains draft for human review; tests and
-translation do not approve it or enable product E2EE.
+surrounding boundaries. Approval of this revision is not implementation, deployment
+or real-device acceptance; tests and translation do not enable product E2EE.
