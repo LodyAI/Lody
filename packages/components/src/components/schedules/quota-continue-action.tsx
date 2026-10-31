@@ -1,3 +1,7 @@
+import { useLocalSessionContinuation } from '@/components/sessions/use-local-session-continuation';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
@@ -28,6 +32,7 @@ import {
   findClaudeSessionLimit,
   quotaContinueDraft,
   quotaContinueIdentity,
+  legacyQuotaContinueId,
   quotaContinueReset,
   quotaContinueSendAt,
 } from './quota-continue';
@@ -84,6 +89,7 @@ function SessionLimitContinueOwner({
 }) {
   const { t, i18n } = useTranslation();
   const user = useAtomValue(userAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const active = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
   const runtime = scope.enabled && scope.workspaceId === active?.workspaceId ? active : null;
@@ -96,6 +102,16 @@ function SessionLimitContinueOwner({
   const { turns } = useConversationTail(history, { extendToLastUserTurn: true });
   const failure = findClaudeSessionLimit(turns);
   const isThisFailure = failure?.noticeId === entryId;
+  const local = !!localMachineId && session.machineId === localMachineId;
+  const continuation = useLocalSessionContinuation(
+    runtime && session.machineId && user?.id === session.userId &&
+      workspaceSupports({ mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' }, 'automations') &&
+      (local || (!!localMachineId && !!getAutomationProofIssuer()))
+      ? { workspaceId: runtime.workspaceId, machineId: session.machineId, sessionId: session.id,
+          ...(!local ? { remote: { runtime, requesterUserId: user.id } } : {}) }
+      : null,
+    isThisFailure
+  );
   useProviderQuotaRefresh(
     session.machineId,
     session.agentConfigId,
@@ -114,8 +130,8 @@ function SessionLimitContinueOwner({
       : null;
   const sendAt = reset === null ? null : quotaContinueSendAt(reset);
   const identity =
-    runtime && reset !== null
-      ? quotaContinueIdentity(runtime.workspaceId, session.id, reset)
+    runtime && reset && failure
+      ? quotaContinueIdentity(runtime.workspaceId, session.id, reset, failure.user.id)
       : null;
   const key = `${runtime?.accountId}:${runtime?.workspaceId}:${user?.id}:${identity?.scheduleId}`;
   const [saved, setSaved] = useState<string | null>(null);
@@ -147,6 +163,17 @@ function SessionLimitContinueOwner({
     return null;
   const exists =
     saved === key || registry.rows.some((row) => row.scheduleId === identity.scheduleId);
+  const legacyId = legacyQuotaContinueId(runtime.workspaceId, session.id, reset);
+  const legacyV2Id = legacyQuotaContinueId(runtime.workspaceId, session.id, reset, 2);
+  const existingId = registry.rows.some((row) => row.scheduleId === legacyId)
+    ? legacyId
+    : registry.rows.some((row) => row.scheduleId === legacyV2Id)
+      ? legacyV2Id
+      : exists
+        ? identity.scheduleId
+        : null;
+  const hasReservation = !!existingId;
+  if (continuation.recoveryEnabled && !hasReservation) return null;
   const timeLabel = formatClockWithZone(
     sendAt,
     machine.timeZone ?? getDeviceTimeZone(),
@@ -156,7 +183,7 @@ function SessionLimitContinueOwner({
     if (slug)
       void navigate({
         to: '/$workspaceName/schedules/$scheduleId',
-        params: { workspaceName: slug, scheduleId: identity.scheduleId },
+        params: { workspaceName: slug, scheduleId: existingId ?? identity.scheduleId },
       });
   };
   const save = async () => {
@@ -200,7 +227,7 @@ function SessionLimitContinueOwner({
   };
   return (
     <SessionLimitContinueRow
-      state={exists ? 'scheduled' : pending === key ? 'pending' : 'idle'}
+      state={hasReservation ? 'scheduled' : pending === key ? 'pending' : 'idle'}
       timeLabel={timeLabel}
       onSchedule={() => void save()}
       onOpen={open}

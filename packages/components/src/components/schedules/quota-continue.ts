@@ -1,5 +1,10 @@
 import { v5 as uuidv5 } from 'uuid';
-import { type ScheduleDraft, type SessionHistory, type SessionMeta } from '@lody/shared';
+import {
+  quotaReservationIdentity,
+  type ScheduleDraft,
+  type SessionHistory,
+  type SessionMeta,
+} from '@lody/shared';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   getAgentRateLimitWindows,
@@ -115,16 +120,30 @@ export function quotaContinueSendAt(resetMs: number): number {
 }
 
 /** One reservation per conversation and reset, shared by devices and uncertain retries. */
-export function quotaContinueIdentity(workspaceId: string, sessionId: string, resetMs: number) {
-  const scheduleId = uuidv5(
-    JSON.stringify(['claude-quota-continue', workspaceId, sessionId, resetMs]),
+export function quotaContinueIdentity(
+  workspaceId: string,
+  sessionId: string,
+  resetMs: number,
+  turnId: string
+) {
+  return quotaReservationIdentity(workspaceId, sessionId, resetMs, turnId);
+}
+
+export function legacyQuotaContinueId(
+  workspaceId: string,
+  sessionId: string,
+  resetMs: number,
+  version = 1
+) {
+  return uuidv5(
+    JSON.stringify([
+      version === 1 ? 'claude-quota-continue' : 'claude-quota-continue-v2',
+      workspaceId,
+      sessionId,
+      resetMs,
+    ]),
     uuidv5.URL
   );
-  return {
-    scheduleId,
-    activationId: uuidv5('activation', scheduleId),
-    activityId: uuidv5('create', scheduleId),
-  };
 }
 
 export function quotaContinueDraft(

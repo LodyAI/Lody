@@ -29,6 +29,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localProjectCreateDirectory: 'localProjectCreateDirectory',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
+  remoteAutomationControl: 'remoteAutomationControl',
   preparedSessionInput: 'preparedSessionInput',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
@@ -365,7 +366,9 @@ export function machineSupportsPiExtensions(
 export function machineSupportsSchedulesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
     SCHEDULES_PROMPT_PROTOCOL_VERSION
   );
 }
@@ -519,7 +522,9 @@ export function machineSupportsSessionHistoryPatches(
 export function machineSupportsScheduledMessagesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
     SCHEDULED_MESSAGES_PROTOCOL_VERSION
   );
 }

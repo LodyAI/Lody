@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewControlIntent } from '@lody/shared';
 import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+import { mintAutomationControlProof } from '../src/lib/automation-control-api';
 
 const intent: PreviewControlIntent = {
   workspaceId: 'workspace',
@@ -17,6 +18,35 @@ afterEach(() => {
   uninstall?.();
   uninstall = undefined;
   vi.unstubAllGlobals();
+});
+
+it('requests an automation proof for the authenticated user and exact operation', async () => {
+  uninstall = installCloudHttpPort({ authBaseUrl: 'https://auth.test', serverBaseUrl: null });
+  const { createRpcSecretRecipient } = await import('@lody/loro-streams-rpc');
+  const automationIntent = {
+    ...intent,
+    responseKey: (await createRpcSecretRecipient()).publicKey,
+    operation: { type: 'settings' as const },
+  };
+  vi.stubGlobal('fetch', async (url: URL, init: RequestInit) => {
+    expect(url.href).toBe('https://auth.test/api/session-automation/request-token');
+    const request = new Request(url, init);
+    expect(request.headers.get('Authorization')).toBe('Bearer private-session');
+    const { requesterUserId: _user, ...body } = automationIntent;
+    expect(await request.json()).toEqual(body);
+    return Response.json({ requesterUserId: 'owner', requestToken: 'signed-operation' });
+  });
+  expect(await mintAutomationControlProof(automationIntent, 'private-session')).toEqual({
+    runtimeNonce: intent.runtimeNonce,
+    requestId: intent.requestId,
+    requestToken: 'signed-operation',
+  });
+  vi.stubGlobal('fetch', async () =>
+    Response.json({ requesterUserId: 'other', requestToken: 'token' })
+  );
+  await expect(mintAutomationControlProof(automationIntent, 'private-session')).rejects.toThrow(
+    'identity changed'
+  );
 });
 
 describe('preview control proof minting', () => {

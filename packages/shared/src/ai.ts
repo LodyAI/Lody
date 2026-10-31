@@ -1960,6 +1960,8 @@ export type ACPSessionConfig = ACPTurnConfig & {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

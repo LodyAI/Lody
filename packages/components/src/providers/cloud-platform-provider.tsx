@@ -47,10 +47,12 @@ import { installAttachmentWorkspaceAccess } from '@/lib/attachment-workspace-acc
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
+import { mintAutomationControlProof } from '@/lib/automation-control-api';
 
 const CLOUD_HTTP_PORT = {
   authBaseUrl: import.meta.env.VITE_CONVEX_SITE_URL || null,
   serverBaseUrl: import.meta.env.VITE_API_BASE_URL || null,
+  mintAutomationControlProof,
 } as const;
 
 function toWorkspaceSummary(

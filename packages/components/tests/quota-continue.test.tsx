@@ -23,6 +23,7 @@ import { MessageRowView } from '../src/components/ai-gui/view';
 import {
   findClaudeSessionLimit,
   quotaContinueIdentity,
+  legacyQuotaContinueId,
   quotaContinueReset,
   quotaContinueSendAt,
 } from '../src/components/schedules/quota-continue';
@@ -34,6 +35,10 @@ const state = vi.hoisted(() => ({
   machine: null as any,
   registry: { ready: true, rows: [], error: undefined },
   allowed: true,
+  recoveryEnabled: false,
+}));
+vi.mock('../src/components/sessions/use-local-session-continuation', () => ({
+  useLocalSessionContinuation: () => ({ recoveryEnabled: state.recoveryEnabled }),
 }));
 vi.mock('../src/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: () => ({ enabled: true, workspaceId: 'workspace' }),
@@ -116,6 +121,7 @@ describe('Claude quota continuation', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     state.turns = [user(), failed()];
     state.allowed = true;
+    state.recoveryEnabled = false;
     state.registry = { ready: true, rows: [], error: undefined };
     state.machine = {
       id: 'machine',
@@ -162,12 +168,20 @@ describe('Claude quota continuation', () => {
   });
   const render = async (entryId = 'failure') => {
     await act(async () =>
-      root.render(<SessionLimitContinueAction session={session} entryId={entryId} />)
+      root.render(<SessionLimitContinueAction session={{ ...session }} entryId={entryId} />)
     );
   };
   const click = async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   };
+
+  it('uses a stable reservation identity scoped to the failed Turn', () => {
+    const first = quotaContinueIdentity('workspace', 'session', RESET, 'user');
+    expect(first).toEqual(quotaContinueIdentity('workspace', 'session', RESET, 'user'));
+    expect(first.scheduleId).not.toBe(
+      quotaContinueIdentity('workspace', 'session', RESET, 'other-turn').scheduleId
+    );
+  });
 
   it('creates one full-message reservation after reset without consuming history or draft content', async () => {
     await render();
@@ -177,7 +191,7 @@ describe('Claude quota continuation', () => {
       container.querySelector<HTMLButtonElement>('button')!.click();
       container.querySelector<HTMLButtonElement>('button')!.click();
     });
-    const id = quotaContinueIdentity('workspace', 'session', RESET).scheduleId;
+    const id = quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId;
     const document = await repository.read(id);
     expect(document?.prompt).toBe('continue');
     expect(document?.message).toEqual({
@@ -206,11 +220,34 @@ describe('Claude quota continuation', () => {
     await render();
     await click();
     const document = await repository.read(
-      quotaContinueIdentity('workspace', 'session', RESET).scheduleId
+      quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId
     );
     expect(document?.timeline).toHaveLength(1);
     expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
     expect(container.textContent).toContain('View');
+  });
+
+  it('keeps an existing legacy reservation visible without creating a second one', async () => {
+    const oldId = legacyQuotaContinueId('workspace', 'session', RESET);
+    state.registry.rows = [{ scheduleId: oldId }] as never[];
+    await render();
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    await click();
+    expect(
+      await repository.read(quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId)
+    ).toBeNull();
+  });
+
+  it('does not offer a new reservation while automatic capacity recovery is enabled', async () => {
+    state.recoveryEnabled = true;
+    await render();
+    expect(container.querySelector('button')).toBeNull();
+    state.recoveryEnabled = false;
+    await render();
+    await click();
+    state.recoveryEnabled = true;
+    await render();
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
   });
 
   it('rechecks expiry at click time and never sends immediately', async () => {
@@ -218,7 +255,7 @@ describe('Claude quota continuation', () => {
     vi.spyOn(Date, 'now').mockReturnValue(RESET + 2000);
     await click();
     expect(
-      await repository.read(quotaContinueIdentity('workspace', 'session', RESET).scheduleId)
+      await repository.read(quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId)
     ).toBeNull();
   });
 
@@ -232,8 +269,11 @@ describe('Claude quota continuation', () => {
     expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
     expect(container.textContent).toContain('View');
     expect(
-      (await repository.read(quotaContinueIdentity('workspace', 'session', RESET).scheduleId))
-        ?.timeline
+      (
+        await repository.read(
+          quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId
+        )
+      )?.timeline
     ).toHaveLength(1);
   });
 

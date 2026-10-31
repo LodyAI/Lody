@@ -602,6 +602,11 @@ export class AgentClient implements acp.Client {
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
   private legacySessionModelState: LegacySessionModelState | null = null;
   public currentModel?: ModelInfo;
+  private latestCapacityObservation: RateLimitsSnapshot | undefined;
+  private latestContextObservation: SessionContextWindowUsage | undefined;
+  getAutomationObservations() {
+    return { capacity: this.latestCapacityObservation, context: this.latestContextObservation };
+  }
   /**
    * Tool-call IDs identified by the canonical Lody tool name. We need this so the
    * follow-up `tool_call_update` notifications — which never repeat the title —
@@ -1205,6 +1210,7 @@ export class AgentClient implements acp.Client {
       size >= 0 &&
       used >= 0
     ) {
+      this.latestContextObservation = { size, used };
       this.options.onContextWindowUsageUpdate?.({ size, used });
     }
     return true;
@@ -1583,6 +1589,7 @@ export class AgentClient implements acp.Client {
         }
         return;
       case 'rateLimits':
+        this.latestCapacityObservation = event.snapshot;
         for (const rateLimit of event.snapshot.rateLimits) {
           this.options.onRateLimitUpdate?.(rateLimit);
         }
@@ -1806,6 +1813,8 @@ export class AgentClient implements acp.Client {
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
     this.currentModel = undefined;
+    this.latestCapacityObservation = undefined;
+    this.latestContextObservation = undefined;
     this.applyConfigOptionsState(
       sessionResponse.configOptions ?? [],
       sessionResponse.configOptions !== undefined
@@ -2644,6 +2653,16 @@ export class AgentClient implements acp.Client {
     if (!activity || activity.sessionId !== this.acpSessionId) return null;
     if (activity.state !== 'idle') return 'running';
     return activity.backgroundTaskCount > 0 ? 'background' : null;
+  }
+
+  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {
+    if (
+      !this.reportsSessionActivity() ||
+      !this.nativeActivity ||
+      this.nativeActivity.sessionId !== this.acpSessionId
+    )
+      return 'unknown';
+    return this.getNativeWork() ?? 'idle';
   }
 
   /** Raw prompts and steer submissions remain owned after their local waits end. */

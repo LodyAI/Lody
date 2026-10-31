@@ -1,5 +1,6 @@
 import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
+import { automationOriginSchema } from './automations/contracts';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
@@ -426,7 +427,10 @@ export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
 export const SessionHistoryInputConfigSchema = ACPTurnConfigSchema.partial()
-  .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
+  .extend({
+    _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional(),
+    _lodyAutomation: automationOriginSchema.optional(),
+  })
   .strip();
 
 const LooseSessionTurnInputConfigSchema = SessionHistoryInputConfigSchema.passthrough();
@@ -463,6 +467,8 @@ export const normalizeSessionTurnInputConfig = (
 
   const record = value as Record<string, unknown>;
   const normalized: SessionTurnInputConfig = {};
+  if (record._lodyAutomation !== undefined)
+    normalized._lodyAutomation = automationOriginSchema.parse(record._lodyAutomation);
 
   const prompt = trimOptionalString(record.prompt);
   if (prompt) {

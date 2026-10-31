@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { RequestError } from '@agentclientprotocol/sdk';
 import {
   ACP_ERROR_CODES,
+  classifyCapacityFailure,
   getACPErrorUserMessage,
   isAcpSessionStorageIncompatibleError,
   isAuthenticationRequiredACPError,
@@ -107,6 +108,7 @@ describe('ACP error classification', () => {
       throw new Error('expected ACP error to parse');
     }
     expect(isProviderOverloadedACPError(parsed)).toBe(true);
+    expect(classifyCapacityFailure(parsed)).toBe('provider_overloaded');
     expect(mapACPErrorToFailureReason(parsed)).toBe('acp_provider_overloaded');
     expect(shouldTerminateOnACPError(parsed, 'acp_provider_overloaded')).toBe(false);
   });

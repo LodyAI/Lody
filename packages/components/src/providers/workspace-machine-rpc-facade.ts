@@ -14,6 +14,8 @@ import {
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
+import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
+import type { RemoteAutomationOperation, RemoteAutomationResult } from '@lody/shared/automations';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type {
   LoroStreamsMachineRpcClient,
@@ -1101,6 +1103,61 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     );
   };
 
+  const requestSessionAutomationControl = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: RemoteAutomationOperation
+  ): Promise<RemoteAutomationResult> => {
+    if ((await resolveMachineTargetPlane(machineId)) === 'local')
+      throw new Error('Remote automation control cannot target the local machine.');
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) },
+        MACHINE_PROTOCOL_CAPABILITIES.remoteAutomationControl,
+        1
+      )
+    )
+      throw new Error('This machine does not support remote automation control.');
+    const mint = getAutomationProofIssuer();
+    const token = deps.getSessionToken?.();
+    if (!mint || !token) throw new Error('Remote automation authorization is unavailable.');
+    const client = await getMachineRpcClient(machineId);
+    const handshake = await client.requestAutomationControlHandshake();
+    if (!handshake?.success) throw new Error('Remote automation owner is unavailable.');
+    let current = operation;
+    const waits: Extract<RemoteAutomationResult, { type: 'list' }>['waits'] = [];
+    while (true) {
+      const responseRecipient = await createRpcSecretRecipient();
+      const intent = {
+        workspaceId,
+        machineId,
+        sessionId,
+        requesterUserId,
+        operation: current,
+        runtimeNonce: handshake.runtimeNonce,
+        requestId: crypto.randomUUID(),
+        responseKey: responseRecipient.publicKey,
+      };
+      const proof = await mint(intent, token);
+      const response = await client.requestSessionAutomationControl({
+        sessionId,
+        ownerSessionId: sessionId,
+        requesterUserId,
+        operation: current,
+        proof,
+        responseRecipient,
+      });
+      if (!response) throw new Error('Remote automation control outcome is unknown.');
+      if (!response.success) throw new Error(response.error);
+      if (response.sessionId !== sessionId) throw new Error('Remote automation Session mismatch.');
+      if (current.type !== 'list' || response.result.type !== 'list') return response.result;
+      waits.push(...response.result.waits);
+      if (!response.result.next) return { type: 'list', waits };
+      current = { type: 'list', after: response.result.next };
+    }
+  };
+
   const requestSessionPreviewCreate = async (
     machineId: MachineId,
     sessionId: SessionId,
@@ -1786,6 +1843,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   };
 
   return {
+    requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,
     requestSessionCancel,

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { assertSessionConfigRevision } from '@lody/shared';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
@@ -48,6 +49,7 @@ import {
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
+  type MessageQueueItemInput,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
   getReadableAcpCapabilityCacheEntry,
@@ -3523,7 +3525,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return first;
   }
 
-  async pushMessageQueue(item: Omit<MessageQueueItem, '$cid'>): Promise<void> {
+  async pushMessageQueue(item: MessageQueueItemInput): Promise<void> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3535,6 +3537,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
           ? `queue:${item.userTurnId.trim()}`
           : undefined);
+      const prior = operationId
+        ? mq.find((queued) => queued.operationId === operationId)
+        : undefined;
+      if (prior) {
+        if (
+          prior.userTurnId !== item.userTurnId ||
+          prior.userId !== item.userId ||
+          prior.task !== item.task ||
+          !isDeepStrictEqual(prior.acpSessionConfig, item.acpSessionConfig) ||
+          !isDeepStrictEqual(prior.project, item.project)
+        )
+          throw new Error('Queue operation identity conflict');
+        return prev;
+      }
       // @ts-ignore - mq is read-only in type but writable at runtime
       prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
       return prev;

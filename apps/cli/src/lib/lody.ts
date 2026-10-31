@@ -39,6 +39,16 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   logger: Logger;
   builtinAgentConfigCliTypes?: CliType[];
   supportRegistryAgentTypes?: string[];
@@ -144,6 +154,7 @@ export class Lody {
           notifications: null,
           attachmentUpload: null,
           remotePreview: null,
+          remoteAutomation: undefined,
           sessionSharing: null,
           prAssociation: null,
           githubTokens: null,
@@ -316,6 +327,7 @@ export class Lody {
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
+        remoteAutomation: options.remoteAutomation,
         cloudPort: options.cloudPort,
       },
       logger: this.logger,
@@ -588,6 +600,12 @@ export class Lody {
 
   hasAutomationSessionWork(sessionId: SessionId): boolean {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
+  }
+
+  getAutomationSessionAuthority() {
+    const handler = this.runtime.getMessageHandler();
+    if (!handler) throw new Error('AUTOMATION_SESSION_OWNER_UNAVAILABLE');
+    return handler.getAutomationSessionAuthority();
   }
 
   hasAutomationTurnWork(sessionId: SessionId): boolean {

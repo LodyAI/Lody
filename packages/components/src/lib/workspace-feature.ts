@@ -15,6 +15,9 @@ export function workspaceFeatureUnavailableMessage(
     case 'schedules':
       message = 'Encrypted workspaces do not yet support scheduled messages.';
       break;
+    case 'automations':
+      message = 'Encrypted workspaces do not yet support automations.';
+      break;
     case 'preview-comments':
       message = 'Encrypted workspaces do not yet support preview comments.';
       break;

@@ -113,6 +113,10 @@ class FakeWorkspace {
   associateEffect: (() => void) | null = null;
   writeEffect: (() => void) | null = null;
   hostedAssociation = true;
+  automationHooks: Pick<
+    PrPollerWorkspaceHandle,
+    'wantsWorkflowObservations' | 'recordObservations' | 'recordWorkflowObservations'
+  > = {};
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
   readonly writtenPatches: Array<{ sessionId: SessionId; patch: PrPollMetaPatch }> = [];
@@ -134,6 +138,7 @@ class FakeWorkspace {
 
   handle(): PrPollerWorkspaceHandle {
     return {
+      ...this.automationHooks,
       workspaceId: this.workspaceId,
       machineId: LOCAL_MACHINE,
       listAliveSessionMetas: this.listAliveSessionMetas,
@@ -229,7 +234,10 @@ const config: PrPollerConfig = loadPrPollerConfig({});
 describe('PrPollScheduler', () => {
   let now: number;
   let scheduler: PrPollScheduler;
-  let client: { executeBatch: ReturnType<typeof vi.fn> };
+  let client: {
+    executeBatch: ReturnType<typeof vi.fn>;
+    executeWorkflows?: import('./github-graphql-client').GitHubGraphQlClient['executeWorkflows'];
+  };
   let clientHandler: (batch: PrPollBatchQuery, token: string) => Promise<PrPollQueryOutcome>;
   let stateStore: ReturnType<typeof makeStateStore>;
   let logger: Logger;
@@ -308,6 +316,67 @@ describe('PrPollScheduler', () => {
   afterEach(() => {
     scheduler.stop();
     vi.useRealTimers();
+  });
+
+  it('keeps an entrusted CI wait observable after PR closure and isolates Actions denial', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    const sessionId = sid('s1');
+    const head = 'a'.repeat(40);
+    workspace.metas.set(
+      sessionId,
+      makeMeta({ id: sessionId, pullRequests: [prMeta(11, 'closed')] })
+    );
+    let demand = true;
+    const published: Array<{ head: string; gap: boolean }> = [];
+    workspace.automationHooks = {
+      wantsWorkflowObservations: () => demand,
+      recordWorkflowObservations: async (_meta, _repo, headSha, _runs, gap) => {
+        published.push({ head: headSha, gap });
+      },
+    };
+    clientHandler = async (batch) => {
+      const result = successOutcome(batch);
+      if (result.kind === 'success')
+        for (const item of result.batch.pullRequests)
+          item.pr = observation(item.prNumber, {
+            status: 'closed',
+            headSha: head,
+            headRepository: 'owner/repo',
+          });
+      return result;
+    };
+    let request = 0;
+    client.executeWorkflows = async (_repo, headSha, token) => {
+      expect(headSha).toBe(head);
+      expect(token).toBe('token-1');
+      return ++request === 1
+        ? {
+            kind: 'success',
+            batch: {
+              pullRequests: [],
+              discoveries: [],
+              workflowRuns: [],
+              workflowGap: false,
+              rateLimit: null,
+            },
+          }
+        : { kind: 'repo-not-found-or-forbidden', message: 'Actions denied' };
+    };
+    await startWith([workspace]);
+    expect(published).toEqual([{ head, gap: false }]);
+    expect(scheduler.counters.pointsSpent).toBe(2);
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(Object.keys(stateStore.getStored().repoCooldowns)).toHaveLength(1);
+    expect(
+      Object.keys(stateStore.getStored().repoCooldowns).every((key) => key.endsWith('#actions'))
+    ).toBe(true);
+    const before = scheduler.counters.calls;
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(scheduler.counters.calls).toBe(before + 1);
+    demand = false;
+    const ended = scheduler.counters.calls;
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(scheduler.counters.calls).toBe(ended);
   });
 
   it('coalesces all due targets of one repo into a single batched call', async () => {

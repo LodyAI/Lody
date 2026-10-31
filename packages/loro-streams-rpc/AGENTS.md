@@ -68,6 +68,7 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
+  Automation controls require target-verified operation-bound proof.
   `session/live-status` reads the target
   daemon's active-presence controller and must not infer liveness from durable
   `SessionMeta.status` or message pointers.

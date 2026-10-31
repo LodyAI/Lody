@@ -26,6 +26,7 @@ import { RemoteBridge, type RemoteBridgeRuntime } from '../src/lib/remote-bridge
 import { fileLocksLegacy } from '../src/utils/file-lock';
 import * as projectMeta from '../src/lib/local-project-meta';
 import * as scheduleWorkspace from '../src/lib/schedules/schedule-workspace';
+import * as automationWorkspace from '../src/automations/workspace-legacy';
 import { createCloudPrAssociationPort } from '../src/lib/cloud-pr-association';
 import type { PrPollerWorkspaceHandle } from '../src/lib/pr-poller/pr-poller-workspace';
 import type { Logger } from '../src/utils/logger';
@@ -1247,6 +1248,10 @@ describe('Fleet PR observation composition', () => {
       const schedules = vi
         .spyOn(scheduleWorkspace, 'createScheduleWorkspace')
         .mockResolvedValue(scheduleHandle);
+      const automationHandle = { dispose: async () => {} };
+      const automations = vi
+        .spyOn(automationWorkspace, 'createAutomationWorkspaceLegacy')
+        .mockResolvedValue(automationHandle as never);
       const fleet = createFleetHarness(
         createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
         cloud
@@ -1256,9 +1261,12 @@ describe('Fleet PR observation composition', () => {
           string,
           {
             prPollerWorkspace: PrPollerWorkspaceHandle | null;
+            automations?: unknown;
+            automationsRetryAt?: number;
             schedules: scheduleWorkspace.ScheduleWorkspaceHandle;
           }
         >;
+        ensureAutomations(state: unknown): Promise<unknown>;
         retryTimers: Map<string, ReturnType<typeof setTimeout>>;
         startWorkspace(workspace: never): Promise<void>;
         stopWorkspace(id: string): Promise<void>;
@@ -1284,8 +1292,15 @@ describe('Fleet PR observation composition', () => {
         expect(runtime?.schedules).toBe(scheduleHandle);
         if (encrypted) {
           expect(runtime?.prPollerWorkspace).toBeNull();
+          expect(runtime?.automations).toBeUndefined();
+          expect(runtime?.automationsRetryAt).toBeUndefined();
+          await expect(fleet.ensureAutomations(runtime)).rejects.toThrow(
+            'AUTOMATIONS_UNSUPPORTED_FOR_ENCRYPTED_WORKSPACE'
+          );
+          expect(runtime?.automations).toBeUndefined();
           expect(requests).toEqual([]);
         } else {
+          expect(runtime?.automations).toBe(automationHandle);
           expect(
             await runtime?.prPollerWorkspace?.associatePullRequest?.({
               repoFullName: 'synthetic/repo',
@@ -1315,6 +1330,7 @@ describe('Fleet PR observation composition', () => {
         create.mockRestore();
         reconcile.mockRestore();
         schedules.mockRestore();
+        automations.mockRestore();
       }
     }
   );

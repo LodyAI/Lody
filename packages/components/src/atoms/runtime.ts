@@ -187,6 +187,12 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
   /** Local document access is independent of permission to transmit content. */
   waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
