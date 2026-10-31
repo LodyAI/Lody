@@ -9,6 +9,8 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFunctionName, type FunctionReference } from 'convex/server';
+import { createAuthClient } from 'better-auth/react';
+import { organizationClient } from 'better-auth/client/plugins';
 import type {
   PlatformProvider,
   E2eeRuntimeFactory,
@@ -23,6 +25,8 @@ import { usePlatform, usePlatformSession } from '@lody/platform/react';
 const fixture = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
   organization: {} as Record<string, unknown>,
+  organizationHook: undefined as (() => Record<string, unknown>) | undefined,
+  rawSession: {} as Record<string, unknown>,
   electron: false,
   usePreload: false,
   invoke: async (_channel: string, ..._args: unknown[]): Promise<unknown> => {
@@ -80,9 +84,17 @@ vi.mock('../../../apps/electron/node_modules/electron', () => ({
     invoke: (channel: string, ...args: unknown[]) => fixture.invoke(channel, ...args),
   },
 }));
-vi.mock('@/hooks/useStableSession', () => ({ useStableSession: () => fixture.session }));
-vi.mock('@/hooks/useOrganization', () => ({ useOrganization: () => fixture.organization }));
-vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () => {} }));
+vi.mock('@/hooks/useStableSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useStableSession')>()),
+  useStableSession: () => fixture.session,
+}));
+vi.mock('@/hooks/useOrganization', () => ({
+  useOrganization: () => fixture.organizationHook?.() ?? fixture.organization,
+}));
+vi.mock('@/providers/convex-provider', () => ({
+  useAuthSignOut: () => async () => {},
+  useAuthClient: () => ({ useSession: () => fixture.rawSession }),
+}));
 vi.mock('convex/react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('convex/react')>()),
   useConvex: () => fixture.cloudClient,
@@ -103,22 +115,29 @@ import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platfo
 import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
-import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
+import {
+  readAuthBootstrapSnapshot,
+  writeAuthBootstrapSnapshot,
+  writeStoredAuthToken,
+} from '@/lib/auth-bootstrap';
+import { useStableSessionInternal } from '@/hooks/useStableSession';
 
 function CloudPlatformProvider({
   children,
   createE2eeRuntime,
+  convexAuthenticated = true,
 }: {
   children?: ReactNode;
   createE2eeRuntime?: E2eeRuntimeFactory;
+  convexAuthenticated?: boolean;
 }) {
   return (
     <AuthenticatedConvexContext.Provider
       value={{
         authSessionId: 'session-a',
-        isAuthenticated: true,
-        isLoading: false,
-        isRecovering: false,
+        isAuthenticated: convexAuthenticated,
+        isLoading: !convexAuthenticated,
+        isRecovering: !convexAuthenticated,
         confirmedUnauthenticated: false,
         claimAutomaticCommand: () => true,
         requestAuthRecovery: () => {},
@@ -169,6 +188,7 @@ describe('CloudPlatformProvider', () => {
     };
     delete window.ipc;
     fixture.native = undefined;
+    fixture.organizationHook = undefined;
     fixture.cloudClient.query = async () => {
       throw new Error('unexpected query');
     };
@@ -183,6 +203,7 @@ describe('CloudPlatformProvider', () => {
     act(() => root.unmount());
     container.remove();
     localStorage.clear();
+    vi.useRealTimers();
     delete window.ipc;
   });
 
@@ -237,6 +258,141 @@ describe('CloudPlatformProvider', () => {
     );
     expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
     expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+  });
+
+  it('starts real organization hooks only after session admission and preserves them during recovery', async () => {
+    vi.useFakeTimers();
+    refetch('A');
+    const confirmed = fixture.session;
+    const organizations = fixture.organization.organizations;
+    const organization = fixture.organization.activeOrganization;
+    const requests: string[] = [];
+    let signedIn = false;
+    const client = createAuthClient({
+      baseURL: 'https://organization-admission.example.test',
+      plugins: [organizationClient()],
+      fetchOptions: {
+        customFetchImpl: async (input) => {
+          const path = new URL(String(input)).pathname;
+          requests.push(path);
+          return Response.json(
+            signedIn
+              ? path.endsWith('/list')
+                ? organizations
+                : organization
+              : { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+            { status: signedIn ? 200 : 401 }
+          );
+        },
+      },
+    });
+    fixture.organizationHook = function useLiveOrganization() {
+      const list = client.useListOrganizations();
+      const active = client.useActiveOrganization();
+      return {
+        ...fixture.organization,
+        organizations: list.data ?? undefined,
+        activeOrganization: active.data,
+        refetchOrganizations: list.refetch,
+        refetchActiveOrganization: active.refetch,
+      };
+    };
+    const renderAuth = async (convexAuthenticated = false) => {
+      await act(async () => {
+        root.render(
+          createElement(CloudPlatformProvider, { convexAuthenticated }, createElement(Probe))
+        );
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+    };
+
+    fixture.session = { data: null, isPending: true, isOptimistic: false };
+    await renderAuth();
+    expect(requests).toEqual([]);
+    expect(seen.at(-1)!.workspaces.state.get()).toEqual({ status: 'loading' });
+
+    fixture.session = { ...confirmed, rawData: null, isOptimistic: true, hasLocalToken: true };
+    await renderAuth();
+    expect(requests).toEqual([]);
+    expect(seen.at(-1)!.workspaces.state.get()).toEqual({ status: 'loading' });
+
+    signedIn = true;
+    fixture.session = confirmed;
+    await renderAuth();
+    expect(requests.sort()).toEqual([
+      '/api/auth/organization/get-full-organization',
+      '/api/auth/organization/list',
+    ]);
+    const platform = seen.at(-1)!;
+    const ready = platform.workspaces.state.get();
+    expect(ready).toMatchObject({ status: 'ready', workspaces: [{ id: 'workspace-a' }] });
+
+    fixture.session = {
+      ...confirmed,
+      rawData: null,
+      isPending: true,
+      isRetrying: true,
+      isOptimistic: true,
+    };
+    await renderAuth();
+    expect(seen.at(-1)).toBe(platform);
+    expect(platform.workspaces.state.get()).toEqual(ready);
+    expect(requests).toHaveLength(2);
+
+    fixture.session = {
+      ...confirmed,
+      data: { user: { id: 'user-b' } },
+      rawData: null,
+      isOptimistic: true,
+    };
+    await renderAuth();
+    expect(platform.workspaces.state.get()).toEqual({ status: 'loading' });
+    fixture.session = { ...confirmed, rawData: null, isOptimistic: true };
+    await renderAuth();
+    expect(platform.workspaces.state.get()).toEqual({ status: 'loading' });
+    expect(requests).toHaveLength(2);
+
+    fixture.session = { data: null, confirmedUnauthenticated: true };
+    await renderAuth();
+    expect(platform.workspaces.state.get()).toEqual({ status: 'loading' });
+    await expect(platform.workspaces.retry()).rejects.toThrow(
+      'Cloud workspace operations require AuthenticatedConvexProvider'
+    );
+    expect(requests).toHaveLength(2);
+  });
+
+  it('keeps the organization owner through a real userless session refetch', async () => {
+    vi.useFakeTimers();
+    refetch('A');
+    const data = fixture.session.data;
+    writeStoredAuthToken('synthetic-session-token');
+    writeAuthBootstrapSnapshot({
+      id: 'user-a',
+      email: 'a@example.com',
+      name: 'A',
+      image: null,
+    });
+    fixture.rawSession = { data, error: null, isPending: false, refetch: async () => {} };
+    function RealStableSession() {
+      fixture.session = useStableSessionInternal();
+      return createElement(CloudPlatformProvider, null, createElement(Probe));
+    }
+    await act(async () => root.render(createElement(RealStableSession)));
+    const platform = seen.at(-1)!;
+    const ready = platform.workspaces.state.get();
+    expect(ready).toMatchObject({ status: 'ready' });
+
+    fixture.rawSession = { ...fixture.rawSession, data: null, isPending: true };
+    await act(async () => root.render(createElement(RealStableSession)));
+    expect(fixture.session.isOptimistic).toBe(true);
+    expect(fixture.session.confirmedUnauthenticated).toBe(false);
+    expect(platform.workspaces.state.get()).toEqual(ready);
+    expect(seen.at(-1)).toBe(platform);
+
+    fixture.rawSession = { ...fixture.rawSession, data, isPending: false };
+    await act(async () => root.render(createElement(RealStableSession)));
+    expect(fixture.session.isOptimistic).toBe(false);
+    expect(platform.workspaces.state.get()).toEqual(ready);
   });
 
   it('keeps Electron IPC as the runtime owner when a browser factory is supplied', async () => {

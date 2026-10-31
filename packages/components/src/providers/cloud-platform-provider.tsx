@@ -425,11 +425,28 @@ type CloudWorkspaceBridgeProps = {
   accountId: string | undefined;
 };
 
-// Standalone login has session/Convex contexts but no authenticated-query context.
-// Keep the optional boundary outside the component that invokes protected hooks.
+// Context presence is not session admission: anonymous routes also mount it.
+// A startup bootstrap cannot start Better Auth organization requests. Once this
+// account is admitted, a userless refetch may temporarily select its bootstrap
+// again; preserve the existing child instead of remounting its queries/inbox.
 function CloudWorkspaceBridge(props: CloudWorkspaceBridgeProps) {
   const auth = useOptionalAuthenticatedConvex();
-  return auth ? <AuthenticatedCloudWorkspaceBridge {...props} /> : null;
+  const session = useStableSession();
+  const admittedAccount = useRef<string | undefined>(undefined);
+  if (
+    !auth ||
+    !props.accountId ||
+    session.confirmedUnauthenticated ||
+    admittedAccount.current !== props.accountId
+  ) {
+    admittedAccount.current = undefined;
+  }
+  if (auth && props.accountId && !session.isOptimistic && !session.confirmedUnauthenticated) {
+    admittedAccount.current = props.accountId;
+  }
+  return props.accountId && admittedAccount.current === props.accountId ? (
+    <AuthenticatedCloudWorkspaceBridge {...props} />
+  ) : null;
 }
 
 function AuthenticatedCloudWorkspaceBridge({

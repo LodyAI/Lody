@@ -70,6 +70,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.
   Never restore a second writer or proxy-authoring/write-intent mirror.
+- First admission of cloud organization hooks requires a confirmed Better Auth
+  user. Context presence, a retained token and an optimistic startup identity do
+  not admit them. Keep an already admitted same-account bridge through userless
+  session refetch and Convex authentication refresh. Account changes and terminal
+  sign-out revoke that admission without unmounting the application children.
 - Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents
