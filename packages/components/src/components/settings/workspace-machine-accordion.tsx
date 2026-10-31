@@ -274,6 +274,7 @@ export function WorkspaceMachineAccordionRow({
       <button
         type="button"
         {...stylex.props(styles.toggle)}
+        data-testid="settings-machine"
         data-settings-machine-id={meta.machine.id}
         aria-expanded={expanded}
         aria-label={

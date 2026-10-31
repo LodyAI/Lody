@@ -1267,6 +1267,7 @@ export function ChatComposer({
                   fillHeight={isSheet}
                   mentionPanelPlacement={isSheet ? 'bottom' : undefined}
                   autoFocus={promptAutoFocus}
+                  data-testid="composer-input"
                   data-keyboard-nav="composer"
                 />
 
@@ -1412,7 +1413,8 @@ export function ChatComposer({
               placeholder={resolvedPromptPlaceholder}
               containerClassName={mentionContainerClassName}
               className={dialogTextareaClassName}
-              data-keyboard-nav="composer"
+              data-testid="composer-input"
+                  data-keyboard-nav="composer"
             />
 
             {statusMessage ? (

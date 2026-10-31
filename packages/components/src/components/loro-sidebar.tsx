@@ -1178,6 +1178,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1191,6 +1192,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}

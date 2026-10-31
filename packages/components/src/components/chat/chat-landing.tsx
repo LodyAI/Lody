@@ -6577,6 +6577,7 @@ function WorkspaceChatLanding({
                 }}
                 onMouseDown={(event) => event.preventDefault()}
                 disabled={submitDisabled}
+                data-testid="composer-send"
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */

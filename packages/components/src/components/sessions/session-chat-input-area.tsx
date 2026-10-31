@@ -2285,7 +2285,7 @@ export const SessionChatInputArea = memo(
         />
       </Button>
     ) : (
-      <Button
+      <Button data-testid="composer-send"
         type="button"
         icon
         variant="ghost"

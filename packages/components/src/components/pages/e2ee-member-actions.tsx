@@ -50,6 +50,8 @@ export function E2eeMemberActions(props: {
               size="small"
               icon
               disabled={pending}
+              data-testid="e2ee-member-manage"
+              data-membership-id={member.membershipId}
               aria-label={t('e2ee.members.manage', { name: props.name })}
             >
               <MoreHorizontal size={16} />
@@ -68,6 +70,7 @@ export function E2eeMemberActions(props: {
           )}
           {mayRemove && (
             <Menu.Item
+              data-testid="e2ee-member-remove"
               tone="destructive"
               onClick={() => {
                 setFailed(false);
@@ -105,6 +108,7 @@ export function E2eeMemberActions(props: {
               {t('common.cancel')}
             </Button>
             <Button
+              data-testid="e2ee-member-remove-confirm"
               tone="destructive"
               disabled={pending}
               onClick={() => {
