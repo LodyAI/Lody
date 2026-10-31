@@ -1,3 +1,4 @@
+import { SessionLimitNotice } from './session-limit-notice';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
@@ -233,11 +234,6 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 
-/**
- * The landing chrome. The amber notices keep their hard-coded Tailwind
- * palette colours — a `dark:` step needs the `.dark` ancestor StyleX cannot
- * select — so those stay Tailwind classes beside the styles.
- */
 const landingStyles = stylex.create({
   branchSlot: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
   topSelectorRow: {
@@ -274,30 +270,6 @@ const landingStyles = stylex.create({
   },
   hidden: { display: 'none' },
   topSelector: { width: '100%', minWidth: 0 },
-
-  /* The free-session limit notice. */
-  sessionLimitNotice: {
-    marginBottom: themeSpace[2],
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: themeSpace[1.5],
-    rowGap: themeSpace[1],
-    borderRadius: themeRadius.lg,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    paddingInline: themeSpace[3],
-    paddingBlock: themeSpace[2],
-    fontSize: themeFontSize.xs,
-    lineHeight: themeLineHeight.xs,
-    fontWeight: themeFontWeight.medium,
-    boxShadow: themeShadow.xs,
-  },
-  sessionLimitAction: {
-    fontWeight: themeFontWeight.semibold,
-    textDecorationLine: 'underline',
-    textUnderlineOffset: '2px',
-  },
 
   /* The sharing-review notice. */
   sharingReviewNotice: {
@@ -6362,43 +6334,20 @@ function WorkspaceChatLanding({
   const sessionLimitReached =
     !sessionLimitAdmission.allowed && sessionLimitAdmission.reason === 'limit_reached';
   const sessionLimitNoticeNode = sessionLimitReached ? (
-    <div
-      className={[
-        stylex.props(landingStyles.sessionLimitNotice).className,
-        // The amber notice is a hard-coded palette pair, and its dark step
-        // needs the `.dark` ancestor StyleX cannot select.
-        'border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <span>
-        {t(hidesBillingUi ? 'chat.sessionLimitNoticeMobile' : 'chat.sessionLimitNotice', {
-          limit: FREE_SESSION_LIMIT_PER_WORKSPACE,
-        })}
-      </span>
-      {!hidesBillingUi ? (
-        <button
-          type="button"
-          className={[
-            stylex.props(landingStyles.sessionLimitAction).className,
-            'text-amber-700 hover:text-amber-800 dark:text-amber-200 dark:hover:text-amber-100',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          onClick={() => {
-            capturePostHogEvent(postHog, 'session/free_session_limit_upgrade_clicked', {
-              user_id: userId,
-              workspace_id: workspaceId,
-              entrypoint: 'chat_landing',
-            });
-            openSettings('billing');
-          }}
-        >
-          {t('sessions.freeTurnLimitUpgrade')}
-        </button>
-      ) : null}
-    </div>
+    <SessionLimitNotice
+      message={t(hidesBillingUi ? 'chat.sessionLimitNoticeMobile' : 'chat.sessionLimitNotice', {
+        limit: FREE_SESSION_LIMIT_PER_WORKSPACE,
+      })}
+      actionLabel={hidesBillingUi ? undefined : t('sessions.freeTurnLimitUpgrade')}
+      onUpgrade={() => {
+        capturePostHogEvent(postHog, 'session/free_session_limit_upgrade_clicked', {
+          user_id: userId,
+          workspace_id: workspaceId,
+          entrypoint: 'chat_landing',
+        });
+        openSettings('billing');
+      }}
+    />
   ) : null;
   const sharingReviewRow =
     sharingReviewState.ready && sharingReviewState.active

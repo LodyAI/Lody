@@ -192,6 +192,7 @@ const privateButtonStyles = stylex.create({
 
 const rootLayoutStyles = stylex.create({
   toolbarNoShrink: { flexShrink: 0 },
+  diffControlHeight: { height: 'calc(var(--spacing) * 8)' },
   resizerVisibility: {
     display: { default: null, '@media not all and (width >= 64rem)': 'none' },
   },
@@ -1702,13 +1703,13 @@ function DiffStyleControl({
         }
       }}
       aria-label="Diff view"
-      className="h-8 gap-0.5 p-0.5"
+      className={cn('gap-0.5 p-0.5', stylex.props(rootLayoutStyles.diffControlHeight).className)}
     >
-      <ToggleGroupItem value="unified" aria-label="Unified diff" size="sm" className="h-7 gap-1.5">
+      <ToggleGroupItem value="unified" aria-label="Unified diff" size="sm" className="gap-1.5">
         <Rows3 className="size-3.5" />
         Unified
       </ToggleGroupItem>
-      <ToggleGroupItem value="split" aria-label="Split diff" size="sm" className="h-7 gap-1.5">
+      <ToggleGroupItem value="split" aria-label="Split diff" size="sm" className="gap-1.5">
         <Columns2 className="size-3.5" />
         Split
       </ToggleGroupItem>
@@ -3651,6 +3652,7 @@ const diffBlockStyles = stylex.create({
     borderBottomStyle: 'var(--tw-border-style)',
     borderBottomWidth: '1px',
   },
+  parseErrorPadding: { padding: 'calc(var(--spacing) * 3)' },
   diagnostics: {
     borderBottomStyle: 'var(--tw-border-style)',
     borderBottomWidth: '1px',
@@ -4102,9 +4104,9 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           ) : block.kind === 'context' ? (
             <ContextBody block={block} />
           ) : parsed?.status === 'error' ? (
-            <div className="p-3">
+            <div {...stylex.props(diffBlockStyles.parseErrorPadding)}>
               <Alert variant="destructive">
-                <CircleAlert className="size-4" />
+                <CircleAlert />
                 <AlertTitle>Diff render failed</AlertTitle>
                 <AlertDescription>{parsed.message}</AlertDescription>
               </Alert>

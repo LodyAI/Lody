@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving a public component's Tailwind defaults into the earlier StyleX layer can change which caller styles win, even when default screenshots match. An isolated experiment preserves thirteen AdaptiveTabStrip cases by extracting a separate StyleX namespace into the utilities layer before Tailwind. It also demonstrates real Slot and source-order failures, so this is a possible route for selected native defaults, not a general replacement or an adopted build change. Product sources, configuration, dependencies and lockfiles remain unchanged by the experiment.
+Moving public Tailwind defaults into the earlier StyleX layer can change which caller styles win, even when default screenshots match. A separate namespace extracted into utilities before Tailwind preserves 66 real AdaptiveTabStrip pairs in two isolated client builds, including ordinary StyleX controls. Real Slot and source-order counterexamples still prevent a general replacement; development, hot updates and the actual App renderer remain unverified. This is a proposed route for selected native defaults, with no production configuration, dependency or lockfile change.
 
 ## Evidence and limits
 
@@ -21,6 +21,29 @@ The [migration note](../../implemented/architecture/2026-10-22-tailwind-to-style
 | Separate import namespace and class prefix; native metadata extraction into flat `utilities`, before Tailwind | All thirteen Adaptive cases match complete recorded fields and PNGs; the ordinary StyleX control stays unchanged | Radix Slot grid-parent/flex-child changes grid to flex and height 55 to 28px.                                                                                       |
 | The same extraction placed after Tailwind                                                                     | Repairs that Slot direction                                                                                      | Breaks the reverse Slot direction, direct caller width 840 to 0, and the retained 366px query's active minimum 180 to 0; none of the thirteen Adaptive cases match. |
 | Reusing ordinary atom names across the two routes                                                             | Adaptive cases match                                                                                             | Promotes a shared atom into `utilities`; an ordinary StyleX control changes overflow from visible to hidden despite identical pixels.                               |
+
+The bounded client-build prototype uses a private 96-line extractor for one fixed
+native owner. Storybook and a production Vite consumer of the real SessionTabBar
+both build successfully with 2,401 inputs stable; eight Root source/configuration
+and lock guards remain unchanged. All 66 PNG pairs match byte-for-byte. Complete
+recorded ordinary/custom/pseudo fields, attributes, state, geometry and animation
+snapshots match after only the owned class carriers are replaced; 46 ordinary
+StyleX controls match without that normalization. The ordinary and unlayered CSS
+rules retain their conditions and relative order, and native atoms stay out of the
+normal collector. Workspace evidence is `leaves159-field-comparison.json`,
+`leaves159-css-asset-audit.json` and the independent
+`root159-native-route-independent-verification.json` under the visual artifact
+directory. These results earn zero production migration credit.
+
+The extractor must run before React/docgen source transforms; its strict raw-source
+equality rejected the original later wiring. Its seven constant atoms fold every
+StyleX call, so no dynamic runtime alias was exercised. It deliberately rejects
+dev/HMR, build-watch and SSR; its generated file and private compile cache do not
+yet establish safe ownership across concurrent development servers. Source maps,
+directly declared compiler dependencies and an actual paired Electron renderer
+run remain adoption requirements. The second client build is a standalone
+consumer, not the Electron App. The existing renderer-only verification path can
+hold main/CLI bytes fixed without invoking ACP prerequisites.
 
 The original five direct-caller frames omitted `items-end` from the fixture's Tailwind candidate list. They remain rejected evidence. Only those five cells were corrected and captured again after proving the stylesheet changed solely by the missing rule; sixty healthy cells were retained.
 

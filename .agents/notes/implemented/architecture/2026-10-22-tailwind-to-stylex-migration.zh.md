@@ -1850,22 +1850,39 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-后续闭合范围移除22处源码utility：Goal／CI147七处、helper148四处、Chevron151四处、
-helper152五处、Cancel153一处、margin155一处。另三处重复尺寸／shrink是清理，不计迁移。
-helper截至155精确库存311／8／21、覆盖30份生产源码；主组件截至147观察库存为
-1,376／156／727、覆盖790份源码，仅两个147产品不同于合格146边界。扫描下界只减少三，
-但147实际移除七：动态`CI_ICON_TONE[state]`字典的原四字符串不在v2解析范围。这是已记录
-的下界缺口，不是四个额外删除，也没改统计方法。完整620／6,209稳定回归仍固定146，
-后续owning suites与不可变真实采集分别限定范围。
+147–161 的已审计范围移除 32 处源码 utility；另六处重复尺寸／shrink 单列清理，不计迁移。
+helper 截至 160 的精确源码库存为 306 处／8 文件／21 未解析，覆盖 30 份生产源码。
+主组件截至 161 的观察库存为 1,368 处／156 文件／727 未解析，覆盖 791 份源码，见
+`inventory-source-through161-observed-proof.json`；八处 amber 移除承接 147 的
+1,376／156／727 边界。这些仍是源码下界：147 实际迁移七处，但动态
+`CI_ICON_TONE[state]` 字典原四字符串不在 v2 解析范围，因此扫描只减少三处。
+这个已知缺口不改变统计方法，也不增加迁移信用。
 
-| 单元                  | 真实渲染结果                                                        | 保留限制                                                                                                                                                                  |
-| --------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Goal／CI147           | 162对PNG全同，10,034标准及2,864完整目标记录、24回调同               | 仅1,008精确class／style载体不同；legacy bar容器定位漏掉portal，不称容器CSS已采。保留旧class浅断言失败，仅删该断言后21owning测试通过；一条新增宽类型lint warning明确记录。 |
-| Shadow／outline148    | 正式30全同，完整86对78同                                            | 八个forced-color OPEN356原始／52阈值；精确shadow逗号空格差保留。14注册／fallback及真实无probe生产构建已核。                                                               |
-| Chevron151            | native96与file16，共112对103PNG同，448完整记录同                    | 九OPEN874／2；56真实transition事件／时序结构同。截图仅证明稳定端点，不称逐动画帧；未虚构共享formal runner对照。                                                           |
-| File glyph／shrink152 | 126对117PNG同，2,808完整记录／几何同；三类真实SVG内容和解码尺寸一致 | 九OPEN69／15；原22部分帧、pointer失败及未完成终止保留。零尺寸glyph不称painted，只用真实键盘恢复不可命中的状态。                                                           |
-| Cancel153             | 实际Cancel56对50同，全部90正向／参考对77同、656物理记录同           | 十三OPEN58／0；精确新增inline／private-var载体保留，六private-var负控单列。translate候选在两个实际utility-writer探针中1.98→4px，60,471／52,490，已完整恢复。              |
-| Delete margin155      | 128对115PNG同，2,514完整记录／几何与真实剪贴板／删除结果同          | 十三OPEN44／15；另六状态证明实际键盘focus-visible。原十六张Copied／rest图作为before-only保留，权威idle-ready补采另列，不关闭旧OPEN。                                      |
+root160 稳定回归通过 620 文件／6,209 测试，3,208 份记录输入全程不变；全部 790 份
+core147 冻结源码 hash 匹配该测试边界，见
+`root160-core147-stable-test-qualification.json`。这只建立测试边界，不是新整页渲染／
+Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning suite 与不可变真实采集
+仍分别限定范围。
+
+| 单元                   | 真实渲染结果                                                                                        | 保留限制                                                                                                                                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal／CI147            | 162对PNG全同，10,034标准及2,864完整目标记录、24回调同                                               | 仅1,008精确class／style载体不同；legacy bar容器定位漏掉portal，不称容器CSS已采。保留旧class浅断言失败，仅删该断言后21owning测试通过；一条新增宽类型lint warning明确记录。                               |
+| Shadow／outline148     | 正式30全同，完整86对78同                                                                            | 八个forced-color OPEN356原始／52阈值；精确shadow逗号空格差保留。14注册／fallback及真实无probe生产构建已核。                                                                                             |
+| Chevron151             | native96与file16，共112对103PNG同，448完整记录同                                                    | 九OPEN874／2；56真实transition事件／时序结构同。截图仅证明稳定端点，不称逐动画帧；未虚构共享formal runner对照。                                                                                         |
+| File glyph／shrink152  | 126对117PNG同，2,808完整记录／几何同；三类真实SVG内容和解码尺寸一致                                 | 九OPEN69／15；原22部分帧、pointer失败及未完成终止保留。零尺寸glyph不称painted，只用真实键盘恢复不可命中的状态。                                                                                         |
+| Cancel153              | 实际Cancel56对50同，全部90正向／参考对77同、656物理记录同                                           | 十三OPEN58／0；精确新增inline／private-var载体保留，六private-var负控单列。translate候选在两个实际utility-writer探针中1.98→4px，60,471／52,490，已完整恢复。                                            |
+| Delete margin155       | 128对115PNG同，2,514完整记录／几何与真实剪贴板／删除结果同                                          | 十三OPEN44／15；另六状态证明实际键盘focus-visible。原十六张Copied／rest图作为before-only保留，权威idle-ready补采另列，不关闭旧OPEN。                                                                    |
+| DiffStyleControl158    | 112对103PNG同，1,120完整记录／几何同；真实radio Arrow／Space／pointer及可见modified文件单HTML已验   | 九OPEN511／267保留。原24张unpaired PNG、七error记录但仅六完整error图、两次零图discovery失败及一次null-root门禁修正保留。root高度迁移一处，两sm-item重复高度清理信用0；完整CSS、63注册／fallback逐字同。 |
+| 解析错误提示160        | 32 对中 29 PNG 同，228 条完整记录／几何同；真实内部 parser 失败、折叠／展开及 standalone 输出已验。 | 三个 OPEN 共四原始／二阈值像素。一处 padding 迁移与一处重复 SVG 尺寸清理。原两份 Before build log 被覆盖，仍保留真实退出码／输入／HTTP／driver 证据，不称原日志完整保留。                               |
+| 会话配额提示161        | 96 对 PNG 全同，476 条完整记录及四组键盘／指针／触控回调序列同。                                    | 188 处精确 class 载体另列，不称整个原始对象相同。Baseline 来自机械提取后的真实呈现 owner，不代表挂载过 stateful quota 或 Electron 分支；原空 label 的零尺寸 button、采集与 QA 失败均保留。              |
+| 透明 Checkbox input162 | 63 对已采配对 PNG 全同，但仅 61 对完整对象同；三对实际滚入可见目标的诊断也同。                      | 五处候选已恢复，信用零。两组离屏几何／派生颜色差异、native After 与未迁源 file Before 的严格门禁失败、两方向各九个未配对状态均保留；不能据此认定五个样式造成失败。                                      |
+
+提示的原 18 个样式字段、原生 DOM 和父级回调原样移出；配额、翻译、telemetry 与 settings
+仍由原页面负责。父级最终仅清理一个空悬注释，其 runtime token AST 与构建输入同，
+不称字节 hash 相同。八处 amber 替换保留本元素 palette 变量、包含 light-scope 排除的
+精确自身／祖先 dark 谓词、fine-pointer hover，以及编译器原 color-mix 能力查询与 fallback。
+直接使用 `when.ancestor` 会引入 marker 要求，并不等价。这个呈现 owner 让真实状态可被
+独立验收，没有复制 UI，也没有增加另一套配额策略。
 
 公开组合带来真实阻塞，默认截图不足。Assistant actions149保留六类：四个受支持自定义
 Icon Token reader在发布间距Token后6→9px或10→18px，八个受支持Stream unlayered调用

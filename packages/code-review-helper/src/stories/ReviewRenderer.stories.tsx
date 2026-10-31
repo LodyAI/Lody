@@ -835,3 +835,25 @@ export const RenderingErrorFallback: Story = {
     storageKey: 'storybook-rendering-error-fallback',
   },
 };
+
+// The malformed text exists only here; the real parser catches its own failure.
+export const DiffParseErrorFallback: Story = {
+  args: {
+    bundle: {
+      ...groupedRefactorBundle,
+      groups: [
+        {
+          ...groupedRefactorBundle.groups[0],
+          blocks: [
+            {
+              ...groupedRefactorBundle.groups[0]!.blocks[0]!,
+              file: undefined,
+              displayOldText: { syntheticMalformedDiffText: true } as unknown as string,
+            },
+          ],
+        },
+      ],
+    },
+    storageKey: 'storybook-diff-parse-error-fallback',
+  },
+};
