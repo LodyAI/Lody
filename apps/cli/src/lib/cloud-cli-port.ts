@@ -627,6 +627,9 @@ export function createCommandAttachmentTransfer(
 }
 
 /** A cloud machine authenticated only to one admitted encrypted workspace. No account APIs. */
+/** Bounds the cooperative quota's plan read; a slower answer is treated as unavailable. */
+const MACHINE_ENTITLEMENT_TIMEOUT_MS = 10_000;
+
 export function createCloudE2eeMachinePort(options: {
   accountId: string;
   workspaceId: string;
@@ -686,9 +689,33 @@ export function createCloudE2eeMachinePort(options: {
     billing: {
       getWorkspaceEntitlement: async (workspaceId) => {
         if (workspaceId !== options.workspaceId) throw new Error('e2ee_binding_conflict');
-        return parseMachineWorkspaceEntitlement(
-          await client.query(api.e2eeMachinePairing.workspaceEntitlement, access)
-        );
+        // `query()` waits for a reconnect without bound while disconnected, which would
+        // keep the cooperative quota from ever failing open. Subscribe once with a
+        // deadline and release only this read's subscription, never the shared client.
+        const value = await new Promise<unknown>((resolve, reject) => {
+          let settled = false;
+          let unsubscribe: (() => void) | undefined;
+          const finish = (settle: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            unsubscribe?.();
+            settle();
+          };
+          const timer = setTimeout(
+            () => finish(() => reject(new Error('e2ee_billing_entitlement_timeout'))),
+            MACHINE_ENTITLEMENT_TIMEOUT_MS
+          );
+          unsubscribe = client.onUpdate(
+            api.e2eeMachinePairing.workspaceEntitlement,
+            access,
+            (result) => finish(() => resolve(result)),
+            (error) => finish(() => reject(error))
+          );
+          // A synchronous answer settles before the handle exists; release it now.
+          if (settled) unsubscribe();
+        });
+        return parseMachineWorkspaceEntitlement(value);
       },
     },
     e2ee: {

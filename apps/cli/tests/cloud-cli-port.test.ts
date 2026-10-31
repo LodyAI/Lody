@@ -403,11 +403,13 @@ it('applies the shared session and turn quotas on a paired machine from its devi
   let answer: unknown = { valid: true, effectivePlanTier: 'free', checkoutPending: false };
   const asked: unknown[] = [];
   const client: Client = {
-    onUpdate: (() => () => {}) as Client['onUpdate'],
-    query: (async (_ref: unknown, args: unknown) => {
+    // A connected client answers the one-shot subscription immediately.
+    onUpdate: ((_ref: unknown, args: unknown, listener: (value: unknown) => void) => {
       asked.push(args);
-      return answer;
-    }) as Client['query'],
+      listener(answer);
+      return () => {};
+    }) as unknown as Client['onUpdate'],
+    query: (() => new Promise(() => {})) as Client['query'],
     close: async () => {},
   };
   const port = createCloudE2eeMachinePort({
@@ -455,6 +457,49 @@ it('applies the shared session and turn quotas on a paired machine from its devi
     expect(asked).toEqual([]);
   } finally {
     await port.dispose?.();
+    vi.unstubAllEnvs();
+  }
+});
+
+it('bounds a paired machine entitlement read while disconnected so the quota can fail open', async () => {
+  const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+  type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const subscriptions = { opened: 0, released: 0 };
+  // A disconnected WebSocket: neither a one-shot query nor a subscription ever answers.
+  const client: Client = {
+    onUpdate: (() => {
+      subscriptions.opened += 1;
+      return () => {
+        subscriptions.released += 1;
+      };
+    }) as unknown as Client['onUpdate'],
+    query: (() => new Promise(() => {})) as Client['query'],
+    close: async () => {},
+  };
+  const port = createCloudE2eeMachinePort({
+    accountId: 'synthetic-machine-owner',
+    workspaceId: 'synthetic-workspace',
+    genesisHash: 'ab'.repeat(32),
+    machineId: 'machine',
+    credential: 'a3'.repeat(32),
+    authBaseUrl: 'https://synthetic.convex.cloud',
+    serverBaseUrl: 'https://relay.synthetic.test',
+    logger: { debug() {}, info() {}, warn() {}, error() {}, trace() {} } as unknown as Logger,
+    client,
+  });
+  try {
+    const billing = port.billing;
+    if (!billing) throw new Error('expected a paired machine billing port');
+    const read = billing.getWorkspaceEntitlement('synthetic-workspace');
+    const settled = expect(read).rejects.toThrow('e2ee_billing_entitlement_timeout');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settled;
+    // Only this read's subscription is released; the shared client stays open.
+    expect(subscriptions).toEqual({ opened: 1, released: 1 });
+  } finally {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   }
 });
