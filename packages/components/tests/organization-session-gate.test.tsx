@@ -164,6 +164,124 @@ describe('real Better Auth organization hook admission', () => {
     vi.unstubAllGlobals();
   });
 
+  const validSession = session('alice');
+  it.each([
+    { name: 'missing user', payload: { session: validSession.session } },
+    { name: 'missing session', payload: { user: validSession.user } },
+    { name: 'null user', payload: { ...validSession, user: null } },
+    { name: 'null session', payload: { ...validSession, session: null } },
+    {
+      name: 'both account IDs missing',
+      payload: {
+        user: { ...validSession.user, id: undefined },
+        session: { ...validSession.session, userId: undefined },
+      },
+    },
+    {
+      name: 'missing session ID',
+      payload: { ...validSession, session: { ...validSession.session, id: undefined } },
+    },
+    {
+      name: 'missing user ID',
+      payload: { ...validSession, user: { ...validSession.user, id: undefined } },
+    },
+    {
+      name: 'missing session user ID',
+      payload: { ...validSession, session: { ...validSession.session, userId: undefined } },
+    },
+    {
+      name: 'both account IDs empty',
+      payload: {
+        user: { ...validSession.user, id: '' },
+        session: { ...validSession.session, userId: '' },
+      },
+    },
+    {
+      name: 'empty session ID',
+      payload: { ...validSession, session: { ...validSession.session, id: '' } },
+    },
+    { name: 'empty user ID', payload: { ...validSession, user: { ...validSession.user, id: '' } } },
+    {
+      name: 'empty session user ID',
+      payload: { ...validSession, session: { ...validSession.session, userId: '' } },
+    },
+    {
+      name: 'non-string account IDs',
+      payload: {
+        user: { ...validSession.user, id: 1 },
+        session: { ...validSession.session, userId: 1 },
+      },
+    },
+    {
+      name: 'non-string session ID',
+      payload: { ...validSession, session: { ...validSession.session, id: 1 } },
+    },
+  ])('disables malformed session input: $name', async ({ payload }) => {
+    // Inject the wire response, without casting malformed data to the SDK type.
+    currentSession = session('alice');
+    const wire = deferred<Response>();
+    pendingSession = wire.promise;
+    const loadMalformedSession = async () => {
+      await mount();
+      await act(async () => {
+        const checking = client.$store.atoms.session.get().refetch();
+        wire.resolve(json(payload));
+        await checking;
+      });
+      await act(async () => {
+        root.render(<Consumer key="validated-response" />);
+      });
+    };
+    await expect(loadMalformedSession()).resolves.toBeUndefined();
+    expect(JSON.stringify(client.$store.atoms.session.get().data)).toBe(JSON.stringify(payload));
+    expect(client.$store.atoms.session.get().error).toBeNull();
+    expect(client.$store.atoms.session.get().isPending).toBe(false);
+    expect(organizationRequests()).toEqual([]);
+    expect(list.data).toBeNull();
+    expect(active.data).toBeNull();
+  });
+
+  it('recovers a delayed authenticated session on cold mount', async () => {
+    const coldSession = deferred<Response>();
+    pendingSession = coldSession.promise;
+    await mount();
+    expect(organizationRequests()).toEqual([]);
+    expect(list.data).toBeNull();
+    expect(active.data).toBeNull();
+    currentSession = session('alice');
+    await act(async () => {
+      coldSession.resolve(json(currentSession));
+    });
+    expect(organizationRequests().sort()).toEqual([
+      '/api/auth/organization/get-full-organization',
+      '/api/auth/organization/list',
+    ]);
+    expect(list.data?.[0]?.id).toBe('org-alice');
+    expect(active.data?.id).toBe('org-alice');
+  });
+
+  it.each(['setActive', 'acceptInvitation'] as const)(
+    'refreshes the active organization after %s',
+    async (mutation) => {
+      currentSession = session('alice');
+      await mount();
+      pendingOrganizations.set(
+        '/api/auth/organization/get-full-organization',
+        Promise.resolve(json(organization('updated')))
+      );
+      await act(async () => {
+        if (mutation === 'setActive')
+          await client.organization.setActive({ organizationId: 'org-updated' });
+        else await client.organization.acceptInvitation({ invitationId: 'synthetic-invitation' });
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(active.data?.id).toBe('org-updated');
+      expect(requests).toContain(
+        `/api/auth/organization/${mutation === 'setActive' ? 'set-active' : 'accept-invitation'}`
+      );
+    }
+  );
+
   it('sends zero organization requests during anonymous mount and pending login, then loads after authentication', async () => {
     await mount();
     expect(organizationRequests()).toEqual([]);

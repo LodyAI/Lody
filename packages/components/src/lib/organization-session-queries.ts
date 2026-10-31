@@ -22,16 +22,22 @@ export function withSessionGatedOrganizationQueries(
   const refetchSession = session.value.refetch;
   const readSession = () => {
     const { data, error, isPending, isRefetching } = session.get();
+    const userId = data?.user?.id;
+    const sessionId = data?.session?.id;
+    const sessionUserId = data?.session?.userId;
     const key =
-      data !== null &&
-      data.session.id !== '' &&
-      data.user.id !== '' &&
-      data.session.userId === data.user.id
-        ? JSON.stringify([data.user.id, data.session.id])
+      typeof userId === 'string' &&
+      userId.length > 0 &&
+      typeof sessionId === 'string' &&
+      sessionId.length > 0 &&
+      typeof sessionUserId === 'string' &&
+      sessionUserId.length > 0 &&
+      sessionUserId === userId
+        ? JSON.stringify([userId, sessionId])
         : null;
     return {
       key,
-      accountId: data?.user.id ?? null,
+      accountId: key === null ? null : userId,
       checking: Boolean(isRefetching),
       ready: !isPending && !isRefetching && error === null,
     };
