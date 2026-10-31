@@ -64,6 +64,8 @@ import {
   Exit as TokenExit,
 } from 'effect';
 import { LoroDoc, LoroMap } from 'loro-crdt';
+import { z } from 'zod';
+import { createCloudE2eePort } from '../src/lib/cloud-cli-port';
 import {
   StreamsCrdt,
   createLoroDocAdapter,
@@ -99,7 +101,11 @@ import {
   signGenesisRecord,
   signLedgerRecord,
   verifyLedger,
+  sealRpcRequestContent,
 } from '@lody/e2ee-core/protocol';
+import { encodeE2eeRpcRequestBody } from '../../../packages/loro-streams-rpc/src/e2ee-wire';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import * as rpcLedgerCatchUp from '../src/lib/e2ee/rpc-ledger-catch-up';
 import { makeNodeE2eeCustody, type KekWrapper } from '@lody/e2ee-core/adapters/node-custody';
 import { makeCliE2eeCustody } from '../src/lib/e2ee/custody';
 import { makeCliE2eeRuntime } from '../src/lib/e2ee/runtime';
@@ -417,6 +423,219 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
+    'receives the current RPC key through the real workspace with %s',
+    async (mode) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rpc-key-catch-up-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+      let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      let oldRefresh: Promise<void> | undefined;
+      const receiveEntered = Promise.withResolvers<void>();
+      const releaseReceive = Promise.withResolvers<void>();
+      const joinedRefresh = Promise.withResolvers<void>();
+      let holdReceive = false;
+      let advanceDuringJoin: (() => Promise<void>) | undefined;
+      const originalCatchUp = rpcLedgerCatchUp.makeLedgerCatchUp;
+      const catchUpSpy =
+        mode === 'joined-refresh'
+          ? vi.spyOn(rpcLedgerCatchUp, 'makeLedgerCatchUp').mockImplementation((options) =>
+              originalCatchUp({
+                ...options,
+                catchUp: async () => {
+                  const result = options.catchUp();
+                  await advanceDuringJoin?.();
+                  joinedRefresh.resolve();
+                  return await result;
+                },
+              })
+            )
+          : undefined;
+      const doc = new LoroDoc();
+      try {
+        const accountId = 'synthetic-rpc-key-account';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          'workspace'
+        );
+        const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+        const stagedGroup = fixture.stagedGroup;
+        if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+        await retainCliE2eeWorkspaceBinding(accountId, {
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+        });
+        const devicePublicKey = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(root, 'custody'),
+              keyring: noKeyring,
+            });
+            return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+          })
+        );
+        await fs.writeFile(
+          join(root, 'activation.json'),
+          JSON.stringify({
+            genesisHash: hex(fixture.genesis.toBytes()),
+            signingPublicKey: devicePublicKey,
+          })
+        );
+        let history = page(fixture.records);
+        // The hosted readGroup boundary accepts precisely these four fields.
+        // Use the real HTTP adapter: the native locator also carries a local
+        // signer, which must not leak into this strict wire object.
+        const stagingKey = z.strictObject({
+          genesis: z.string(),
+          epoch: z.number(),
+          commitment: z.string(),
+          recordHash: z.string(),
+        });
+        vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+          const request = JSON.parse(init.body as string);
+          expect(request.path).toBe('e2eeEpochStaging:readGroup');
+          const parsed = stagingKey.safeParse(request.args[0].key);
+          return Response.json(
+            parsed.success
+              ? { status: 'success', value: encodeEpochStagedGroup(stagedGroup) }
+              : {
+                  status: 'error',
+                  errorMessage: 'ArgumentValidationError: extra staging key field',
+                }
+          );
+        });
+        const stagingPort = createCloudE2eePort({
+          authBaseUrl: 'https://synthetic-staging.convex.cloud',
+        });
+        const cloud = {
+          getHistory: async () => history,
+          readEpochGroup: stagingPort.readEpochGroup,
+          mailboxCall: async (
+            method: keyof E2eeMailboxRequests,
+            input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+          ) => {
+            if (method === 'fetch') {
+              if (holdReceive) {
+                holdReceive = false;
+                receiveEntered.resolve();
+                await releaseReceive.promise;
+              }
+              return {
+                items:
+                  (input as E2eeMailboxRequests['fetch']).epoch === 0
+                    ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                    : [],
+                next: null,
+              };
+            }
+            if (method === 'status')
+              return {
+                ...(input as E2eeMailboxRequests['status']).slot,
+                revision: 0,
+                status: 'EnvelopeStored',
+              };
+            if (method === 'report') return null;
+            throw new Error('unexpected mailbox operation');
+          },
+        } as CloudE2eePort;
+        host = await openCliE2eeWorkspaceLegacy({
+          accountId,
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          cloud,
+          keyring: noKeyring,
+          onUnavailable: () => {},
+        });
+        const active = host;
+        await host.refresh();
+        expect(await host.status()).toMatchObject({ epoch: 0, hasCurrentKey: true });
+        if (mode === 'joined-refresh') {
+          holdReceive = true;
+          oldRefresh = host.refresh();
+          await receiveEntered.promise;
+        }
+        history = page([...fixture.records, ...fixture.rotationSuffix]);
+        const advanceLedger = async () => {
+          expect(
+            await Effect.runPromise(active.authorizeExecution('workspace', fixture.sender))
+          ).toMatchObject({ _tag: 'Authorized' });
+          expect(await active.status()).toMatchObject({
+            epoch: 1,
+            writeEpoch: 0,
+            hasCurrentKey: false,
+          });
+        };
+        if (mode === 'fresh-ledger') await advanceLedger();
+        if (mode === 'joined-refresh') advanceDuringJoin = advanceLedger;
+        const input = {
+          sessionId: 'synthetic-session',
+          userTurnId: 'synthetic-turn-23',
+          userId: 'display-only',
+          timestamp: new Date(1000).toISOString(),
+          inputConfig: { prompt: 'SYNTHETIC_AFTER_ROTATION' },
+        };
+        const frame = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeNodeE2eeCustody({
+              directory: join(directory, 'owner'),
+              wrapper,
+            });
+            const signer = yield* custody.openDevice(fixture.genesis);
+            return yield* sealRpcRequestContent({
+              scope: {
+                genesis: hex(fixture.genesis.toBytes()),
+                resource: e2eeRpcResource('machine'),
+                epoch: 1,
+              },
+              epochKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72))),
+              signer,
+              plaintext: encodeE2eeRpcRequestBody({
+                requestId: new Uint8Array(16).fill(23),
+                expiresAt: 901000,
+                method: 'session/dispatch-turn',
+                params: new TextEncoder().encode(JSON.stringify(input)),
+              }),
+            });
+          })
+        );
+        doc.getMap('rpcDispatchOriginals').set(input.userTurnId, hex(frame));
+        doc.commit();
+        const original = Effect.runPromise(
+          host.resolveVerifiedExecutionOriginal(
+            {
+              workspaceId: 'workspace',
+              sessionId: input.sessionId,
+              userTurnId: input.userTurnId,
+              inputConfig: input.inputConfig,
+            },
+            doc
+          )
+        );
+        if (mode === 'joined-refresh') {
+          await joinedRefresh.promise;
+          releaseReceive.resolve();
+        }
+        expect(await original).toMatchObject({
+          requesterDevice: fixture.sender,
+          expiresAt: 901000,
+        });
+        expect(await host.status()).toMatchObject({ epoch: 1, writeEpoch: 1, hasCurrentKey: true });
+      } finally {
+        releaseReceive.resolve();
+        await oldRefresh;
+        await host?.close();
+        catchUpSpy?.mockRestore();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   effectIt.effect('bounds missing-origin reads, aborts their I/O and allows another attempt', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1081,10 +1300,20 @@ describe('machine E2EE local runtime', () => {
           },
         };
         expect(await host.content.snapshotUpload.canUpload()).toBe(true);
+        if (rotation === 'epoch') {
+          await expect(protection.config.provider.seal(snapshotInput)).rejects.toMatchObject({
+            code: 'missing-read-key',
+          });
+          expect((await stream.appendWriteOnly()).ok).toBe(false);
+          expect(frames).toHaveLength(0);
+          expect(doc.getText('draft').toString()).toBe('retained local edit');
+          releaseReceive.resolve();
+          await recovery;
+        }
         const retainedSnapshot = await protection.config.provider.seal(snapshotInput);
         expect(
           Result.getOrThrow(inspectContentFrame(retainedSnapshot.sealed, 'doc-snapshot')).epoch
-        ).toBe(0);
+        ).toBe(rotation === 'epoch' ? 1 : 0);
         expect(
           await protection.config.provider.open({
             ...retainedSnapshot,
@@ -3772,6 +4001,16 @@ describe('machine E2EE local runtime', () => {
         repair: () => Effect.void,
       };
       const records = [...fixture.records, ...fixture.rotationSuffix];
+      const request = {
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch',
+        } as const,
+        plaintext: new Uint8Array([1, 2]),
+        additionalData: () => new Uint8Array([3]),
+      };
+      let retained: { header: Uint8Array; sealed: Uint8Array } | undefined;
       for (const reopened of [false, true])
         await execute(
           Effect.gen(function* () {
@@ -3792,6 +4031,8 @@ describe('machine E2EE local runtime', () => {
             if (!reopened) {
               yield* runtime.ingest(page(fixture.records));
               yield* runtime.receiveKeys();
+              const prior = yield* runtime.binding('doc:after-rotation', 'loro', 0);
+              retained = yield* prior.seal(request);
               yield* runtime.ingest(page(records, fixture.records.length));
             }
             expect((yield* runtime.status()).hasCurrentKey).toBe(false);
@@ -3800,21 +4041,15 @@ describe('machine E2EE local runtime', () => {
               0
             );
             const old = yield* runtime.binding('doc:after-rotation', 'loro', 0);
-            const retained = yield* old.seal({
-              context: {
-                protocol: 'loro-streams-crdt-payload-protection',
-                version: 2,
-                kind: 'update_batch',
-              },
-              plaintext: new Uint8Array([1, 2]),
-              additionalData: () => new Uint8Array([3]),
-            });
-            expect(retained.sealed.length).toBeGreaterThan(2);
+            expect(Result.isFailure(yield* Effect.result(old.seal(request)))).toBe(true);
+            if (!retained) throw new Error('missing pre-rotation original');
+            expect(
+              yield* old.open({ ...request, ...retained, additionalData: new Uint8Array([3]) })
+            ).toEqual(request.plaintext);
             if (!reopened) return;
             yield* runtime.receiveKeys();
             expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-            const binding = yield* runtime.binding('doc:after-rotation', 'loro', 1);
-            const sealed = yield* binding.seal({
+            const sealed = yield* old.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
                 version: 2,
@@ -3823,6 +4058,7 @@ describe('machine E2EE local runtime', () => {
               plaintext: new Uint8Array([1, 2]),
               additionalData: () => new Uint8Array([3]),
             });
+            expect(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch).toBe(1);
             expect(sealed.sealed.length).toBeGreaterThan(2);
           })
         );

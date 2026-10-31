@@ -122,7 +122,8 @@ Cancellation retains selection and cannot remove a user destination.
 ## Billing data
 
 - After auth/workspace resolution, preload billing overview into the session-scoped
-  cache for latency only. Permissions, quotas, destructive guards, and Stripe invoice
+  cache for latency only. A rejected preload stays inside its leaf and never reaches
+  the route error boundary. Permissions, quotas, destructive guards, and Stripe invoice
   history remain live/on-demand.
 
 ## ACP selectors

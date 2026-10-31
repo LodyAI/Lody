@@ -625,6 +625,39 @@ it('joins one legacy reader close when member removal and unmount overlap', asyn
   expect(count).toBe(1);
 });
 
+it('turns a live device revocation into local cleanup and re-pairing guidance, not removal', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  let closes = 0;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      // Main erased this device's identity after the authenticated revocation.
+      if (opens > 1)
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked");
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      closes += 1;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(opens).toBe(2);
+  expect(closes).toBe(1);
+  expect(container.textContent).not.toContain('removed from this workspace');
+  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
+  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+});
+
 it('fences the preallocated control reader before a cold open settles', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;

@@ -1,4 +1,4 @@
-import { isE2eeMemberRemoved } from '../lib/e2ee-member-removal';
+import { e2eeAccessLoss, type E2eeAccessLoss } from '../lib/e2ee-member-removal';
 import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
@@ -26,16 +26,17 @@ export function createE2eeContent(input: {
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
   onKeyUpdateRequired?: () => void;
-  onMemberRemoved?: () => void;
+  /** Credential-authenticated member removal or revocation of this device. */
+  onMemberRemoved?: (reason: E2eeAccessLoss) => void;
   onSnapshotRecoveryChange?: (pending: boolean) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
-  let memberRemoved = false,
+  let lost: E2eeAccessLoss | null = null,
     closed = false;
   const assertOpen = () => {
-    if (closed || memberRemoved) throw new Error('e2ee_closed');
+    if (closed || lost) throw new Error('e2ee_closed');
   };
   const withinContent = async <A>(work: () => Promise<A>): Promise<A> => {
     assertOpen();
@@ -44,12 +45,13 @@ export function createE2eeContent(input: {
     return value;
   };
   const observeRemoval = (error: unknown) => {
-    if (!isE2eeMemberRemoved(error)) return false;
-    if (!memberRemoved) {
+    const reason = e2eeAccessLoss(error);
+    if (!reason) return false;
+    if (!lost) {
       setMemberRole(null);
-      memberRemoved = true;
+      lost = reason;
       try {
-        input.onMemberRemoved?.();
+        input.onMemberRemoved?.(reason);
       } catch {
         /* Retirement never holds the token request. */
       }
@@ -97,7 +99,7 @@ export function createE2eeContent(input: {
   let memberRole: E2eeRuntimeStatus['memberRole'] = null;
   const roleListeners = new Set<() => void>();
   const codeCollabRole = (): 'read' | 'write' =>
-    !closed && !memberRemoved && memberRole && memberRole !== 'guest' ? 'write' : 'read';
+    !closed && !lost && memberRole && memberRole !== 'guest' ? 'write' : 'read';
   const setMemberRole = (next: E2eeRuntimeStatus['memberRole']) => {
     const before = codeCollabRole();
     memberRole = next;
@@ -133,7 +135,7 @@ export function createE2eeContent(input: {
         ),
       // SDK schedules only after local writes, suppresses a competing writer,
       // and checks the remote snapshot before exporting a new one.
-      canUpload: () => !closed && !memberRemoved && transition.phase() !== 'closed',
+      canUpload: () => !closed && !lost && transition.phase() !== 'closed',
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
     },
@@ -143,7 +145,7 @@ export function createE2eeContent(input: {
           ({
             maxSealOverheadBytes: 4096,
             seal: (request) => {
-              if (memberRemoved) return Promise.reject(new Error('e2ee_member_removed'));
+              if (lost) return Promise.reject(new Error(lost));
               const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
               const additionalData = request.additionalData(header);
               const seal = () =>
@@ -259,7 +261,7 @@ export function createE2eeContent(input: {
       ),
       attachmentToken: () =>
         withinContent(async () => {
-          if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
+          if (lost || transition.phase() === 'closed') throw new Error('e2ee_closed');
           const result = await input.runtime
             .contentStreamsToken(input.workspaceId)
             .catch((error) => {

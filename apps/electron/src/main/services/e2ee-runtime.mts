@@ -105,6 +105,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
 }> {}
@@ -268,8 +269,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         if (observed) yield* openedEntry.observe(observed, proof)
         return openedEntry
       }
-      if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
-        return yield* fail('member_removed')
+      const removed = yield* options.bootstrap.removedReason(workspaceId)
+      if (removed) return yield* fail(removed)
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
       const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
@@ -1045,25 +1046,24 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
         >()
-        const binding = Effect.fnUntraced(function* (
-          room: E2eeContentSeal['room'],
-          writeEpoch: number
-        ) {
+        const binding = Effect.fnUntraced(function* (room: E2eeContentSeal['room']) {
           const descriptor = yield* Effect.try({
             try: () => encryptedWorkspaceRoom(workspaceId, room),
             catch: () => fail('invalid-input')
           })
-          let value = bindings.get(`${descriptor.resource}:${writeEpoch}`)
+          let value = bindings.get(descriptor.resource)
           if (!value) {
             value = yield* makeStreamsUpdateBinding({
               ...descriptor,
               genesis,
-              writeEpoch,
+              // Renderer epochs are stale hints, never encryption authority.
+              // Core captures the verified current epoch when each seal starts.
+              writeEpoch: 'current',
               signer: device,
               ledger: () => verified.current(),
               readEpochKey: (epoch) => history.read(epoch)
             }).pipe(Scope.provide(scope))
-            bindings.set(`${descriptor.resource}:${writeEpoch}`, value)
+            bindings.set(descriptor.resource, value)
           }
           return value
         })
@@ -1079,7 +1079,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const provider = yield* binding(input.room, input.epoch)
+          // A future hint must fail for catch-up, never silently downgrade.
+          const view = yield* verified.current()
+          if (input.epoch > view.inspectState().epoch.number) return yield* fail('invalid-ledger')
+          const provider = yield* binding(input.room)
           return yield* provider.seal({ ...input, additionalData: () => input.additionalData })
         })
         const openContent = Effect.fnUntraced(function* (input: E2eeContentOpen) {
@@ -1090,8 +1093,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const view = yield* verified.current()
-          const provider = yield* binding(input.room, view.inspectState().epoch.number)
+          const provider = yield* binding(input.room)
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined

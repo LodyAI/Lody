@@ -573,9 +573,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
         genesis,
         resource,
         model,
-        writeEpoch,
+        // A cached provider selection cannot authorize new writes at an old epoch.
+        writeEpoch: 'current',
         signer: options.device,
-        ledger: () => verified.current(),
+        ledger: () =>
+          verified
+            .current()
+            .pipe(
+              Effect.flatMap((view) =>
+                typeof writeEpoch === 'number' && writeEpoch > view.inspectState().epoch.number
+                  ? Effect.fail(failure('invalid-input'))
+                  : Effect.succeed(view)
+              )
+            ),
         readEpochKey: (epoch) => history.read(epoch),
       }),
     realtimeBinding: (resource: string) =>
