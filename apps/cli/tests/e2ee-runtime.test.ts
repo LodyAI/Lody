@@ -5180,8 +5180,9 @@ describe('machine execution authorization freshness', () => {
             workspaceId: 'workspace',
             ...(sharedSource
               ? {
-                  localProjectId:
+                  localProjectIds: [
                     mode === 'project-unshared' ? 'private-project' : 'shared-project',
+                  ],
                 }
               : {}),
             sessionId,

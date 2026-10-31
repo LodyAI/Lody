@@ -220,6 +220,8 @@ export interface ISession {
   /** Existing host path only; never creates a directory or prepares a runtime. */
   peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
+  /** Machine-held inputs that chose this process's directories; synced metadata may differ. */
+  getExecutionScope?(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'>;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;

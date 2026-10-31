@@ -140,3 +140,26 @@ Newly readable history cannot rename, pin, change owner/project or close tabs vi
 retained callback. Activity receipts also preflight their affected parent. Ordinary
 management behavior is unchanged; signed-policy visibility retains its existing
 refresh contract. Purely local sidebar drag ordering never writes session metadata.
+
+## Project scope at the receiving machine
+
+A member granted project P1 on a shared machine could run in an unshared project P2:
+the CLI claimed execution before it recorded the turn's project, so the gate received
+no project and checked only the machine switch. The claim now authorizes every local
+project the turn can reach, resolved on the machine before any worktree, process or
+prompt. That set unites the request, synced Session metadata, the live process's own
+machine-held configuration, a child Tab's parent, and Project group members, including
+every local copy that an unpinned repository member may use. Any one unshared project
+denies. Extra sources only add projects to check, so a member editing synced metadata
+cannot remove the project a live process actually uses. Directories come only from
+this machine's registry by ID; no requested path, working directory or worktree path
+is accepted, so there is no caller-controlled subdirectory or symlink to escape
+through. Same-member execution is unchanged.
+
+A projectless conversation (`kind: 'none'`, a Lody-managed chat directory or managed
+GitHub clone) needs only the machine switch. The draft foundations Spec makes absent
+projects private and requires "actual local projects" to have their own switch, while
+enabling a project also enables its machine. A machine switch therefore admits work
+that touches no registered local project. Project switches select where a member may
+start work; agents are not sandboxed, so they are not a filesystem isolation boundary.
+The whitepaper leaves per-directory isolation to future work.

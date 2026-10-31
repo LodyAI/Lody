@@ -38,6 +38,7 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import {
+  readMachineLocalProjects,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
@@ -139,6 +140,7 @@ import {
   type SessionGoalResponse,
   SessionHistoryInput,
   type SessionId,
+  type SessionProjectRun,
   type SessionInputBlock,
   type SessionMeta,
   SessionStatusFactory,
@@ -443,7 +445,10 @@ type VisibleSessionTurnContext = {
     unhandledErrorContext?: VisibleSessionTurnUnhandledErrorContext;
   }) => Effect.Effect<void, unknown, never>;
   prompt: (promptBlocks: ContentBlock[]) => Effect.Effect<void, unknown, never>;
-  claimExecution: () => Effect.Effect<void, unknown, never>;
+  /** `scope` resolves, on this machine, every local project the turn can reach. */
+  claimExecution: (
+    scope: () => Promise<readonly LocalProjectId[]>
+  ) => Effect.Effect<void, unknown, never>;
 };
 
 type VisibleSessionTurnAnalytics = {
@@ -4978,7 +4983,9 @@ export class SessionExecutionService {
               return undefined;
             });
 
-            const claimExecution = Effect.fnUntraced(function* (): Effect.fn.Return<void, unknown> {
+            const claimExecution = Effect.fnUntraced(function* (
+              scope: () => Promise<readonly LocalProjectId[]>
+            ): Effect.fn.Return<void, unknown> {
               const gate = self.deps.encryptedExecution;
               if (!gate && !self.deps.encryptedWorkspace) return undefined;
               yield* abortIfCancelled();
@@ -4988,10 +4995,7 @@ export class SessionExecutionService {
                       workspaceId: self.deps.workspaceId,
                       sessionId,
                       userTurnId,
-                      localProjectId:
-                        runtime.project?.kind === 'local'
-                          ? runtime.project.localProjectId
-                          : undefined,
+                      localProjectIds: [...(yield* self.tryPromise(scope))],
                       requesterUserId: options.invocation?.requesterUserId,
                       inputConfig: options.invocation?.inputConfig,
                     })
@@ -5905,6 +5909,65 @@ export class SessionExecutionService {
     });
   }
 
+  /**
+   * Encrypted sharing authorizes the local projects a turn can reach, resolved here
+   * from machine state, never from the request alone. The live process's own config,
+   * synced metadata, the request, a parent Session and Project group members are
+   * united: an extra source can only add a project to check, never remove one the
+   * machine will use. Directories come from this machine's registry by ID; no
+   * requested path is accepted. An empty result is a projectless conversation.
+   */
+  private async encryptedExecutionScope(input: {
+    projects: readonly (ProjectRef | undefined)[];
+    projectRuns: readonly (SessionProjectRun | undefined)[];
+    parentSessionId?: SessionId;
+    live: ISession | null | undefined;
+  }): Promise<LocalProjectId[]> {
+    const projects = [...input.projects];
+    const runs = [...input.projectRuns];
+    const own = input.live?.getExecutionScope?.();
+    projects.push(own?.project);
+    runs.push(own?.projectRun);
+    const parentSessionId =
+      input.parentSessionId ?? own?.parentSessionId ?? input.live?.getParentSessionId();
+    if (parentSessionId) {
+      // A child Tab runs in its parent's directories.
+      const parent = this.deps.sessionManager.getSession(parentSessionId)?.getExecutionScope?.();
+      const parentMeta = await (
+        await this.deps.workspaceDocument.getOrCreateSessionDoc(parentSessionId)
+      ).getMetaState();
+      projects.push(parent?.project, this.resolveProjectFromMeta(parentMeta));
+      runs.push(parent?.projectRun, parentMeta?.projectRun);
+    }
+    const ids = new Set<LocalProjectId>();
+    for (const project of projects) if (project?.kind === 'local') ids.add(project.localProjectId);
+    const preferLocal = new Set<string>();
+    for (const run of runs)
+      for (const member of Object.values(run?.members ?? {})) {
+        if (member.src.kind === 'local' && member.src.machineId === this.deps.machineId)
+          ids.add(member.src.localProjectId);
+        if (
+          member.repositoryCheckout?.kind === 'local' &&
+          member.repositoryCheckout.machineId === this.deps.machineId
+        )
+          ids.add(member.repositoryCheckout.localProjectId);
+        // An unpinned repository Member may use any local copy of that repository.
+        if (member.src.kind === 'github' && member.src.preferLocal)
+          preferLocal.add(member.src.repoFullName.toLowerCase());
+      }
+    if (preferLocal.size) {
+      const local = await readMachineLocalProjects(
+        this.deps.workspaceDocument.repo,
+        this.deps.workspaceId,
+        this.deps.machineId as MachineId
+      );
+      for (const row of Object.values(local))
+        if (row.githubRepoFullName && preferLocal.has(row.githubRepoFullName.toLowerCase()))
+          ids.add(row.id);
+    }
+    return [...ids].sort();
+  }
+
   private resolveProjectFromMeta(
     meta: SessionMeta | undefined,
     preferredBranch?: string | null
@@ -6812,7 +6875,15 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
-          yield* ctx.claimExecution();
+          yield* ctx.claimExecution(async () => {
+            const meta = await sessionDoc.getMetaState();
+            return self.encryptedExecutionScope({
+              projects: [message.project, self.resolveProjectFromMeta(meta)],
+              projectRuns: [meta?.projectRun],
+              parentSessionId: meta?.parentSessionId,
+              live: self.deps.sessionManager.getSession(sessionId),
+            });
+          });
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -7178,7 +7249,17 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
-          yield* claimExecution();
+          yield* claimExecution(() =>
+            self.encryptedExecutionScope({
+              projects: [
+                project,
+                existingMeta ? self.resolveProjectFromMeta(existingMeta) : undefined,
+              ],
+              projectRuns: [sessionConfig.projectRun, existingMeta?.projectRun, message.projectRun],
+              parentSessionId: message.parentSessionId ?? existingMeta?.parentSessionId,
+              live: self.deps.sessionManager.getSession(sessionId),
+            })
+          );
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );

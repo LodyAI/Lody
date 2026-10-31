@@ -1470,10 +1470,40 @@ describe('host-only E2EE realtime journal', () => {
       });
       expect(
         await Effect.runPromise(
-          execution.claim({ ...intent, localProjectId: 'actual-local-project' })
+          execution.claim({ ...intent, localProjectIds: ['actual-local-project'] })
         )
       ).toEqual({ state: 'denied' });
       expect(read(key)).toBeNull();
+    });
+
+    it('requires every project the turn reaches to be shared before the durable start', async () => {
+      const asked: (string | undefined)[] = [];
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspace, _requester, localProjectId) =>
+          Effect.sync(() => {
+            asked.push(localProjectId);
+            return localProjectId === 'private'
+              ? { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' }
+              : { _tag: 'Authorized' as const };
+          }),
+      });
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, localProjectIds: ['shared', 'private', 'shared'] })
+        )
+      ).toEqual({ state: 'denied', reason: 'e2ee_machine_not_shared' });
+      expect(asked).toEqual(['shared', 'private']);
+      expect(journal.read(key)).toBeNull();
     });
 
     it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {

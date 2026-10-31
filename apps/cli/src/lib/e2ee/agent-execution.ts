@@ -22,7 +22,8 @@ const intentSchema = z.object({
   /** Display metadata only; execution identity comes from the verified signer. */
   requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
-  localProjectId: z.string().min(1).optional(),
+  /** Every local project this machine resolved for the turn; empty means projectless. */
+  localProjectIds: z.array(z.string().min(1)).optional(),
 });
 export type EncryptedExecutionIntent = z.infer<typeof intentSchema>;
 /** The shape is structurally compatible with the workspace host freshness gate. */
@@ -118,11 +119,25 @@ export function makeEncryptedAgentExecution(options: {
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    let authorization = yield* authorizeExecution(
-      intent.workspaceId,
-      verified.requesterDevice,
-      intent.localProjectId
-    );
+    const targets: readonly (string | undefined)[] = intent.localProjectIds?.length
+      ? [...new Set(intent.localProjectIds)]
+      : [undefined];
+    // Each touched project needs its own switch; every grant's fence must still hold.
+    const authorizeTargets = Effect.fnUntraced(function* (
+      authorize: AuthorizeEncryptedExecution
+    ): Effect.fn.Return<ExecutionAuthorization, unknown> {
+      const fences: (() => boolean)[] = [];
+      for (const target of targets) {
+        const result = yield* authorize(intent.workspaceId, verified.requesterDevice, target);
+        if (result._tag !== 'Authorized') return result;
+        if (result.isCurrent) fences.push(result.isCurrent);
+      }
+      return {
+        _tag: 'Authorized',
+        ...(fences.length ? { isCurrent: () => fences.every((current) => current()) } : {}),
+      };
+    });
+    let authorization = yield* authorizeTargets(authorizeExecution);
     if (authorization._tag !== 'Authorized')
       return authorization.reason === 'e2ee_machine_not_shared'
         ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
@@ -130,7 +145,11 @@ export function makeEncryptedAgentExecution(options: {
     let scheduleCurrent: (() => boolean) | undefined;
     if (verified.schedule) {
       if (!options.authorizeSchedule) return { state: 'denied' };
-      const schedule = yield* options.authorizeSchedule(verified.schedule, intent.localProjectId);
+      const authorizeSchedule = options.authorizeSchedule;
+      const scheduleRequest = verified.schedule;
+      const schedule = yield* authorizeTargets((_workspaceId, _device, target) =>
+        authorizeSchedule(scheduleRequest, target)
+      );
       if (schedule._tag !== 'Authorized')
         return {
           state:
@@ -146,11 +165,7 @@ export function makeEncryptedAgentExecution(options: {
       scheduleCurrent = schedule.isCurrent;
       // Schedule signer refreshes may advance the ledger snapshot. Recheck the
       // turn signer without dropping the independent Schedule source fences.
-      authorization = yield* authorizeExecution(
-        intent.workspaceId,
-        verified.requesterDevice,
-        intent.localProjectId
-      );
+      authorization = yield* authorizeTargets(authorizeExecution);
       if (authorization._tag !== 'Authorized')
         return {
           state: 'denied',
