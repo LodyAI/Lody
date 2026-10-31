@@ -10,6 +10,59 @@ const context = {
 } as const;
 
 describe('desktop E2EE content epoch safety', () => {
+  it('observes a failed new seal only for a verified missing current key, without changing its failure', async () => {
+    let failure = new Error('installed key unavailable');
+    const sources: Array<'seal' | undefined> = [];
+    const draft = new LoroDoc();
+    draft.getText('draft').insert(0, 'local edit remains here');
+    draft.commit();
+    const access = createDesktopE2eeContent({
+      runtime: {
+        seal: async () => {
+          throw failure;
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => null,
+      onKeyUpdateRequired: (source) => {
+        sources.push(source);
+        if (source === 'seal') throw new Error('observer failure');
+      },
+    });
+    try {
+      const room =
+        access.content.mode === 'protected'
+          ? access.content.resolve({ kind: 'doc', docId: 'session' })
+          : undefined;
+      if (!room || room.mode !== 'protected') throw new Error('expected protected room');
+      const request = {
+        context,
+        plaintext: draft.export({ mode: 'update' }),
+        additionalData: () => Uint8Array.of(3),
+      };
+      // A generic save/transport failure with no missing-key status is unrelated.
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual([]);
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: false });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      failure = new Error('e2ee_device_revoked');
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      failure = new Error('installed key unavailable');
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+      expect(sources.filter((source) => source === 'seal')).toEqual(['seal', 'seal']);
+      expect(draft.getText('draft').toString()).toBe('local edit remains here');
+    } finally {
+      await access.close();
+      draft.free();
+    }
+  });
   it.each([false, true])(
     'advertises only real purpose-bound RPC capabilities (%s)',
     async (supported) => {

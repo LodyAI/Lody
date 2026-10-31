@@ -284,6 +284,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
   });
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.useRealTimers();
     if (realRuntimeSelected) {
       await actualRuntime?.dispose();
       vi.unstubAllGlobals();
@@ -1250,6 +1251,79 @@ describe('RuntimeProvider warm workspace preparation', () => {
     );
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
+  });
+
+  it('keeps the runtime and edits while delayed key reception clears through the existing installation signal', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let installed = false;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      writeEpoch: installed ? 1 : 0,
+      hasCurrentKey: installed,
+      rotationRequired: false,
+    });
+    const failure = new Error('installed key unavailable');
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      close: async () => {},
+      refresh: async () => {
+        throw new Error('temporary key reception failure');
+      },
+      seal: async () => {
+        throw failure;
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)?.[0].content;
+    if (content?.mode !== 'protected') throw new Error('expected protected content');
+    const room = content.resolve({ kind: 'doc', docId: 'session' });
+    if (room.mode !== 'protected') throw new Error('expected protected room');
+    const request = {
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch',
+      } as const,
+      plaintext: new Uint8Array([1, 2, 3]),
+      additionalData: () => Uint8Array.of(3),
+    };
+    editDraft(store);
+    const before = store.get(sessionRunConfigDraftsAtom);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    await act(async () => {
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+    });
+    const retry = container.querySelector<HTMLButtonElement>('button')!;
+    expect(retry.textContent).toBe('e2ee.content.retryKeyUpdate');
+    await act(async () => {
+      vi.advanceTimersByTime(29_999);
+    });
+    expect(container.textContent).not.toContain('e2ee.content.receivingNewKey');
+    await act(async () => {
+      await expect(room.config.provider.seal(request)).rejects.toBe(failure);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(container.querySelector('p[role="status"]')?.textContent).toBe(
+      'e2ee.content.receivingNewKey'
+    );
+    expect(container.querySelector('button')).toBe(retry);
+    await act(async () => retry.click());
+    expect(container.querySelector('p[role="status"]')).not.toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(store.get(sessionRunConfigDraftsAtom)).toEqual(before);
+    installed = true;
+    await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
+    expect(container.querySelector('p[role="status"]')).toBeNull();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(store.get(sessionRunConfigDraftsAtom)).toEqual(before);
   });
 
   it('opens an ordinary workspace before authentication, verifies it in the background and keeps it through auth refresh', async () => {

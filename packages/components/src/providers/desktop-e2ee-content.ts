@@ -25,7 +25,8 @@ export function createE2eeContent(input: {
   epoch: number;
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
-  onKeyUpdateRequired?: () => void;
+  /** `seal` marks an unresolved save failure with a verified missing-current-key status. */
+  onKeyUpdateRequired?: (source?: 'seal') => void;
   /** Credential-authenticated member removal or revocation of this device. */
   onMemberRemoved?: (reason: E2eeAccessLoss) => void;
   onSnapshotRecoveryChange?: (pending: boolean) => void;
@@ -33,6 +34,8 @@ export function createE2eeContent(input: {
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
+  let statusEpoch = input.epoch;
+  let currentKeyMissing = false;
   let lost: E2eeAccessLoss | null = null,
     closed = false;
   const assertOpen = () => {
@@ -119,6 +122,10 @@ export function createE2eeContent(input: {
     memberRole?: E2eeRuntimeStatus['memberRole'];
   }) => {
     if (closed) return;
+    if (status.epoch >= statusEpoch) {
+      statusEpoch = status.epoch;
+      currentKeyMissing = status.hasCurrentKey === false;
+    }
     setMemberRole(status.memberRole ?? null);
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
@@ -144,7 +151,7 @@ export function createE2eeContent(input: {
         (epoch) =>
           ({
             maxSealOverheadBytes: 4096,
-            seal: (request) => {
+            seal: async (request) => {
               if (lost) return Promise.reject(new Error(lost));
               const header = new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]);
               const additionalData = request.additionalData(header);
@@ -156,7 +163,24 @@ export function createE2eeContent(input: {
                   plaintext: request.plaintext,
                   additionalData,
                 });
-              return effects ? effects.track('write', seal) : seal();
+              try {
+                return await (effects ? effects.track('write', seal) : seal());
+              } catch (error) {
+                if (
+                  !closed &&
+                  !lost &&
+                  !e2eeAccessLoss(error) &&
+                  currentKeyMissing &&
+                  transition.needsUpdate()
+                ) {
+                  try {
+                    input.onKeyUpdateRequired?.('seal');
+                  } catch {
+                    /* Observation must not replace the failed save or alter its retry. */
+                  }
+                }
+                throw error;
+              }
             },
             open: (request) => {
               const open = () => input.runtime.openContent(input.workspaceId, { room, ...request });

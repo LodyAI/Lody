@@ -93,6 +93,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   [Sealing](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md),
   [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
   [transport](../../../../specs/workspace-streams-content.md).
+- Missing-current-key save notices observe existing transitions; they never retry, gate, or discard edits.
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;
   hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot

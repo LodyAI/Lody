@@ -133,6 +133,7 @@
   "e2ee.content.snapshotRecoveryPending": "Requesting another device to upload a fresh snapshot. Sync will retry automatically.",
   "e2ee.content.retryKeyUpdate": "Retry key update",
   "e2ee.content.keyUpdateRequired": "Key update pending. You can keep reading and editing. Retry if needed.",
+  "e2ee.content.receivingNewKey": "Receiving a new encryption key…",
   "sessions.fileLinks.chooseTitle": "Choose a file",
   "sessions.fileLinks.chooseDescription": "This link matches files in more than one worktree. Choose the version to open.",
   "sessions.fileLinks.detached": "Detached HEAD",

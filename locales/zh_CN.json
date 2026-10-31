@@ -133,6 +133,7 @@
   "e2ee.content.snapshotRecoveryPending": "正在请求其他设备重新上传快照，同步将自动重试。",
   "e2ee.content.retryKeyUpdate": "重试密钥更新",
   "e2ee.content.keyUpdateRequired": "密钥更新待完成。你仍可正常读写，需要时可重试。",
+  "e2ee.content.receivingNewKey": "正在接收新的加密密钥…",
   "sessions.fileLinks.chooseTitle": "选择文件",
   "sessions.fileLinks.chooseDescription": "此链接在多个工作树中都有匹配文件，请选择要打开的版本。",
   "sessions.fileLinks.detached": "分离的 HEAD",
