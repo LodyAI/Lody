@@ -3418,6 +3418,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       onOpenChangeComplete={onOpenChangeComplete}
     >
       <Dialog.Content
+        data-testid="agent-config-dialog"
+        data-machine-id={machine.id}
         // The wide header draws the close beside the capability status so they
         // share a centre line. The dialog cross is pinned to the panel padding
         // and sat above that row. On the narrow layout the back button is the close.
