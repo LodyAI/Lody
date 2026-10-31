@@ -129,3 +129,14 @@ run is claimed.
 
 
 The new history-read permission does not grant rename, archive, restore or deletion; existing author management is unchanged. Automatic archive Machine Flock readers remain limited to available machines and projects, never inferred from newly visible history.
+
+Management admission belongs to `useSessionActions`, not list callbacks. The shared
+guard re-reads each affected session from Repo and uses the pre-history visibility
+predicate (author fallback or usable machine/project), never `historyOnlySessionIds`
+as authorization. It fences account/runtime changes across reads. Tree archive,
+restore, collaboration changes and deletion preflight their entire discovered target
+set before cancellation, catalog cleanup or writes, then recheck at each write.
+Newly readable history cannot rename, pin, change owner/project or close tabs via a
+retained callback. Activity receipts also preflight their affected parent. Ordinary
+management behavior is unchanged; signed-policy visibility retains its existing
+refresh contract. Purely local sidebar drag ordering never writes session metadata.

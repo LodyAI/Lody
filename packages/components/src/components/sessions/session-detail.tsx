@@ -3053,7 +3053,18 @@ const SessionDetail = ({
     [router, workspaceSlug]
   );
 
-  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const confirmAndArchiveSession = useArchiveSessionWithConfirmation(archiveSession);
+  const archiveSessionWithConfirmation = useCallback(
+    async (...args: Parameters<typeof confirmAndArchiveSession>) => {
+      try {
+        return await confirmAndArchiveSession(...args);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return false;
+      }
+    },
+    [confirmAndArchiveSession]
+  );
   const requestArchiveConfirmation = useArchiveConfirmationRequest();
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {

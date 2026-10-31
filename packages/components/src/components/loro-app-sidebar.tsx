@@ -1828,7 +1828,9 @@ export function LoroAppSidebar({
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
       if (rejectHistoryWrite([sessionId])) return;
-      void setSessionPinned(sessionId as SessionId, nextPinned);
+      void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [rejectHistoryWrite, setSessionPinned]
   );
@@ -1836,7 +1838,9 @@ export function LoroAppSidebar({
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
       if (rejectHistoryWrite([sessionId])) return;
-      void markSessionUnread(sessionId as SessionId);
+      void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [markSessionUnread, rejectHistoryWrite]
   );

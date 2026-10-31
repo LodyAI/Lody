@@ -141,8 +141,15 @@ function VisibleMachineAuthorizationProbe({
   return null;
 }
 
-function VisibleLocalProjectProbe({ onSnapshot }: { onSnapshot: (value: AccessSnapshot) => void }) {
+function VisibleLocalProjectProbe({
+  onSnapshot,
+  enabled = true,
+}: {
+  onSnapshot: (value: AccessSnapshot) => void;
+  enabled?: boolean;
+}) {
   const { accessByProjectKey, isLoading } = useVisibleLocalProjects({
+    enabled,
     includeMachineFlock: false,
   });
 
@@ -457,6 +464,26 @@ describe('visible access hooks', () => {
       convexAuthorizedKeys: [],
       isLoading: false,
     });
+  });
+
+  it('removes cached ordinary project authority when the guard consumer is disabled', async () => {
+    queryMocks.localProjectRows = [
+      {
+        machineId: 'cached-machine',
+        localProjectId: 'cached-project',
+        ownerUserId: 'other-member',
+        sharedWithTeam: true,
+        updatedAt: 1,
+      },
+    ];
+    let result: AccessSnapshot | undefined;
+    const onSnapshot = (next: AccessSnapshot) => {
+      result = next;
+    };
+    await mount('cached-projects', <VisibleLocalProjectProbe onSnapshot={onSnapshot} />);
+    expect(result?.accessKeys).toEqual(['cached-machine:cached-project']);
+    await render(<VisibleLocalProjectProbe enabled={false} onSnapshot={onSnapshot} />);
+    expect(result?.accessKeys).toEqual([]);
   });
 
   it('does not reuse local-project access rows while a later mount is loading', async () => {
