@@ -284,6 +284,8 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  # Backport isaacs/node-glob 4682e8c9; remove when compatible parents adopt the fix.
+  glob@13.0.1: patches/glob@13.0.1.patch
   '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch
   '@loro-dev/streams-crdt@0.19.2': patches/@loro-dev__streams-crdt@0.19.2.patch
   '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch

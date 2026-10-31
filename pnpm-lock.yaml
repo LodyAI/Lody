@@ -209,6 +209,9 @@ patchedDependencies:
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
+  glob@13.0.1:
+    hash: 061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484
+    path: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1:
     hash: b03e2c531618296b99e716d479b68761f6ebc6c81dcd1e9359e80b71e6b5ee8e
     path: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
@@ -16535,7 +16538,7 @@ snapshots:
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@5.9.3)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       react-docgen-typescript: 2.4.0(typescript@5.9.3)
       vite: 8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
@@ -16543,7 +16546,7 @@ snapshots:
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@5.9.3)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))':
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       react-docgen-typescript: 2.4.0(typescript@5.9.3)
       vite: 8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
     optionalDependencies:
@@ -23608,7 +23611,7 @@ snapshots:
     dependencies:
       is-glob: 4.0.3
 
-  glob@13.0.1:
+  glob@13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484):
     dependencies:
       minimatch: 10.2.5
       minipass: 7.1.2
@@ -26813,7 +26816,7 @@ snapshots:
 
   rimraf@6.1.2:
     dependencies:
-      glob: 13.0.1
+      glob: 13.0.1(patch_hash=061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484)
       package-json-from-dist: 1.0.1
 
   roarr@2.15.4:
