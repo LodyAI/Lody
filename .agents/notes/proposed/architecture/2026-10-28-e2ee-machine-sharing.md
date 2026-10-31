@@ -156,6 +156,15 @@ this machine's registry by ID; no requested path, working directory or worktree 
 is accepted, so there is no caller-controlled subdirectory or symlink to escape
 through. Same-member execution is unchanged.
 
+Two follow-ups close what an independent review found. A restore no longer rereads
+synced metadata after authorization: it starts from the project, Project group and
+parent it authorized, and create and restore recompute the scope immediately before a
+process starts, refusing anything outside the authorized set. Registry rows are synced,
+so any member can write them; in encrypted workspaces a row counts only while its
+`rootPath` still hashes to its project ID, which this machine derived from the canonical
+root it registered. A rewritten path therefore resolves as missing instead of
+redirecting an authorized project.
+
 A projectless conversation (`kind: 'none'`, a Lody-managed chat directory or managed
 GitHub clone) needs only the machine switch. The draft foundations Spec makes absent
 projects private and requires "actual local projects" to have their own switch, while

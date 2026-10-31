@@ -1926,6 +1926,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           this.machineId,
           localProjectId,
           {
+            verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
                 reason: 'session-fork-workdir-resolve',
@@ -1943,6 +1944,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'session-fork-local-project-resolve',

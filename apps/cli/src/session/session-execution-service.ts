@@ -445,10 +445,13 @@ type VisibleSessionTurnContext = {
     unhandledErrorContext?: VisibleSessionTurnUnhandledErrorContext;
   }) => Effect.Effect<void, unknown, never>;
   prompt: (promptBlocks: ContentBlock[]) => Effect.Effect<void, unknown, never>;
-  /** `scope` resolves, on this machine, every local project the turn can reach. */
+  /**
+   * `scope` resolves, on this machine, every local project the turn can reach. An
+   * encrypted claim returns the authorized set; the turn must not start outside it.
+   */
   claimExecution: (
     scope: () => Promise<readonly LocalProjectId[]>
-  ) => Effect.Effect<void, unknown, never>;
+  ) => Effect.Effect<readonly LocalProjectId[] | undefined, unknown, never>;
 };
 
 type VisibleSessionTurnAnalytics = {
@@ -3934,6 +3937,7 @@ export class SessionExecutionService {
       this.deps.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.deps.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.deps.workspaceDocument.syncMachineFlockDoc(this.deps.machineId, {
             reason: 'session-local-project-resolve',
@@ -4985,17 +4989,18 @@ export class SessionExecutionService {
 
             const claimExecution = Effect.fnUntraced(function* (
               scope: () => Promise<readonly LocalProjectId[]>
-            ): Effect.fn.Return<void, unknown> {
+            ): Effect.fn.Return<readonly LocalProjectId[] | undefined, unknown> {
               const gate = self.deps.encryptedExecution;
               if (!gate && !self.deps.encryptedWorkspace) return undefined;
               yield* abortIfCancelled();
+              const authorized = gate && userTurnId ? yield* self.tryPromise(scope) : [];
               const result =
                 gate && userTurnId
                   ? yield* gate.claim({
                       workspaceId: self.deps.workspaceId,
                       sessionId,
                       userTurnId,
-                      localProjectIds: [...(yield* self.tryPromise(scope))],
+                      localProjectIds: [...authorized],
                       requesterUserId: options.invocation?.requesterUserId,
                       inputConfig: options.invocation?.inputConfig,
                     })
@@ -5013,7 +5018,7 @@ export class SessionExecutionService {
                   userTurnId,
                   at: yield* Clock.currentTimeMillis,
                 });
-                return undefined;
+                return authorized;
               }
               if (result.state === 'completed' && userTurnId) {
                 const backend = yield* self.tryPromise(() =>
@@ -5909,6 +5914,16 @@ export class SessionExecutionService {
     });
   }
 
+  /** Refuse a start whose directories were changed after authorization. */
+  private async assertEncryptedScopeWithin(
+    authorized: readonly LocalProjectId[],
+    input: Parameters<SessionExecutionService['encryptedExecutionScope']>[0]
+  ): Promise<void> {
+    const allowed = new Set(authorized);
+    if ((await this.encryptedExecutionScope(input)).some((id) => !allowed.has(id)))
+      throw new Error('e2ee_machine_not_shared: the execution scope changed after authorization');
+  }
+
   /**
    * Encrypted sharing authorizes the local projects a turn can reach, resolved here
    * from machine state, never from the request alone. The live process's own config,
@@ -6094,6 +6109,8 @@ export class SessionExecutionService {
       message.project?.kind === 'local' ? undefined : message.project?.branch?.trim();
     let session = this.deps.sessionManager.getSession(sessionId);
     let project: ProjectRef | undefined = message.project;
+    // Encrypted turns start from the metadata they were authorized with, never a later read.
+    let authorized: { ids: readonly LocalProjectId[]; meta: SessionMeta | undefined } | undefined;
     const acpReplaySuppression = this.createAcpReplaySuppressionResource(sessionId);
 
     let replayPromptResult: ReplayPromptResult | null = null;
@@ -6117,7 +6134,17 @@ export class SessionExecutionService {
     const restoreMissingSession = Effect.fnUntraced(function* (
       ctx: VisibleSessionTurnContext
     ): Effect.fn.Return<ISession, unknown, Scope.Scope> {
-      const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+      const current = yield* self.tryPromise(() => sessionDoc.getMetaState());
+      const frozen = authorized?.meta;
+      const meta: SessionMeta | undefined =
+        authorized && current
+          ? {
+              ...current,
+              project: frozen?.project,
+              projectRun: frozen?.projectRun,
+              parentSessionId: frozen?.parentSessionId,
+            }
+          : current;
       project = project ?? self.resolveProjectFromMeta(meta, message.project?.branch);
       const localProjectId = project?.kind === 'local' ? project.localProjectId : undefined;
       const restoreWorkdir = localProjectId
@@ -6258,6 +6285,17 @@ export class SessionExecutionService {
         },
       };
 
+      if (authorized) {
+        const allowed = authorized.ids;
+        yield* self.tryPromise(() =>
+          self.assertEncryptedScopeWithin(allowed, {
+            projects: [project],
+            projectRuns: [restoreConfig.projectRun],
+            parentSessionId: restoreConfig.parentSessionId,
+            live: null,
+          })
+        );
+      }
       const restoreAttempt = Effect.gen(function* () {
         if (resumeSessionId) {
           yield* acpReplaySuppression.acquire;
@@ -6875,8 +6913,10 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
-          yield* ctx.claimExecution(async () => {
+          let scopedMeta: SessionMeta | undefined;
+          const authorizedIds = yield* ctx.claimExecution(async () => {
             const meta = await sessionDoc.getMetaState();
+            scopedMeta = meta;
             return self.encryptedExecutionScope({
               projects: [message.project, self.resolveProjectFromMeta(meta)],
               projectRuns: [meta?.projectRun],
@@ -6884,6 +6924,7 @@ export class SessionExecutionService {
               live: self.deps.sessionManager.getSession(sessionId),
             });
           });
+          if (authorizedIds) authorized = { ids: authorizedIds, meta: scopedMeta };
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -7249,16 +7290,17 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
-          yield* claimExecution(() =>
-            self.encryptedExecutionScope({
-              projects: [
-                project,
-                existingMeta ? self.resolveProjectFromMeta(existingMeta) : undefined,
-              ],
-              projectRuns: [sessionConfig.projectRun, existingMeta?.projectRun, message.projectRun],
-              parentSessionId: message.parentSessionId ?? existingMeta?.parentSessionId,
-              live: self.deps.sessionManager.getSession(sessionId),
-            })
+          const scopeInputs = () => ({
+            projects: [
+              project,
+              existingMeta ? self.resolveProjectFromMeta(existingMeta) : undefined,
+            ],
+            projectRuns: [sessionConfig.projectRun, existingMeta?.projectRun, message.projectRun],
+            parentSessionId: message.parentSessionId ?? existingMeta?.parentSessionId,
+            live: self.deps.sessionManager.getSession(sessionId),
+          });
+          const authorizedIds = yield* claimExecution(() =>
+            self.encryptedExecutionScope(scopeInputs())
           );
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
@@ -7393,6 +7435,11 @@ export class SessionExecutionService {
             if (self.turnRuntimeBySession.get(sessionId) === runtime) runtime.startStage = stage;
           };
           sessionConfig.worktreeScriptHistoryInsertBeforeEntryId = turnId;
+          // Parent metadata may change after authorization; recheck before any process starts.
+          if (authorizedIds) {
+            const allowed = authorizedIds;
+            yield* self.tryPromise(() => self.assertEncryptedScopeWithin(allowed, scopeInputs()));
+          }
           const session = yield* self.startWithTransientRetry({
             sessionId,
             runtime,

@@ -2637,6 +2637,8 @@ describe('SessionExecutionService', () => {
     meta?: Record<string, unknown>;
     /** Machine-held configuration of the live Session process. */
     liveConfig?: { project?: ProjectRef; parentSessionId?: SessionId };
+    /** No live process: the turn restores one; started configurations are recorded. */
+    restore?: SessionConfig[];
   }) => {
     let history: Array<Record<string, unknown>> = [
       ...(options.earlierInputAuthor
@@ -2683,7 +2685,9 @@ describe('SessionExecutionService', () => {
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
     let status = SessionStatusFactory.idle();
+    let restored = false;
     const sessionDoc = withHistoryPort({
+      // Read at call time, so a test can change synced metadata mid-turn.
       getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
       setStatus: vi.fn(async (next: typeof status) => {
         status = next;
@@ -2719,9 +2723,13 @@ describe('SessionExecutionService', () => {
           : [...history, entry];
       }),
       sessionManager: {
-        getSession: vi.fn(() => activeSession),
+        getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
         getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(),
+        createSession: vi.fn(async (config: SessionConfig) => {
+          options.restore?.push(config);
+          restored = true;
+          return activeSession;
+        }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         validateSessionCredentials: vi.fn(async () => {}),
@@ -3521,6 +3529,38 @@ describe('SessionExecutionService', () => {
         expect(result.failureMessages).toEqual([
           expect.stringContaining('e2ee_machine_not_shared'),
         ]);
+      } finally {
+        f.close();
+      }
+    });
+    it('restores from the metadata it authorized, even if synced metadata changes meanwhile', async () => {
+      const f = encryptedExecutionFixture();
+      const meta: Record<string, unknown> = {};
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      // The member rewrites synced metadata while the claim is authorizing.
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          Effect.sync(() => {
+            meta.project = local('p2');
+          }).pipe(Effect.andThen(shared.claim(intent))),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([[undefined]]);
+        // Before the fix the restore re-read the rewritten metadata and resolved p2.
+        expect(result.failureMessages.join('\n')).not.toContain('p2');
+        expect(started).toHaveLength(1);
+        expect(started[0]?.project).toBeUndefined();
       } finally {
         f.close();
       }
