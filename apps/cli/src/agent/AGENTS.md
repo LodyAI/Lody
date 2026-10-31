@@ -102,12 +102,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
   ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
   budget for the form.
-- A protocol agent lists every way to sign in in its `initialize` response, whether or not the
-  stored credentials still work. The capability probe records that list on the Provider's
-  capability row, and the panel renders it without waiting for an `authRequired` probe. `start`
-  accepts the reader's `methodId` only from machines advertising
-  `acpAuthenticationMethodSelection`; the daemon re-reads the advertised list, falls back to its
-  own picker when a cached pick is stale, and still runs `authenticate` itself.
+- A protocol agent's `initialize` methods are the sign-in entry point; record them on the
+  Provider's capability row and let the reader pick one.
 - Machine RPC may name only a persisted Provider `configId`; the daemon freezes
   machine/CLI/agent/launch/env/runtime fields before spawning, capability refresh included, and
   later replies can never replace that launch target.

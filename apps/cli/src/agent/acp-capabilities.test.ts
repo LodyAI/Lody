@@ -433,6 +433,7 @@ describe('fetchAcpCapabilities', () => {
       getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => ({ version: 1, actions: ['pause', 'resume'] }),
+      getAuthMethods: () => [],
     } as never;
     mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
 
@@ -456,6 +457,7 @@ describe('fetchAcpCapabilities', () => {
       getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => true,
       getGoalCapability: () => undefined,
+      getAuthMethods: () => [],
     } as never;
     mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
 

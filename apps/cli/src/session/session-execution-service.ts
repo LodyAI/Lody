@@ -9034,13 +9034,13 @@ export class SessionExecutionService {
       options.signal?.throwIfAborted();
       // Only agent-driven providers authenticate through the ACP exchange. A
       // built-in provider signs in with its own native command, and the
-      // adapter's advertised methods do not describe it.
-      const advertisedAuthMethods = usesAcpProtocolAuthentication(
-        message.cliType,
-        message.agentType
-      )
-        ? (authMethods ?? []).map(summarizeAcpAuthMethod)
-        : undefined;
+      // adapter's advertised methods do not describe it. A probe that could not
+      // read the list reports `undefined`, which stays "never asked" rather than
+      // claiming the agent offers no way to sign in.
+      const advertisedAuthMethods =
+        authMethods && usesAcpProtocolAuthentication(message.cliType, message.agentType)
+          ? authMethods.map(summarizeAcpAuthMethod)
+          : undefined;
       const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,

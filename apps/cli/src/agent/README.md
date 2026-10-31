@@ -312,7 +312,8 @@ advertised list on its own connection, ignores a pick the agent no longer advert
 back to the single method or its own picker), and still runs `authenticate` itself. A machine
 that predates `acpAuthenticationMethodSelection` receives no `methodId` at all, because its
 strict request schema would reject the whole start. `authRequired` now only describes stored
-credentials; it no longer decides whether the panel appears.
+credentials; it no longer decides whether the panel appears. [Decision and rejected
+alternatives](../../../../.agents/notes/implemented/architecture/2026-10-31-acp-advertised-auth-methods.md).
 
 ### Capability cache
 
