@@ -1,6 +1,7 @@
 # No-PID spawn failures preserve resource identity
 
 Status: implemented
+Archived: 2026-10-30
 Translation: current
 
 [中文](2026-10-17-no-pid-spawn-resource-identity.zh.md)
@@ -25,7 +26,7 @@ an earlier uncertainty flag.
 
 The Session remains the resource owner; acquired processes, cancellation,
 termination and successor admission retain the existing
-[Inbox contract](../architecture/2026-10-12-operation-inbox.md). Failed journal
+[Inbox contract](../../implemented/architecture/2026-10-12-operation-inbox.md). Failed journal
 writes and unresolved release failures still require the retained recovery owner.
 This corrects acquisition evidence without changing physical release guarantees.
 Installing `gh` merely avoids one trigger. No credential/PATH change or automatic

@@ -124,5 +124,7 @@ denial/I/O failure cannot gate mailbox receipt. Show file protection; socket tim
 Only rotate resumes candidates. Keep errors transport-free.
 
 Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
+Passive cache inspection uses existing entries only; never call openWorkspace or
+readMachineSharing from that path. Counts are diagnostic, not execution authority.
 Policy errors affect dependent execution only. Narrow read/update methods keep keys
 and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

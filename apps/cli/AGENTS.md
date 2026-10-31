@@ -47,6 +47,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
+- Shared start/probe/load promises share only in-flight attempts or successes; a failure must not be
+  cached until restart. An unprovable local fact degrades its own action instead of blocking unrelated
+  work, and every user-path wait is bounded ([rules](../../.agents/docs/failure-containment.md#rules)).
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).

@@ -1,5 +1,6 @@
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
@@ -23,6 +24,7 @@ import { useScheduledMessageContents } from '../schedules/use-scheduled-message-
 import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { readConversationCopySource } from '@/lib/conversation-copy-source';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
 import { SessionWindowMenuItem } from '../session-window-menu-item';
@@ -175,7 +177,7 @@ import {
   queuedMessageBehaviorAtom,
   userAtom,
 } from '@/atoms';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import {
   docMetaCacheReadyAtom,
@@ -2356,7 +2358,11 @@ export type SessionChatInterfaceHandle = {
   copyConversationHistory: () => Promise<void>;
   /** Plain-text conversation snapshot for the share-as-image card; null while
    * durable history has not loaded. */
-  getShareImageData: () => Promise<{ messages: ConversationMessage[]; agentName?: string } | null>;
+  getShareImageData: () => Promise<{
+    messages: ConversationMessage[];
+    sourceRuntime: WorkspaceRuntime;
+    agentName?: string;
+  } | null>;
   startShareImageSelection: (
     messages: ConversationMessage[],
     onConfirm: (messages: ConversationMessage[]) => void
@@ -2593,6 +2599,10 @@ export const SessionChatInterface = memo(
     );
 
     const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+    const { run: runPlaintextCopy, confirmation: plaintextCopyConfirmation } = usePlaintextCopy(
+      runtime,
+      session.id
+    );
     const localMachineId = useAtomValue(localMachineIdAtom);
     const localHomeDir = useAtomValue(localHomeDirAtom);
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
@@ -4122,43 +4132,50 @@ export const SessionChatInterface = memo(
 
         const turnCount = conversationView.turnCount;
         try {
-          if (!runtime) throw new Error('Workspace runtime unavailable');
-          await runtime.waitForContentAdmission?.();
-          const history = conversationCopyRange(await conversationView.readAll(), throughMessageId);
-          const last = history.at(-1);
-          const { markdown, stats } = buildConversationMarkdown({
-            workspaceId: workspaceId ?? undefined,
-            history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
-            title: session.title ?? undefined,
-            source: conversationCopySource,
-            participants: conversationCopyParticipants,
-            // Header, not a trailing line: whoever reads this next has to know the
-            // last turn is cut short before reading it. See the builder's option.
-            incompleteFinalResponse:
-              last?.role === 'assistant' && !last.finished
-                ? t(
-                    'sessions.copyContextIncomplete',
-                    'The last response was still generating when copied.'
-                  )
-                : undefined,
+          await runPlaintextCopy(async (assertCurrent, admitOutput) => {
+            if (!runtime) throw new Error('Workspace runtime unavailable');
+            const history = conversationCopyRange(
+              await readConversationCopySource(runtime, session.id, conversationView),
+              throughMessageId
+            );
+            assertCurrent();
+            const last = history.at(-1);
+            const { markdown, stats } = buildConversationMarkdown({
+              workspaceId: workspaceId ?? undefined,
+              history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+              title: session.title ?? undefined,
+              source: conversationCopySource,
+              participants: conversationCopyParticipants,
+              // Header, not a trailing line: whoever reads this next has to know the
+              // last turn is cut short before reading it. See the builder's option.
+              incompleteFinalResponse:
+                last?.role === 'assistant' && !last.finished
+                  ? t(
+                      'sessions.copyContextIncomplete',
+                      'The last response was still generating when copied.'
+                    )
+                  : undefined,
+            });
+            await admitOutput();
+            assertCurrent();
+            await navigator.clipboard.writeText(markdown);
+            assertCurrent();
+            captureSessionEvent('session/history_copy_succeeded', {
+              history_count: turnCount,
+              prompt_length: stats.chars,
+              estimated_tokens: stats.estimatedTokens,
+              over_budget: stats.overBudget,
+              thinking_truncated: stats.thinkingTruncated,
+              terminal_omitted: stats.terminalOutputOmitted,
+              tool_calls_collapsed: stats.toolCallsCollapsed,
+              tool_results_truncated: stats.toolResultsTruncated,
+            });
+            capturePostHogEvent(postHog, 'export/context_markdown_copied', {
+              scope: throughMessageId ? 'through_message' : 'full',
+              history_count: turnCount,
+            });
+            toast.success(describeCopiedConversation(stats, t));
           });
-          await runtime.waitForContentAdmission?.();
-          await navigator.clipboard.writeText(markdown);
-          captureSessionEvent('session/history_copy_succeeded', {
-            history_count: turnCount,
-            prompt_length: stats.chars,
-            estimated_tokens: stats.estimatedTokens,
-            over_budget: stats.overBudget,
-            thinking_truncated: stats.thinkingTruncated,
-            terminal_omitted: stats.terminalOutputOmitted,
-            tool_calls_collapsed: stats.toolCallsCollapsed,
-            tool_results_truncated: stats.toolResultsTruncated,
-          });
-          capturePostHogEvent(postHog, 'export/context_markdown_copied', {
-            scope: throughMessageId ? 'through_message' : 'full',
-            history_count: turnCount,
-          });
-          toast.success(describeCopiedConversation(stats, t));
         } catch (error) {
           console.error('Failed to copy conversation history', error);
           captureSessionEvent('session/history_copy_failed', {
@@ -4180,6 +4197,8 @@ export const SessionChatInterface = memo(
         session.title,
         conversationView,
         runtime,
+        session.id,
+        runPlaintextCopy,
         postHog,
         t,
       ]
@@ -6100,7 +6119,10 @@ export const SessionChatInterface = memo(
           if (!runtime) throw new Error('Workspace runtime unavailable');
           await runtime.waitForContentAdmission?.();
           return {
-            messages: collectConversationMessages(await conversationView.readAll()),
+            messages: collectConversationMessages(
+              await readConversationCopySource(runtime, session.id, conversationView)
+            ),
+            sourceRuntime: runtime,
             agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
           };
         },
@@ -6119,6 +6141,7 @@ export const SessionChatInterface = memo(
         lastCompletedAssistantMessageId,
         openSearch,
         session.cliType,
+        session.id,
         sessionAgentConfig?.name,
         conversationView,
         runtime,
@@ -7156,6 +7179,7 @@ export const SessionChatInterface = memo(
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
+          {plaintextCopyConfirmation}
           {toolbar?.container &&
             createPortal(
               <SessionConversationPage className={toolbar.className} hideMessageArea>

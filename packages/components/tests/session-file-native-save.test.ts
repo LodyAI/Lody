@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   received: [] as { name: string; bytes: Buffer }[],
   failure: null as string | null,
   failWrite: false,
+  failUri: false,
 }));
 
 vi.mock('@capacitor/filesystem', () => ({
@@ -28,6 +29,7 @@ vi.mock('@capacitor/filesystem', () => ({
       state.files.set(path, Buffer.concat([state.files.get(path)!, Buffer.from(data, 'base64')]));
     },
     async getUri({ path }: { path: string }) {
+      if (state.failUri) throw new Error('URI unavailable');
       return { uri: `file://${path}` };
     },
     async deleteFile({ path }: { path: string }) {
@@ -53,6 +55,7 @@ beforeEach(() => {
   state.received = [];
   state.failure = null;
   state.failWrite = false;
+  state.failUri = false;
 });
 
 it.each([0, 7, 3 * 1024 * 1024 + 5])(
@@ -98,6 +101,22 @@ it.each(['write', 'share'])('cleans up and reports a %s failure', async (step) =
   expect(state.files.size).toBe(0);
   expect(state.received).toEqual([]);
 });
+
+it.each(['cancel', 'write', 'uri', 'share'])(
+  'cleans only its own decrypted staging file on %s, never an existing user file',
+  async (step) => {
+    const original = Buffer.from('existing-user-file');
+    state.files.set('user-target/notes.md', original);
+    state.failWrite = step === 'write';
+    state.failUri = step === 'uri';
+    state.failure = step === 'cancel' ? 'Share canceled' : step === 'share' ? 'Share failed' : null;
+    const copy = shareFileBytesNatively('../notes.md', new TextEncoder().encode('approved-copy'));
+    if (step === 'cancel') await expect(copy).resolves.toEqual({ shared: false });
+    else await expect(copy).rejects.toThrow();
+    expect([...state.files]).toEqual([['user-target/notes.md', original]]);
+    expect(state.received).toEqual([]);
+  }
+);
 
 it.each(['save', 'share'] as const)(
   'image %s hands off original bytes, never claims an album save',

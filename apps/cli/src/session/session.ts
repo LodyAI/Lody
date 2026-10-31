@@ -1,4 +1,5 @@
 import { CommandTimedOut } from '@lody/shared/node/process';
+import { TURN_BUDGETS } from './turn-budgets';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
 import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
@@ -220,13 +221,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     await this.sandbox.applyLimits(limits);
   }
 
-  watchInboxRecoveryResources(
-    persist: (identity: import('./session-sandbox').SessionRecoveryResources) => void
-  ): Promise<() => void> {
-    if (!this.sandbox.watchRecoveryResources)
-      return Promise.reject(new Error('Complete Session resource ownership is unavailable'));
-    return this.sandbox.watchRecoveryResources(persist);
-  }
   async getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo> {
     let accounting: SessionMonitorRuntimeInfo['accounting'];
     try {
@@ -967,14 +961,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           const timeout = observation
             ? setTimeout(() => {
                 timedOut = true;
-                this.logger.warn(`[${this.sessionId}] Git observation timed out after 15000ms`);
+                this.logger.warn(
+                  `[${this.sessionId}] Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`
+                );
                 void processHandle.terminate(true).then(
                   () => {
                     cleanup();
                     reject(
                       new CommandTimedOut({
                         command: 'git',
-                        message: 'Git observation timed out after 15000ms',
+                        message: `Git observation timed out after ${TURN_BUDGETS.gitObservationMs}ms`,
                       })
                     );
                   },
@@ -983,7 +979,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                     reject(error);
                   }
                 );
-              }, 15_000)
+              }, TURN_BUDGETS.gitObservationMs)
             : undefined;
           const cleanup = () => {
             clearTimeout(timeout);

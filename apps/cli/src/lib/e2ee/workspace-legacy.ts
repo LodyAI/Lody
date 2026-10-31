@@ -8,6 +8,9 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import { getLogger } from '../../utils/logger';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -751,6 +754,24 @@ async function openWorkspaceOwned(
     Date.now
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
+  // Realtime dispatch, the durable execution origin and feature requests reopen frames.
+  const catchUpLedger = makeLedgerCatchUp({
+    genesis: binding.genesisHash,
+    resource: e2eeRpcResource,
+    ledger: () => opened.runtime.executionLedger(),
+    catchUp: async () => {
+      // An older round may finish after an independent authority read advances
+      // the ledger. Join it without extending it, then receive the current key
+      // through the same refresh owner if it is still missing. Never reset retries.
+      await (refresh ?? refreshInBackground(false));
+      if (closed) return;
+      const status = await run(opened.runtime.status());
+      if (!closed && !status.hasCurrentKey) await refreshInBackground(false);
+    },
+    // Two epoch integers and an outcome only; never the frame or its plaintext.
+    observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
+  });
+  const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
@@ -1200,7 +1221,7 @@ async function openWorkspaceOwned(
             const state = view.inspectState();
             const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
             if (!machineId) return undefined;
-            const verified = yield* rpc.openDispatch(machineId, rpcOriginal);
+            const verified = yield* dispatchNative.openDispatch(machineId, rpcOriginal);
             if (
               verified.args.sessionId !== intent.sessionId ||
               verified.args.userTurnId !== intent.userTurnId ||
@@ -1270,7 +1291,7 @@ async function openWorkspaceOwned(
                   workspaceId: options.workspaceId,
                   genesis: binding.genesisHash,
                   machineId,
-                  native: rpc,
+                  native: dispatchNative,
                   journal: rpcJournal,
                   authorize: opened.executionAuthorization.authorizeExecution,
                   isOpen: () => !closed,
@@ -1283,7 +1304,7 @@ async function openWorkspaceOwned(
                       workspaceId: options.workspaceId,
                       genesis: binding.genesisHash,
                       machineId,
-                      native: rpc,
+                      native: dispatchNative,
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,

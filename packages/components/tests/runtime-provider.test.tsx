@@ -581,54 +581,56 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
   });
 
-  it('retires the local replica when native credential refresh confirms member removal', async () => {
-    vi.stubGlobal('indexedDB', new IDBFactory());
-    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
-    ordinaryCloud();
-    listEncrypted();
-    const status = {
-      genesisHash: '11'.repeat(32),
-      signingPublicKey: '22'.repeat(32),
-      epoch: 0,
-      hasCurrentKey: true,
-      rotationRequired: false,
-    };
-    let rejectRefresh: (error: Error) => void = () => {};
-    let closed = false;
-    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
-    environment.e2eeWorkspaces!.runtime = {
-      open: async () => status,
-      status: async () => status,
-      close: async () => {
-        closed = true;
-      },
-      refresh: () =>
-        new Promise((_resolve, reject) => {
-          rejectRefresh = reject;
-        }),
-    } as unknown as E2eeWorkspaceRuntime;
-    await render();
-    expect(store.get(runtimeAtom)).toBe(prepared);
-    await act(async () =>
-      rejectRefresh(
-        new Error("Error invoking remote method 'e2ee.refresh': Error: e2ee_member_removed")
-      )
-    );
-    expect(store.get(runtimeAtom)).toBeNull();
-    expect(prepared.disposed).toBe(true);
-    expect(closed).toBe(true);
-    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
-      errorType: 'e2ee_member_removed',
-    });
-    await resumeEncryptedWorkspaceCleanup({
-      accountId: 'local:user',
-      workspaceId: 'local:workspace',
-      windowId: 'test-window',
-      genesisHash: '11'.repeat(32),
-      signingPublicKey: '22'.repeat(32),
-    });
-    vi.unstubAllGlobals();
-  });
+  it.each(['e2ee_member_removed', 'e2ee_device_revoked'] as const)(
+    'retires the local replica when native credential refresh confirms %s',
+    async (code) => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      ordinaryCloud();
+      listEncrypted();
+      const status = {
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+        epoch: 0,
+        hasCurrentKey: true,
+        rotationRequired: false,
+      };
+      let rejectRefresh: (error: Error) => void = () => {};
+      let closed = false;
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => status,
+        status: async () => status,
+        close: async () => {
+          closed = true;
+        },
+        refresh: () =>
+          new Promise((_resolve, reject) => {
+            rejectRefresh = reject;
+          }),
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      await act(async () =>
+        rejectRefresh(new Error(`Error invoking remote method 'e2ee.refresh': Error: ${code}`))
+      );
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(prepared.disposed).toBe(true);
+      expect(closed).toBe(true);
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        errorType: code,
+        workspaceId: 'local:workspace',
+      });
+      await resumeEncryptedWorkspaceCleanup({
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        windowId: 'test-window',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      });
+      vi.unstubAllGlobals();
+    }
+  );
 
   it.each([true, false])(
     'cold native removal uses only a saved exact locator: %s',
@@ -881,6 +883,40 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await act(async () => root.render(null));
     expect(prepared.disposed).toBe(true);
     expect(readers).toEqual(new Set(['other-window']));
+  });
+
+  it('releases exactly one count of a legacy window-scoped reader', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    // Electron main counts acquisitions per window and workspace, and labels all
+    // of them with one account-owner ID. The control page in this same window
+    // already holds one count that the content runtime must not release.
+    let count = 1;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'account-owner',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => {
+        count += 1;
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {
+        count = Math.max(0, count - 1);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(count).toBe(2);
+    await act(async () => root.render(null));
+    expect(prepared.disposed).toBe(true);
+    expect(count).toBe(1);
   });
 
   it('opens an independent ordinary workspace while an encrypted workspace retains incomplete native close', async () => {

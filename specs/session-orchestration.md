@@ -203,7 +203,7 @@ finish their inputs as unknown without replay, clear legacy blocks and preserve 
 work. Report uncertainty and attempt bounded background cleanup; cleanup failure cannot
 prevent input or shutdown. Never reuse an Agent whose termination failed: detach the old
 Session and create a new ACP. Restart retirement may log a warning when history is not
-available. Resource journals remain cleanup evidence; offline attestation is not required.
+available. Cleanup state never gates admission, and no offline attestation is required.
 
 An automatic batch yields atomically to pre-submission human acceptance. A human input
 already being prepared survives later queued human input. Keep admission from the

@@ -28,6 +28,14 @@ the store into the raw `LoroDoc` — and
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.
 
+## Conversation exports
+
+Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
+repeat runtime admission and its source guard before output. Unknown cloud mode
+cannot authorize a copy; encrypted copies require a fresh explicit choice.
+Cancellation retains selection and cannot remove a user destination.
+[Ownership](hooks/README.md#explicit-plaintext-copies).
+
 ## Lightweight hosted entries
 
 - `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
@@ -114,7 +122,8 @@ Performance comparisons must use the current full-Mirror baseline.
 ## Billing data
 
 - After auth/workspace resolution, preload billing overview into the session-scoped
-  cache for latency only. Permissions, quotas, destructive guards, and Stripe invoice
+  cache for latency only. A rejected preload stays inside its leaf and never reaches
+  the route error boundary. Permissions, quotas, destructive guards, and Stripe invoice
   history remain live/on-demand.
 
 ## ACP selectors

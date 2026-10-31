@@ -25,11 +25,11 @@ The 2026-10-12 research borrowed durable queuing, separate admission and batched
 
 ## Ownership, recovery and compatibility
 
-Effect remains locked at 4.0.2. `inbox/service.ts` owns the repository, signals and scoped fibers; `operationInboxLegacy` bridges Session input; `operation-coordinator.ts` and `workspace-cleanup-legacy.ts` are registered application entries. Platform Session resource observers bridge acquisition callbacks synchronously before spawn. Whole Session/ACP/history migration remains unfinished, as recorded in the [Effect ledger](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger).
+Effect remains locked at 4.0.2. `inbox/service.ts` owns the repository, signals and scoped fibers; `operationInboxLegacy` bridges Session input; `operation-coordinator.ts` and `workspace-cleanup-legacy.ts` are registered application entries. Whole Session/ACP/history migration remains unfinished, as recorded in the [Effect ledger](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger).
 
 Review of `40ef5c29cbe496f28f17ab10297cf37c3c48030f` found three adapter defects, addressed by the following contracts:
 
-1. Journal every resource acquisition before spawning, mark incomplete acquisition persistently, union later terminal/process roots, and retain all Session owners and the producing host PID. Resource registration remains, but the [availability decision](../bug-fix/2026-10-29-inbox-no-durable-block.md) supersedes release-proof admission: restart retires interrupted input without replay; failed release detaches the old Agent and never blocks successors. Never signal a possibly reused PID.
+1. Retain every attached Session owner's terminate handle for cleanup. The [availability decision](../bug-fix/2026-10-29-inbox-no-durable-block.md) supersedes the original resource journal and release-proof admission: restart retires interrupted input without replay; failed release detaches the old Agent and never blocks successors; process identities are no longer journaled. Never signal a possibly reused PID.
 2. Trusted renderer/non-delegated CLI sends persist `humanInputReceipts` before activation or queuing. History fallback restores matching authorization after lost or oversized RPC; generic history, foreign receipts and canceled/terminal inputs cannot clear pause.
 3. Coordinator `recoverStop()` calls independent `recoverClose()` to repair durable settlement/release/pause writes. Preserve the original failed receipt and recovery owner; never replay transport or treat repeated Scope close as recovery.
 

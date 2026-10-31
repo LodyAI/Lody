@@ -76,6 +76,7 @@ describe('WorkspaceMachineExpandedSection', () => {
       'button[aria-expanded="false"]'
     );
     expect(collapsedRow).not.toBeNull();
+    expect(collapsedRow!.getAttribute('data-settings-machine-id')).toBe(machineId);
     const rowClassName = collapsedRow!.className;
     const childLayout = [...collapsedRow!.children].map(
       (child) => `${child.tagName}:${child.className}`
@@ -86,6 +87,7 @@ describe('WorkspaceMachineExpandedSection', () => {
 
     const expandedRow = container.querySelector<HTMLButtonElement>('button[aria-expanded="true"]');
     expect(expandedRow).not.toBeNull();
+    expect(expandedRow!.getAttribute('data-settings-machine-id')).toBe(machineId);
     expect(expandedRow!.className).toBe(rowClassName);
     const expandedChildLayout = [...expandedRow!.children].map(
       (child) => `${child.tagName}:${child.className}`

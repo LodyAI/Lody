@@ -783,7 +783,22 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     const fiber = yield* Effect.forkIn(work, scope);
     return yield* Fiber.join(fiber);
   });
+  // Observe retained RAM only. This is not an execution decision and deliberately
+  // does not check/extend freshness, resolve a target or initialize an owner.
+  const inspectCache = (machineId: string) => {
+    let cachedPolicies = 0,
+      cachedExecutionGrants = 0;
+    for (const entry of cache.values()) {
+      const policy = entry.policy.inspect();
+      if (policy.machineId !== machineId) continue;
+      cachedPolicies++;
+      if (policy.sharedWithTeam) cachedExecutionGrants++;
+    }
+    return { cachedPolicies, cachedExecutionGrants };
+  };
   return {
+    /** Passive counts of retained policies/team grants, never current authorization. */
+    inspectCache,
     read: (...args: Parameters<typeof read>) => owned(read(...args)),
     write: (...args: Parameters<typeof write>) => owned(write(...args)),
     authorize: (...args: Parameters<typeof authorize>) => owned(authorize(...args)),
@@ -830,6 +845,9 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
   };
   yield* Effect.addFinalizer(() => Effect.sync(stop));
   return {
+    /** Count an existing owner only; observing an unopened host never opens storage. */
+    inspectCache: (machineId: string) =>
+      owner?.inspectCache(machineId) ?? { cachedPolicies: 0, cachedExecutionGrants: 0 },
     read: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['read']>
     ) => Effect.flatMap(get, (value) => value.read(...args)),

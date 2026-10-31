@@ -12,13 +12,11 @@ import {
   type InboxRelease,
   type InboxScope,
 } from './model';
-import type { InboxResourceIdentity } from './recovery';
 import { canFenceBatch, inputAcceptance, operationInboxCompletion } from './rules';
 
 const StateRow = z.object({
   revision: z.number(),
   paused: z.number(),
-  blocked: z.number(),
   active_execution: z.string().nullable(),
   active_input: z.string().nullable(),
 });
@@ -230,7 +228,7 @@ export class InboxSqlite {
     if (
       this.db
         .prepare(
-          'SELECT 1 FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND (paused=1 OR blocked=1 OR active_execution IS NOT NULL)'
+          'SELECT 1 FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND (paused=1 OR active_execution IS NOT NULL)'
         )
         .get(scope.workspaceId, scope.sessionId)
     )
@@ -276,7 +274,7 @@ export class InboxSqlite {
   hasRunnableWork(workspaceId: string, sessionId: string): boolean {
     return !!this.db
       .prepare(`SELECT 1 FROM inbox_sessions s WHERE s.workspace_id=? AND s.session_id=? AND
-      (s.active_execution IS NOT NULL OR s.blocked=1 OR (s.paused=0 AND EXISTS(
+      (s.active_execution IS NOT NULL OR (s.paused=0 AND EXISTS(
         SELECT 1 FROM inbox_intents i WHERE i.workspace_id=s.workspace_id AND i.session_id=s.session_id AND i.user_id=s.user_id AND i.state IN ('pending','prepared')))) LIMIT 1`)
       .get(workspaceId, sessionId);
   }
@@ -331,7 +329,7 @@ export class InboxSqlite {
   private ensure(s: InboxScope): void {
     this.db
       .prepare(
-        'INSERT OR IGNORE INTO inbox_sessions(workspace_id,session_id,user_id,paused,blocked) SELECT ?,?,?,COALESCE(MAX(paused),0),COALESCE(MAX(blocked),0) FROM inbox_sessions WHERE workspace_id=? AND session_id=?'
+        'INSERT OR IGNORE INTO inbox_sessions(workspace_id,session_id,user_id,paused) SELECT ?,?,?,COALESCE(MAX(paused),0) FROM inbox_sessions WHERE workspace_id=? AND session_id=?'
       )
       .run(s.workspaceId, s.sessionId, s.userId, s.workspaceId, s.sessionId);
   }
@@ -340,7 +338,7 @@ export class InboxSqlite {
     return StateRow.parse(
       this.db
         .prepare(
-          'SELECT revision,paused,blocked,active_execution,active_input FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND user_id=?'
+          'SELECT revision,paused,active_execution,active_input FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND user_id=?'
         )
         .get(s.workspaceId, s.sessionId, s.userId)
     );
@@ -408,21 +406,12 @@ export class InboxSqlite {
                 'failed',
                 this.watermark({ workspaceId, sessionId: row.session_id, userId: row.user_id })
               );
-          this.db
-            .prepare(
-              "UPDATE inbox_resources SET state='unreleased',cause=COALESCE(cause,?) WHERE workspace_id=? AND session_id=? AND execution_id=?"
-            )
-            .run(
-              'Previous owner exited; result unknown, not retried',
-              workspaceId,
-              row.session_id,
-              row.active_execution
-            );
         });
         getLogger('inbox').warn(
           `[${row.session_id}] Previous run was interrupted when Lody exited; result unknown, not retried`
         );
       }
+      // `blocked` is no longer written; clearing it only repairs pre-#2067 stores.
       this.db
         .prepare(
           'UPDATE inbox_sessions SET blocked=0,active_execution=NULL,active_input=NULL,revision=revision+1 WHERE workspace_id=? AND (active_execution IS NOT NULL OR blocked=1)'
@@ -487,8 +476,7 @@ export class InboxSqlite {
         current.active_execution !== executionId ||
         current.active_input !== previous.inputId ||
         this.inputCanceled(previous.workspaceId, previous.sessionId, previous.inputId) ||
-        current.paused ||
-        current.blocked
+        current.paused
       )
         return false;
       if (!this.accept(next)) return false;
@@ -507,11 +495,6 @@ export class InboxSqlite {
           'UPDATE inbox_sessions SET active_execution=?,active_input=? WHERE workspace_id=? AND session_id=? AND user_id=?'
         )
         .run(executionId, next.inputId, next.workspaceId, next.sessionId, next.userId);
-      this.db
-        .prepare(
-          'UPDATE inbox_resources SET user_id=? WHERE workspace_id=? AND session_id=? AND execution_id=?'
-        )
-        .run(next.userId, next.workspaceId, next.sessionId, executionId);
       return true;
     });
   }
@@ -567,7 +550,6 @@ export class InboxSqlite {
     return (
       this.currentOwner(scope.workspaceId, owner) &&
       !current.paused &&
-      !current.blocked &&
       current.active_execution === executionId &&
       !!current.active_input &&
       !this.inputCanceled(scope.workspaceId, scope.sessionId, current.active_input)
@@ -752,11 +734,10 @@ export class InboxSqlite {
       )
         return false;
       if (
-        current.blocked ||
         current.paused ||
         this.db
           .prepare(
-            'SELECT 1 FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND (active_execution IS NOT NULL OR blocked=1)'
+            'SELECT 1 FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND active_execution IS NOT NULL'
           )
           .get(s.workspaceId, s.sessionId)
       )
@@ -764,7 +745,7 @@ export class InboxSqlite {
       return (
         this.db
           .prepare(
-            'UPDATE inbox_sessions SET active_execution=?,active_input=? WHERE workspace_id=? AND session_id=? AND user_id=? AND blocked=0 AND active_execution IS NULL'
+            'UPDATE inbox_sessions SET active_execution=?,active_input=? WHERE workspace_id=? AND session_id=? AND user_id=? AND active_execution IS NULL'
           )
           .run(executionId, 'inputId' in s ? s.inputId : null, s.workspaceId, s.sessionId, s.userId)
           .changes === 1
@@ -785,20 +766,9 @@ export class InboxSqlite {
       const used = this.db
         .prepare(
           `SELECT 1 FROM inbox_releases WHERE workspace_id=? AND session_id=? AND execution_id=?
-           UNION ALL SELECT 1 FROM inbox_resources WHERE workspace_id=? AND session_id=? AND execution_id=?
            UNION ALL SELECT 1 FROM inbox_batches WHERE workspace_id=? AND session_id=? AND input_id=? AND state NOT IN ('prepared','superseded')`
         )
-        .get(
-          s.workspaceId,
-          s.sessionId,
-          executionId,
-          s.workspaceId,
-          s.sessionId,
-          executionId,
-          s.workspaceId,
-          s.sessionId,
-          s.inputId
-        );
+        .get(s.workspaceId, s.sessionId, executionId, s.workspaceId, s.sessionId, s.inputId);
       if (used) return false;
       return (
         this.db
@@ -864,7 +834,7 @@ export class InboxSqlite {
       });
       this.db
         .prepare(
-          'UPDATE inbox_sessions SET active_execution=NULL,active_input=NULL,blocked=0 WHERE workspace_id=? AND session_id=? AND user_id=?'
+          'UPDATE inbox_sessions SET active_execution=NULL,active_input=NULL WHERE workspace_id=? AND session_id=? AND user_id=?'
         )
         .run(event.workspaceId, event.sessionId, event.userId);
       this.db
@@ -872,19 +842,6 @@ export class InboxSqlite {
           'UPDATE inbox_inputs SET finished=1 WHERE workspace_id=? AND session_id=? AND input_id=?'
         )
         .run(event.workspaceId, event.sessionId, event.inputId);
-      this.writeDiagnostic(() => {
-        this.db
-          .prepare(
-            'UPDATE inbox_resources SET state=?,cause=COALESCE(?,cause) WHERE workspace_id=? AND session_id=? AND execution_id=?'
-          )
-          .run(
-            event.outcome === 'unreleased' ? 'unreleased' : 'released',
-            event.cause ?? null,
-            event.workspaceId,
-            event.sessionId,
-            event.executionId
-          );
-      });
       const accepted = this.db
         .prepare(
           'SELECT revision FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND input_id=?'
@@ -898,31 +855,11 @@ export class InboxSqlite {
       if (
         event.outcome !== 'normal' ||
         current.paused ||
-        current.blocked ||
         (accepted ?? prepared)?.revision !== current.revision
       )
         return;
       this.requestAutomatic(event, event.config, event.executionId);
     });
-  }
-  registerResources(
-    scope: InboxScope,
-    executionId: string,
-    identity: InboxResourceIdentity | undefined
-  ): void {
-    this.db
-      .prepare(
-        `INSERT INTO inbox_resources(workspace_id,session_id,user_id,execution_id,identity_json) VALUES(?,?,?,?,?)
-         ON CONFLICT(workspace_id,session_id,execution_id) DO UPDATE SET identity_json=excluded.identity_json,generation=inbox_resources.generation+1
-         WHERE inbox_resources.user_id=excluded.user_id AND inbox_resources.state IN ('active','unreleased')`
-      )
-      .run(
-        scope.workspaceId,
-        scope.sessionId,
-        scope.userId,
-        executionId,
-        identity ? JSON.stringify(identity) : null
-      );
   }
   private writeDiagnostic(write: () => void): void {
     try {
@@ -930,14 +867,6 @@ export class InboxSqlite {
     } catch (cause) {
       getLogger('inbox').warn(`Inbox diagnostic write failed; continuing: ${String(cause)}`);
     }
-  }
-  /** Cleanup confirms only this execution's journal, never a successor's slot. */
-  confirmReleased(s: InboxScope, executionId: string): void {
-    this.db
-      .prepare(
-        "UPDATE inbox_resources SET state='released' WHERE workspace_id=? AND session_id=? AND execution_id=?"
-      )
-      .run(s.workspaceId, s.sessionId, executionId);
   }
   private watermark(s: InboxScope): number {
     return (
@@ -984,7 +913,7 @@ export class InboxSqlite {
     return this.transaction(() => {
       if (!this.currentOwner(input.workspaceId, owner)) return undefined;
       const current = this.state(input);
-      if (current.paused || current.blocked) return undefined;
+      if (current.paused) return undefined;
       const existing = this.db
         .prepare(
           "SELECT * FROM inbox_batches WHERE workspace_id=? AND session_id=? AND input_id=? AND state<>'superseded'"

@@ -3,7 +3,8 @@ import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
 import {
-  isE2eeMemberRemoved,
+  e2eeAccessLoss,
+  type E2eeAccessLoss,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
   retryRetiredEncryptedWorkspaceCleanup,
@@ -589,7 +590,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let removed = false;
     let removalScope: E2eeLocalDataScope | null = null;
     let localIdentity: E2eeLocalDataIdentity | undefined;
-    const handleMemberRemoval = () => {
+    const handleMemberRemoval = (reason: E2eeAccessLoss) => {
       if (disposed || retired) return;
       removed = true;
       try {
@@ -598,7 +599,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         logRuntimeOperationError('retain removal cleanup', error);
       }
       retire();
-      setRuntimeInitFailure({ workspaceSlug, errorType: 'e2ee_member_removed' });
+      // Device revocation keeps membership: the gate offers re-pairing for this workspace.
+      setRuntimeInitFailure({
+        workspaceSlug,
+        errorType: reason,
+        workspaceId: effectiveWorkspaceId,
+      });
     };
 
     const initializationAbort = new AbortController();
@@ -656,6 +662,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const encryptedRuntime = platform.e2eeWorkspaces?.runtime;
     let nativeLease: string | null = null;
     let nativeReaderOwner: string | undefined;
+    let nativeLeasePreallocated = false;
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
@@ -693,8 +700,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         .then(acceptStatus)
         .catch(async (error: unknown) => {
           if (disposed || retired) return;
-          if (isE2eeMemberRemoved(error)) {
-            handleMemberRemoval();
+          const lost = e2eeAccessLoss(error);
+          if (lost) {
+            handleMemberRemoval(lost);
             return;
           }
           // Reception failure stays visible and retryable. The retained epoch
@@ -740,6 +748,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         );
         if (nativeLease) {
           await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!nativeLeasePreallocated) nativeLease = null;
         }
         await initialization;
         // Legacy hosts acquire their lease only after open settles. A capable
@@ -941,6 +952,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             if (requestedReader) {
               nativeLease = effectiveWorkspaceId;
               nativeReaderOwner = requestedReader;
+              nativeLeasePreallocated = true;
             }
             const status = await native.open(
               effectiveWorkspaceId,
@@ -1114,8 +1126,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         setRuntime(null);
-        if (isE2eeMemberRemoved(error)) {
-          handleMemberRemoval();
+        const lost = e2eeAccessLoss(error);
+        if (lost) {
+          handleMemberRemoval(lost);
           return;
         }
         if (admitting) {

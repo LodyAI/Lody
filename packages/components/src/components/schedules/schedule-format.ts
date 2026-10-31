@@ -307,6 +307,14 @@ export function describeScheduleState(
             tone: 'muted',
             group: 'paused',
           };
+        if (runtime?.queueState === 'blocked')
+          return {
+            label: t('schedules.state.blocked', 'Needs attention'),
+            detail: blockedDetail,
+            tone: 'attention',
+            icon: 'attention',
+            group: 'attention',
+          };
         return {
           label:
             planned !== undefined

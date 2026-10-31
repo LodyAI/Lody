@@ -6,6 +6,7 @@ import { desktopWindowId } from '@/lib/desktop-window';
 import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
+  e2eeAccessLoss,
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
@@ -96,6 +97,7 @@ function WorkspaceControlRoute() {
     let hostOpened = false;
     let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
     let readerOwner: string | undefined;
+    let readerPreallocated = false;
     let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
@@ -108,7 +110,12 @@ function WorkspaceControlRoute() {
       }),
       async () => {
         // Fence a preallocated cold open before joining its actual settlement.
-        if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+        if (hostOpened) {
+          await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!readerPreallocated) hostOpened = false;
+        }
         // Join only actual native acquisition. Public describe/history can stay
         // offline after this reader is confirmed closed; they own no host lease.
         await nativeAcquisition?.then(
@@ -177,7 +184,7 @@ function WorkspaceControlRoute() {
               if (disposed) return undefined;
               readerOwner =
                 runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-              if (readerOwner) hostOpened = true;
+              if (readerOwner) hostOpened = readerPreallocated = true;
               const opened = await runtime.open(
                 workspaceId,
                 readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
@@ -273,7 +280,7 @@ function WorkspaceControlRoute() {
                 try {
                   await runtime.refresh(workspaceId, { installKeys: false });
                 } catch (checked) {
-                  if (isE2eeMemberRemoved(checked)) throw checked;
+                  if (e2eeAccessLoss(checked)) throw checked;
                 }
               }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
@@ -321,18 +328,18 @@ function WorkspaceControlRoute() {
           custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
         });
       } catch (error) {
-        if (!disposed && isE2eeMemberRemoved(error)) {
+        if (!disposed && e2eeAccessLoss(error)) {
           try {
             if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
           try {
-            if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+            // Unmount joins this same retirement instead of releasing the reader again.
+            if (hostOpened) await closeHost();
           } catch (closeError) {
-            // Preserve the full reader owner and never erase borrowed stores
-            // before the actual host close can finish.
-            void closeHost().catch(reportClose);
+            // The retained retirement keeps the full reader owner and never erases
+            // borrowed stores before the actual host close can finish.
             setState((previous) =>
               previous.scope === scope
                 ? { ...previous, loading: false, failure: classifyE2eeControlFailure(closeError) }
@@ -341,6 +348,12 @@ function WorkspaceControlRoute() {
             return;
           }
           if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          // A revoked device keeps its membership: reopen without this identity,
+          // which lands in the existing re-pairing guidance instead of removal.
+          if (!isE2eeMemberRemoved(error)) {
+            if (!disposed) setGeneration((value) => value + 1);
+            return;
+          }
           if (!disposed)
             setState((previous) =>
               previous.scope === scope
@@ -491,6 +504,7 @@ function WorkspaceControlRoute() {
       <E2eeWorkspaceControlPage
         memberManagement={
           current?.nativeStatus?.deviceKind === 'personal' &&
+          current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
           port?.runtime?.removeMember &&

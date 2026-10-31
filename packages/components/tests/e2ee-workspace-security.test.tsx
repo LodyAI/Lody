@@ -9,12 +9,16 @@ import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
+import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async (target: unknown) => {
     navigation.target = target;
   },
+}));
+vi.mock('../src/hooks/use-authenticated-convex', () => ({
+  useAuthenticatedConvex: () => ({ requestAuthRecovery: vi.fn() }),
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/settings/account-setting', () => ({
@@ -148,6 +152,131 @@ describe('encrypted workspace settings', () => {
       store.set(workspaceContentModeAtom, { ...current, accountId: 'other-account' })
     );
     expect(container.textContent).toBe('');
+  });
+  it.each([false, true])(
+    'keeps only owner-signed sharing in the device pane (local: %s)',
+    async (isLocal) => {
+      let shared = false;
+      const writes: unknown[] = [];
+      const generation = '55'.repeat(32);
+      platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => ({
+        machineId: 'synthetic-machine',
+        generation,
+        ownerMembershipId: '11'.repeat(16),
+        head: { revision: shared ? 4 : 3, digest: '33'.repeat(32) },
+        sharedWithTeam: shared,
+        projects: [],
+        canManage: true,
+        signer: '44'.repeat(32),
+        needsResign: false,
+      });
+      platform.e2eeWorkspaces!.runtime!.updateMachineSharing = async (
+        _workspace,
+        machine,
+        selectedGeneration,
+        requestId,
+        change
+      ) => {
+        expect(machine).toBe('synthetic-machine');
+        expect(selectedGeneration).toBe(generation);
+        expect(requestId).toMatch(/^[0-9a-f]{32}$/);
+        writes.push(change);
+        if (change.kind === 'machine') shared = change.sharedWithTeam;
+        return { status: 'saved', requestId };
+      };
+      await act(async () =>
+        root.render(
+          <Provider store={store}>
+            <PlatformContext.Provider value={platform}>
+              <MachineDetailPane
+                {...({
+                  machine: {
+                    id: 'synthetic-machine',
+                    name: 'Remote',
+                    os: 'linux',
+                    sessions: [],
+                    raceLimits: {},
+                  },
+                  mode: 'devices',
+                  isLocal,
+                  isOwn: true,
+                  configs: [],
+                  ownerName: null,
+                  sharedWithTeam: false,
+                  canDelete: false,
+                  onRename: async () => {},
+                  onDelete: async () => {},
+                  onAddConfig: () => {},
+                  onEditConfig: () => {},
+                  onSharedWithTeamChange: async () => {
+                    throw new Error('ordinary sharing must stay closed');
+                  },
+                } as never)}
+                footer={<E2eeMachineSharingSettings machineId="synthetic-machine" projects={[]} />}
+              />
+            </PlatformContext.Provider>
+          </Provider>
+        )
+      );
+      const toggle = () => container.querySelector<HTMLButtonElement>('[role="switch"]');
+      expect(container.querySelectorAll('[role="switch"]')).toHaveLength(1);
+      expect(toggle()).not.toBeNull();
+      await act(async () => toggle()!.click());
+      expect(writes).toEqual([{ kind: 'machine', sharedWithTeam: true }]);
+      expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+      expect(container.textContent).toContain('v4');
+      await act(async () => toggle()!.click());
+      expect(shared).toBe(false);
+      expect(writes).toHaveLength(2);
+      expect(container.textContent).not.toContain('Restart daemon');
+    }
+  );
+  it('drops an unknown sharing intent when the verified machine generation changes', async () => {
+    let generation = '55'.repeat(32);
+    let shared = false;
+    const writes: { generation: string; requestId: string }[] = [];
+    platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => ({
+      machineId: 'synthetic-machine',
+      generation,
+      ownerMembershipId: '11'.repeat(16),
+      head: null,
+      sharedWithTeam: shared,
+      projects: [],
+      canManage: true,
+      signer: null,
+      needsResign: false,
+    });
+    platform.e2eeWorkspaces!.runtime!.updateMachineSharing = async (
+      _workspace,
+      _machine,
+      selectedGeneration,
+      requestId,
+      change
+    ) => {
+      writes.push({ generation: selectedGeneration, requestId });
+      if (writes.length === 1) return { status: 'pending', requestId };
+      if (change.kind === 'machine') shared = change.sharedWithTeam;
+      return { status: 'saved', requestId };
+    };
+    await renderSharing();
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+    expect(shared).toBe(false);
+    expect(container.textContent).toContain('e2ee.machineSharing.issue.pending');
+    generation = '66'.repeat(32);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(container.textContent).toContain('e2ee.machineSharing.issue.generation');
+    expect(container.textContent).not.toContain('e2ee.machineSharing.retry');
+    expect(writes).toHaveLength(1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+    expect(writes[1]?.generation).toBe(generation);
+    expect(writes[1]?.requestId).not.toBe(writes[0]?.requestId);
+    expect(shared).toBe(true);
+  });
+  it('explains missing mobile policy support without pretending that a sharing host exists', async () => {
+    await renderSharing();
+    expect(container.textContent).toContain('e2ee.machineSharing.issue.unsupported');
+    expect(container.querySelector('[role="switch"]')).toBeNull();
+    expect(container.textContent).not.toContain('e2ee.machineSharing.issue.unavailable');
   });
   it('does not open sharing ports for an ordinary workspace', async () => {
     platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => {

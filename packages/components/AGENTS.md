@@ -35,6 +35,8 @@ mobile surfaces. Background for the rules below:
   its presence never permits ordinary RPC, unsupported controls or execution.
   Control-page readers close their captured account/reader, including cold opens,
   and retain incomplete owners until actual close before reusing that binding.
+  Electron counts unlabeled readers per window and workspace, so the control page
+  and RuntimeProvider each release one settled acquisition exactly once.
 - A descriptor marked `public` can run before authentication and must expose only an
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use

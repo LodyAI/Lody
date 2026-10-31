@@ -17,7 +17,7 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度进一步批准现有实现的 tag 9 能力声明、capability 1 和 tag 10 移除，包括现有 1–16 个严格递增非零 u32 能力码、现有长度上限，以及遇到不支持的声明时以 `upgrade-required` 停止。此决定来自[冻结前审查](https://github.com/LodyAI/Lody/pull/2026)；恢复格式问题及第 9 节仍不在此次批准范围。
 
-2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度批准恢复设备 tag 4 与 `possess/v2` 字节不变、不修改 genesis；恢复 generation 和可信账本材料保存在加密恢复包中，可信锚由外部独立确认。owner 同时批准恢复包 `formatVersion: 1` 与验收条件：独立确认可信锚、导入恢复密钥、实际解密当前代信封并核对承诺。这些是格式边界，不代表整个[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)获批；保险库仍为 draft，且不在 MVP 内。[格式审查](https://github.com/LodyAI/Lody/pull/2026)记录字节形状和依据。
+2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度批准恢复设备 tag 4 与 `possess/v2` 字节不变、不修改 genesis；恢复 generation 和可信账本材料保存在加密恢复包中，可信锚由外部独立确认。owner 同时批准恢复包 `formatVersion: 1` 与验收条件：独立确认可信锚、导入恢复密钥、实际解密当前代信封并核对承诺。这些是格式边界，不代表整个[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)获批；保险库仍为 draft，且不在 MVP 内。[格式审查](https://github.com/LodyAI/Lody/pull/2026)记录字节形状和依据。2026-10-31，owner 经 E2EE 总调度另行接受：两个恢复私钥必须分别是 Ed25519 与 X25519 的 48 字节 RFC 8410 PKCS#8 精确编码（[#2124](https://github.com/LodyAI/Lody/pull/2124)），其他编码一律拒绝。这只是包格式边界，保险库 Spec 仍为 draft。
 
 ## Web 与移动端保管授权
 
@@ -38,3 +38,7 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 该 revision 之后新增的批准元数据及链接不改变其技术正文。[当前 Spec](../../../../specs/e2ee/client-custody.zh.md)记录此批准；实际原生 Keychain/Keystore、首次解锁、最低 OS 与真机验收仍须分别提供证据。
 
 2026-10-29，Owner Zixuan Chen 经 E2EE 总调度批准以 480 秒 E2EE 内容 token 作为上线缓解：480 秒有效期 + 60 秒 JWT 宽限 + 一段 300 秒 SSE，常规预算为 840 秒。其余 60 秒仅为余量，不保证覆盖缓冲、上游等待/重试、时钟误差或存储提交。严格 gateway 期限执行列为后续项，不阻塞上线。本文记录决定，不证明私有后端已部署或真实 gateway 已验收；独立移除与稍后手动换钥维持已批准的 tag 10 语义。
+
+## 设备撤销保留例外
+
+2026-10-31，owner Zixuan Chen（zxch3n）经 E2EE 协调者批准，把普通密钥保留规则的例外扩展到凭据确认的本设备撤销，对应修订 `145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc`。批准的文本为 [desktop custody](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/desktop-custody.zh.md)（英文 blob `cbfc986784d7fe89a162bf0fd29f16b76124574a`，中文 `7cecb36a44e25ba814110fc68240ff3c80ec4c61`）、[client custody](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/client-custody.zh.md)（英文 `d19dd471113d3f61ef5451a414761e21b1552898`，中文 `1ea279bfd0abd707a78c053c46cc5f416611364c`）以及[白皮书](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/whitepaper.zh.md)中关于本人设备撤销与删除的段落（英文 `dd0aab07ada8c2220cd0fae4beb80d2b894b49b8`，中文 `fcb311aa398f0f9fb6a883d311039ac2e8266ddc`）。范围：只有精确的类型化撤销结果才算数；清理只删除本设备在该工作区的身份、内容和密钥，保留成员资格和该成员的其他设备，并允许用新身份重新配对。普通失败仍不得触发删除。这是诚实客户端清理，不是对此前副本的安全擦除。理由见[桌面设备撤销](2026-10-30-e2ee-desktop-device-revocation.zh.md)。

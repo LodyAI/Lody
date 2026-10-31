@@ -59,7 +59,11 @@ writing machine Flock rows, or reacting to reconnection. Before changing
 `LoroDocumentManager` options, scheduler and bulk-writer limits, sender-enforced
 framing, the RAW-chunk `createJsonLineSplitter` requirement, renderer room lifetime.
 The room engine remains explicitly Legacy; outbound work uses the single native
-process writer facade, and cleanup awaits its release receipt. Two are never negotiable: a renderer joining a Session Doc room must not call
+process writer facade, and cleanup awaits its release receipt. Workspace engines share that
+writer, so Fleet shutdown closes it only after every workspace runtime and data-plane
+connection owner has released, and a retained failed owner keeps it open for recovery
+([ordering](../../../../.agents/notes/implemented/architecture/2026-10-12-effect-local-presence-writer.md)).
+Two are never negotiable: a renderer joining a Session Doc room must not call
 `getOrCreateSessionDoc` or retain a live cloud room, and the CLI's cloud room status is
 never pushed to renderers as local room health.
 

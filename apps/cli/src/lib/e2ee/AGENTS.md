@@ -45,10 +45,26 @@
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
   Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
+  The local catalog never refuses that check: a workspace it lacks or binds to another
+  genesis waits for the first authoritative list outcome (list, rejection, subscription
+  error or shutdown), then fails closed; a cached match proceeds offline
+  ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
+  After admission, `lody machine pair` treats a missing key as a bounded wait for desktop
+  delivery, never as failure; other activation errors stay terminal
+  ([remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)).
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
-- Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
-  [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+- Retain already sealed old-epoch sends and historical reads. New seals use the verified current
+  epoch in core; a missing current key fails for retry, never falls back to an older key.
+  Provider epoch hints are not encryption authority; rotationRequired alone is only a hint.
+  A rejected dispatch or feature request naming a newer epoch, or missing its current-epoch key,
+  signed by a current ledger device, joins
+  one bounded catch-up per verified ledger state, then reopens; the core guard still decides.
+  A joined older refresh that leaves the current key missing gets at most one additional
+  round through the same owner and wait budget. An unsuccessful refresh of an unchanged
+  ledger cools down; successful key installation must not cool down the next rotation.
+  Logs carry only both epochs.
+  [M3 selection](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. Marker grants no authority; match genesis/device.

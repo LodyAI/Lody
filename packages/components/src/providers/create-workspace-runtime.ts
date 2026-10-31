@@ -113,6 +113,7 @@ import {
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import {
@@ -225,10 +226,17 @@ export function resolveWorkspaceRuntimeCacheIdentity(
   };
 }
 
+export type ProtectedCodeCollabRole = {
+  get(): 'read' | 'write';
+  subscribe(listener: () => void): () => void;
+};
+
 export type WorkspaceE2eeTransport = {
   supportsDispatch?: boolean;
   /** Whether the actual injected host implements the closed signed RPC ports. */
   supportsRpc?: boolean;
+  /** Verified ledger file role; absent means read-only. Never an authorization. */
+  codeCollabRole?: ProtectedCodeCollabRole;
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -574,6 +582,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
+  // E2E-only protected transport evidence; absent outside a probe-enabled window.
+  const transportEffects = protectedContent ? clientLossEffects(deps.workspaceId) : null;
+  transportEffects?.ownerOpened();
+  let cloudStreamCounted = false;
+  const countCloudStream = () => {
+    if (!transportEffects || cloudStreamCounted) return;
+    cloudStreamCounted = true;
+    transportEffects.streamAttached();
+  };
+  // Removal stays best-effort for its callers; only a confirmed removal ends the count.
+  const removeCloudTransport = () =>
+    repo.removeTransport('cloud', { close: true }).then(
+      () => {
+        if (!cloudStreamCounted) return;
+        cloudStreamCounted = false;
+        transportEffects?.streamRemoved(true);
+      },
+      () => {
+        if (cloudStreamCounted) transportEffects?.streamRemoved(false);
+      }
+    );
   // Liveness invariant: opening a workspace must never wait forever on rebuildable
   // local cache. Loro Streams cursors are checkpoints, not source-of-truth data, so
   // a broken IndexedDB cursor store must fail open and let Streams bootstrap/catch up.
@@ -2077,6 +2106,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     getMachineRpcClient,
     ...(protectedContent
       ? {
+          protectedContent: true,
+          protectedCodeCollabRole: () => deps.e2ee?.codeCollabRole?.get() ?? 'read',
+        }
+      : {}),
+    ...(protectedRpcAvailable
+      ? {
           requestEncryptedFeature: async (
             request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
           ) => (await ensureEncryptedRpc()).requestFeature(request),
@@ -3153,7 +3188,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       if (transportAttached || localLoroTransport) {
         await repo.removeTransport('local', { close: true }).catch(() => undefined);
       }
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
       transportAttached = false;
     }
     localLoroTransport = null;
@@ -3403,6 +3438,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       webCloudAddsInFlight.add(options.generation);
       try {
         await repo.addTransport('cloud', transportAdapter, { ephemeral: true });
+        countCloudStream();
       } finally {
         webCloudAddsInFlight.delete(options.generation);
       }
@@ -3543,8 +3579,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         await repo.addTransport('cloud', createStreamsDurableTransport(provider, streamsBaseUrl), {
           ephemeral: true,
         });
+        countCloudStream();
         if (disposePromise || !authToken || !transportAttached) {
-          await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+          await removeCloudTransport();
           return;
         }
         attachCloudMetaHealthTracker();
@@ -3562,7 +3599,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           machineMonitorTransport.stop(),
           promptSuggestions.stop(),
         ]);
-        await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+        await removeCloudTransport();
         throw error;
       }
     })();
@@ -3594,7 +3631,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     latestCloudPresenceStates = {};
     publishMergedPresence();
     if (transportAttached) {
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
     }
     cloudTransportAttached = false;
     notifyConnectionStateInputsChanged();
@@ -5552,6 +5589,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         throw codeCollabFileIndexCacheDisposeError;
       }
     });
+    // A rejected disposal keeps the owner live: it never reports a closed transport.
+    if (transportEffects)
+      void disposePromise.then(
+        () => transportEffects.ownerClosed(true),
+        () => transportEffects.ownerClosed(false)
+      );
 
     return disposePromise;
   };
@@ -5737,6 +5780,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
     waitForContentAdmission,
     protectedRpcAvailable,
+    ...(protectedContent
+      ? {
+          protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
+            get: () => 'read' as const,
+            subscribe: () => () => undefined,
+          },
+        }
+      : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
@@ -5805,11 +5856,25 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releasePreviewVisualCommentStore: previewVisualCommentStoreCache.release,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
     releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
-    withScheduleStore: <T>(
+    withScheduleStore: async <T>(
       id: string,
       fn: (store: ScheduleDocStore) => Promise<T> | T,
       options?: { create?: boolean }
-    ): Promise<T> => withScheduleWrite(scheduleStoreCache, id, fn, options),
+    ): Promise<T> => {
+      // A provisional ordinary Repo is for local input/read access, not for
+      // accepting a scheduled body into a namespace that E2EE may retire.
+      await waitForContentAdmission();
+      return withScheduleWrite(
+        scheduleStoreCache,
+        id,
+        (store) => {
+          // Store acquisition or first-sync can outlive this routed runtime.
+          egressAbort.signal.throwIfAborted();
+          return fn(store);
+        },
+        options
+      );
+    },
     acquireScheduleStore: scheduleStoreCache.acquire,
     releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     sendControl,

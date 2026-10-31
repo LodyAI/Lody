@@ -3,7 +3,13 @@ import test from 'node:test'
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import ts from 'typescript'
-import { IPC_INVOKE_SERVICE_GROUPS, isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
+import { E2EE_CLIENT_LOSS_PROBE } from '@lody/shared/electron-ipc'
+import {
+  CLIENT_LOSS_PROBE_POLICY,
+  IPC_INVOKE_SERVICE_GROUPS,
+  isClientLossProbeChannel,
+  isIpcInvokeChannel
+} from '../../preload/ipc-invoke-policy.ts'
 
 const ipcDirectory = import.meta.dirname
 const servicesDirectory = path.join(ipcDirectory, 'services')
@@ -32,6 +38,7 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'open',
     'close',
     'status',
+    'inspectCachedState',
     'readIdentity',
     'ingestLedgerRecords',
     'ledgerView',
@@ -55,6 +62,21 @@ void test('invoke policy allows methods only within renderer-facing service grou
   assert.equal(isIpcInvokeChannel('lodyAuth:getSession'), false)
   assert.equal(isIpcInvokeChannel('unknown.getState'), false)
   assert.equal(isIpcInvokeChannel('cli.restart.extra'), false)
+})
+
+void test('admits the E2E client-loss probe only with the argument main passes when it registered it', () => {
+  const flag = '--lody-e2ee-client-loss-probe'
+  for (const channel of ['e2ee.inspectClientLoss', 'e2ee.clientLossEffects']) {
+    assert.equal(isClientLossProbeChannel(channel, ['electron', 'app']), false)
+    assert.equal(isClientLossProbeChannel(channel, ['electron', 'app', flag]), true)
+  }
+  assert.equal(isClientLossProbeChannel('e2ee.seal', ['electron', flag]), false)
+  // The ordinary invoke policy never lists it: production preload rejects the channel.
+  assert.equal(isIpcInvokeChannel('e2ee.inspectClientLoss'), false)
+  assert.deepEqual(CLIENT_LOSS_PROBE_POLICY, {
+    argument: E2EE_CLIENT_LOSS_PROBE.argument,
+    channels: [E2EE_CLIENT_LOSS_PROBE.inspect, E2EE_CLIENT_LOSS_PROBE.effects]
+  })
 })
 
 function methodHasIpcDecorator(method) {

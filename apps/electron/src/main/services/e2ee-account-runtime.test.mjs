@@ -1,5 +1,5 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
@@ -55,10 +55,13 @@ async function load(relative, dependencies, console = globalThis.console, env = 
           : id === '../../services/e2ee-member-join.mjs'
             ? memberJoining
             : id === '../../services/e2ee-cloud-errors.mjs'
-              ? { E2eeMemberRemovedError }
+              ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
               : id === '../../services/e2ee-personal-pairing.mjs'
                 ? { PersonalPairingOfferSchema }
-                : require(id)
+                : id === '../../services/e2ee-client-loss-probe'
+                  ? // Production default: the E2E probe is disabled and forwards work.
+                    { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
+                  : require(id)
     }
   )
   return exports
@@ -111,6 +114,61 @@ async function account(options = {}) {
     }
   }
 }
+void test('passive account inspection never reopens an absent or closed owner', async () => {
+  let leases = 0,
+    custody = 0,
+    hosts = 0
+  const { api, identity } = await account({
+    identityStorage: {
+      leaseE2eeIdentity: () =>
+        Effect.sync(() => {
+          leases++
+        })
+    },
+    custody: () =>
+      Effect.sync(() => {
+        custody++
+        return {}
+      }),
+    host: () =>
+      Effect.sync(() => {
+        hosts++
+        return {
+          inspectCachedState: (workspaceId, machineId) =>
+            Effect.succeed({
+              workspaceId,
+              machineId,
+              entryPresent: true,
+              cachedPolicies: 1,
+              cachedExecutionGrants: 1
+            })
+        }
+      })
+  })
+  const inspect = () => api.inspectDesktopE2eeCachedState('account', 'team', 'machine')
+  assert.equal((await inspect()).ownerPresent, false)
+  assert.deepEqual([leases, custody, hosts], [0, 0, 0])
+  await api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.sync(() => {
+        owner.readers.set('team', new Map([[1, 2]]))
+      }),
+    'team'
+  )
+  const live = await inspect()
+  assert.equal(live.ownerPresent, true)
+  assert.equal(live.activeContentReaders, 2)
+  assert.equal(live.cachedExecutionGrants, 1)
+  const opened = [leases, custody, hosts]
+  await api.closeDesktopE2eeAccount()
+  assert.equal((await inspect()).ownerPresent, false)
+  assert.equal((await inspect()).activeContentReaders, 0)
+  assert.deepEqual([leases, custody, hosts], opened)
+  identity.userId = 'other'
+  await assert.rejects(inspect(), /e2ee_host_operation_failed/)
+  assert.deepEqual([leases, custody, hosts], opened)
+})
+
 void test('failed account cleanup cannot block sign-out or authorize replacement on a second close', async () => {
   const { api, warnings } = await account()
   await api.withDesktopE2eeAccount((owner) =>
@@ -728,7 +786,12 @@ async function personalJoinFixture(t) {
   }
   let lockDepth = 0
   const rows = new Map()
-  const relay = { statusFailure: null, loseCancelReceipt: false, memberRemoved: false }
+  const relay = {
+    statusFailure: null,
+    loseCancelReceipt: false,
+    memberRemoved: false,
+    deviceRevoked: false
+  }
   const remote = (work) =>
     Effect.try({
       try: () => {
@@ -744,10 +807,13 @@ async function personalJoinFixture(t) {
   }
   const client = {
     history: () => Effect.fail(new Error('unauthorized history')),
+    // An unclassified rejection (raw error text) must never authorize deletion.
     contentStreamsToken: () =>
       relay.memberRemoved
         ? Effect.fail(new E2eeMemberRemovedError())
-        : Effect.fail(new Error('e2ee_device_revoked')),
+        : relay.deviceRevoked
+          ? Effect.fail(new E2eeDeviceRevokedError())
+          : Effect.fail(new Error('e2ee_device_revoked')),
     memberCreateInvitation: () => Effect.fail(new E2eeMemberRemovedError()),
     memberPending: () => Effect.fail(new E2eeMemberRemovedError()),
     memberRead: () => Effect.fail(new E2eeMemberRemovedError()),
@@ -1878,7 +1944,7 @@ void test('real preload bridge admits only confirmed trusted reset IPC and archi
     electron: {
       ipcRenderer: { on: () => {}, invoke: (channel, input) => ipc[channel.split('.')[1]](input) }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   await ipc.open('workspace')
@@ -1937,6 +2003,45 @@ void test('credential-authenticated member removal drains and deletes through th
     0
   )
   await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
+})
+
+void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('revoked-ipc')
+  await owner.create()
+  const status = await owner.ipc.status(f.workspaceId)
+  f.relay.deviceRevoked = true
+  await assert.rejects(owner.ipc.contentStreamsToken(f.workspaceId), /^Error: e2ee_device_revoked$/)
+  assert.equal(owner.readers.has(f.workspaceId), false)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  await assert.rejects(
+    owner.ipc.seal(f.workspaceId, {
+      epoch: 0,
+      room: { kind: 'meta' },
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch'
+      },
+      plaintext: new Uint8Array([1]),
+      additionalData: new Uint8Array([2])
+    }),
+    /e2ee_not_open|e2ee_device_revoked/
+  )
+  assert.equal(
+    f.db(
+      owner,
+      'creations.sqlite',
+      (db) => db.prepare('SELECT count(*) AS n FROM creations').get().n
+    ),
+    0
+  )
+  await assert.rejects(readFile(join(owner.path, 'workspaces', f.workspaceId, 'history.sqlite')), {
+    code: 'ENOENT'
+  })
+  // A later open, with a freshly constructed owner, reports the persisted reason.
+  await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'device_revoked')
+  assert.ok(status.signingPublicKey)
 })
 
 void test('credential-authenticated joining management uses exact-identity removal cleanup through IPC', async (t) => {
@@ -2143,7 +2248,7 @@ void test('remote commands use workspace custody and never create an account con
         invoke: (channel, ...args) => ipc[channel.split('.')[1]](...args)
       }
     },
-    './ipc-invoke-policy': { isIpcInvokeChannel },
+    './ipc-invoke-policy': { isIpcInvokeChannel, isClientLossProbeChannel: () => false },
     '@lody/shared/electron-ipc': electronIpc
   })
   for (const [workspaceId, expected] of [
@@ -2212,6 +2317,7 @@ async function memberIpcFixture() {
     keyEntered = deferredMember(),
     keyGate = deferredMember()
   let holdCloud = false
+  let trusted = true
   const makeOwner = (accountId, label) => ({
     accountId,
     label,
@@ -2221,6 +2327,14 @@ async function memberIpcFixture() {
       acceptMemberJoin: () => Effect.void
     },
     host: {
+      inspectCachedState: (workspaceId, machineId) =>
+        Effect.succeed({
+          workspaceId,
+          machineId,
+          entryPresent: false,
+          cachedPolicies: 0,
+          cachedExecutionGrants: 0
+        }),
       memberOffer: () =>
         Effect.sync(() => {
           signed.push(label)
@@ -2264,7 +2378,11 @@ async function memberIpcFixture() {
       getIpcContext: () => ({ event: { sender } })
     },
     '../../platform': { isLocalPlatform: () => false },
-    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../assert-sender': {
+      assertProductWindowSender: () => {
+        if (!trusted) throw new Error('untrusted sender')
+      }
+    },
     '../ipc-service-deps': {
       getIpcServiceDeps: () => ({
         authService: { getCachedSessionIdentity: () => ({ ...identity }) }
@@ -2272,6 +2390,18 @@ async function memberIpcFixture() {
     },
     '../../services/e2ee-bootstrap.mjs': {},
     '../../services/e2ee-account-runtime': {
+      inspectDesktopE2eeCachedState: async (accountId, workspaceId, machineId) => {
+        if (current.accountId !== accountId) throw new Error('e2ee_account_mismatch')
+        return {
+          ...(await Effect.runPromise(current.host.inspectCachedState(workspaceId, machineId))),
+          accountId,
+          ownerPresent: true,
+          activeContentReaders: [...(current.readers.get(workspaceId)?.values() ?? [])].reduce(
+            (sum, n) => sum + n,
+            0
+          )
+        }
+      },
       withDesktopE2eeAccount: async (work) => Effect.runPromise(work(current)),
       desktopE2eeCloudClient: async () => {
         cloudEntered.resolve()
@@ -2300,6 +2430,9 @@ async function memberIpcFixture() {
     keyEntered,
     keyGate,
     makeOwner,
+    setTrusted(value) {
+      trusted = value
+    },
     setOwner(owner) {
       current = owner
     },
@@ -2369,3 +2502,26 @@ for (const code of ['machine_not_owned', 'machine_not_shared']) {
     )
   })
 }
+
+void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
+  const f = await memberIpcFixture()
+  const owner = f.makeOwner('A', 'passive-A')
+  owner.readers.clear()
+  f.setOwner(owner)
+  const snapshot = await f.ipc.inspectCachedState('team', 'machine')
+  assert.equal(snapshot.accountId, 'A')
+  assert.equal(snapshot.workspaceId, 'team')
+  assert.equal(snapshot.machineId, 'machine')
+  assert.equal(snapshot.activeContentReaders, 0)
+  assert.equal(snapshot.cachedExecutionGrants, 0)
+  assert.equal(owner.readers.size, 0)
+  assert.deepEqual(f.signed, [])
+  assert.deepEqual(f.closed, [])
+  f.identity.userId = 'B'
+  await assert.rejects(f.ipc.inspectCachedState('team', 'machine'), /e2ee_account_mismatch/)
+  f.identity.userId = 'A'
+  f.setTrusted(false)
+  await assert.rejects(f.ipc.inspectCachedState('team', 'machine'), /untrusted sender/)
+  f.setTrusted(true)
+  await assert.rejects(f.ipc.inspectCachedState('', 'machine'), /e2ee_invalid-input/)
+})

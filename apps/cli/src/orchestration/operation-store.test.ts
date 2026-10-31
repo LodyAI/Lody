@@ -427,7 +427,7 @@ describe('LodyOperationStore', () => {
     store.inbox.begin(input, 'execution');
     const batch = store.inbox.prepare(input, 'owner')!;
     expect(store.inbox.fence(batch, 'execution')).toBe(true);
-    store.inbox.release({ ...input, executionId: 'execution', outcome: 'unreleased' });
+    store.inbox.release({ ...input, executionId: 'execution', outcome: 'failed' });
     store.inbox.pause(input, 'execution', [], 'stop');
     store.close();
     let db = new Database(filename);

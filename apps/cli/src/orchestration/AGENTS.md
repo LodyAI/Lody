@@ -67,16 +67,16 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   same gate, with no await between. Post-fence uncertainty never replays, including
   human-plus-batch stale-ACP recovery. Retry failed settlement only, never the request.
 - Physical resource release differs from waiter exit. Keep immutable execution IDs,
-  shared close receipts, full Cause and resource registration. Unconfirmed release must
+  shared close receipts and full Cause. Unconfirmed release must
   not block successors or shutdown: detach the failed Agent before returning the slot,
   report it and attempt bounded background cleanup using only the old handles.
   Startup retires interrupted input as unknown without replay and clears legacy blocks.
   Coordinator recovery calls `recoverClose`, not cached failed `close`. Release finishes
   input; a still-pending turn `withdraw`s before submit/acquisition.
 - Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Preserve queued
-  input/results, pause, unknown/resource evidence and monotonic sequences. Host v3
+  input/results, pause, unknown evidence and monotonic sequences. Host v3
   rejects old workers before storage; end prior Workers before handoff. Passive
-  results are not busy. Resource identities are cleanup evidence, never admission gates.
+  results are not busy. Never journal process identities or let cleanup state gate admission.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through

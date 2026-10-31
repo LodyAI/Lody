@@ -5,7 +5,6 @@ export type InboxModel = {
   consumed: number[];
   pending: number[];
   paused: boolean;
-  blocked: boolean;
   human: boolean;
   active: 'none' | 'human' | 'automatic';
   batch: number[];
@@ -21,9 +20,7 @@ export type InboxEvent =
   | 'normal'
   | 'stop'
   | 'failed'
-  | 'unreleased'
   | 'restart'
-  | 'recover'
   | 'withdraw'
   | 'duplicate_release';
 export const initialOrchestrationModelState = (): InboxModel => ({
@@ -32,7 +29,6 @@ export const initialOrchestrationModelState = (): InboxModel => ({
   consumed: [],
   pending: [],
   paused: false,
-  blocked: false,
   human: false,
   active: 'none',
   batch: [],
@@ -57,7 +53,7 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
     case 'result':
       if (s.next <= 3) {
         s.queue.push(s.next++);
-        if (s.active === 'none' && !s.paused && !s.blocked && !s.human) s.pending = [...s.queue];
+        if (s.active === 'none' && !s.paused && !s.human) s.pending = [...s.queue];
       }
       break;
     case 'human':
@@ -66,7 +62,7 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       s.pending = [];
       break;
     case 'schedule':
-      if (s.active !== 'none' || s.paused || s.blocked) break;
+      if (s.active !== 'none' || s.paused) break;
       if (s.human) {
         s.active = 'human';
         s.human = false;
@@ -82,13 +78,13 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       }
       break;
     case 'submit':
-      if (s.active === 'none' || s.submitted || s.paused || s.blocked) break;
+      if (s.active === 'none' || s.submitted || s.paused) break;
       if (s.active === 'automatic' && (!s.batch.length || s.human)) break;
       if (s.batch.length) s.receipts.push([...s.batch]);
       s.submitted = true;
       break;
     case 'normal':
-      if (s.active === 'none' || s.blocked || !s.submitted) break;
+      if (s.active === 'none' || !s.submitted) break;
       consume();
       s.boundary = [...s.queue];
       s.pending = s.paused || s.human ? [] : [...s.queue];
@@ -107,28 +103,17 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       s.pending = [];
       release();
       break;
-    case 'unreleased':
-      if (s.active === 'none') break;
-      consume();
-      s.blocked = true;
-      s.pending = [];
-      break;
     case 'restart':
+      // The interrupted execution retires as unknown: never replayed, never blocking.
       if (s.active !== 'none') {
         consume();
-        s.blocked = true;
         s.pending = [];
-      }
-      break;
-    case 'recover':
-      if (s.blocked) {
-        s.blocked = false;
         release();
       }
       break;
     case 'withdraw':
       // An unverified human execution returns its input before submission.
-      if (s.active !== 'human' || s.submitted || s.blocked) break;
+      if (s.active !== 'human' || s.submitted) break;
       s.active = 'none';
       s.batch = [];
       s.human = true;
@@ -156,9 +141,7 @@ export function enumerateOrchestrationModel(depth = 8) {
     'normal',
     'stop',
     'failed',
-    'unreleased',
     'restart',
-    'recover',
     'withdraw',
     'duplicate_release',
   ];

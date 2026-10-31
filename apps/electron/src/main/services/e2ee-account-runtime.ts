@@ -45,6 +45,8 @@ const CreationReceipt = z
   .strict()
 const owners = new Map<string, Account>()
 const removing = new Map<string, Deferred.Deferred<boolean, unknown>>()
+// Reason reported while an identity directory is fenced for terminal cleanup.
+const removingReasons = new Map<string, 'member_removed' | 'device_revoked'>()
 const accountDirectory = (accountId: string) =>
   join(
     app.getPath('userData'),
@@ -162,7 +164,10 @@ export function withDesktopE2eeAccount<A>(
             yield* closeCurrent
           const accountId = identity.userId
           const directory = identityDirectory(accountId, location)
-          if (removing.has(directory)) return yield* Effect.fail(accountFailure('member_removed'))
+          if (removing.has(directory))
+            return yield* Effect.fail(
+              accountFailure(removingReasons.get(directory) ?? 'member_removed')
+            )
           if (!create)
             yield* Effect.tryPromise({
               try: () => lstat(directory),
@@ -225,6 +230,61 @@ export function withDesktopE2eeAccount<A>(
   ).catch((error: unknown) => {
     throw publicE2eeFailure(error)
   })
+}
+
+/** Passive metadata only: never acquire a lease or construct an absent owner. */
+export function inspectDesktopE2eeCachedState(
+  accountId: string,
+  workspaceId: string,
+  machineId: string
+) {
+  return Effect.runPromise(
+    serial.withPermit(
+      Effect.gen(function* () {
+        if (quitting) return yield* Effect.fail(accountFailure('closed'))
+        const auth = getIpcServiceDeps().authService
+        const identity = auth.getCachedSessionIdentity()
+        if (!identity.userId || identity.userId !== accountId)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        const owner = owners.get(identityDirectory(accountId, workspaceId))
+        if (owner?.closeFailed) return yield* Effect.fail(accountFailure('restart-required'))
+        const state = owner
+          ? yield* owner.host.inspectCachedState(workspaceId, machineId)
+          : {
+              workspaceId,
+              machineId,
+              entryPresent: false,
+              cachedPolicies: 0,
+              cachedExecutionGrants: 0
+            }
+        const latest = auth.getCachedSessionIdentity()
+        if (latest.userId !== accountId || latest.generation !== identity.generation)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        return {
+          ...state,
+          accountId,
+          ownerPresent: Boolean(owner),
+          activeContentReaders: [...(owner?.readers.get(workspaceId)?.values() ?? [])].reduce(
+            (sum, count) => sum + count,
+            0
+          )
+        }
+      })
+    )
+  ).catch((error: unknown) => {
+    throw publicE2eeFailure(error)
+  })
+}
+
+/** E2E evidence only: one renderer's registered reader acquisitions. Synchronous,
+ * so it never waits on or takes the account lock, opens an owner or touches custody. */
+export function countDesktopE2eeReaders(
+  accountId: string,
+  workspaceId: string,
+  senderId: number
+): number {
+  const owner = owners.get(identityDirectory(accountId, workspaceId))
+  return owner?.accountId === accountId ? (owner.readers.get(workspaceId)?.get(senderId) ?? 0) : 0
 }
 
 /** Quit/logout await actual in-flight native operations before releasing stores. */
@@ -439,6 +499,8 @@ export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId:
 export function cleanupRemovedDesktopWorkspace(input: {
   accountId: string
   workspaceId: string
+  /** The exact authenticated reason the caller observed; it only labels the fence. */
+  reason?: 'member_removed' | 'device_revoked'
 }): Promise<boolean> {
   const { workspaceId } = input
   return Effect.runPromise(
@@ -472,6 +534,7 @@ export function cleanupRemovedDesktopWorkspace(input: {
             }
             const done = Deferred.makeUnsafe<boolean, unknown>()
             removing.set(directory, done)
+            removingReasons.set(directory, input.reason ?? 'member_removed')
             return { kind: 'owner' as const, directory, owner, done }
           })
         )
@@ -501,7 +564,10 @@ export function cleanupRemovedDesktopWorkspace(input: {
         )
         yield* serial.withPermit(
           Effect.gen(function* () {
-            if (removing.get(plan.directory) === plan.done) removing.delete(plan.directory)
+            if (removing.get(plan.directory) === plan.done) {
+              removing.delete(plan.directory)
+              removingReasons.delete(plan.directory)
+            }
             yield* Deferred.done(plan.done, result)
           })
         )
@@ -597,6 +663,7 @@ function publicE2eeFailure(error: unknown): Error {
     'custody_unavailable',
     'missing-binding',
     'member_removed',
+    'device_revoked',
     'conflict',
     'local-evidence-conflict',
     'snapshot-history-required',

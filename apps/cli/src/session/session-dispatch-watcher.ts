@@ -2529,7 +2529,12 @@ export class SessionDispatchWatcher {
         operationId,
         existingEntry: existing,
       });
-      return promoted.entry;
+      // Match the history dispatch projection: Loro omits undefined fields,
+      // while the in-memory queue builder can still own those properties.
+      return {
+        ...promoted.entry,
+        inputConfig: normalizeSessionTurnInputConfig(promoted.entry.inputConfig),
+      };
     } finally {
       releaseQueueMutation();
     }

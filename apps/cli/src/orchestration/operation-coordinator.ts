@@ -30,6 +30,7 @@ import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher'
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import type { SessionUserResolver } from '@/session/session-user-resolver';
 import type { Logger } from '@/utils/logger';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
 
 import {
   getLodyOperationStorePath,
@@ -371,7 +372,7 @@ export class LodyOperationCoordinator {
         if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
-      7_000,
+      TURN_BUDGETS.cliShutdownMs,
       'Coordinator resources did not drain'
     );
     await this.inbox?.close();

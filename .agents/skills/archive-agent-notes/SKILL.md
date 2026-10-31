@@ -75,9 +75,6 @@ Keep active:
 
 - `bug-fix/2026-10-22-node-security-runtime-floor` (598 words): the root
   `AGENTS.md` cites it as the rationale for a binding version floor.
-- `bug-fix/2026-10-17-no-pid-spawn-resource-identity` (343 words): a non-obvious
-  boundary between a spawn failure and resource uncertainty that a later change
-  could plausibly erase.
 - `architecture/2026-10-12-operation-inbox` (3931 words): an ownership and
   admission contract other notes and `AGENTS.md` files depend on.
 

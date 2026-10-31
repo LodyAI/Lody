@@ -60,6 +60,7 @@ import {
   type InboxScope,
 } from '@/orchestration/inbox/model';
 import { sessionExecutionResource } from '@/orchestration/platform/session-resources';
+import { TURN_BUDGETS } from './turn-budgets';
 import { formatErrorMessage, formatReportedError } from '@/utils/format-error';
 import {
   describeSessionStartFailure,
@@ -199,12 +200,11 @@ type FinalizeTurnContext = {
   producedOutput?: boolean;
 };
 
+type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
 const DEAD_TURN_SCAN_ROWS = 64;
-/** Bookkeeping waiters are bounded; raw work remains owned until it settles. */
-const TURN_BOOKKEEPING_TIMEOUT_MS = 30_000;
-const WORKSPACE_STATS_BUDGET_MS = 20_000;
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
 // authentication workflow. Keep the post-login capability proof inside that
 // envelope and leave a small delivery margin for the final response.
@@ -354,7 +354,7 @@ type TurnRuntimeState = {
   releaseFailure?: unknown;
   rawPromptCompletion?: Promise<void>;
   disconnectedTransport?: boolean;
-  inboxOwner?: Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+  inboxOwner?: InboxExecutionHandle;
   /** Withdraw rather than release the unsubmitted Inbox execution at turn end. */
   withdrawInboxExecution?: boolean;
   cancelFinalized: boolean;
@@ -921,7 +921,7 @@ export class SessionExecutionService {
   ): Promise<T | undefined> {
     return withTimeout(
       this.ownBookkeeping(sessionId, Promise.resolve().then(run)),
-      TURN_BOOKKEEPING_TIMEOUT_MS,
+      TURN_BUDGETS.bookkeepingMs,
       `${stage} timed out`
     ).catch((error: unknown) => {
       this.deps.logger.warn(`[${sessionId}] ${stage}: ${formatErrorMessage(error)}`);
@@ -936,7 +936,8 @@ export class SessionExecutionService {
   ): Promise<void> {
     const runtime = this.getTurnRuntime(sessionId, turnId);
     const now = Date.now();
-    const deadline = runtime?.workspaceFinalizationDeadlineMs ?? now + WORKSPACE_STATS_BUDGET_MS;
+    const deadline =
+      runtime?.workspaceFinalizationDeadlineMs ?? now + TURN_BUDGETS.workspaceStatsMs;
     if (runtime) runtime.workspaceFinalizationDeadlineMs = deadline;
     const remaining = deadline - now;
     if (this.shutdownAbort.signal.aborted) return;
@@ -970,7 +971,7 @@ export class SessionExecutionService {
     );
     await withTimeout(
       Promise.all(releases),
-      6_000,
+      TURN_BUDGETS.shutdownReleaseWaitMs,
       'Active execution releases exceeded shutdown budget'
     ).catch(async (error: unknown) => {
       this.deps.logger.warn(formatErrorMessage(error));
@@ -981,17 +982,13 @@ export class SessionExecutionService {
         this.deps.logger.warn(
           `[${runtime.sessionId}] Shutdown forced release ${owner.id}; result unknown`
         );
-        await this.operationInbox?.release({
-          ...owner.input,
-          executionId: owner.id,
-          outcome: 'failed',
-        });
+        await this.writeFailedRelease(owner);
         this.liveInboxExecutionIds.delete(owner.id);
         if (owner.batch) await this.operationInbox?.settleUnknown(owner.batch);
       });
       const results = await withTimeout(
         Promise.allSettled(receipts),
-        1_000,
+        TURN_BUDGETS.shutdownForcedWriteMs,
         'Shutdown release write timed out'
       ).catch((cause: unknown) => this.deps.logger.warn(formatErrorMessage(cause)));
       for (const result of results ?? [])
@@ -1100,7 +1097,7 @@ export class SessionExecutionService {
       try {
         return await withTimeout(
           this.recoverInboxExecution(sessionId, runtime),
-          5_000,
+          TURN_BUDGETS.agentCleanupMs,
           'Background execution cleanup timed out'
         )
           .then(() => true)
@@ -1111,24 +1108,12 @@ export class SessionExecutionService {
             return false;
           });
       } finally {
-        try {
-          const owner = runtime.inboxOwner;
-          if (owner)
-            await this.operationInbox?.release({
-              ...owner.input,
-              executionId: owner.id,
-              outcome: 'failed',
-            });
-        } catch (cause) {
-          this.deps.logger.warn(
-            `[${sessionId}] Retired execution release write failed: ${formatErrorMessage(cause)}`
+        if (runtime.inboxOwner)
+          await this.writeFailedRelease(runtime.inboxOwner).catch((cause: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Retired execution release write failed: ${formatErrorMessage(cause)}`
+            )
           );
-        }
-        try {
-          runtime.inboxOwner?.detach();
-        } catch (cause) {
-          this.deps.logger.warn(`Cleanup observer detach failed: ${formatErrorMessage(cause)}`);
-        }
         this.releaseRecoveryBySession.delete(sessionId);
       }
     })();
@@ -1147,11 +1132,11 @@ export class SessionExecutionService {
           const session = runtime.pendingSession
             ? await withTimeout(
                 runtime.pendingSession,
-                5_000,
+                TURN_BUDGETS.agentCleanupMs,
                 'Execution acquisition remains owned'
               )
             : runtime.session;
-          if (session) runtime.inboxOwner!.retain(sessionExecutionResource(session));
+          if (session) runtime.inboxOwner!.register(sessionExecutionResource(session));
         },
         () =>
           withTimeout(
@@ -1159,7 +1144,7 @@ export class SessionExecutionService {
               runtime.yieldedFinalization,
               ...(runtime.pendingSteerConfig ?? []),
             ]).then(() => undefined),
-            5_000,
+            TURN_BUDGETS.agentCleanupMs,
             'Execution finalization remains owned'
           )
       );
@@ -3044,13 +3029,29 @@ export class SessionExecutionService {
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
   }
 
+  /**
+   * The only way a turn gives up its in-process slot: drop its live Inbox execution id
+   * and its runtime registration. Idempotent and keyed by turn, so it never frees a
+   * successor. Writing the durable release receipt is the caller's separate step.
+   */
+  private freeTurnSlot(runtime: TurnRuntimeState): void {
+    if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
+    this.releaseTurnRuntime(runtime.sessionId, runtime.turnId);
+  }
+
+  /** A retired or force-released execution ends as `failed`; a repeated write is a no-op. */
+  private async writeFailedRelease(owner: InboxExecutionHandle): Promise<void> {
+    await this.operationInbox?.release({
+      ...owner.input,
+      executionId: owner.id,
+      outcome: 'failed',
+    });
+  }
+
   private releaseTurnRuntime(sessionId: SessionId, turnId: string): void {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const releasedOwner = runtime?.turnId === turnId;
-    if (releasedOwner) {
-      runtime.inboxOwner?.detach();
-      this.turnRuntimeBySession.delete(sessionId);
-    }
+    if (releasedOwner) this.turnRuntimeBySession.delete(sessionId);
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
     if (releasedOwner || this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId) {
@@ -3280,47 +3281,43 @@ export class SessionExecutionService {
     if (pending.length === 0) return Promise.resolve();
     const pendingPrompt = Promise.allSettled(pending).then(() => undefined);
 
-    const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
-      async (timeoutError: unknown) => {
-        // A terminal response may have won just after the timeout fired.
-        if (requests().length === 0) return;
-        if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
+    const drain = withTimeout(
+      pendingPrompt,
+      TURN_BUDGETS.cancelDrainMs,
+      'ACP prompt cancellation timed out'
+    ).catch(async (timeoutError: unknown) => {
+      // A terminal response may have won just after the timeout fired.
+      if (requests().length === 0) return;
+      if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
+      this.deps.logger.warn(
+        `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+      );
+      if (turnId) {
+        this.reportSessionStopFailure(session.sessionId, turnId, 'timeout', timeoutError, runtime);
+      }
+      try {
+        await session.terminate(true);
+      } catch (error) {
         this.deps.logger.warn(
-          `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+          `[${session.sessionId}] Failed to terminate cancelled session; retiring Agent: ${formatErrorMessage(error)}`
         );
         if (turnId) {
           this.reportSessionStopFailure(
             session.sessionId,
             turnId,
-            'timeout',
-            timeoutError,
+            'terminate',
+            new Error(`${formatErrorMessage(error)}; continuing with a new Agent`),
             runtime
           );
         }
-        try {
-          await session.terminate(true);
-        } catch (error) {
-          this.deps.logger.warn(
-            `[${session.sessionId}] Failed to terminate cancelled session; retiring Agent: ${formatErrorMessage(error)}`
-          );
-          if (turnId) {
-            this.reportSessionStopFailure(
-              session.sessionId,
-              turnId,
-              'terminate',
-              new Error(`${formatErrorMessage(error)}; continuing with a new Agent`),
-              runtime
-            );
-          }
-          // Failed termination is not permission to reuse a busy agent.
-          if (runtime) {
-            runtime.releaseFailure = error;
-            this.requestTurnInterrupt(runtime);
-          }
-          throw error;
+        // Failed termination is not permission to reuse a busy agent.
+        if (runtime) {
+          runtime.releaseFailure = error;
+          this.requestTurnInterrupt(runtime);
         }
+        throw error;
       }
-    );
+    });
     if (runtime) runtime.cancellationDrain = drain;
     return drain;
   }
@@ -4520,8 +4517,7 @@ export class SessionExecutionService {
         );
       } finally {
         // Preparation acquired no prompt; a failed release write cannot retain its slot.
-        if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
-        this.releaseTurnRuntime(sessionId, turnId);
+        this.freeTurnSlot(runtime);
       }
       if (
         !runtime.releaseFailure &&
@@ -4602,7 +4598,7 @@ export class SessionExecutionService {
                 .tryPromise(() =>
                   withTimeout(
                     turnRuntime.session!.terminate(true),
-                    5_000,
+                    TURN_BUDGETS.agentCleanupMs,
                     'Disconnected execution release timed out'
                   )
                 )
@@ -4622,7 +4618,7 @@ export class SessionExecutionService {
               self.tryPromise(() =>
                 withTimeout(
                   waitForSteer(yielded, self.shutdownAbort.signal),
-                  TURN_BOOKKEEPING_TIMEOUT_MS,
+                  TURN_BUDGETS.bookkeepingMs,
                   'Yielded finalization timed out'
                 )
               )
@@ -4898,11 +4894,7 @@ export class SessionExecutionService {
                   { type: 'text', text: batchPreview(inboxBatch, members) },
                 ];
               }
-              if (runtime.inboxOwner) {
-                yield* self.tryPromise(() =>
-                  runtime.inboxOwner!.register(sessionExecutionResource(activeSession))
-                );
-              }
+              runtime.inboxOwner?.register(sessionExecutionResource(activeSession));
               runtime.terminateSessionOnCancel = false;
               self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
 
@@ -5270,8 +5262,6 @@ export class SessionExecutionService {
           );
         if (runtime.inboxOwner!.failure) runtime.releaseFailure = runtime.inboxOwner!.failure;
       }
-      if (inboxInput && !runtime.releaseFailure)
-        this.liveInboxExecutionIds.delete(runtime.inboxOwner!.id);
     } catch (cause) {
       runtime.releaseFailure ??= cause;
       this.deps.logger.warn(
@@ -5286,7 +5276,6 @@ export class SessionExecutionService {
           if (runtime.session) this.deps.sessionManager.detachSession(runtime.session);
           else if (runtime.pendingSession)
             this.deps.sessionManager.abandonPendingSessionCreate(sessionId, 'unconfirmed-release');
-          if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
           this.reportSessionStopFailure(
             sessionId,
             runtime.turnId,
@@ -5299,7 +5288,7 @@ export class SessionExecutionService {
           void this.requestReleaseRecovery(sessionId, runtime);
         }
         if (inboxInput || runtime.releaseFailure) {
-          this.releaseTurnRuntime(sessionId, runtime.turnId);
+          this.freeTurnSlot(runtime);
           if (inbox && outcome !== 'execution-deferred') {
             await inbox!
               .wake()

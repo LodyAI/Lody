@@ -882,14 +882,9 @@ payload. The watcher waits for matching control data and checks control arrivals
 its separate cancellation chain. RPC uses the same ID, so a late fallback cannot
 pause fresh input again; a second click gets a new ID even for the same target turn.
 
-The Session sandbox persists incomplete identity before spawn and continuously adds
-ACP/terminal process roots. Execution retains every attached Session owner until release,
-including replacements within one turn. Restart probes require explicit completeness and
-absence of every root/group; an initial snapshot alone is insufficient.
-A child error with no PID proves that spawn created no process: it still rejects
-the command, but does not make resource identity permanently incomplete. This
-exception matches the actual child error; journal, setup and cleanup failures
-remain uncertain, as do other acquisitions already marked uncertain.
+Execution retains a terminate handle for every attached Session owner, including
+replacements within one turn, so bounded background cleanup can reach the old process
+trees. Process identities are not journaled; cleanup never gates the next input.
 
 Native commit observation has one acknowledged callback in flight per pooled client;
 stream identities and changed index keys coalesce with bounded memory. The owner watches

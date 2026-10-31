@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
+  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
@@ -782,6 +783,90 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       await runtime.dispose();
     }
   });
+
+  it.each(['plaintext', 'encrypted', 'dispose'] as const)(
+    'keeps a scheduled-message draft unaccepted until mode admission: %s',
+    async (outcome) => {
+      const admitted = Promise.withResolvers<void>();
+      const phase = Promise.withResolvers<'waiting' | 'writing'>();
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1',
+        accountId: 'owner',
+        apiBaseUrl: 'https://synthetic.invalid',
+        waitForContentAdmission: (signal) => {
+          phase.resolve('waiting');
+          return waitForWorkspaceContentAdmission(admitted.promise, signal);
+        },
+      });
+      const repository = new ScheduleRepository(repo, 'workspace-1' as WorkspaceId);
+      let draft = 'unclassified scheduled body sentinel';
+      const saving = runtime
+        .withScheduleStore(
+          'mode-reservation',
+          async () => {
+            phase.resolve('writing');
+            return repository.save({
+              scheduleId: 'mode-reservation',
+              actorId: 'owner',
+              now: 0,
+              create: true,
+              activationId: 'activation',
+              activityId: 'created',
+              draft: {
+                title: 'Reserved',
+                prompt: draft,
+                machineId: 'remote-owned-machine',
+                agent: { agentConfigId: 'agent' },
+                destination: { kind: 'existing_session', sessionId: 'chat' },
+                trigger: { kind: 'once', at: '2030-01-01T00:00:00Z' },
+                misfirePolicy: { kind: 'run_once' },
+                overlapPolicy: 'queue_one',
+                retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+                message: { inputBlocks: [{ type: 'text', text: draft }] },
+              },
+            });
+          },
+          { create: true }
+        )
+        .then((saved) => {
+          draft = '';
+          return saved;
+        });
+      void saving.catch(() => {});
+      try {
+        expect(await phase.promise).toBe('waiting');
+        expect(draft).toBe('unclassified scheduled body sentinel');
+        expect(await repository.read('mode-reservation')).toBeNull();
+        expect(await repository.list()).toEqual([]);
+        if (outcome === 'plaintext') {
+          admitted.resolve();
+          await saving;
+          expect(draft).toBe('');
+          expect((await repository.read('mode-reservation'))?.message?.inputBlocks).toEqual([
+            { type: 'text', text: 'unclassified scheduled body sentinel' },
+          ]);
+        } else {
+          if (outcome === 'encrypted') admitted.reject(new Error('workspace became encrypted'));
+          else {
+            await runtime.dispose();
+            admitted.resolve();
+          }
+          await expect(saving).rejects.toThrow();
+          expect(draft).toBe('unclassified scheduled body sentinel');
+        }
+        expect(mocks.authInvocations).toEqual([]);
+      } finally {
+        admitted.resolve();
+        await saving.catch(() => {});
+        await runtime.dispose();
+      }
+    }
+  );
 
   it('returns the local Repo before admission even when cloud startup already has a token', async () => {
     const admitted = Promise.withResolvers<void>();
@@ -2789,6 +2874,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const repo = await RealRepo.create({});
       mocks.repoOverride = repo;
       const intents: unknown[][] = [];
+      const featurePreparations: unknown[][] = [];
       const original = {
         requestId: '11'.repeat(16),
         targetMachineId: 'remote-machine',
@@ -2805,7 +2891,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
             acceptDispatchResponse: async () => ({}),
             ...(support === 'complete'
               ? {
-                  prepareFeatureRpc: async () => original,
+                  prepareFeatureRpc: async (...args: unknown[]) => {
+                    featurePreparations.push(args);
+                    return original;
+                  },
                   acceptFeatureRpcResponse: async () => null,
                 }
               : {}),
@@ -2855,8 +2944,31 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         } else {
           await expect(
             runtime.requestFilePreview('remote-machine' as MachineId, {} as never)
-          ).resolves.toMatchObject({ status: 'error', message: 'e2ee_rpc_unavailable' });
+          ).resolves.toMatchObject({
+            status: 'error',
+            code: 'permission_denied',
+            retryable: false,
+            message: 'Encrypted workspaces do not yet support remote machine operations.',
+          });
         }
+        // Writes follow the verified ledger role; a Guest is refused before any signing.
+        access.updateStatus({
+          epoch: 0,
+          rotationRequired: false,
+          hasCurrentKey: true,
+          memberRole: 'guest',
+        });
+        expect(runtime.protectedCodeCollabRole?.get()).toBe('read');
+        await expect(
+          runtime.requestCodeCollabSaveText('remote-machine' as MachineId, {
+            sessionId: 'session',
+            requestedByUserId: 'guest',
+            path: 'a.ts',
+            baseDigest: `sha256:${'0'.repeat(64)}`,
+            text: { encoding: 'plain', text: 'x', rawBytes: 1 },
+          })
+        ).resolves.toMatchObject({ status: 'error', code: 'permission_denied', retryable: false });
+        expect(featurePreparations).toEqual([]);
         // Preparation needs no local agent or ordinary transport/token.
         expect(cloudAttachCalls()).toEqual([]);
         expect(mocks.authInvocations).toEqual([]);
@@ -2864,6 +2976,76 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       } finally {
         await runtime.dispose();
         await access.close();
+      }
+    }
+  );
+
+  it.each([true, false])(
+    'reports the E2E protected transport owner closed only after a confirmed removal (%s)',
+    async (removed) => {
+      const reports: { workspaceId: string; effects: Record<string, unknown> }[] = [];
+      const probe = window as unknown as Record<string, unknown>;
+      const previous = { flag: probe.__LODY_E2E_CLIENT_LOSS__, ipc: probe.ipc };
+      probe.__LODY_E2E_CLIENT_LOSS__ = true;
+      probe.ipc = {
+        send: (_channel: string, payload: (typeof reports)[number]) => reports.push(payload),
+      };
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      vi.spyOn(repo, 'addTransport').mockImplementation(mocks.addTransport as never);
+      vi.spyOn(repo, 'joinMetaRoom').mockImplementation(mocks.joinMetaRoom as never);
+      vi.spyOn(repo, 'removeTransport').mockImplementation((async (id: string) => {
+        if (id === 'cloud' && !removed) throw new Error('teardown failed');
+      }) as never);
+      const runtime = await createWorkspaceRuntime({
+        content: {
+          mode: 'protected' as const,
+          namespace: 'synthetic-genesis',
+          resolve: () => {
+            throw new Error('unused until protected transport attaches');
+          },
+          snapshotUpload: { canUpload: () => false },
+        },
+        e2ee: {
+          bucketId: () => 'synthetic-encrypted-content',
+          createTokenProvider: () =>
+            createLoroStreamsTokenProviderLegacy({
+              endpoint: 'https://encrypted.example.test/token',
+              workspaceId: 'workspace-1',
+              authToken: () => 'synthetic',
+            }),
+        },
+        accountId: 'synthetic-account',
+        e2eeLocalIdentity: {
+          accountId: 'synthetic-account',
+          workspaceId: 'workspace-1',
+          genesisHash: '11'.repeat(32),
+          signingPublicKey: '22'.repeat(32),
+        },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode: 'dual',
+      });
+      try {
+        mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+        await runtime.setAuthToken('synthetic');
+        expect(cloudAttachCalls()).toHaveLength(1);
+        expect(reports.at(-1)).toMatchObject({
+          workspaceId: 'workspace-1',
+          effects: { activeContentStreams: 1, transportOwnerClosed: false },
+        });
+        await runtime.dispose();
+        expect(reports.at(-1)?.effects).toMatchObject(
+          removed
+            ? { activeContentStreams: 0, transportOwnerClosed: true }
+            : { activeContentStreams: 1, transportOwnerClosed: false }
+        );
+      } finally {
+        await runtime.dispose();
+        probe.__LODY_E2E_CLIENT_LOSS__ = previous.flag;
+        probe.ipc = previous.ipc;
       }
     }
   );
@@ -2910,7 +3092,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         runtime.requestFilePreview('machine-1' as MachineId, {} as never)
       ).resolves.toMatchObject({
         status: 'error',
-        message: 'e2ee_rpc_unavailable',
+        code: 'permission_denied',
+        retryable: false,
       });
       const schedule = await runtime.acquireScheduleStore('schedule-1');
       expect(schedule.roomId).toBe('schedule-schedule-1');

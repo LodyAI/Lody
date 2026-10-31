@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LodyOperationStore } from '../operation-store';
 import { inboxRepositoryLayer } from '../platform/inbox-repository';
-import { ExecutionJournal, makeExecutionOwner } from './execution-owner';
+import { ExecutionMembers, makeExecutionOwner } from './execution-owner';
 import {
   batchDepth,
   batchPreview,
@@ -163,8 +163,8 @@ describe('durable Operation inbox', () => {
     ).toEqual(['after-claim']);
     db.close();
   });
-  it.each(['user_stop', 'unreleased'] as const)(
-    'late wakeable receipts respect Stop and continue after unconfirmed release (%s)',
+  it.each(['user_stop', 'failed'] as const)(
+    'late wakeable receipts respect Stop and continue after a failed release (%s)',
     (outcome) => {
       const f = fixture();
       f.start();
@@ -177,7 +177,7 @@ describe('durable Operation inbox', () => {
       expect(other.inbox.pending('workspace')).toHaveLength(outcome === 'user_stop' ? 0 : 1);
     }
   );
-  it('withdraws only an unsubmitted, resource-free execution and keeps its input admissible', () => {
+  it('withdraws only an unsubmitted execution and keeps its input admissible', () => {
     const f = fixture();
     f.add('result');
     f.start();
@@ -187,9 +187,7 @@ describe('durable Operation inbox', () => {
     // The same execution id begins again and keeps the prepared claim.
     expect(f.sql.begin(f.input, 'execution-1')).toBe(true);
     expect(f.sql.prepare(f.input, 'owner')?.batchId).toBe(batch.batchId);
-    // Acquired resources or a fenced submission make withdrawal impossible.
-    f.sql.registerResources(f.input, 'execution-1', undefined);
-    expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
+    // A fenced submission makes withdrawal impossible.
     expect(f.sql.fence(batch, 'execution-1')).toBe(true);
     expect(f.sql.withdraw(f.input, 'execution-1')).toBe(false);
     f.sql.settle(batch, 'settled');
@@ -327,15 +325,12 @@ describe('durable Operation inbox', () => {
         .get()
     ).toEqual({ consumed: 1 });
   });
-  it('retains failed and unreleased state without granting automatic continuation', () => {
-    for (const outcome of ['failed', 'unreleased'] as const) {
-      const f = fixture();
-      f.start();
-      f.add('one');
-      f.release(outcome);
-      expect(f.sql.pending('workspace')).toEqual([]);
-      if (outcome === 'unreleased') expect(f.sql.begin(f.input, 'successor')).toBe(false);
-    }
+  it('a failed release grants no automatic continuation', () => {
+    const f = fixture();
+    f.start();
+    f.add('one');
+    f.release('failed');
+    expect(f.sql.pending('workspace')).toEqual([]);
   });
   it('denies foreign batch lookup and has no per-result execution tables', () => {
     const f = fixture();
@@ -565,10 +560,10 @@ describe('Inbox recovery and retained settlement', () => {
       stores.push(reopened);
       reopened.inbox.activate('workspace', 'replacement');
       expect(reopened.inbox.state(f.input)).toMatchObject({
-        blocked: 0,
         active_execution: null,
         active_input: null,
       });
+      expect(db.prepare('SELECT blocked FROM inbox_sessions').get()).toEqual({ blocked: 0 });
       // Crossed fences are permanently unknown, including orphan legacy blocks.
       expect(reopened.inbox.getBatch(batch.batchId, f.input)?.state).toBe('unknown');
       expect(reopened.inbox.inputEnded('workspace', 'A', f.input.inputId)).toBe(true);
@@ -580,28 +575,20 @@ describe('Inbox recovery and retained settlement', () => {
     }
   );
 
-  it('unreleased retirement preserves failure evidence and admits another requester', () => {
+  it('failed retirement keeps its receipt and admits another requester', () => {
     const f = fixture();
     f.start();
-    f.sql.registerResources(f.input, 'execution-1', { platform: 'win32', roots: [123] });
     f.sql.release({
       ...f.input,
       executionId: 'execution-1',
-      outcome: 'unreleased',
+      outcome: 'failed',
       cause: 'termination failed',
     });
     const fresh = { ...f.input, userId: 'other-human', inputId: 'fresh' };
     f.sql.accept(fresh);
     expect(f.sql.begin(fresh, 'successor')).toBe(true);
-    f.sql.confirmReleased(f.input, 'execution-1');
-    expect(f.sql.state(fresh).active_execution).toBe('successor');
     const db = new Database(f.filename);
-    expect(db.prepare('SELECT outcome FROM inbox_releases').get()).toEqual({
-      outcome: 'unreleased',
-    });
-    expect(db.prepare('SELECT cause FROM inbox_resources').get()).toEqual({
-      cause: 'termination failed',
-    });
+    expect(db.prepare('SELECT outcome FROM inbox_releases').get()).toEqual({ outcome: 'failed' });
     db.close();
   });
 
@@ -721,64 +708,6 @@ describe('Inbox recovery and retained settlement', () => {
   });
 });
 
-it.skipIf(process.platform === 'win32')(
-  'preserves terminal group identities after restart while admitting fresh input',
-  async () => {
-    const { createSessionSandboxFactory } = await import('@/session/session-sandbox');
-    const sandbox = await createSessionSandboxFactory({
-      logger: { debug: () => {}, warn: () => {} } as import('@/utils/logger').Logger,
-      // Exercise the same POSIX noop groups on macOS/Linux without depending on
-      // whether the test machine grants cgroup administration.
-      deps: { platform: 'darwin', configureExecutionProcess: async () => {} },
-    })('resource-reopen' as SessionId);
-    const launch = async () => {
-      const handle = await sandbox.spawn(
-        process.execPath,
-        ['-e', 'process.stdin.resume();process.stdout.write("ready")'],
-        { captureOutput: true }
-      );
-      await new Promise<void>((resolve) => handle.onStdout(() => resolve()));
-      return handle;
-    };
-    const f = fixture();
-    f.start();
-    const acp = await launch();
-    const detach = await sandbox.watchRecoveryResources!((identity) =>
-      f.sql.registerResources(f.input, 'execution-1', {
-        platform: process.platform,
-        ...identity,
-        roots: [process.pid, ...identity.roots],
-      })
-    );
-    try {
-      const terminal = await launch();
-      const exited = new Promise<void>((resolve) => acp.onExit(() => resolve()));
-      acp.child.stdin!.end();
-      await exited;
-      const second = new LodyOperationStore(f.filename);
-      stores.push(second);
-      second.inbox.activate('workspace', 'replacement');
-      const db = new Database(f.filename);
-      const resource = db.prepare('SELECT identity_json FROM inbox_resources').get() as {
-        identity_json: string;
-      };
-      expect(JSON.parse(resource.identity_json)).toMatchObject({
-        complete: true,
-        roots: expect.arrayContaining([acp.child.pid, terminal.child.pid]),
-      });
-      db.close();
-      // A real independently spawned group remains after the ACP leader exits.
-      expect(process.kill(-terminal.child.pid!, 0)).toBe(true);
-      const fresh = { ...f.input, inputId: 'successor-input' };
-      second.inbox.accept(fresh);
-      expect(second.inbox.begin(fresh, 'successor', 'replacement')).toBe(true);
-    } finally {
-      detach();
-      await sandbox.cleanup();
-    }
-  }
-);
-
 it('reads an oversized member in bounded fragments without dropping any result bytes', async () => {
   const { batchPage, INBOX_READ_BYTES } = await import('./batch-page');
   const member = {
@@ -825,34 +754,19 @@ it('a fresh human can clear pause without reviving the execution canceled by Sto
   expect(f.sql.canSubmit(f.input, 'execution-1', 'owner')).toBe(false);
 });
 
-it('execution owner retains resources and serializes recovery without resubmitting the batch', async () => {
+it('execution owner retains cleanup handles and serializes recovery without resubmitting the batch', async () => {
   const f = fixture();
   f.add('owned');
   f.sql.accept(f.input);
   const received: string[] = [];
   let alive = true;
-  let detached = false;
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const terminating = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        let emit:
-          | ((identity: {
-              roots: readonly number[];
-              complete: boolean;
-            }) => Effect.Effect<void, unknown>)
-          | undefined;
-        const journal = Layer.succeed(ExecutionJournal, {
-          record: (input, id, identity) =>
-            Effect.try(() => f.sql.registerResources(input, id, identity)),
-          confirm: (input, id) => Effect.try(() => f.sql.confirmReleased(input, id)),
+        const journal = Layer.succeed(ExecutionMembers, {
           members: (batch) => Effect.try(() => f.sql.members(batch)),
-          identity: (resourceRoots, complete) => ({
-            platform: 'darwin',
-            roots: [77, ...resourceRoots],
-            complete,
-          }),
         });
         const dependencies = Layer.mergeAll(
           inboxRepositoryLayer(f.sql),
@@ -868,14 +782,6 @@ it('execution owner retains resources and serializes recovery without resubmitti
           const owner = yield* makeExecutionOwner(f.input, 'owned-execution');
           yield* owner.register({
             key: {},
-            observesAcquisitions: true,
-            observe: (update) =>
-              Effect.sync(() => {
-                emit = update;
-                return Effect.sync(() => {
-                  detached = true;
-                });
-              }),
             terminate: Deferred.succeed(terminating, undefined).pipe(
               Effect.andThen(Deferred.await(release)),
               Effect.andThen(
@@ -885,28 +791,9 @@ it('execution owner retains resources and serializes recovery without resubmitti
               )
             ),
           });
-          expect(
-            JSON.parse(
-              (f.store as unknown as { db: Database.Database }).db
-                .prepare('SELECT identity_json FROM inbox_resources')
-                .get().identity_json
-            ).complete
-          ).toBe(false);
-          yield* emit!({ roots: [91], complete: true });
-          expect(
-            JSON.parse(
-              (f.store as unknown as { db: Database.Database }).db
-                .prepare('SELECT identity_json FROM inbox_resources')
-                .get().identity_json
-            )
-          ).toEqual({
-            platform: 'darwin',
-            roots: [77, 91],
-            complete: true,
-          });
           yield* owner.submit(() => received.push(owner.batch!.batchId));
           yield* owner.finish('user_stop', new Error('resource release failed'));
-          expect(owner.phase).toBe('blocked');
+          expect(owner.phase).toBe('failed');
           const first = yield* owner
             .recover(Effect.void, Effect.void)
             .pipe(Effect.forkScoped({ startImmediately: true }));
@@ -916,14 +803,15 @@ it('execution owner retains resources and serializes recovery without resubmitti
             .pipe(Effect.forkScoped({ startImmediately: true }));
           expect(second.pollUnsafe()).toBeUndefined();
           expect(alive).toBe(true);
-          expect(detached).toBe(false);
-          expect(f.sql.begin({ ...f.input, inputId: 'successor' }, 'successor')).toBe(false);
+          // A failed release returns the slot; cleanup never gates a successor.
+          const successor = { ...f.input, inputId: 'successor' };
+          f.sql.accept(successor);
+          expect(f.sql.begin(successor, 'successor')).toBe(true);
           yield* Deferred.succeed(release, undefined);
           yield* Fiber.join(first);
           yield* Fiber.join(second);
           yield* owner.awaitReleased;
           expect(alive).toBe(false);
-          expect(detached).toBe(true);
           expect(owner.phase).toBe('released');
           expect(f.sql.getBatch(owner.batch!.batchId, owner.input)?.state).toBe('unknown');
           expect(received).toEqual([owner.batch!.batchId]);
@@ -1135,7 +1023,6 @@ it('owner replacement settles a crossed fence as unknown without making its memb
       .prepare("SELECT consumed FROM inbox_results WHERE session_id='A' AND operation_id='one'")
       .get()
   ).toEqual({ consumed: 1 });
-  other.inbox.confirmReleased(f.input, 'execution-1');
   const next = { ...f.input, inputId: 'fresh' };
   other.inbox.accept(next);
   expect(other.inbox.prepare(next, 'replacement')).toBeUndefined();
@@ -1234,7 +1121,7 @@ it('keeps the first conflicting receipt and admits the next input', () => {
       ...f.input,
       userId: 'other',
       executionId: 'execution-1',
-      outcome: 'unreleased',
+      outcome: 'user_stop',
     })
   ).not.toThrow();
   const fresh = { ...f.input, inputId: 'fresh' };

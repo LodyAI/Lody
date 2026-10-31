@@ -1,5 +1,4 @@
 import { makeNodeLocalLoroWriterConnection } from '@lody/shared/node/local-loro-writer';
-import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
 import fs from 'node:fs';
 import net from 'node:net';
 import {
@@ -250,14 +249,14 @@ async function stopInner(): Promise<void> {
   activeClientSockets.clear();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   // The close event registered the recovery owners before server.close resolves.
-  // Failures leave those owners and the application writer available for retry.
+  // Failures leave those owners available for retry. The process writer is shared
+  // with every workspace engine, so its application owner releases it afterwards.
   await Promise.all(
     [...connectionReleases].map(async (release) => {
       await release();
       connectionReleases.delete(release);
     })
   );
-  await closeProcessLocalLoroWriterLegacy();
   dataPlaneServer = null;
   activeSocketPath = null;
   if (socketPath && process.platform !== 'win32' && fs.existsSync(socketPath))

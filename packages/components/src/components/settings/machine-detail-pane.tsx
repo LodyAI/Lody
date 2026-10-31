@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -457,7 +458,11 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     accordion,
   } = props;
   const { t } = useTranslation();
-  const ordinarySharing = useWorkspaceFeature('sharing');
+  const contentMode = useAtomValue(workspaceContentModeAtom);
+  const ordinarySharing =
+    !contentMode?.descriptor ||
+    !('contentMode' in contentMode.descriptor) ||
+    contentMode.descriptor.contentMode !== 'e2ee';
   const isMobile = useIsMobile();
   const monitoredOnline = useMachineOnlineStatus(machine.id) === 'online';
   // The accordion list already owns the workspace-wide presence snapshot. Reuse
@@ -1190,6 +1195,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
   return allowed || props.isLocal ? (
     <SupportedMachineDetailPane {...props} />
   ) : (
-    <WorkspaceFeatureNotice feature="rpc" />
+    <>
+      {props.mode === 'devices' ? props.footer : null}
+      <WorkspaceFeatureNotice feature="rpc" />
+    </>
   );
 }

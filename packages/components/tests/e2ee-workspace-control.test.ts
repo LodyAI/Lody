@@ -1,6 +1,7 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
+import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
@@ -393,6 +394,45 @@ it.each(['identity-lost', 'approval-required'] as const)(
     });
   }
 );
+
+it('routes an authenticated revocation of this device to re-pairing guidance', () => {
+  expect(
+    classifyE2eeControlFailure(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked")
+    )
+  ).toEqual({ kind: 'approval-required', code: 'device-revoked' });
+});
+
+it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+  'keeps the typed custody %s outcome distinct from a network failure',
+  (reason) => {
+    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
+      kind: `custody-${reason}`,
+      code: reason,
+    });
+  }
+);
+it.each(['identity-lost', 'corrupt'] as const)(
+  'preserves explicit recovery guidance for custody %s',
+  (reason) => {
+    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
+      kind: reason === 'identity-lost' ? 'approval-required' : 'custody-indeterminate',
+      code: reason,
+    });
+  }
+);
+it('does not infer custody recovery from an error message or unwrap a mixed runtime failure', () => {
+  expect(classifyE2eeControlFailure(new Error('LOCKED indeterminate'))).toMatchObject({
+    kind: 'network',
+  });
+  expect(
+    classifyE2eeControlFailure({
+      _tag: 'PersonalRuntimeFailure',
+      code: 'runtime-failed',
+      cause: { reasons: [new ClientCustodyError({ reason: 'locked' }), new Error('close failed')] },
+    })
+  ).toMatchObject({ kind: 'network' });
+});
 
 describe('encrypted workspace recovery classification', () => {
   it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {

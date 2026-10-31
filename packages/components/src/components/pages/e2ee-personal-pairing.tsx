@@ -1,3 +1,4 @@
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { E2eeIdentityRecovery } from './e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -60,6 +61,7 @@ function PersonalPairingSession({
 }) {
   const { t } = useTranslation();
   const [recoveryError, setRecoveryError] = useState('');
+  const [custodyMessage, setCustodyMessage] = useState<string>();
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
   const [joining, setJoining] = useState<{
@@ -105,6 +107,7 @@ function PersonalPairingSession({
         (error) => {
           if (cancelled) return;
           setRecoveryError(error instanceof Error ? error.message : '');
+          setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
           setPhase('error');
           setRecovering(false);
         }
@@ -118,11 +121,13 @@ function PersonalPairingSession({
     if (busy.current || recovering) return;
     busy.current = true;
     setPhase('busy');
+    setCustodyMessage(undefined);
     try {
       await operation();
     } catch (error) {
       if (isLive()) {
         setRecoveryError(error instanceof Error ? error.message : '');
+        setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
         setPhase('error');
       }
     } finally {
@@ -340,7 +345,7 @@ function PersonalPairingSession({
       )}
       {phase !== 'idle' && phase !== 'busy' && (
         <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>
-          {t(`e2ee.pair.${phase}`)}
+          {t(phase === 'error' && custodyMessage ? custodyMessage : `e2ee.pair.${phase}`)}
         </p>
       )}
     </Card.Root>

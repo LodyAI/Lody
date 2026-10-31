@@ -45,6 +45,9 @@ Read parent rules and linked context.
 - Static HTML requires policy-owned `srcdoc`. Scripts require credentialless and
   `allow-scripts` only; otherwise use navigation-stripped HTML with an empty sandbox.
   Never preview truncated text; static frames die with their tab.
+- Encrypted remote preview controls require the existing protected feature host
+  and verified write role; never fall back to ordinary preview proofs. Explain
+  that page bytes pass through the tunnel service as plaintext.
 - Preview comment writes go through `runtime.writer.mutatePreviewVisualComments`, never the store's `setState`.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)

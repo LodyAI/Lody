@@ -1,6 +1,7 @@
 # 无 PID 的启动失败保持资源身份完整
 
 Status: implemented
+Archived: 2026-10-30
 Translation: current
 
 [English](2026-10-17-no-pid-spawn-resource-identity.md)
@@ -20,7 +21,7 @@ PR 检测虽然捕获了命令错误，Inbox 收尾仍保留本轮并阻塞后�
 启动；已有的不确定标记永远不会因此被清空。
 
 Session 继续拥有资源；已获取的进程、取消、终止和后继准入遵循现有的
-[Inbox 契约](../architecture/2026-10-12-operation-inbox.zh.md)。日志写入失败和
+[Inbox 契约](../../implemented/architecture/2026-10-12-operation-inbox.zh.md)。日志写入失败和
 未解决的释放失败仍由保留的恢复 owner 处理。本次只修正获取证据，不改变实际释放
 保证。安装 `gh` 只是避开其中一个触发条件；本次无需修改凭据、PATH 或添加自动恢复。
 
