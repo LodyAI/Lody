@@ -710,7 +710,8 @@ export class LoroStreamsMachineRpcServer {
           logError(
             `[rpc-server:${this.deps.machineId}] Loro Streams token rejected (status=${error.status}); the CLI token is invalid or has been revoked. Stopping request loop.`
           );
-          this.stopped = true;
+          // A full stop also aborts handlers and capability work in flight.
+          this.stop();
           this.deps.onFatalAuthFailure?.(error);
           return;
         }
@@ -720,13 +721,22 @@ export class LoroStreamsMachineRpcServer {
             this.deps.logger.warn(
               `[rpc-server:${this.deps.machineId}] request stream returned 404; recreating ${this.requestStreamId}`
             );
-            await this.streamClient.ensureJsonStream(
-              this.requestStreamId,
-              this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
-            );
-            this.requestState.nextOffset = '-1';
-            this.requestState.cursor = undefined;
-            continue;
+            try {
+              await this.streamClient.ensureJsonStream(
+                this.requestStreamId,
+                this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+              );
+              this.requestState.nextOffset = '-1';
+              this.requestState.cursor = undefined;
+              continue;
+            } catch (ensureError) {
+              // Retry like any other loop error; never let it end the listener.
+              this.logRequestLoopError(
+                ensureError instanceof Error ? ensureError.message : String(ensureError)
+              );
+              await delay(REQUEST_LOOP_RETRY_DELAY_MS);
+              continue;
+            }
           }
           if (error.status === 410) {
             this.requestState.nextOffset = '-1';

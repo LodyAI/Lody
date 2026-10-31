@@ -12,6 +12,7 @@ import type {
 } from '@lody/shared/electron-ipc'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
+import { quitAndRelaunch } from '../relaunch-intent'
 import { setAppQuitting } from '../window-state'
 import {
   resolveLinuxDebInstallPlan,
@@ -92,6 +93,8 @@ export class AppUpdaterService {
   private downloadedFile: string | undefined
   private errorCount = 0
   private installInFlight = false
+  /** A Sparkle install this service started still holds the app-quitting flag. */
+  private sparkleInstallRequested = false
 
   constructor(private readonly options: { enabled?: boolean } = {}) {}
 
@@ -110,6 +113,8 @@ export class AppUpdaterService {
       })
       return
     }
+    // Sparkle schedules its own checks, which `stop()` leaves running.
+    if (this.sparkleBridge) return
 
     const sparkleBridge = this.tryLoadSparkleBridge()
     if (sparkleBridge) {
@@ -146,7 +151,9 @@ export class AppUpdaterService {
     }, UPDATE_CHECK_INTERVAL_MS)
   }
 
+  /** Stop periodic checks; a recovered quit calls `start()` again to resume them. */
   stop(): void {
+    this.started = false
     if (this.intervalRef) {
       clearInterval(this.intervalRef)
       this.intervalRef = null
@@ -218,9 +225,11 @@ export class AppUpdaterService {
     if (this.sparkleBridge) {
       try {
         setAppQuitting(true)
+        this.sparkleInstallRequested = true
         this.sparkleBridge.installUpdateNow()
         return { ok: true }
       } catch (error) {
+        this.sparkleInstallRequested = false
         setAppQuitting(false)
         const message = formatUnknownError(error)
         this.setState({
@@ -324,9 +333,9 @@ export class AppUpdaterService {
     }
 
     // Close handlers must not hide windows and block the updater-driven quit.
+    // The relaunch is armed only once the quit can no longer be cancelled.
     setAppQuitting(true)
-    app.relaunch()
-    app.quit()
+    void quitAndRelaunch()
     return { ok: true }
   }
 
@@ -409,7 +418,13 @@ export class AppUpdaterService {
     bridge.setEventHandler((event) => {
       try {
         const patch = sparkleEventToStatePatch(event, Date.now())
-        if (patch) this.setState(patch)
+        if (!patch) return
+        // A failed install leaves the app running, so close-to-hide must apply again.
+        if (patch.phase === 'error' && this.sparkleInstallRequested) {
+          this.sparkleInstallRequested = false
+          setAppQuitting(false)
+        }
+        this.setState(patch)
       } catch (error) {
         console.log(`[sparkle] event handler failed: ${formatUnknownError(error)}`)
       }

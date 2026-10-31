@@ -2665,13 +2665,24 @@ export class LoroStreamsRpcResponseDispatcher {
 
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
-            await this.options.streamClient.ensureJsonStream(
-              this.responseStreamId,
-              this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
-            );
-            this.responseState.nextOffset = '-1';
-            this.responseState.cursor = undefined;
-            continue;
+            try {
+              await this.options.streamClient.ensureJsonStream(
+                this.responseStreamId,
+                this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+              );
+              this.responseState.nextOffset = '-1';
+              this.responseState.cursor = undefined;
+              continue;
+            } catch (ensureError) {
+              // Retry like any other loop error; never let it end the loop.
+              this.options.logger?.warn?.(
+                `[rpc-client:${this.options.logLabel ?? this.options.workspaceId}] response stream recreate failed: ${
+                  ensureError instanceof Error ? ensureError.message : String(ensureError)
+                }`
+              );
+              await delay(1000);
+              continue;
+            }
           }
           if (error.status === 410) {
             this.responseState.nextOffset = '-1';

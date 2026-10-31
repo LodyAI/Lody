@@ -3709,6 +3709,108 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+
+  it('aborts in-flight capability work when a token auth failure stops the loop', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const authError = new LoroStreamsTokenAuthError('synthetic revoked token', 403, '{}');
+    let refreshSignal: AbortSignal | undefined;
+    let refreshStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async () => {}),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (_streamId, _state, onBatch) => {
+        await onBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'refresh-in-flight',
+              method: 'machine/acp-capabilities-refresh',
+              rpcVersion: '1',
+              machineId,
+              workspaceId,
+              replyTo: 'workspace-1:rpc:res:machine-1',
+              sentAt: Date.now(),
+              expiresAt: Date.now() + 5000,
+              params: { configId },
+            },
+          ],
+          nextOffset: '1',
+          cursor: 'cursor-1',
+          upToDate: true,
+        });
+        await started;
+        throw authError;
+      }),
+    };
+    const onFatalAuthFailure = vi.fn();
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(
+        ({ signal }) =>
+          new Promise<MachineAcpCapabilitiesRefreshResponse>(() => {
+            refreshSignal = signal;
+            refreshStarted();
+          })
+      ),
+      onFatalAuthFailure,
+    });
+
+    await server.start();
+    await vi.waitFor(() => expect(onFatalAuthFailure).toHaveBeenCalledWith(authError));
+    expect(refreshSignal?.aborted).toBe(true);
+  });
+
+  it('keeps listening when recreating a missing request stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 2) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+      });
+
+      await server.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(2));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      // Start, the failed recreate, then the retried recreate.
+      expect(ensureCalls).toBe(3);
+      server.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 it('round trips typed simulator commands and isolates unavailable and denied controls', async () => {
