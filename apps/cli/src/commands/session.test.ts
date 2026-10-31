@@ -3130,3 +3130,69 @@ describe('session command output boundary', () => {
     }
   });
 });
+
+describe('paired machine billing entitlement while offline', () => {
+  it('waits once, fails open without asking again for 30 seconds, then retries and caches', async () => {
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    const { getWorkspaceBillingEntitlementBestEffort } = await import('./session');
+    const { evaluateSessionCreateQuota } = await import('@lody/shared');
+    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let online = false;
+    let subscriptions = 0;
+    const client: Client = {
+      onUpdate: ((_ref: unknown, _args: unknown, listener: (value: unknown) => void) => {
+        subscriptions += 1;
+        // Offline: the subscription never answers. Online: it answers at once.
+        if (online) listener({ valid: true, effectivePlanTier: 'free', checkoutPending: false });
+        return () => {};
+      }) as unknown as Client['onUpdate'],
+      query: (() => new Promise(() => {})) as Client['query'],
+      close: async () => {},
+    };
+    const workspaceId = 'offline-billing-workspace';
+    const port = createCloudE2eeMachinePort({
+      accountId: 'synthetic-machine-owner',
+      workspaceId,
+      genesisHash: 'ab'.repeat(32),
+      machineId: 'machine',
+      credential: 'a4'.repeat(32),
+      authBaseUrl: 'https://synthetic.convex.cloud',
+      serverBaseUrl: 'https://relay.synthetic.test',
+      logger: getLogger('session'),
+      client,
+    });
+    const manager = { cloudBilling: port.billing } as unknown as Parameters<
+      typeof getWorkspaceBillingEntitlementBestEffort
+    >[0];
+    const workspace = { id: workspaceId, name: 'Offline', slug: null, role: 'member' };
+    const read = () => getWorkspaceBillingEntitlementBestEffort(manager, workspace);
+    try {
+      // The first command waits for the read deadline, then fails open.
+      const first = read();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(first).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // Within 30 seconds the next command fails open at once, with no new read.
+      await vi.advanceTimersByTimeAsync(29_000);
+      await expect(read()).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // After 30 seconds the plan is read again; the connection is back.
+      online = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const free = await read();
+      expect(subscriptions).toBe(2);
+      expect(free).toEqual({ effectivePlanTier: 'free', checkoutPending: false });
+      if (!free) throw new Error('expected a Free plan');
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 199 }).allowed).toBe(true);
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 200 }).allowed).toBe(false);
+      // A successful read is cached normally again.
+      await expect(read()).resolves.toEqual(free);
+      expect(subscriptions).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+  });
+});
