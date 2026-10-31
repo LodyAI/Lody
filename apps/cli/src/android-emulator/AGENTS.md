@@ -17,3 +17,7 @@ access and the pinned scrcpy connection. The shared device-preview core owns vie
 - Appearance uses only fixed `cmd uimode night yes/no` commands on the capture’s
   bound ADB connection. Check exit status and confirmed mode; cancellation shares
   native connection revocation with other preview controls.
+
+- Quality is a bounded per-operation preset, negotiated with `androidEmulatorQuality`.
+  No-viewer expiry is 30 seconds (after boot for an agent's first viewer); it must
+  enter joined cleanup before releasing the device lease, never kill the AVD.

@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import type { AndroidEmulatorQuality } from '@lody/shared';
+import { DevicePreviewPlatformContext } from '@/components/sessions/ios-simulator/device-preview-platform';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import type { Meta, StoryObj } from '@storybook/react-vite';
@@ -286,4 +289,42 @@ export const Narrow: Story = {
     ),
   ],
   args: { status: ready('local'), viewerState: 'ready', controls },
+};
+
+const androidCatalog = toIosSimulatorCatalog([
+  {
+    udid: 'Pixel_A',
+    name: 'Pixel A',
+    runtime: 'Android',
+    deviceType: 'AVD',
+    state: 'Booted',
+    available: true,
+    occupancy: 'available',
+  },
+]);
+function AndroidQualityHarness(args: IosSimulatorPanelViewProps) {
+  const [quality, setQuality] = useState<AndroidEmulatorQuality>('balanced');
+  return (
+    <DevicePreviewPlatformContext.Provider value="android">
+      <IosSimulatorPanelView {...args} quality={{ value: quality, onChange: setQuality }} />
+    </DevicePreviewPlatformContext.Provider>
+  );
+}
+export const AndroidQuality: Story = {
+  render: (args) => <AndroidQualityHarness {...args} />,
+  args: { catalog: { phase: 'ready', ...androidCatalog }, selectedUdid: 'Pixel_A' },
+};
+export const AndroidStopPreview: Story = {
+  render: (args) => (
+    <DevicePreviewPlatformContext.Provider value="android">
+      <IosSimulatorPanelView {...args} />
+    </DevicePreviewPlatformContext.Provider>
+  ),
+  args: {
+    catalog: { phase: 'ready', ...androidCatalog },
+    selectedUdid: 'Pixel_A',
+    status: { ...ready('remote'), udid: 'Pixel_A' },
+    viewerState: 'ready',
+    controlsLayout: 'menu',
+  },
 };

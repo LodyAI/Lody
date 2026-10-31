@@ -1,6 +1,11 @@
 import type { SimulatorIceServer } from './webrtc-protocol';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_PREVIEW_IDLE_TIMEOUT_MS, type SessionId, type PreviewTarget } from '@lody/shared';
+import {
+  DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
+  type SessionId,
+  type PreviewTarget,
+  type AndroidEmulatorQuality,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { QuickTunnelSession } from '@/preview/quick-tunnel-session';
 import { LocalPreviewProxyManager } from '@/preview/local-preview-proxy';
@@ -14,6 +19,7 @@ type ViewerEndpoint = {
   renew?: () => void;
 };
 type Operation = {
+  quality?: AndroidEmulatorQuality;
   state: DevicePreview;
   owner: string;
   abort: AbortController;
@@ -44,11 +50,17 @@ export type DeviceConnection = {
 };
 export type DevicePreviewAdapter = {
   platform: 'ios' | 'android';
+  viewerAttachTimeoutMs?: number;
   normalize(id: string): string;
   list(signal?: AbortSignal): Promise<DeviceEntry[]>;
   prepare(signal: AbortSignal): Promise<string>;
   boot(id: string, signal: AbortSignal): Promise<void>;
-  open(runtime: string, device: DeviceEntry, signal: AbortSignal): Promise<DeviceConnection>;
+  open(
+    runtime: string,
+    device: DeviceEntry,
+    signal: AbortSignal,
+    quality?: AndroidEmulatorQuality
+  ): Promise<DeviceConnection>;
   exterior?(id: string, signal: AbortSignal): Promise<NonNullable<DeviceResponse['exterior']>>;
   environmentMessage: string;
 };
@@ -197,7 +209,8 @@ export class DevicePreviewService {
         if (
           existing &&
           !existing.abort.signal.aborted &&
-          this.deviceKey(existing.state.id) === this.deviceKey(command.id)
+          this.deviceKey(existing.state.id) === this.deviceKey(command.id) &&
+          existing.quality === command.quality
         ) {
           if (!fromAgent) this.attachViewer(existing, remote, true);
           else await this.reportAgentPreview(request.sessionId, existing.state.operationId);
@@ -222,6 +235,7 @@ export class DevicePreviewService {
           };
         const op: Operation = {
           owner,
+          quality: command.quality,
           endpoints: new Map(),
           state: {
             operationId,
@@ -338,7 +352,16 @@ export class DevicePreviewService {
       await this.deps.adapter.boot(device.id, signal);
       signal.throwIfAborted();
       op.state.phase = 'connecting';
-      await op.viewerAttached;
+      const attachTimer =
+        op.viewerAttached && this.deps.adapter.viewerAttachTimeoutMs !== undefined
+          ? setTimeout(() => op.abort.abort(), this.deps.adapter.viewerAttachTimeoutMs)
+          : undefined;
+      attachTimer?.unref?.();
+      try {
+        await op.viewerAttached;
+      } finally {
+        clearTimeout(attachTimer);
+      }
       signal.throwIfAborted();
       // Abort native startup promptly, but keep a ready capture process alive
       // until the gateway has flushed touch-up during shutdown.
@@ -347,7 +370,7 @@ export class DevicePreviewService {
       signal.addEventListener('abort', cancelProcessStartup, { once: true });
       if (signal.aborted) cancelProcessStartup();
       try {
-        process = await this.deps.adapter.open(binary, device, processStartup.signal);
+        process = await this.deps.adapter.open(binary, device, processStartup.signal, op.quality);
       } finally {
         signal.removeEventListener('abort', cancelProcessStartup);
       }

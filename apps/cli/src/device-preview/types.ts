@@ -1,4 +1,8 @@
-import type { IosSimulatorExteriorAsset, IosSimulatorExterior } from '@lody/shared';
+import type {
+  AndroidEmulatorQuality,
+  IosSimulatorExteriorAsset,
+  IosSimulatorExterior,
+} from '@lody/shared';
 
 export type DevicePlatform = 'ios' | 'android';
 export type DeviceEntry = {
@@ -14,7 +18,7 @@ export type DeviceEntry = {
 export type DeviceCommand =
   | { action: 'list' }
   | { action: 'exterior'; id: string }
-  | { action: 'start'; id: string }
+  | { action: 'start'; id: string; quality?: AndroidEmulatorQuality }
   | { action: 'status'; operationId?: string }
   | { action: 'stop'; operationId: string };
 export type DeviceRequest = {

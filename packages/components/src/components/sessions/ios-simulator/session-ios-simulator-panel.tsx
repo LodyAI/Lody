@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import {
   machineSupportsIosSimulatorControls,
   machineSupportsAndroidEmulatorProtocol,
+  machineSupportsAndroidEmulatorQuality,
+  type AndroidEmulatorQuality,
   machineSupportsIosSimulatorExterior,
   IosSimulatorExteriorAssetSchema,
   isIosSimulatorBezelPng,
@@ -154,6 +156,8 @@ function SessionIosSimulatorPanelController({
     [platform, runtime, session.id, session.machineId, user?.id]
   );
 
+  const [quality, setQuality] = useState<AndroidEmulatorQuality>('balanced');
+  const supportsQuality = platform === 'android' && machineSupportsAndroidEmulatorQuality(machine);
   const [catalog, setCatalog] = useState<IosSimulatorCatalogState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [status, setStatus] = useState<IosSimulatorPanelStatus>(IDLE);
@@ -185,7 +189,10 @@ function SessionIosSimulatorPanelController({
           machineId: session.machineId,
           sessionId: session.id,
           requestedByUserId: requesterUserId,
-          command: command.action === 'start' ? { action: 'start', id: command.udid } : command,
+          command:
+            command.action === 'start'
+              ? { action: 'start', id: command.udid, ...(supportsQuality ? { quality } : {}) }
+              : command,
         });
         return androidEmulatorResponseForPanel(result);
       }
@@ -197,7 +204,7 @@ function SessionIosSimulatorPanelController({
         timeoutMs: command.action === 'exterior' ? 45000 : undefined,
       });
     },
-    [platform, requesterUserId, runtime, session.id, session.machineId]
+    [platform, requesterUserId, runtime, session.id, session.machineId, supportsQuality, quality]
   );
 
   const refreshCatalog = useCallback(async () => {
@@ -706,6 +713,7 @@ function SessionIosSimulatorPanelController({
   return (
     <>
       <IosSimulatorPanelView
+        quality={supportsQuality ? { value: quality, onChange: setQuality } : undefined}
         deviceExterior={deviceExterior}
         machineName={machineName}
         blocker={blocker}

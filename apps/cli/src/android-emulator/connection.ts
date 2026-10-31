@@ -1,3 +1,4 @@
+import { androidEncoderOptions, createAndroidViewerIdleTimeout } from './preview-policy';
 import { runAndroidControl, setAndroidAppearance } from './control-task';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
@@ -6,7 +7,7 @@ import { createAdbConnector } from './adb-connector';
 import { AdbScrcpyClient, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
 import type { AndroidKeyCode } from '@yume-chan/scrcpy';
 import { ReadableStream } from '@yume-chan/stream-extra';
-import type { DevicePreviewControl } from '@lody/shared';
+import type { AndroidEmulatorQuality, DevicePreviewControl } from '@lody/shared';
 import { DeviceStream, type DevicePreviewBackend } from '../device-preview/backend';
 import { createDevicePreviewGateway } from '../device-preview/gateway';
 import type { DeviceConnection } from '../device-preview/service';
@@ -17,7 +18,8 @@ import { verifyScrcpy } from './runtime';
 export async function openAndroidConnection(
   runtime: string,
   name: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  quality?: AndroidEmulatorQuality
 ): Promise<DeviceConnection> {
   const startupSignal = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
   const bytes = await readFile(runtime);
@@ -54,9 +56,7 @@ export async function openAndroidConnection(
         control: true,
         tunnelForward: true,
         videoCodec: 'h264',
-        videoBitRate: 1_000_000,
-        maxSize: 1280,
-        maxFps: 30,
+        ...androidEncoderOptions(quality),
         clipboardAutosync: false,
         scid: randomBytes(4).readUInt32BE(0).toString(16).slice(0, 7),
       })
@@ -77,6 +77,11 @@ export async function openAndroidConnection(
     const video = await capture.videoStream;
     const reader = video.stream.getReader();
     const viewers = new Set<AndroidStream>();
+    let finishIdle = () => {};
+    const idleClosed = new Promise<void>((resolve) => {
+      finishIdle = resolve;
+    });
+    const idle = createAndroidViewerIdleTimeout(() => finishIdle());
     let configuration: Buffer | undefined;
     let nextPointer = 1n;
     let clipboardSequence = 1n;
@@ -90,6 +95,7 @@ export async function openAndroidConnection(
       bufferedAmount = 0;
       readonly pointer = nextPointer++ * 2n;
       private tail = Promise.resolve();
+      private readonly leave = idle.attach();
       constructor() {
         super();
         viewers.add(this);
@@ -156,6 +162,7 @@ export async function openAndroidConnection(
         if (this.readyState === 3) return;
         this.readyState = 3;
         viewers.delete(this);
+        this.leave();
         this.emit('close');
       }
     }
@@ -237,9 +244,10 @@ export async function openAndroidConnection(
     startupSignal.removeEventListener('abort', abort);
     let stopping: Promise<void> | undefined;
     return {
-      closed: Promise.race([capture.exited, pump]),
+      closed: Promise.race([capture.exited, pump, idleClosed]),
       stop: () =>
         (stopping ??= (async () => {
+          idle.dispose();
           for (const stream of viewers) stream.close();
           await Promise.allSettled([
             reader.cancel(),

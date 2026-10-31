@@ -5,6 +5,12 @@ ADB resolves the exact case-sensitive AVD name to one `emulator-*` serial. Physi
 devices and ambiguous duplicate AVD instances are excluded. Install the Android
 SDK and create AVDs separately; Lody does not install SDKs or create devices.
 Stopping preview never shuts down the emulator or the user's ADB server.
+The Stop preview button is directly available in desktop and mobile headers.
+After 30 seconds with no viewer streams, capture ends through the normal joined
+cleanup and releases the device lease. A never-viewed agent start gets the same
+30-second grace after boot finishes. Multiple viewers share the grace: one remaining
+viewer keeps the operation alive. Reopening an expired preview offers Restore;
+another session may acquire the AVD once cleanup completes.
 
 Tango talks to loopback ADB on port 5037. The owned TCP connector settles reads and
 writes on abort/error/close. Every capture has an isolated scrcpy connection ID;
@@ -16,8 +22,10 @@ ADB `cmd uimode night` command; apps with their own theme overrides may not foll
 iOS-only controls are unavailable. Audio and clipboard autosync
 are disabled. APK installation and arbitrary shell commands are not exposed.
 
-The encoder is fixed to H.264, 1 Mbps, 30 FPS maximum and a 1280-pixel maximum
-edge. Per-viewer credits and recovery use the common flow controller; viewers do
+H.264 has three per-operation quality presets: Data saver (300 kbps, 640-pixel
+maximum edge, 15 FPS), Balanced (default: 600 kbps, 960 pixels, 24 FPS), and Clear
+(1 Mbps, 1280 pixels, 30 FPS). Select quality before starting; stop and restart to
+change it. Only hosts advertising `androidEmulatorQuality: 1` receive the option. Per-viewer credits and recovery use the common flow controller; viewers do
 not compete to configure the encoder. Annex-B SPS/PPS and frames are converted to
 avcC/AVCC at this adapter. Android requires WebCodecs H.264 and has no MJPEG fallback.
 

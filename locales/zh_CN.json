@@ -5935,5 +5935,9 @@
   "sessions.androidEmulator.environmentDetail": "请在这台机器上安装 Android SDK 并配置 AVD，然后刷新。",
   "sessions.androidEmulator.emptyDetail": "请在 Android Studio 的 Device Manager 中创建 AVD，然后刷新。",
   "sessions.detailTabs.androidEmulator": "Android 模拟器",
-  "sessions.devicePreview.rotate": "旋转"
+  "sessions.devicePreview.rotate": "旋转",
+  "sessions.androidEmulator.quality.label": "预览画质",
+  "sessions.androidEmulator.quality.saver": "省流",
+  "sessions.androidEmulator.quality.balanced": "均衡",
+  "sessions.androidEmulator.quality.clear": "清晰"
 }

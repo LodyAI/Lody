@@ -5,11 +5,19 @@ import {
   IosSimulatorResponseSchema,
 } from './ios-simulator';
 import { RpcSecretEnvelopeSchema } from './rpc-secret';
+export const AndroidEmulatorQualitySchema = z.enum(['saver', 'balanced', 'clear']);
+export type AndroidEmulatorQuality = z.infer<typeof AndroidEmulatorQualitySchema>;
 const id = z.string().min(1).max(200);
 export const AndroidAvdNameSchema = z.string().regex(/^[a-zA-Z0-9_.-]{1,200}$/);
 export const AndroidEmulatorCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('list') }).strict(),
-  z.object({ action: z.literal('start'), id: AndroidAvdNameSchema }).strict(),
+  z
+    .object({
+      action: z.literal('start'),
+      id: AndroidAvdNameSchema,
+      quality: AndroidEmulatorQualitySchema.optional(),
+    })
+    .strict(),
   z.object({ action: z.literal('status'), operationId: id.optional() }).strict(),
   z.object({ action: z.literal('stop'), operationId: id }).strict(),
 ]);

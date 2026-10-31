@@ -1,3 +1,4 @@
+import { ANDROID_PREVIEW_VIEWER_GRACE_MS } from './preview-policy';
 import { DevicePreviewService, type DevicePreviewDependencies } from '../device-preview/service';
 import type { AndroidEmulatorRequest, AndroidEmulatorResponse } from '@lody/shared';
 import { listAndroidDevices, bootAndroidDevice } from './devices';
@@ -9,11 +10,13 @@ export class AndroidEmulatorService extends DevicePreviewService {
       ...deps,
       adapter: {
         platform: 'android',
+        viewerAttachTimeoutMs: ANDROID_PREVIEW_VIEWER_GRACE_MS,
         normalize: (id) => id,
         list: listAndroidDevices,
         prepare: (signal) => ensureScrcpyServer(signal, deps.runtimeBaseUrl),
         boot: bootAndroidDevice,
-        open: (runtime, device, signal) => openAndroidConnection(runtime, device.id, signal),
+        open: (runtime, device, signal, quality) =>
+          openAndroidConnection(runtime, device.id, signal, quality),
         environmentMessage:
           'Check the Android SDK, configured AVDs, and ADB access on this machine.',
       },

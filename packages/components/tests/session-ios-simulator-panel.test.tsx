@@ -474,6 +474,21 @@ describe('SessionIosSimulatorPanel', () => {
     expect(button('Stop preview').disabled).toBe(false);
   });
 
+  it.each(['toolbar', 'menu'] as const)(
+    'exposes Stop preview directly and releases the current operation (%s)',
+    async (controlsLayout) => {
+      const machine = createFakeMachine({
+        devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+        preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL }),
+      });
+      await renderPanel({ machine, controlsLayout });
+      await click('Stop preview');
+      expect(machine.commands).toContainEqual({ action: 'stop', operationId: 'op-1' });
+      await machine.answerNext(answer({ preview: preview({ phase: 'closed' }) }));
+      expect(button('Preview').disabled).toBe(false);
+    }
+  );
+
   it('offers Restore after the preview closed, as a new start', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
@@ -1172,3 +1187,68 @@ it('uses Android capability on Linux and renders configured AVDs without touchin
   expect(text()).not.toContain('Xcode');
   expect(machine.commands).toEqual([]);
 });
+
+it.each([false, true])(
+  'sends a selected quality only to a capable Android host (supported=%s)',
+  async (supported) => {
+    const machine = createFakeMachine({ devices: [] });
+    let started: unknown;
+    await renderPanel({
+      machine,
+      platform: 'android',
+      localMachine: true,
+      meta: macMeta({ androidEmulator: 1, ...(supported ? { androidEmulatorQuality: 1 } : {}) }),
+      androidControl: async ({ command }) => {
+        if (command.action === 'start') started = command;
+        return {
+          type: 'android-emulator/control_response',
+          sessionId: SESSION.id,
+          success: true,
+          devices:
+            command.action === 'list'
+              ? [
+                  {
+                    id: 'Pixel_A',
+                    name: 'Pixel A',
+                    runtime: 'Android',
+                    deviceType: 'AVD',
+                    state: 'Booted',
+                    available: true,
+                    occupancy: 'available',
+                  },
+                ]
+              : undefined,
+          preview:
+            command.action === 'start'
+              ? {
+                  operationId: 'android-op',
+                  id: 'Pixel_A',
+                  phase: 'ready',
+                  transport: 'local',
+                  viewerUrl: VIEWER_URL,
+                }
+              : undefined,
+        };
+      },
+    });
+    if (supported) {
+      await click('Preview quality: Balanced');
+      const option = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find(
+        (item) => item.textContent === 'Data saver'
+      ) as HTMLElement;
+      expect(option).toBeDefined();
+      await act(async () => option.click());
+      await flush();
+      expect(text()).toContain('Preview quality: Data saver');
+    } else {
+      expect(text()).not.toContain('Preview quality');
+    }
+    await click('Preview');
+    expect(started).toEqual({
+      action: 'start',
+      id: 'Pixel_A',
+      ...(supported ? { quality: 'saver' } : {}),
+    });
+    expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
+  }
+);

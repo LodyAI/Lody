@@ -64,3 +64,7 @@ Decision and rationale:
   and the independent `androidEmulator: 1` capability. Keep its state/preferences
   separate from iOS, never request iOS exterior assets for it, and expose only
   supported controls. Android IDs are exact AVD names on the wire.
+
+- Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
+  the current operation. Android quality is selected before start and sent only
+  to hosts advertising `androidEmulatorQuality: 1`; old hosts receive no new field.

@@ -1,10 +1,11 @@
 import { useDevicePreviewPlatform } from './device-preview-platform';
-import type { IosSimulatorExterior } from '@lody/shared';
+import type { AndroidEmulatorQuality, IosSimulatorExterior } from '@lody/shared';
 import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
+import { Menu } from '@lody/ui/menu';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -57,6 +58,7 @@ export type IosSimulatorPanelBlocker =
   | 'offline';
 
 export type IosSimulatorPanelViewProps = {
+  quality?: { value: AndroidEmulatorQuality; onChange: (value: AndroidEmulatorQuality) => void };
   deviceExterior?: { udid: string; geometry: IosSimulatorExterior; imageUrl: string };
   machineName: string;
   blocker: IosSimulatorPanelBlocker | null;
@@ -391,6 +393,7 @@ export function IosSimulatorPanelView({
   onStart,
   onCancel,
   onStop,
+  quality,
   onRestore,
   onRetry,
   onCopyDiagnostics,
@@ -734,12 +737,42 @@ export function IosSimulatorPanelView({
             />
           </div>
         ) : null}
+        {status.phase === 'ready' && blocker === null ? (
+          <Button type="button" variant="secondary" size="small" disabled={busy} onClick={onStop}>
+            {t('sessions.iosSimulator.action.stop', 'Stop preview')}
+          </Button>
+        ) : null}
         {controls && controlsLayout === 'menu' ? (
           <IosSimulatorControls layout="menu" {...controls} />
         ) : null}
       </div>
       {controls && controlsLayout === 'toolbar' ? (
         <IosSimulatorControls layout="toolbar" {...controls} />
+      ) : null}
+      {quality && status.phase !== 'ready' && status.phase !== 'preparing' ? (
+        <Menu.Root>
+          <Menu.Trigger
+            render={<Button type="button" variant="ghost" size="small" disabled={busy} />}
+          >
+            {t('sessions.androidEmulator.quality.label', 'Preview quality')}:{' '}
+            {quality.value === 'saver'
+              ? t('sessions.androidEmulator.quality.saver', 'Data saver')
+              : quality.value === 'clear'
+                ? t('sessions.androidEmulator.quality.clear', 'Clear')
+                : t('sessions.androidEmulator.quality.balanced', 'Balanced')}
+          </Menu.Trigger>
+          <Menu.Content>
+            <Menu.Item onClick={() => quality.onChange('saver')}>
+              {t('sessions.androidEmulator.quality.saver', 'Data saver')}
+            </Menu.Item>
+            <Menu.Item onClick={() => quality.onChange('balanced')}>
+              {t('sessions.androidEmulator.quality.balanced', 'Balanced')}
+            </Menu.Item>
+            <Menu.Item onClick={() => quality.onChange('clear')}>
+              {t('sessions.androidEmulator.quality.clear', 'Clear')}
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       ) : null}
       <div {...stylex.props(styles.stage)}>{renderStage()}</div>
     </div>
