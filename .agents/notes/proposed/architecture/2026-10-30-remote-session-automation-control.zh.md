@@ -16,7 +16,7 @@ Agent 可以管理自己所在机器的 Automation，但 Electron 的 Session �
 
 目标机器公布带版本的 Automation 控制能力。旧机器显示不支持；离线、超时和结果未知不能显示为空列表或确认成功。修改始终绑定同一个 Session，取消仅能作用于该 Session 的 Wait。写入超时不代表失败，也不能盲目重放；应刷新 owner 状态以确认可观察的结果。可核对的内容由现有 Session 策略和取消语义决定。
 
-远端 Wait 列表按账本顺序和字节数分页；客户端为每个游标签发证明，合并页面后再展示。Automation 响应使用独立的有界加密信封大小，以容纳合法的长原因，同时不扩大其他 RPC 密钥用途的限制。
+远端 Wait 列表按账本顺序和字节数分页；客户端为每个游标签发证明，合并页面后再展示。Automation 响应使用独立的有界加密信封大小，以容纳合法的长原因，同时不扩大其他 RPC 密钥用途的限制。机器快速握手使用控制通道；Session 操作使用普通有界请求通道，因为证明验证可能等待云端 I/O。慢验证不会占用 Stop 和 Steer 的保留槽位，但普通通道过载时 Automation 请求可能被拒绝。
 
 调用者授权应遵循现有[远端 Preview 证明](../../../../apps/cli/src/preview/preview-control-authority.ts)的模式：签名意图绑定已认证用户、Workspace、机器、Session、准确操作和参数、runtime nonce、请求 ID 和过期时间；云端签发方授权登录用户，目标 daemon 使用自己的 CLI 凭证核验相同意图后再调用 owner。现有 Preview 证明只允许 Preview/Simulator 操作；Automation 需要云端签发与验证显式支持，并定义独立公共端口契约，不能伪装成 Preview 操作。当前账本、命令 owner 和动作授权都使用 daemon 的 `auth.userId`；第一步仅允许已验证的请求者同时是 Session 和 daemon owner。共享机器上的协作者需要修改这些归属检查，并在交付时重新检查实际用户权限，不能只修改 RPC 入口。
 

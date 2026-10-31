@@ -156,7 +156,6 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/status',
   'machine/preview-control',
   'machine/automation-control',
-  'session/automation-control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',

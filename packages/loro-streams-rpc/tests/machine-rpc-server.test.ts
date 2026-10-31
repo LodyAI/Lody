@@ -4089,6 +4089,124 @@ it('negotiates the encrypted checkpoint watch method through the real Machine RP
   }
 });
 
+it('keeps stop and steer responsive while automation proof verification is blocked', async () => {
+  const fake = createFakeStreamClient();
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    signalStarted = resolve;
+  });
+  let releaseAutomation!: () => void;
+  const release = new Promise<void>((resolve) => {
+    releaseAutomation = resolve;
+  });
+  let active = 0;
+  const machineId = 'synthetic-machine' as MachineId;
+  const sessionId = 'synthetic-session' as SessionId;
+  const recipient = await createRpcSecretRecipient();
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    getAutomationControl: async () => ({
+      type: 'machine/automation-control_response',
+      machineId,
+      success: true,
+      runtimeNonce: previewProof.runtimeNonce,
+    }),
+    controlAutomation: async () => {
+      if (++active === 4) signalStarted();
+      await release;
+      return {
+        type: 'session/automation-control_response',
+        sessionId,
+        success: true,
+        result: { type: 'settings', settings: {} },
+      };
+    },
+    cancelSession: async () => ({ type: 'session/cancel_response', sessionId, success: true }),
+    steerSession: async ({ userTurnId }) => ({
+      type: 'session/steer_response',
+      sessionId,
+      userTurnId,
+      applied: true,
+      disposition: 'applied',
+    }),
+  });
+  const base = {
+    jsonrpc: '2.0',
+    rpcVersion: '1',
+    workspaceId: 'synthetic-workspace',
+    machineId,
+    replyTo: 'synthetic-replies',
+    sentAt: 1,
+    expiresAt: 30_001,
+  };
+  try {
+    await server.start();
+    fake.pushBatch({
+      messages: await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => ({
+          ...base,
+          id: `automation-${index}`,
+          method: 'session/automation-control',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            requesterUserId: 'user',
+            operation: { type: 'settings' },
+            proof: { ...previewProof, requestId: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${index}` },
+            responseKey: recipient.publicKey,
+          }),
+        }))
+      ),
+      upToDate: true,
+    });
+    await started;
+    fake.pushBatch({
+      messages: [
+        { ...base, id: 'stop', method: 'session/cancel', params: { sessionId, turnId: 'turn' } },
+        {
+          ...base,
+          id: 'steer',
+          method: 'session/steer',
+          params: {
+            sessionId,
+            expectedTurnId: 'turn',
+            userTurnId: 'new-turn',
+            userId: 'user',
+            timestamp: '2026-01-01',
+            inputConfig: { prompt: 'continue' },
+          },
+        },
+        { ...base, id: 'handshake', method: 'machine/automation-control', params: {} },
+      ],
+      upToDate: true,
+    });
+    await fake.waitForAppendedCount(3);
+    expect(fake.appended.map(({ value }) => value)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'stop', result: expect.objectContaining({ success: true }) }),
+        expect.objectContaining({
+          id: 'steer',
+          result: expect.objectContaining({ applied: true }),
+        }),
+        expect.objectContaining({
+          id: 'handshake',
+          result: expect.objectContaining({ success: true }),
+        }),
+      ])
+    );
+    releaseAutomation();
+    await fake.waitForAppendedCount(7);
+  } finally {
+    releaseAutomation();
+    server.stop();
+  }
+});
+
 it.each([1, 16])(
   'keeps send and control replies independent of %i saturated history-read handlers across batches',
   async (capacity) => {
