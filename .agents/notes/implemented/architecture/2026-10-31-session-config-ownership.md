@@ -39,11 +39,15 @@ retains its underlying sync. Encrypted admission reads only the native
 protected session document, never a current-revision hint from RPC or metadata.
 Roost's live-confirmation admission and native steer confirmation remain unchanged.
 
-Trusted system derivations enter the existing Inbox only after their action/source
-authority and before-accept guard approve them. Their inherited revision is preserved
-as frozen provenance, not compared as a new human configuration selection. Subsequent
-queue promotion/retry reuses that owner receipt. An `_lodyAutomation` field alone
-is not authority, and encrypted Automations remain disabled by product policy.
+New continuation and compact inputs capture the current native session revision
+when prepared; an absent current revision is omitted instead of inherited from the
+source input. Preparation freezes that selection once in the existing receipt.
+Retry and queue promotion never retag an already-prepared input when the session
+advances again. Trusted derivations still enter the Inbox only after their
+source/action authority and before-accept guard approve them. They are not a new
+human selection: legacy prepared/signed inputs with an inherited revision retain
+their exact body. An `_lodyAutomation` field alone is not authority, and encrypted
+Automations remain disabled by product policy.
 
 A stale first Loro input is terminalized as failed with a durable `chat_failed`
 notice before a Turn exists. This rejection shares the acceptance queue, so

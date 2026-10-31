@@ -264,6 +264,7 @@ export class AutomationSessionActionsLegacy {
         return { state: 'blocked', reason: 'maintenance_input_unavailable' };
       const config: SessionTurnInputConfig = {
         ...normalizeSessionTurnInputConfig(original.turn.inputConfig),
+        configRevision: (await doc.getDocState())?.acpRuntimeConfig?.revision,
         prompt: '/compact',
         inputBlocks: [{ type: 'text', text: '/compact' }],
         cliType: meta.cliType,
@@ -361,6 +362,7 @@ export class AutomationSessionActionsLegacy {
             );
       const config: SessionTurnInputConfig = {
         ...normalizeSessionTurnInputConfig(defaults),
+        configRevision: (await doc.getDocState())?.acpRuntimeConfig?.revision,
         prompt,
         inputBlocks: [{ type: 'text', text: prompt }],
         cliType: meta.cliType,
