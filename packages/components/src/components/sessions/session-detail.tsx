@@ -1039,6 +1039,7 @@ function SessionChatSurface({
   const openBrowser = useStableCallback(() => props.onOpenBrowser?.());
   const openExistingBrowser = useStableCallback(() => props.onOpenExistingBrowser?.());
   const openIosSimulator = useStableCallback(() => props.onOpenIosSimulator?.());
+  const openAndroidEmulator = useStableCallback(() => props.onOpenAndroidEmulator?.());
   const forkLastAssistant = useStableCallback(
     (...args: Parameters<NonNullable<SessionChatInterfaceProps['onForkLastAssistant']>>) =>
       props.onForkLastAssistant?.(...args)
@@ -1070,6 +1071,7 @@ function SessionChatSurface({
       onOpenBrowser={props.onOpenBrowser ? openBrowser : undefined}
       onOpenExistingBrowser={props.onOpenExistingBrowser ? openExistingBrowser : undefined}
       onOpenIosSimulator={props.onOpenIosSimulator ? openIosSimulator : undefined}
+      onOpenAndroidEmulator={props.onOpenAndroidEmulator ? openAndroidEmulator : undefined}
       onForkLastAssistant={props.onForkLastAssistant ? forkLastAssistant : undefined}
       onVisualAnnotationReferencesSubmitted={
         props.onVisualAnnotationReferencesSubmitted ? annotationReferencesSubmitted : undefined
@@ -4036,6 +4038,24 @@ const SessionDetail = ({
     [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
   );
 
+  const handleOpenAndroidEmulatorForSession = useCallback(
+    (targetSessionId: SessionId) => {
+      setIosSimulatorTarget({
+        parentId: sessionId,
+        tabId: activeBrowserSession?.id,
+        sessionId: targetSessionId,
+      });
+      if (isMobile) {
+        setAndroidEmulatorOpen(true);
+      } else {
+        revealRightSidebar();
+        activateSidebarTab('android-emulator');
+        semanticRouterRef.current?.activate('side-panel');
+      }
+    },
+    [sessionId, activeBrowserSession?.id, isMobile, revealRightSidebar, activateSidebarTab]
+  );
+
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
   }, [replaceSessionUrlSimulator]);
@@ -6430,6 +6450,7 @@ const SessionDetail = ({
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
                   onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
+                  onOpenAndroidEmulator={() => handleOpenAndroidEmulatorForSession(tabSession.id)}
                   onOpenBrowser={
                     previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
                   }
@@ -7146,6 +7167,7 @@ const SessionDetail = ({
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
       onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
+      onOpenAndroidEmulator: () => handleOpenAndroidEmulatorForSession(chatSession.id),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

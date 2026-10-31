@@ -2284,6 +2284,7 @@ export interface SessionChatInterfaceProps {
   /** Called when the user wants to open the Browser panel. */
   onOpenBrowser?: () => void;
   onOpenIosSimulator?: () => void;
+  onOpenAndroidEmulator?: () => void;
   /** Opens Browser without forcing a newly reported candidate navigation. */
   onOpenExistingBrowser?: () => void;
   /**
@@ -2480,6 +2481,7 @@ export const SessionChatInterface = memo(
       browserActionSession,
       onOpenBrowser,
       onOpenIosSimulator,
+      onOpenAndroidEmulator,
       onOpenExistingBrowser,
       headerVariant = 'page',
       paintSessionMentionOverlay = true,
@@ -7499,6 +7501,11 @@ export const SessionChatInterface = memo(
                         onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
                         onOpenIosSimulator={
                           session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
+                        }
+                        onOpenAndroidEmulator={
+                          session.androidEmulatorPreviewRequestId
+                            ? onOpenAndroidEmulator
+                            : undefined
                         }
                         privateAccessStatus={
                           isMobile && sharing?.visibility === 'private'

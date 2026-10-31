@@ -103,6 +103,8 @@ Read parent rules and linked context.
   items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
   ownership appears only in details. Scheduled drafts live in the composer, never the bar.
 - Stage icons stay inert; reserve colour for genuine status; no pulses.
+- Simulator actions use each session’s reported preview request. One platform opens
+  directly; iOS + Android share a chooser on desktop and mobile, targeting that session.
 - Open preview stays gated on a real reported target; repository actions are
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
   below the reply.
