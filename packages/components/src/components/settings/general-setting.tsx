@@ -24,10 +24,10 @@ import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { ExperimentalFeatureRows } from './experimental-features-setting';
 import {
-  getOneSignalPermissionState,
-  getOneSignalPushSubscriptionOptedIn,
-  initOneSignal,
-} from '@/lib/onesignal';
+  getPushPermissionState,
+  getPushSubscriptionOptedIn,
+  initPush,
+} from '@/lib/push-notifications';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -168,11 +168,11 @@ export function GeneralSettingsComponent() {
   const [notificationSupported, setNotificationSupported] = useState(isNative);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [oneSignalReady, setOneSignalReady] = useState(false);
+  const [pushClientReady, setPushReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const isSwitchDisabled = isElectron
     ? !notificationSupported || isProcessing
-    : !notificationSupported || !oneSignalReady || isProcessing;
+    : !notificationSupported || !pushClientReady || isProcessing;
 
   const readElectronNotificationPermission =
     useCallback(async (): Promise<ElectronNotificationPermissionStatusResult> => {
@@ -235,18 +235,16 @@ export function GeneralSettingsComponent() {
       };
     }, []);
 
-  const readOneSignalPushSubscriptionEnabled = useCallback(async (): Promise<
-    boolean | undefined
-  > => {
+  const readPushSubscriptionEnabled = useCallback(async (): Promise<boolean | undefined> => {
     if (typeof window === 'undefined' || isElectron) {
       return undefined;
     }
 
-    const oneSignal = await initOneSignal().catch(() => null);
-    if (!oneSignal) {
+    const pushClient = await initPush().catch(() => null);
+    if (!pushClient) {
       return undefined;
     }
-    return getOneSignalPushSubscriptionOptedIn(oneSignal);
+    return getPushSubscriptionOptedIn(pushClient);
   }, [isElectron]);
 
   const syncNotificationPermission = useCallback(async () => {
@@ -269,28 +267,28 @@ export function GeneralSettingsComponent() {
     if (isNative) {
       // notificationSupported is seeded from isNative, so it is already true here.
       try {
-        const oneSignal = await initOneSignal();
-        const supported = Boolean(oneSignal);
-        setOneSignalReady(supported);
+        const pushClient = await initPush();
+        const supported = Boolean(pushClient);
+        setPushReady(supported);
 
-        if (!oneSignal) {
+        if (!pushClient) {
           setPermissionStatus('default');
           setNotificationsEnabled(false);
           return;
         }
 
-        const currentPermission = await getOneSignalPermissionState(oneSignal);
+        const currentPermission = await getPushPermissionState(pushClient);
         setPermissionStatus(currentPermission);
         if (currentPermission !== 'granted') {
           setNotificationsEnabled(false);
           return;
         }
 
-        const pushSubscriptionEnabled = await getOneSignalPushSubscriptionOptedIn(oneSignal);
+        const pushSubscriptionEnabled = await getPushSubscriptionOptedIn(pushClient);
         setNotificationsEnabled(pushSubscriptionEnabled ?? false);
       } catch (error) {
         console.error('Failed to sync native notification permission', error);
-        setOneSignalReady(false);
+        setPushReady(false);
         setPermissionStatus('default');
         setNotificationsEnabled(false);
       }
@@ -312,14 +310,14 @@ export function GeneralSettingsComponent() {
       return;
     }
 
-    const webPushSubscriptionEnabled = await readOneSignalPushSubscriptionEnabled();
+    const webPushSubscriptionEnabled = await readPushSubscriptionEnabled();
     if (typeof webPushSubscriptionEnabled === 'boolean') {
       setNotificationsEnabled(webPushSubscriptionEnabled);
       return;
     }
 
-    if (!oneSignalReady) {
-      // Web push status is managed by OneSignal subscription state, not browser permission only.
+    if (!pushClientReady) {
+      // Web push status is managed by Push subscription state, not browser permission only.
       setNotificationsEnabled(false);
       return;
     }
@@ -330,9 +328,9 @@ export function GeneralSettingsComponent() {
     electronCompletionNotificationsEnabled,
     isElectron,
     isNative,
-    oneSignalReady,
+    pushClientReady,
     readElectronNotificationPermission,
-    readOneSignalPushSubscriptionEnabled,
+    readPushSubscriptionEnabled,
   ]);
 
   useEffect(() => {
@@ -370,12 +368,12 @@ export function GeneralSettingsComponent() {
   }, [electronCompletionNotificationsEnabled, isElectron, syncNotificationPermission]);
 
   useEffect(() => {
-    if (isElectron || !oneSignalReady) {
+    if (isElectron || !pushClientReady) {
       return undefined;
     }
     void syncNotificationPermission();
     return undefined;
-  }, [isElectron, oneSignalReady, syncNotificationPermission]);
+  }, [isElectron, pushClientReady, syncNotificationPermission]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
@@ -383,19 +381,19 @@ export function GeneralSettingsComponent() {
     }
 
     let active = true;
-    void initOneSignal()
-      .then((oneSignal) => {
-        if (!active || !oneSignal?.Notifications) {
+    void initPush()
+      .then((pushClient) => {
+        if (!active || !pushClient?.Notifications) {
           return;
         }
-        setOneSignalReady(true);
+        setPushReady(true);
       })
       .catch((error: unknown) => {
         if (!active) {
           return;
         }
-        setOneSignalReady(false);
-        console.error('OneSignal init failed', error);
+        setPushReady(false);
+        console.error('Push init failed', error);
       });
 
     return () => {
@@ -438,7 +436,7 @@ export function GeneralSettingsComponent() {
         </span>
       );
     }
-    if (!isElectron && !oneSignalReady && !isProcessing) {
+    if (!isElectron && !pushClientReady && !isProcessing) {
       return t('settings.notifications.reason.notReady');
     }
     return undefined;
@@ -448,7 +446,7 @@ export function GeneralSettingsComponent() {
     isNative,
     isProcessing,
     notificationSupported,
-    oneSignalReady,
+    pushClientReady,
     permissionStatus,
     t,
   ]);
@@ -544,27 +542,27 @@ export function GeneralSettingsComponent() {
         return;
       }
 
-      if (!oneSignalReady) {
+      if (!pushClientReady) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
 
-      const oneSignal = await initOneSignal();
-      if (!oneSignal?.Notifications) {
+      const pushClient = await initPush();
+      if (!pushClient?.Notifications) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
 
       if (checked) {
         const pushSurface = isNative ? 'native' : 'web';
-        // push/permission_prompt_shown (spec §8f.3, P0, tier A): the OneSignal
+        // push/permission_prompt_shown (spec §8f.3, P0, tier A): the Push
         // OS permission prompt is about to be requested from settings.
         capturePostHogEvent(postHog, 'push/permission_prompt_shown', {
           surface: pushSurface,
           source: 'settings',
         });
 
-        const result = (await oneSignal.Notifications.requestPermission()) ? 'granted' : 'denied';
+        const result = (await pushClient.Notifications.requestPermission()) ? 'granted' : 'denied';
         setPermissionStatus(result);
 
         if (result !== 'granted') {
@@ -587,13 +585,14 @@ export function GeneralSettingsComponent() {
         });
 
         if (user) {
-          await oneSignal.User.PushSubscription.optIn();
-          await oneSignal.login(user?.id);
-          setNotificationsEnabled(true);
+          await pushClient.User.PushSubscription.optIn();
+          await pushClient.login(user?.id);
+          const registered = await getPushSubscriptionOptedIn(pushClient);
+          setNotificationsEnabled(registered);
+          if (!registered) throw new Error('Push registration was not confirmed');
           // push/subscribed + push/token_registered (spec §8f.3, P0/P0): the
-          // user opted in and OneSignal logged in the external id, so this
-          // install is now a registered push target. We never send the raw
-          // token; OneSignal owns it.
+          // backend confirmed this installation for the current login.
+          // Never include the token in analytics.
           capturePostHogEvent(postHog, 'push/subscribed', {
             surface: pushSurface,
             source: 'settings',
@@ -604,7 +603,7 @@ export function GeneralSettingsComponent() {
           });
         }
       } else {
-        await oneSignal.User.PushSubscription.optOut();
+        await pushClient.User.PushSubscription.optOut();
         setNotificationsEnabled(false);
       }
     } catch (error) {
