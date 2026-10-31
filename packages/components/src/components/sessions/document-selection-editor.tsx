@@ -220,7 +220,7 @@ export function DocumentSelectionEditor({
     paint();
   }, [paint]);
   useEffect(() => {
-    if (!allowMarkup || !canvasRef.current || typeof ResizeObserver === 'undefined') return;
+    if (!allowMarkup || !canvasRef.current || typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(() => paint());
     observer.observe(canvasRef.current);
     return () => observer.disconnect();
