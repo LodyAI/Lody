@@ -52,6 +52,11 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
 
 ## HTTP and loopback
 
+The built-in host starts with the daemon and uses module-scoped immutable tool
+schemas while creating fresh servers, transports and callbacks for each request.
+The [request memory decision](../../../../.agents/notes/implemented/architecture/2026-10-30-mcp-request-allocation.md)
+records the measurements and why subprocess/request isolation remains necessary.
+
 - The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
   never-completing response as a transport failure, not an MCP error. Every request must
   reach a terminated response: `GET /mcp` is answered with 405 rather than handed to the
