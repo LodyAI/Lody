@@ -125,7 +125,20 @@ export class Automations extends Context.Service<
           result: ActionResult
         ) {
           const now = yield* Clock.currentTimeMillis;
-          return yield* Effect.try(() => ledger.update(receipt.id, receipt.state, result, now));
+          return yield* Effect.try(() => {
+            const current = ledger.receipt(receipt.id);
+            const wokeDuringCheck =
+              receipt.event.type === 'provider.quota.exhausted' &&
+              receipt.rule.handler.kind === 'policy' &&
+              receipt.rule.handler.policy === 'recover-capacity' &&
+              current?.capacityWakeRevision !== receipt.capacityWakeRevision;
+            return ledger.update(
+              receipt.id,
+              receipt.state,
+              wokeDuringCheck && result.state === 'blocked' ? { ...result, retryAt: now } : result,
+              now
+            );
+          });
         });
         const check = Effect.fn('Automations.check')(function* (receipt: AutomationReceipt) {
           const current = ledger.rule(receipt.rule.id);
@@ -145,6 +158,10 @@ export class Automations extends Context.Service<
         });
         const advance = Effect.fn('Automations.advance')(function* (receipt: AutomationReceipt) {
           const now = yield* Clock.currentTimeMillis;
+          const quotaRecovery =
+            receipt.event.type === 'provider.quota.exhausted' &&
+            receipt.rule.handler.kind === 'policy' &&
+            receipt.rule.handler.policy === 'recover-capacity';
           if (receipt.state === 'cancelling') {
             const result = yield* host.cancel(receipt);
             yield* persist(receipt, {
@@ -162,7 +179,11 @@ export class Automations extends Context.Service<
             yield* persist(receipt, { retryAt: now + 15_000, ...result });
             return;
           }
-          if (receipt.intent.notBefore !== undefined && receipt.intent.notBefore > now) {
+          if (
+            !quotaRecovery &&
+            receipt.intent.notBefore !== undefined &&
+            receipt.intent.notBefore > now
+          ) {
             yield* persist(receipt, {
               state: 'waiting',
               reason: 'not_before',
@@ -183,6 +204,7 @@ export class Automations extends Context.Service<
             observation = yield* check(receipt);
           }
           if (observation.value !== 'yes') {
+            const estimatedReset = receipt.event.data.retryAt;
             yield* persist(receipt, {
               state:
                 'terminalState' in observation &&
@@ -193,7 +215,13 @@ export class Automations extends Context.Service<
                     ? 'superseded'
                     : 'blocked',
               reason: observation.reason,
-              retryAt: observation.retryAt ?? now + 15_000,
+              retryAt:
+                observation.retryAt ??
+                (quotaRecovery && observation.reason.startsWith('capacity_')
+                  ? typeof estimatedReset === 'number' && estimatedReset > now
+                    ? estimatedReset
+                    : Number.MAX_SAFE_INTEGER
+                  : now + 15_000),
             });
             return;
           }

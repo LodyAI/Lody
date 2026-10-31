@@ -153,9 +153,10 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
 - **Capacity recovery:** structured quota or Codex model-overload failure, the original native conversation,
   launch binding, input and tool boundary are retained before execution release.
   All reported quota windows participate. A reset estimate only schedules a recheck;
-  missing or stale evidence never becomes an availability fact. Enabling recovery
-  permits bounded normal continuation attempts after the retry time when readonly
-  confirmation is unavailable. Confirmed exhaustion still blocks them. Unconfirmed
+  missing or stale evidence never becomes an availability fact. A fresh available
+  observation wakes the existing quota recovery; the reset estimate triggers a query.
+  Unknown quota waits for a later observation without dispatching or starting a new poller.
+  Overload retains its bounded attempts when capacity is unknown. Unconfirmed
   release or tool effects block recovery; new input supersedes older recovery work.
   Model overload uses up to three retries with increasing minimum delays of 5, 10,
   and 20 seconds; the Host persists the work and applies the same admission checks.
@@ -171,8 +172,8 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   New input or the deadline invalidates maintenance. `cacheTtlMs` is an operator
   estimate, not provider cache evidence or a guaranteed discount.
 
-Action deadlines remain in the accepted receipt across restart. Becoming due writes
-a deduplicated `timer.due` fact; it does not create a second invocation or establish
+Action deadlines remain in the accepted receipt across restart. A persisted action deadline writes
+a deduplicated `timer.due` fact when due; it does not create a second invocation or establish
 provider capacity. Wait reevaluation deadlines are persisted with the wait itself.
 Staged turn outcomes remain in a durable pending table until observation succeeds.
 Each pass reads up to 100 due rows; unconfirmed release or failed reads retain a

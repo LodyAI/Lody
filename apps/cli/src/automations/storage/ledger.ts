@@ -29,6 +29,7 @@ import {
   OrchestrationConnection,
   type DatabaseLocation,
 } from '../../orchestration/platform/database';
+import { evaluateCapacity } from '../runtime/capacity';
 
 export const automationIdentity = (...parts: Array<string | number>): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -770,7 +771,38 @@ export class AutomationLedger {
   recordCapacity(observation: CapacityObservation, event?: AutomationEvent): void {
     this.connection.withImmediate(() => {
       this.putCapacity(observation);
-      if (event) this.publish(event);
+      if (event) {
+        this.publish(event);
+        const rows = this.connection.raw
+          .prepare(
+            "SELECT payload FROM receipts WHERE state IN ('accepted','waiting','blocked','resolved') AND json_extract(payload,'$.event.type')='provider.quota.exhausted' AND json_extract(payload,'$.rule.handler.policy')='recover-capacity'"
+          )
+          .all() as JsonRow[];
+        for (const row of rows) {
+          const receipt = JSON.parse(row.payload) as AutomationReceipt;
+          const ref = receipt.event.data.workId;
+          const work = typeof ref === 'string' ? this.work(ref) : undefined;
+          if (
+            !work ||
+            work.bindingId !== observation.bindingId ||
+            work.fingerprint !== observation.fingerprint ||
+            (observation.modelId !== undefined && work.modelId !== observation.modelId)
+          )
+            continue;
+          const current =
+            this.capacity(work.bindingId, work.modelId) ?? this.capacity(work.bindingId);
+          if (evaluateCapacity(current, work, event.observedAt).value !== 'yes') continue;
+          this.update(
+            receipt.id,
+            receipt.state,
+            {
+              retryAt: event.observedAt,
+              capacityWakeRevision: (receipt.capacityWakeRevision ?? 0) + 1,
+            },
+            event.observedAt
+          );
+        }
+      }
     });
   }
   recordWork(work: PendingWork, event: AutomationEvent): void {

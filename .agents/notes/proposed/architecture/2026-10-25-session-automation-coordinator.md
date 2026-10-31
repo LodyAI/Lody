@@ -102,8 +102,7 @@ cannot supply this authority.
 
 A due action writes one deduplicated `timer.due` fact from its durable receipt. Restart
 recovers eligibility without creating a new invocation. A timer proves only elapsed
-time; fresh capacity observations or an explicitly enabled bounded recovery attempt
-must still pass normal admission. Missing observations remain unknown.
+time. Quota recovery needs a fresh available capacity observation; unknown quota waits for a later observation without a new poller. Codex overload retains bounded attempts. All paths still pass normal admission.
 
 ## Lifetime and recovery contract
 
@@ -141,7 +140,7 @@ cancellation addresses an accepted input. Policy dispatch is internal Lody code.
 - **Quota recovery:** typed exhaustion retains the original native conversation,
   launch binding, input and tool boundary before release. All observed windows count;
   partial snapshots cannot erase an exhausted weekly window. New input supersedes old
-  work. Missing release or unresolved tool effects block continuation.
+  work. Fresh available observations wake the same receipt; reset estimates schedule a query, not permission. A persisted wake revision prevents a concurrent check from erasing that wake. Missing release or unresolved tool effects block continuation.
 - **Merge archive:** existing PR facts initiate group settlement, including children,
   queued input, Goals, native work and automations. Admission barriers protect rechecks;
   the root commits last and partial progress is reconciled. A child with an unconfirmed

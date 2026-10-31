@@ -208,6 +208,7 @@ export type AutomationReceipt = {
   state: AutomationState;
   reason?: string;
   retryAt?: number;
+  capacityWakeRevision?: number;
   attempts: number;
   sessionId: string;
   turnId: string;

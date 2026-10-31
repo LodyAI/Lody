@@ -143,7 +143,11 @@ export class AutomationSessionActionsLegacy {
           (meta.latestUserMsgId !== work.turnId && meta.latestUserMsgId !== receipt.turnId)
         )
           return { value: 'no', reason: 'pending_work_superseded', terminalState: 'superseded' };
-        if (work.notBefore !== undefined && work.notBefore > Date.now())
+        const quotaRecovery =
+          receipt.event.type === 'provider.quota.exhausted' &&
+          receipt.rule.handler.kind === 'policy' &&
+          receipt.rule.handler.policy === 'recover-capacity';
+        if (!quotaRecovery && work.notBefore !== undefined && work.notBefore > Date.now())
           return { value: 'no', reason: 'capacity_reset_not_due', retryAt: work.notBefore };
       }
       const capacity = work
@@ -158,6 +162,11 @@ export class AutomationSessionActionsLegacy {
         if (available.value !== 'yes') {
           const attemptGranted =
             work &&
+            !(
+              receipt.event.type === 'provider.quota.exhausted' &&
+              receipt.rule.handler.kind === 'policy' &&
+              receipt.rule.handler.policy === 'recover-capacity'
+            ) &&
             available.value === 'unknown' &&
             [receipt.rule.grants, current.grants].every((grant) => grant.allowCapacityAttempt) &&
             work.notBefore !== undefined &&

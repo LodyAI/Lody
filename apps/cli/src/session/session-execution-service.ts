@@ -1349,8 +1349,18 @@ export class SessionExecutionService {
   );
   private readonly providerQuotaUpdates = new Map<AgentConfigId, number>();
 
-  noteProviderRateLimitsUpdate(configId: AgentConfigId): void {
+  noteProviderRateLimitsUpdate(
+    configId: AgentConfigId,
+    binding: import('./automation-observations').ProviderBinding | undefined,
+    snapshot: import('acp-extension-core').RateLimitsSnapshot
+  ): void {
     this.providerQuotaUpdates.set(configId, (this.providerQuotaUpdates.get(configId) ?? 0) + 1);
+    if (binding && this.automationObservations)
+      void this.automationObservations
+        .capacity(binding, snapshot, 'push')
+        .catch((cause) =>
+          this.deps.logger.warn('Automation capacity observation could not be persisted', cause)
+        );
   }
 
   async refreshProviderRateLimits(

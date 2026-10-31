@@ -88,7 +88,11 @@ import {
 } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
-import type { LodyPromptSuggestion, RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type {
+  LodyPromptSuggestion,
+  RateLimitsSnapshot,
+  SessionUsageUpdate,
+} from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -295,7 +299,7 @@ export interface CreateAgentConfig {
   ) => Promise<RequestPermissionResponse>;
   onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (limits: RateLimit) => void;
+  onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => void;
   onPromptSuggestion?: (suggestion: LodyPromptSuggestion) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
@@ -354,7 +358,8 @@ interface SessionManagerEvents {
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
     cliType: string,
-    limits: RateLimit
+    snapshot: RateLimitsSnapshot,
+    binding: import('./automation-observations').ProviderBinding | undefined
   ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
@@ -772,7 +777,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onPromptSuggestion: (suggestion) => {
         this.emit('onPromptSuggestion', sessionId, suggestion);
       },
-      onRateLimitUpdate: (limits: RateLimit) => {
+      onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => {
         if (
           config.agentConfigId ||
           (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType))
@@ -782,7 +787,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             this.machineId,
             config.agentConfigId,
             config.agentType,
-            limits
+            snapshot,
+            session.getProviderBinding?.()
           );
         }
       },

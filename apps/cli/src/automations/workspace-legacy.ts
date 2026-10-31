@@ -183,7 +183,18 @@ export async function createAutomationWorkspaceLegacy(options: {
         const read = () => ledger.capacity(bindingId, modelId) ?? ledger.capacity(bindingId);
         let observed = evaluateCapacity(read(), { bindingId, fingerprint, modelId }, Date.now());
         if (observed.value === 'unknown') {
-          await authority.refreshCapacity(bindingId);
+          try {
+            await authority.refreshCapacity(bindingId);
+          } catch (cause) {
+            if (
+              receipt.event.type !== 'provider.quota.exhausted' ||
+              receipt.rule.handler.kind !== 'policy' ||
+              receipt.rule.handler.policy !== 'recover-capacity'
+            )
+              throw cause;
+            logger.warn('Automation capacity refresh failed', cause);
+            return observed;
+          }
           observed = evaluateCapacity(read(), { bindingId, fingerprint, modelId }, Date.now());
         }
         return observed;

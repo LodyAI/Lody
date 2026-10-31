@@ -300,7 +300,7 @@ import {
   type ImageGenerationBeginEvent,
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
@@ -4015,10 +4015,13 @@ export class MessageHandler {
         machineId: MachineId,
         agentConfigId: AgentConfigId | undefined,
         cliType: string,
-        limits: RateLimit
+        snapshot: import('acp-extension-core').RateLimitsSnapshot,
+        binding: import('@/session/automation-observations').ProviderBinding | undefined
       ) => {
-        if (agentConfigId) this.executionService.noteProviderRateLimitsUpdate(agentConfigId);
-        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
+        if (agentConfigId)
+          this.executionService.noteProviderRateLimitsUpdate(agentConfigId, binding, snapshot);
+        for (const limits of snapshot.rateLimits)
+          void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 

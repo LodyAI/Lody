@@ -27,7 +27,9 @@ export function internalPolicy({ rule, event }: Delivery): AutomationContinuatio
       return [
         {
           key: event.data.workId,
-          ...(typeof event.data.retryAt === 'number' ? { notBefore: event.data.retryAt } : {}),
+          ...(event.type === 'provider.model.overloaded' && typeof event.data.retryAt === 'number'
+            ? { notBefore: event.data.retryAt }
+            : {}),
           action: {
             kind: 'agent.invoke',
             parameters: {

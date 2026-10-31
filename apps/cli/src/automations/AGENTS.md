@@ -28,7 +28,8 @@
   Stop blocks continuation admission, not authorized condition reads; only explicit
   user restoration clears it. A stopped target is blocked, never a check error.
 - Capacity recovery handles quota and structured Codex overload under one Session
-  setting. Enabling it also admits the recorded failure for the current input, once. Overload retries are bounded and retain the same release and input checks.
+  setting. Fresh available quota observations wake the same receipt; reset times trigger
+  a recheck, not permission to dispatch. Unknown quota waits for new evidence. Enabling it also admits the recorded failure for the current input, once. Overload retries are bounded and retain the same release and input checks.
   Coordinate quota Schedule handoff and final acceptance under the Session Inbox gate;
   leave provider queries outside it. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
 - Native Effect owns the loop and interpreter. `workspace-legacy.ts`,
