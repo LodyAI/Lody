@@ -17,7 +17,7 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度进一步批准现有实现的 tag 9 能力声明、capability 1 和 tag 10 移除，包括现有 1–16 个严格递增非零 u32 能力码、现有长度上限，以及遇到不支持的声明时以 `upgrade-required` 停止。此决定来自[冻结前审查](https://github.com/LodyAI/Lody/pull/2026)；恢复格式问题及第 9 节仍不在此次批准范围。
 
-2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度批准恢复设备 tag 4 与 `possess/v2` 字节不变、不修改 genesis；恢复 generation 和可信账本材料保存在加密恢复包中，可信锚由外部独立确认。owner 同时批准恢复包 `formatVersion: 1` 与验收条件：独立确认可信锚、导入恢复密钥、实际解密当前代信封并核对承诺。这些是格式边界，不代表整个[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)获批；保险库仍为 draft，且不在 MVP 内。[格式审查](https://github.com/LodyAI/Lody/pull/2026)记录字节形状和依据。
+2026-10-28，owner Zixuan Chen（zxch3n）通过 E2EE 总调度批准恢复设备 tag 4 与 `possess/v2` 字节不变、不修改 genesis；恢复 generation 和可信账本材料保存在加密恢复包中，可信锚由外部独立确认。owner 同时批准恢复包 `formatVersion: 1` 与验收条件：独立确认可信锚、导入恢复密钥、实际解密当前代信封并核对承诺。这些是格式边界，不代表整个[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)获批；保险库仍为 draft，且不在 MVP 内。[格式审查](https://github.com/LodyAI/Lody/pull/2026)记录字节形状和依据。2026-10-31，owner 经 E2EE 总调度另行接受：两个恢复私钥必须分别是 Ed25519 与 X25519 的 48 字节 RFC 8410 PKCS#8 精确编码（[#2124](https://github.com/LodyAI/Lody/pull/2124)），其他编码一律拒绝。这只是包格式边界，保险库 Spec 仍为 draft。
 
 ## Web 与移动端保管授权
 
