@@ -8,6 +8,7 @@ import {
   type SessionMeta,
   type SessionPlanEntry,
   type SessionQueuePromotionRecord,
+  type SessionGoalMessage,
   type SessionSteerOperationRecord,
 } from '@lody/shared';
 import { resolveSessionHistoryStatus } from '@lody/shared';
@@ -52,6 +53,7 @@ import type {
  */
 export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
+  readonly readLatestGoal?: () => Promise<SessionGoalMessage | null>;
   readonly agentWrites: SessionAgentWrites;
   readonly setPlan: (entries: readonly SessionPlanEntry[]) => Promise<void>;
   readonly readDispatchHistory?: (
@@ -101,6 +103,10 @@ export class RoostSessionBackend implements SessionBackend {
 
   get history(): SessionHistoryReader {
     return this.services.sessionData.history;
+  }
+
+  get readLatestGoal() {
+    return this.services.readLatestGoal;
   }
 
   get inputAcceptance() {

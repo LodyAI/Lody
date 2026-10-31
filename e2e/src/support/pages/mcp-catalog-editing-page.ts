@@ -24,7 +24,7 @@ export class McpCatalogEditingPage {
     await expect(enabledByDefault).toHaveAttribute('aria-checked', 'false');
     await enabledByDefault.click();
     await expect(enabledByDefault).toHaveAttribute('aria-checked', 'true');
-    await editor.getByRole('button', { name: /^(Save|保存)$/u }).click();
+    await editor.getByRole('button', { name: /^(Save configuration|保存配置)$/u }).click();
     await expect(settings.getByText(this.fixture.initialServerName, { exact: true })).toBeVisible({
       timeout: 30_000,
     });
@@ -49,7 +49,7 @@ export class McpCatalogEditingPage {
     });
     await editor.getByLabel(/^(Server name|服务器名称)$/u).fill(this.fixture.editedServerName);
     await editor.getByLabel(/^(Description|描述)$/u).fill(this.fixture.editedDescription);
-    await editor.getByRole('button', { name: /^(Save|保存)$/u }).click();
+    await editor.getByRole('button', { name: /^(Save configuration|保存配置)$/u }).click();
     await expect(settings.getByText(this.fixture.initialServerName, { exact: true })).toBeHidden({
       timeout: 30_000,
     });

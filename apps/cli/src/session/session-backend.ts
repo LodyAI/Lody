@@ -8,6 +8,7 @@ import {
   type SessionAcpRuntimeConfigPatch,
   type SessionSteerOperationRecord,
   type SessionPlanEntry,
+  type SessionGoalMessage,
 } from '@lody/shared';
 import {
   readSessionHistory,
@@ -50,6 +51,8 @@ export interface SessionBackend {
 
   initialize(options: { skipAutoRead: boolean }): Promise<void>;
   readHistory(): Promise<SessionHistoryInput[]>;
+  /** Local goal inspection; RPC-backed services retain their existing history read. */
+  readonly readLatestGoal?: () => Promise<SessionGoalMessage | null>;
   readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]>;
   readDispatchSelection(
     includeTurnIds: readonly string[],
@@ -221,6 +224,10 @@ class LoroSessionBackend implements SessionBackend {
 
   async readHistory(): Promise<SessionHistoryInput[]> {
     return readSessionHistory(this.sessionDoc.sessionData.history) as SessionHistoryInput[];
+  }
+
+  async readLatestGoal(): Promise<SessionGoalMessage | null> {
+    return this.sessionDoc.sessionData.readLatestGoal();
   }
 
   readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]> {
