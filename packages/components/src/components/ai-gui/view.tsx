@@ -6481,7 +6481,11 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
-        encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: entry.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -6656,7 +6660,11 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
-      encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+      encryption: entry.encryption,
+      attachmentToken:
+        attachmentRuntime?.workspaceId === workspaceId
+          ? attachmentRuntime.attachmentToken
+          : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6899,7 +6907,7 @@ export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGr
   );
 };
 
-const WorkspaceSessionFileGroup = ({
+export const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6931,7 +6939,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
-        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6969,7 +6981,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
-        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })

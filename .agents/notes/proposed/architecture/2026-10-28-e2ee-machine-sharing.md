@@ -110,9 +110,22 @@ Shared encrypted machines are exposed for selection and execution only. They sta
 of the Convex-backed authorized set, so startup capability probes never launch agents
 on another member's machine. `withoutEncryptedSharedMachines` also keeps them out of
 automatic agent-config migration, bug-report log collection and memory-provider
-settings, which use fenced machine RPC or write a machine's catalog. Sessions on a
-shared machine or project become visible as in ordinary workspaces; every member
-already holds those encrypted documents, so this filter is presentation, not a security
-boundary. The receiving machine still authorizes every execution. Hook and store tests
-use fake timers and deferred reads; no two-member product run is claimed.
+settings, which use fenced machine RPC or write a machine's catalog.
 
+The owner-confirmed MVP lets new members read all workspace history. Session and
+archive lists therefore use the account/workspace-bound encrypted runtime's document
+access independently of the usable-machine/project indexes. Hiding a private machine
+must not hide its encrypted conversations. Adding those machine IDs to the usable index
+was rejected: it would also enable selection and automatic machine reads. An unavailable
+target instead mounts a document-only history reader, without the interactive subtree's
+machine catalogs, probes or RPC. Attachments keep their existing document capabilities;
+Markdown copy keeps the explicit, source-bound decrypted-copy confirmation. Ordinary
+workspace filtering is unchanged. The receiving machine still authorizes every execution.
+The document reader opens workspace-synced Loro history only; machine-owned formats
+remain explicitly unavailable without starting their RPC reader. An empty cold replica
+is not ready until its first remote sync completes.
+Hook and store tests use deterministic fixtures and deferred reads; no two-member product
+run is claimed.
+
+
+The new history-read permission does not grant rename, archive, restore or deletion; existing author management is unchanged. Automatic archive Machine Flock readers remain limited to available machines and projects, never inferred from newly visible history.

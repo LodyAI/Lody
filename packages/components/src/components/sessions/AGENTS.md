@@ -57,6 +57,7 @@ Read parent rules and linked context.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
 - Read receipts require per-surface `isVisible`, never mere mounting.
+- Encrypted history uses the bound runtime's document access without expanding machine/project execution indexes. Unavailable targets mount only the document reader, without machine probes or RPC. [Boundary](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
 - Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
   keep prose whole, cap thinking rather than drop it, toast every omission, and
