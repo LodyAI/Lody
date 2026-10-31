@@ -26,9 +26,14 @@ or Roost's immutable history acceptance, bypass rechecking on retry/restart. A
 renderer outbox is not owner acceptance. History reconstruction and queue promotion
 preserve captured requirements.
 
-Loaded revision and native connection confirmation are different proofs. After a crash, Loro
-waits for its already-owned initial room sync within the 30-second configuration
-budget, then reads the loaded revision without manufacturing a live generation.
+Historical inputs without `configRevision`, including rows without `inputConfig`,
+retain legacy admission. Their absent fields are not synthesized into history, and
+encrypted origin matching still compares the verified historical input exactly.
+
+Loaded revision and native connection confirmation are different proofs. For a
+versioned input after a crash, Loro waits for its already-owned initial room sync
+within the 30-second configuration budget, then reads the loaded revision without
+manufacturing a live generation.
 The same bounded wait applies if the loaded document has no revision. Normal
 dispatch then loads/establishes the native connection and confirms and persists
 required configuration before prompting. A missing revision or failed/timed-out load yields the existing
