@@ -55,3 +55,15 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 6. 恢复成功后通知该账号所有在用设备与账号邮箱；不强制更换 R，不加 owner 审批，不设冷却期。
 
 批准只确立意图，不代表已实现、已部署或真机验收。私有后端缺口仍在：没有 `e2eeRecoveryVault` 存储、Recovery 凭据登记、以 R 身份认证的邮箱访问，也没有恢复通知。恢复保险库仍不在 MVP 内。
+
+## Whitepaper 2026-10-31 修订
+
+2026-10-31，owner Zixuan Chen（zxch3n）经 E2EE 总调度转达，批准 [PR #2145](https://github.com/LodyAI/Lody/pull/2145) 中 commit `7efe3f2c05253a98bb5f8c3034c26b48f7a165a0` 的[白皮书](../../../../specs/e2ee/whitepaper.zh.md)修订。[获批英文文本](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.md)的 Git blob 为 `4421440f723aa15171a2c6a71ee10be9b6829ccd`；[获批中文文本](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.zh.md)的 Git blob 为 `a324c87d687adfa5a11617064eada76005f4633c`。
+
+批准范围是三路只读审计（审计 `c990a689` 加 #2143）后与 `main` 对齐的修订，以及描述当前行为的新表述：
+
+- 按已批准 client custody Spec 的 Web 个人设备保管；恢复保险库（2026-10-31 批准）与桌面保管的批准及其实现限制。
+- Streams epoch 钥 provider、快照加入与安全码 UI 现状、历史解密与执行权限分离（#2143），以及计费与禁用的旧接口。
+- 一项优先可用性与后端成本的换代 owner 决定：当前钥已安装时，新内容使用已验证的当前 epoch；新 epoch 发布后，尚未收到当前钥的设备最多 15 分钟内可继续用最新已保留的已发布 epoch 封装，超时后新写入失败并可重试。后端不强制检查内容 epoch。被移除或撤销的设备在这段时间内可能读到用旧 epoch 封装的新内容。
+
+机器共享方案 A 不在本次修订范围内。批准记录意图，不代表已实现、已部署或真机验收；15 分钟宽限另行实现。
