@@ -211,6 +211,7 @@ describe('MessageHandler machine registration', () => {
       acpAuthenticationInteractions: 2,
       previewControl: 1,
       androidEmulator: 1,
+      androidEmulatorQuality: 1,
       iosSimulator: 1,
       iosSimulatorControls: 1,
       iosSimulatorExterior: 1,
