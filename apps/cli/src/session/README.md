@@ -23,6 +23,7 @@ Inbox release; the durable source reconciles release without replaying requests.
 Native recovery preserves the exact conversation and launch binding. Archive uses
 existing admission/rewrite barriers, including parent admission held by child
 executions; it never treats an idle metadata label as release proof.
+
 ## ACP command exit
 
 `terminal-manager.ts` records the direct process's `exit` status immediately.
@@ -88,8 +89,12 @@ A notification failure cannot replay Agent execution.
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
 - `acp-session-config-applier.ts` — resolves top-level and config-option selections,
   then applies mode, model, and dependent options in that order. This prevents model switches
-  from resetting an already-applied effort. Reports rejected model selections through the GUI
-  warning path, retaining the agent's actual model.
+  from resetting an already-applied effort. A refused required selection fails the input
+  before prompting, while retaining the agent's actual partial changes. The execution
+  service rejects stale human revisions against the loaded Loro session at first acceptance;
+  this does not require a preexisting native connection after restart. Missing revisions
+  load through the existing room sync within the configuration budget or fail visibly.
+  Approved system derivations and durable Inbox receipts preserve frozen queue/retry requirements.
 - `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
   guidance only after execution verifies this Session's temporary branch in an ordinary
   new independent GitHub/local worktree.

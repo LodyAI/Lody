@@ -6009,5 +6009,8 @@
   "sessions.androidEmulator.quality.label": "预览画质",
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
-  "sessions.androidEmulator.quality.clear": "清晰"
+  "sessions.androidEmulator.quality.clear": "清晰",
+  "sessions.systemNotices.chatFailed.sessionConfigChanged": "配置已在别处更新，请用当前配置重新发送。",
+  "sessions.messageStatus.failedResend": "发送失败，重新发送",
+  "sessions.resendUndelivered.failedDescription": "使用当前配置将相同内容作为新消息发送？已完成的工作可能会重复执行。"
 }

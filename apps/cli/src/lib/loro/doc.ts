@@ -2906,19 +2906,59 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.flushLocalWrites();
   }
 
-  /** Serialize first acceptance with publication; a Roost receipt skips this on retry. */
+  /** Serialize first acceptance and its durable receipt with configuration publication. */
   acceptWithConfigRevision<A>(
     input: { configRevision?: number },
-    accept: () => Promise<A>
+    accept: () => Promise<A>,
+    alreadyAccepted: () => boolean | Promise<boolean> = () => false,
+    onRejected?: (error: Error) => Promise<A>,
+    loroInput?: { waitForSync: () => Promise<void> }
   ): Promise<A> {
-    const next = this.acpRuntimeConfigPatchSerial.then(() => {
-      if (
-        input.configRevision !== undefined &&
-        !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
-      ) {
-        throw new Error('SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.');
+    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
+      if (await alreadyAccepted()) return accept();
+      try {
+        if (loroInput && input.configRevision !== undefined) {
+          // Loaded document revision is an input baseline, not proof of a live ACP
+          // connection. Dispatch must be able to establish that connection after a crash.
+          const readRevision = () => this.mirror?.getState().acpRuntimeConfig?.revision;
+          if (readRevision() === undefined || this.acpRuntimeConfigGeneration === undefined) {
+            try {
+              await loroInput.waitForSync();
+            } catch (cause) {
+              throw new Error(
+                'SESSION_CONFIG_UNCONFIRMED: The session configuration could not be loaded.',
+                { cause }
+              );
+            }
+          }
+          const revision = readRevision();
+          if (revision === undefined || !Number.isSafeInteger(revision) || revision < 0)
+            throw new Error(
+              'SESSION_CONFIG_UNCONFIRMED: The session configuration could not be loaded.'
+            );
+          if (input.configRevision < revision)
+            throw new Error(
+              'SESSION_CONFIG_CHANGED: The agent configuration changed. Review the settings and send again.'
+            );
+        } else {
+          if (
+            input.configRevision !== undefined &&
+            !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
+          )
+            throw new Error(
+              'SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.'
+            );
+          assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
+        }
+      } catch (error) {
+        if (
+          onRejected &&
+          error instanceof Error &&
+          /^SESSION_CONFIG_(CHANGED|UNCONFIRMED):/.test(error.message)
+        )
+          return onRejected(error);
+        throw error;
       }
-      assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
       return accept();
     });
     this.acpRuntimeConfigPatchSerial = next.then(

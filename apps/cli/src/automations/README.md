@@ -21,6 +21,12 @@ replace the Session as the continuation target.
 Automations currently run in plaintext workspaces. Encrypted workspaces remain unsupported
 under the shared workspace content policy; Fleet creates no automation runtime there.
 
+New continuation and compact inputs capture the current native session configuration
+revision while preparing the action. They do not inherit an old source-input
+revision. The prepared receipt then freezes the input for retries and queue
+promotion, even if the session changes again. Source/action authorization and
+native execution checks remain required. See [configuration ownership](../../../../.agents/notes/implemented/architecture/2026-10-31-session-config-ownership.md).
+
 ## Register a condition
 
 The bundled [Automations skill](../mcp/skills/lody-automations/SKILL.md) documents
