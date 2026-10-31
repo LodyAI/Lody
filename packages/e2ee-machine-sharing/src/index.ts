@@ -677,8 +677,12 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           if (denial) return denial;
           return yield* Effect.fail(refreshed.failure);
         }
-        const { policy } = refreshed.success;
+        const { policy, head } = refreshed.success;
         yield* guard();
+        // An authenticated read found no policy for this generation (a new or re-paired
+        // machine is private by default) or its removal: a known denial, not unknown.
+        if (!policy && (head === null || head.status === 'removed'))
+          return { allowed: false as const, reason: 'machine-not-shared' as const };
         const cached = cache.get(key(initial.binding));
         if (!cached || cached.policy !== policy || !sharingFresh(cached.stamp, yield* sharingStamp))
           return yield* unknown();

@@ -935,6 +935,72 @@ it('isolates pending originals, high water and live caches on same-member machin
     })
   ));
 
+it('gives a member in one process an exact denial after re-pairing, then the new share', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const member = yield* f.make('member-rejoin', f.bob.signer);
+      const bob = hex(f.bob.publicKey);
+      const old = hex(f.f.phone.publicKey);
+      const outcome = () =>
+        Effect.result(f.run(member.authorize('fixture-machine', bob, undefined, f.remote)));
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          old,
+          rid(1),
+          { kind: 'machine', sharedWithTeam: true },
+          f.remote
+        )
+      );
+      // The member's process caches a grant for the old generation.
+      expect(
+        yield* f.run(member.authorize('fixture-machine', bob, undefined, f.remote))
+      ).toMatchObject({
+        allowed: true,
+      });
+      const replacement = f.f.ed(29);
+      yield* f.append({ _tag: 'RevokeDevice', target: f.f.phone.publicKey });
+      yield* f.append(
+        yield* P.prepareDeviceAdmission({
+          genesis: f.view().genesis,
+          membershipId: f.view().inspectState().owner,
+          encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(new Uint8Array(32).fill(29))),
+          kind: 'machine',
+          machineId: 'fixture-machine',
+          signer: replacement.signer,
+        })
+      );
+      f.newResource();
+      const generation = hex(replacement.publicKey);
+      expect(yield* f.run(member.read('fixture-machine', f.remote))).toMatchObject({
+        generation,
+        head: null,
+        sharedWithTeam: false,
+        deniedReason: 'e2ee_machine_not_shared',
+      });
+      // A new generation without any owner policy is private: a known denial.
+      expect(yield* outcome()).toMatchObject({
+        _tag: 'Success',
+        success: { allowed: false, reason: 'machine-not-shared' },
+      });
+      // The owner shares the re-paired machine again: the same process may dispatch.
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          generation,
+          rid(2),
+          { kind: 'machine', sharedWithTeam: true },
+          f.remote
+        )
+      );
+      expect(yield* f.run(member.knownDenial('fixture-machine', bob, undefined))).toBeUndefined();
+      expect(yield* outcome()).toMatchObject({
+        _tag: 'Success',
+        success: { allowed: true, reason: 'team' },
+      });
+    })
+  ));
+
 it('keeps same-member authority when generation proof is unavailable and retries sharing after recovery', () =>
   test((f) =>
     Effect.gen(function* () {
