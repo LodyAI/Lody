@@ -41,7 +41,9 @@ Shared metadata readers expose identity, state, attribution, schedule markers an
 
 The Native owner queue binds selection and hydration to a generation/event observation. Dispatch-index repair reads field pages; original-Create fingerprint recovery scans immutable creation bytes inside Native one record at a time.
 
-Owner RPC negotiates `sessionHistoryInspection` v1. Each query page, selected body and absence proof carries an opaque checkpoint that distinguishes generations even when their numeric revisions match. Older owners provide checkpoint-fenced body traversal one record at a time through their existing API.
+Owner RPC negotiates `sessionHistoryInspection` v2. Metadata, latest-goal, limited transcript and replay queries run in the owner command queue and return their publication with the result. Replay returns the budgeted prompt and statistics. ID lookups use the existing single-turn request.
+
+General selection returns a digest of the queried fields, then validates those fields while hydrating the selected positions in one owner task. Ordinary text edits do not supersede an unchanged selection. Owners without v2 retain the pre-optimization single-`readAll` compatibility path; failures from an advertised v2 interface propagate without switching paths. Existing v1 requests remain accepted.
 
 ## Write design
 

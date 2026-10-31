@@ -99,6 +99,32 @@ export function historyQueryRow(
   return row;
 }
 
+export function selectTranscriptHistoryPositions(
+  rows: readonly HistoryQueryRow[],
+  options: { limit?: number; reverse?: boolean }
+): { total: number; positions: number[] } {
+  const visible = rows.flatMap((row, index) => {
+    if (row.role !== 'user' && row.role !== 'assistant' && row.role !== 'system') return [];
+    const items = row.items ?? [];
+    if (row.role === 'system' && !items.some((item) => item.type === 'operation_completion'))
+      return [];
+    return items.some(
+      (item) =>
+        item.type === 'image' ||
+        item.type === 'operation_completion' ||
+        (item.type === 'image_group' &&
+          typeof item._imageCount === 'number' &&
+          item._imageCount > 0) ||
+        (item.type === 'text' && item._textNonBlank === true)
+    )
+      ? [index]
+      : [];
+  });
+  const positions = visible.slice(-(options.limit ?? 50));
+  if (options.reverse) positions.reverse();
+  return { total: visible.length, positions };
+}
+
 /** Select reducer positions, including matching owners and fallback tails. */
 export function selectHistoryActionRows(
   rows: readonly HistoryQueryRow[],

@@ -2116,6 +2116,34 @@ export const SESSION_HISTORY_READ_MAX_PAGE = 500;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('readMetadata') }).strict(),
+    z.object({ kind: z.literal('readLatestGoal') }).strict(),
+    z
+      .object({
+        kind: z.literal('readTranscript'),
+        limit: z.number().int().nonnegative().optional(),
+        reverse: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readQuerySnapshot'),
+        from: z.number().int().nonnegative().optional(),
+        to: z.number().int().nonnegative().optional(),
+        transcriptVisibility: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readSelection'),
+        positions: z.array(z.number().int().nonnegative()),
+        token: z.string().regex(/^[a-f0-9]{64}$/),
+        transcriptVisibility: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({ kind: z.literal('readReplayPrompt'), excludeTurnId: z.string().optional() })
+      .strict(),
     z
       .object({
         kind: z.literal('watchChanges'),
@@ -2187,6 +2215,11 @@ export const SessionHistoryReadQuerySchema = z
     z.object({ kind: z.literal('readTurnOutput'), userTurnId: z.string().trim().min(1) }).strict(),
   ])
   .superRefine((value, ctx) => {
+    if (value.kind === 'readQuerySnapshot') {
+      if (value.from !== undefined && value.to !== undefined && value.to < value.from)
+        ctx.addIssue({ code: 'custom', path: ['to'], message: 'Invalid history query range' });
+      return;
+    }
     if (value.kind !== 'readRange' && value.kind !== 'readDirectory' && value.kind !== 'readQuery')
       return;
     if (value.to < value.from) {

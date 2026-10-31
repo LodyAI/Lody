@@ -44,6 +44,8 @@ import {
 import { NodeLodyHistory, type HistoryIdentity } from '@loro-dev/roost/lody-history';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  resolveActiveAssistantTurnId,
+  SessionHistoryReadQuerySchema,
   applyNotificationOnHistory,
   prepareReplacement,
   SessionHistoryReadResponseSchema,
@@ -71,6 +73,7 @@ import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   createRoostDirectoryRow,
+  readSessionHistoryMetadata,
   hashHistoryEntryForVersion,
   hashText,
   applySessionHistoryPatches,
@@ -5619,5 +5622,153 @@ it('keeps rooted directory cursors, metadata selection and bounded replay equiva
   } finally {
     all.mockRestore();
     full.mockRestore();
+  }
+});
+
+it.each([undefined, 1, 2])(
+  'keeps CLI metadata, transcript and replay usable while streaming (inspection v%s)',
+  async (version) => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0]!;
+    let client: Awaited<ReturnType<SessionBackendFactory>> | undefined;
+    try {
+      await fixture.ready(sessionId);
+      await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', {
+        entry: {
+          ...nativeUser('rpc-prefix'),
+          inputConfig: { modelId: 'synthetic-model', modeId: 'ask' },
+          items: [{ type: 'text', text: 'prefix'.repeat(50000) }],
+        },
+      });
+      const doc = fixture.docs.get(sessionId)!;
+      const owner = await createSessionBackend(doc);
+      for (let index = 0; index < 50; index++)
+        await owner.appendHistoryTurn({
+          ...nativeUser(`rpc-row-${index}`),
+          status: 'handled',
+          read: true,
+        });
+      await owner.openAssistantTurn({
+        turnId: 'rpc-live',
+        userTurnId: 'rpc-row-49',
+        timestamp: '2026-10-31T00:00:00Z',
+      });
+      const capabilities: Record<string, number> = { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
+      if (version === undefined) delete capabilities.sessionHistoryInspection;
+      else capabilities.sessionHistoryInspection = version;
+      await fixture.repo.upsertDocMeta(getMachineRoomId('test-machine'), {
+        id: 'test-machine',
+        protocolCapabilities: capabilities,
+      });
+      let update = 0;
+      const factory = createCommandSessionHistoryFactory(
+        () => ({ repo: fixture.repo }) as LoroDocumentManager,
+        { userId: 'test-user', machineId: 'test-machine', token: 'synthetic-token' } as AuthContext,
+        'test-workspace',
+        async (_target, run) =>
+          run({
+            requestSessionHistoryRead: async (request: {
+              sessionId: SessionId;
+              query: SessionHistoryReadQuery;
+            }) => {
+              const query = SessionHistoryReadQuerySchema.parse(request.query);
+              if (version === 2 ? query.kind === 'readAll' : query.kind !== 'readAll')
+                throw new Error('History read used the wrong negotiated protocol');
+              await owner.applyHistoryAction({
+                kind: 'assistant-items',
+                turnId: 'rpc-live',
+                mode: 'replace',
+                items: Array.from({ length: (++update % 2) + 1 }, (_, index) => ({
+                  type: 'text' as const,
+                  text: `stream-${update}-${index}`,
+                })),
+              });
+              return fixture.rpc.readSessionHistoryForRpc(request.sessionId, query);
+            },
+          } as never)
+      );
+      client = await factory(doc, await doc.getMetaState());
+      const metadata = await readSessionHistoryMetadata(client.history);
+      expect(resolveActiveAssistantTurnId(metadata)).toBe('rpc-live');
+      expect(metadata[0]).toMatchObject({
+        id: 'rpc-prefix',
+        inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+      });
+      const query = await client.readHistoryQuery();
+      expect(query.at(-1)).toMatchObject({ id: 'rpc-live', role: 'assistant' });
+      expect(await client.readLatestGoal()).toBeNull();
+      expect(await client.readHistoryEntry?.('rpc-row-7')).toMatchObject({
+        id: 'rpc-row-7',
+        status: 'handled',
+      });
+      for (const options of [
+        { all: false, limit: 50 },
+        { reverse: true, limit: 3 },
+      ]) {
+        const transcript = await readSessionTranscript(client, options);
+        const afterTranscript = toSessionTranscriptEntries(await owner.readHistory());
+        expect(transcript).toEqual({
+          total: afterTranscript.length,
+          entries: selectSessionTranscriptEntries(afterTranscript, options),
+        });
+      }
+      const replay = await client.readHistoryReplay?.('rpc-prefix');
+      expect(replay).toEqual(
+        buildReplayPromptFromHistory({
+          history: await owner.readHistory(),
+          excludeTurnId: 'rpc-prefix',
+        })
+      );
+    } finally {
+      await client?.dispose();
+      await fixture.close();
+    }
+  }
+);
+
+it('reselects the latest row when metadata changes between the two owner requests', async () => {
+  const fixture = await coldHistoryHandlerFixture(1);
+  const sessionId = [...fixture.docs.keys()][0]!;
+  let client: Awaited<ReturnType<SessionBackendFactory>> | undefined;
+  try {
+    await fixture.ready(sessionId);
+    await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', {
+      entry: nativeUser('first-choice'),
+    });
+    const doc = fixture.docs.get(sessionId)!;
+    const owner = await createSessionBackend(doc);
+    await fixture.repo.upsertDocMeta(getMachineRoomId('test-machine'), {
+      id: 'test-machine',
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    let changed = false;
+    const factory = createCommandSessionHistoryFactory(
+      () => ({ repo: fixture.repo }) as LoroDocumentManager,
+      { userId: 'test-user', machineId: 'test-machine', token: 'synthetic-token' } as AuthContext,
+      'test-workspace',
+      async (_target, run) =>
+        run({
+          requestSessionHistoryRead: async (request: {
+            sessionId: SessionId;
+            query: SessionHistoryReadQuery;
+          }) => {
+            const query = SessionHistoryReadQuerySchema.parse(request.query);
+            if (query.kind === 'readAll')
+              throw new Error('Whole-history fallback is forbidden for this owner');
+            if (query.kind === 'readSelection' && !changed) {
+              changed = true;
+              await owner.appendHistoryTurn(nativeUser('new-choice'));
+            }
+            return fixture.rpc.readSessionHistoryForRpc(request.sessionId, query);
+          },
+        } as never)
+    );
+    client = await factory(doc, await doc.getMetaState());
+    expect(await client.readHistorySelection((rows) => [rows.length - 1])).toEqual([
+      nativeUser('new-choice'),
+    ]);
+  } finally {
+    await client?.dispose();
+    await fixture.close();
   }
 });

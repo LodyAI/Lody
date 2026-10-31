@@ -1,6 +1,6 @@
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb';
 import { createRoostHistoryCache } from '../src/lib/roost-history-cache';
-import { createRoostDirectoryRow } from '@lody/shared/session-data';
+import { createRoostDirectoryRow, readSessionHistoryMetadata } from '@lody/shared/session-data';
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
@@ -27,6 +27,75 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
+  it.each(
+    [0, 1, 500, 501].flatMap((count) =>
+      [false, true].map((coherentInspection) => ({ count, coherentInspection }))
+    )
+  )(
+    'reads schedule metadata with $count turns (owner queries: $coherentInspection)',
+    async ({ count, coherentInspection }) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const sessionId = `synthetic-metadata-${count}-${coherentInspection}` as SessionId;
+      const turns: SessionHistoryInput[] = Array.from({ length: count }, (_, index) => ({
+        id: `turn-${index}`,
+        role: 'user',
+        timestamp: '2026-10-31T00:00:00Z',
+        inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+        scheduleRun: { scheduleId: 'synthetic-schedule' },
+        items: [{ type: 'text', text: 'Synthetic body' }],
+      }));
+      const data = createLocalRoostSessionDataFactory({
+        coherentInspection,
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        sendControl: async (request) => {
+          if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+          const query = request.query;
+          let result: unknown;
+          if (query.kind === 'readMetadata' && coherentInspection)
+            result = turns.map(({ items: _items, ...metadata }) => metadata);
+          else if (query.kind === 'readAll' && !coherentInspection) result = turns;
+          else if (query.kind === 'count') result = turns.length;
+          else if (query.kind === 'readDirectory')
+            result = turns
+              .slice(query.from, query.to)
+              .map((turn, index) => createRoostDirectoryRow(query.from + index, turn));
+          else throw new Error('Metadata lookup requested transcript bodies');
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                result,
+                historyRevision: 0,
+                historyCount: turns.length,
+              },
+            ],
+          };
+        },
+      })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      try {
+        expect(
+          (await data.history.readDirectory(0, Number.MAX_SAFE_INTEGER)).map((row) => row.turnId)
+        ).toEqual(turns.map((turn) => turn.id));
+        const metadata = await readSessionHistoryMetadata(data.history);
+        expect(metadata).toEqual(
+          turns.map((turn) => ({
+            id: turn.id,
+            role: turn.role,
+            timestamp: turn.timestamp,
+            inputConfig: turn.inputConfig,
+            scheduleRun: turn.scheduleRun,
+          }))
+        );
+      } finally {
+        data.dispose();
+      }
+    }
+  );
+
   it('receives an existing owner acceptance through the real SDK after a silent SSE stall', async () => {
     vi.useFakeTimers();
     const connected = Promise.withResolvers<void>();

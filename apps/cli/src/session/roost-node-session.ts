@@ -24,6 +24,9 @@ import {
   parseHistoryWrite,
   PermissionOutcomeSchema,
   isSessionHistoryStatusAwaitingStart,
+  createReplayPromptBuilder,
+  type SessionHistoryInspectionQuery,
+  type SessionHistoryReadResponse,
 } from '@lody/shared';
 import {
   planHistoryAction as planDomainHistoryAction,
@@ -52,6 +55,7 @@ import {
   selectHistoryActionRows,
   selectAgentHistoryRows,
   type HistoryQueryRow,
+  selectTranscriptHistoryPositions,
   ROOST_CLEAR_FIELDS_KEY,
   type SessionInputAcceptanceResult,
 } from '@lody/shared/session-data';
@@ -1105,36 +1109,40 @@ const createNodeServicesForLease = async (
       if (generation === readGeneration) fullEntriesCache = projected.map((entry) => clone(entry));
       return projected.map((entry) => clone(entry));
     });
-  const readLatestGoal = (): Promise<SessionGoalMessage | null> =>
-    inspectHistory(async (index, checkpoint, source) => {
-      const cursor = BigInt(checkpoint.header.cursor);
-      let latest =
-        operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
-      if (latest === undefined)
-        latest = await readGoalProjection(historyHost, cursor, checkpoint.header.count).catch(
-          () => undefined
-        );
-      if (latest === undefined) {
-        latest = null;
-        for (let end = checkpoint.header.count; end > 0; end -= 500) {
-          const rows = await index.range(checkpoint, Math.max(0, end - 500), end);
-          for (let position = rows.length - 1; position >= 0; position--) {
-            const row = rows[position]!;
-            if (!projectLatestGoal([{ id: row.entry.id, items: index.inspection(row).goals }]))
-              continue;
-            const complete = await readIndexedEntries(source, [row]);
-            latest = projectLatestGoal(complete, row.position);
-            if (latest) break;
-          }
+  const readGoalAtInspection: InspectionQuery<SessionGoalMessage | null> = async (
+    index,
+    checkpoint,
+    source
+  ) => {
+    const cursor = BigInt(checkpoint.header.cursor);
+    let latest =
+      operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
+    if (latest === undefined)
+      latest = await readGoalProjection(historyHost, cursor, checkpoint.header.count).catch(
+        () => undefined
+      );
+    if (latest === undefined) {
+      latest = null;
+      for (let end = checkpoint.header.count; end > 0; end -= 500) {
+        const rows = await index.range(checkpoint, Math.max(0, end - 500), end);
+        for (let position = rows.length - 1; position >= 0; position--) {
+          const row = rows[position]!;
+          if (!projectLatestGoal([{ id: row.entry.id, items: index.inspection(row).goals }]))
+            continue;
+          const complete = await readIndexedEntries(source, [row]);
+          latest = projectLatestGoal(complete, row.position);
           if (latest) break;
         }
+        if (latest) break;
       }
-      if (operationCursor === undefined && cursor === knownCursor) {
-        goalProjection = latest;
-        goalCoveredStart = latest?.position ?? 0;
-      }
-      return latest ? clone(latest.goal) : null;
-    });
+    }
+    if (operationCursor === undefined && cursor === knownCursor) {
+      goalProjection = latest;
+      goalCoveredStart = latest?.position ?? 0;
+    }
+    return latest ? clone(latest.goal) : null;
+  };
+  const readLatestGoal = () => inspectHistory(readGoalAtInspection);
   const rememberPageEntries = (start: number, projected: readonly SessionEntry[]): void => {
     for (const [offset, turn] of projected.entries()) {
       const position = start + offset;
@@ -1588,6 +1596,42 @@ const createNodeServicesForLease = async (
     onOwner(() =>
       readStable(async () => inspectAtCursor(await roostHistory.observedEventCursor(), query))
     );
+  const inspectionRows = async (
+    index: RoostDispatchIndex,
+    checkpoint: RoostDispatchCheckpoint,
+    options?: { from?: number; to?: number }
+  ) => {
+    const from = Math.max(0, Math.min(options?.from ?? 0, checkpoint.header.count));
+    const end = Math.max(
+      from,
+      Math.min(options?.to ?? checkpoint.header.count, checkpoint.header.count)
+    );
+    const rows: RoostDispatchRow[] = [];
+    for (let start = from; start < end; start += 500)
+      rows.push(...(await index.range(checkpoint, start, Math.min(end, start + 500))));
+    return rows;
+  };
+  const inspectionToken = (rows: readonly HistoryQueryRow[]) =>
+    createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+  const readReplayAtInspection = async (
+    index: RoostDispatchIndex,
+    checkpoint: RoostDispatchCheckpoint,
+    source: NodeLodyHistory,
+    excludeTurnId?: string
+  ) => {
+    const builder = createReplayPromptBuilder({ excludeTurnId });
+    for (let from = 0; from < checkpoint.header.count; from += 500)
+      for (const row of await index.range(
+        checkpoint,
+        from,
+        Math.min(checkpoint.header.count, from + 500)
+      )) {
+        if (row.entry.id === excludeTurnId) continue;
+        const [entry] = await readIndexedEntries(source, [row]);
+        if (entry) builder.add(entry as SessionHistoryInput);
+      }
+    return builder.finish();
+  };
   const readLatestUserId = () =>
     inspectHistory(async (index, checkpoint) => {
       for (let end = checkpoint.header.count; end > 0; end -= 500) {
@@ -3414,8 +3458,101 @@ const createNodeServicesForLease = async (
   // Admission follows registration. Its fresh bootstrap hint checks the gap
   // after the private initial load; no consumer checkpoint has been exposed yet.
   refreshCommitSubscription();
+  const readHistoryInspection = (
+    query: SessionHistoryInspectionQuery
+  ): Promise<SessionHistoryReadResponse> =>
+    onOwner(() =>
+      readStable(async () => {
+        const source = roostHistory,
+          generation = readGeneration,
+          cursor = await source.observedEventCursor();
+        const result = await inspectAtCursor(cursor, async (index, checkpoint, selectedSource) => {
+          if (query.kind === 'readLatestGoal')
+            return readGoalAtInspection(index, checkpoint, selectedSource);
+          if (query.kind === 'readReplayPrompt') {
+            return readReplayAtInspection(index, checkpoint, selectedSource, query.excludeTurnId);
+          }
+          const rows = await inspectionRows(
+            index,
+            checkpoint,
+            query.kind === 'readQuerySnapshot' ? query : undefined
+          );
+          if (query.kind === 'readMetadata')
+            return rows.map((row) => {
+              const fields = index.inspection(row);
+              return {
+                ...fields.scalars,
+                inputConfig: fields.inputConfig,
+                ...(fields.userId === undefined ? {} : { userId: fields.userId }),
+                ...(fields.scheduleRun === undefined ? {} : { scheduleRun: fields.scheduleRun }),
+              };
+            });
+          if (query.kind === 'readTranscript') {
+            const projected = await historyQueryRows(rows, index, selectedSource, true);
+            const selected = selectTranscriptHistoryPositions(projected, query);
+            return {
+              ...selected,
+              entries: await readIndexedEntries(
+                selectedSource,
+                selected.positions.map((position) => rows[position]!)
+              ),
+            };
+          }
+          const projected = await historyQueryRows(
+            rows,
+            index,
+            selectedSource,
+            query.transcriptVisibility
+          );
+          const token = inspectionToken(projected);
+          if (query.kind === 'readQuerySnapshot') return { rows: projected, token };
+          if (query.token !== token)
+            throw Object.assign(new Error('History selection changed'), { code: 'superseded' });
+          const positions = [...new Set(query.positions)];
+          const selected = positions.map((position) => {
+            const row = rows[position];
+            if (!Number.isSafeInteger(position) || !row)
+              throw new Error('Invalid history selection');
+            return row;
+          });
+          const bodies = await readIndexedEntries(selectedSource, selected);
+          const byPosition = new Map(
+            positions.map((position, offset) => [position, bodies[offset]])
+          );
+          return query.positions.map((position) => {
+            const entry = byPosition.get(position);
+            if (!entry) throw new Error('Owner history selection is incomplete');
+            return entry;
+          });
+        });
+        if (!history.getPublication) throw new Error('Native history publication is unavailable');
+        const published = await history.getPublication();
+        if (
+          source !== roostHistory ||
+          generation !== readGeneration ||
+          cursor !== (await source.observedEventCursor())
+        ) {
+          needsRefresh = true;
+          throw staleRead();
+        }
+        return {
+          type: 'session/history-read_response',
+          sessionId: sessionDoc.sessionId,
+          success: true,
+          result,
+          historyRevision: published.historyRevision,
+          historyCount: published.historyCount,
+          historyChange: published.historyChange,
+        };
+      })
+    );
   return {
     sessionData,
+    readHistoryInspection,
+    readHistoryReplay: (excludeTurnId) =>
+      inspectHistory((index, checkpoint, source) =>
+        readReplayAtInspection(index, checkpoint, source, excludeTurnId)
+      ),
     readLatestGoal,
     readLatestUserId,
     foldHistory: (create, visit) =>
@@ -3434,14 +3571,7 @@ const createNodeServicesForLease = async (
       }),
     readHistoryQuery: (options) =>
       inspectHistory(async (index, checkpoint, source) => {
-        const from = Math.max(0, Math.min(options?.from ?? 0, checkpoint.header.count));
-        const end = Math.max(
-          from,
-          Math.min(options?.to ?? checkpoint.header.count, checkpoint.header.count)
-        );
-        const rows: RoostDispatchRow[] = [];
-        for (let start = from; start < end; start += 500)
-          rows.push(...(await index.range(checkpoint, start, Math.min(end, start + 500))));
+        const rows = await inspectionRows(index, checkpoint, options);
         return historyQueryRows(rows, index, source, options?.transcriptVisibility);
       }),
     readHistorySelection: (select, options) =>

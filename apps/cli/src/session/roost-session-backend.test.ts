@@ -6,7 +6,11 @@ import type {
   SessionQueuePromotionRecord,
   SessionSteerOperationRecord,
 } from '@lody/shared';
-import { SessionHistoryReadQuerySchema, type SessionHistoryReadResponse } from '@lody/shared';
+import {
+  buildReplayPromptFromHistory,
+  SessionHistoryReadQuerySchema,
+  type SessionHistoryReadResponse,
+} from '@lody/shared';
 import { createRoostRpcSessionServices } from './roost-rpc-session';
 import {
   createRoostHistoryReader,
@@ -341,16 +345,15 @@ describe('Roost owner RPC reader', () => {
   });
 });
 
-it.each(['body', 'generation'] as const)(
-  'fences query selection and streamed folds across an owner %s change',
+it.each(['body', 'metadata'] as const)(
+  'selects current bodies after an owner %s change',
   async (change) => {
     const doc = { sessionId: 'selective-owner' } as SessionDocument;
-    let revision = 1,
-      scope = 1,
+    let token = 'a'.repeat(64),
       raced = false;
     const rows = [
       { ...entry, id: 'old', userId: 'author', items: [{ type: 'text' as const, text: 'before' }] },
-      { ...entry, id: 'target' },
+      { ...entry, id: 'target', userId: 'author' },
     ];
     const querySnapshot = () =>
       rows.map((row) =>
@@ -363,38 +366,34 @@ it.each(['body', 'generation'] as const)(
         })
       );
     const services = createRoostRpcSessionServices(doc, {
-      inspection: true,
+      coherentInspection: true,
       read: async (input) => {
         const parsed = SessionHistoryReadQuerySchema.parse(input);
         let result: unknown;
-        if (parsed.kind === 'count')
-          result = parsed.withCheckpoint
-            ? { count: rows.length, checkpoint: `scope-${scope}` }
-            : rows.length;
-        else if (parsed.kind === 'readQuery')
-          result = querySnapshot().slice(parsed.from, parsed.to);
-        else if (parsed.kind === 'readRange') {
+        if (parsed.kind === 'readQuerySnapshot') result = { rows: querySnapshot(), token };
+        else if (parsed.kind === 'readSelection') {
+          rows[0]!.items = [{ type: 'text', text: 'after' }];
           if (!raced) {
             raced = true;
-            scope++;
-            if (change === 'body') revision++;
-            rows[0]!.items = [{ type: 'text', text: 'after' }];
+            if (change === 'metadata') {
+              rows[0]!.userId = 'new-author';
+              token = 'b'.repeat(64);
+            }
           }
-          if (parsed.atCheckpoint !== `scope-${scope}`)
+          if (parsed.token !== token)
             return {
               type: 'session/history-read_response',
               sessionId: doc.sessionId,
               success: false,
               retryReason: 'superseded',
-              error: 'superseded',
+              error: 'Selection changed',
             };
-          result = rows.slice(parsed.from, parsed.to).map((turn) => ({ state: 'ready', turn }));
-        } else throw new Error('Unexpected whole-history or body query');
+          result = parsed.positions.map((position) => rows[position]);
+        } else throw new Error('Unexpected whole-history or paged query');
         return {
           type: 'session/history-read_response',
           sessionId: doc.sessionId,
           success: true,
-          historyRevision: revision,
           result,
         };
       },
@@ -402,21 +401,22 @@ it.each(['body', 'generation'] as const)(
         throw new Error('read-only');
       },
     });
-    const selected = await services.readHistorySelection?.((query) =>
-      query.flatMap((row, index) => (row.id === 'old' ? [index] : []))
-    );
-    expect(selected).toEqual([rows[0]]);
-    expect(raced).toBe(true);
-    const folded = await services.foldHistory?.(
-      () => [] as string[],
-      (state, row) => state.push(row.id)
-    );
-    expect(folded).toEqual(['old', 'target']);
-    await services.dispose?.();
+    try {
+      const selected = await services.readHistorySelection?.((query) =>
+        query.flatMap((row, index) => (row.id === 'old' ? [index] : []))
+      );
+      expect(selected).toEqual([rows[0]]);
+      expect(selected?.[0]).toMatchObject({
+        userId: change === 'metadata' ? 'new-author' : 'author',
+        items: [{ text: 'after' }],
+      });
+    } finally {
+      await services.dispose?.();
+    }
   }
 );
 
-it('retains older-owner attribution, configuration and schedule metadata without a whole array', async () => {
+it('retains single-read legacy metadata, selection and replay behavior', async () => {
   const doc = { sessionId: 'older-selective-owner' } as SessionDocument;
   const row = {
     ...entry,
@@ -426,35 +426,68 @@ it('retains older-owner attribution, configuration and schedule metadata without
   };
   const services = createRoostRpcSessionServices(doc, {
     read: async (input) => {
-      let result: unknown;
-      if (input.kind === 'count') result = 1;
-      else if (input.kind === 'readLatestPage')
-        result = { totalCount: 1, checkpoint: 'older-owner:1' };
-      else if (input.kind === 'readDirectory')
-        result = [
-          {
-            position: 0,
-            state: 'ready',
-            turnId: row.id,
-            scalars: { id: row.id, role: row.role, timestamp: row.timestamp },
-          },
-        ];
-      else if (input.kind === 'readRange') result = [{ state: 'ready', turn: row }];
-      else throw new Error('Unsupported old-owner query');
+      if (input.kind !== 'readAll') throw new Error('Unsupported old-owner query');
       return {
         type: 'session/history-read_response',
         sessionId: doc.sessionId,
         success: true,
         historyRevision: 1,
-        result,
+        result: [row],
       };
     },
     write: async () => {
       throw new Error('read-only');
     },
   });
-  expect(await readSessionHistoryMetadata(services.sessionData.history)).toMatchObject([
-    { id: row.id, userId: 'older-author', scheduleRun: { scheduleId: 'schedule' } },
-  ]);
-  await services.dispose?.();
+  try {
+    expect(await readSessionHistoryMetadata(services.sessionData.history)).toMatchObject([
+      {
+        id: row.id,
+        userId: 'older-author',
+        inputConfig: row.inputConfig,
+        scheduleRun: row.scheduleRun,
+      },
+    ]);
+    expect(await services.readHistorySelection?.(() => [0])).toEqual([row]);
+    expect(await services.readHistoryQuery?.()).toMatchObject([
+      { id: row.id, userId: 'older-author' },
+    ]);
+    expect(
+      await services.foldHistory?.(
+        () => [] as string[],
+        (ids, value) => ids.push(value.id)
+      )
+    ).toEqual([row.id]);
+    expect(await services.readHistoryReplay?.()).toEqual(
+      buildReplayPromptFromHistory({ history: [row] })
+    );
+  } finally {
+    await services.dispose?.();
+  }
+});
+
+it('propagates a new-owner query failure without a legacy whole-history fallback', async () => {
+  const doc = { sessionId: 'failed-inspection-owner' } as SessionDocument;
+  const services = createRoostRpcSessionServices(doc, {
+    coherentInspection: true,
+    read: async (query) => {
+      if (query.kind !== 'readQuerySnapshot') throw new Error('Unexpected compatibility fallback');
+      return {
+        type: 'session/history-read_response',
+        sessionId: doc.sessionId,
+        success: false,
+        error: 'Synthetic Native read failure',
+      };
+    },
+    write: async () => {
+      throw new Error('read-only');
+    },
+  });
+  try {
+    await expect(services.readHistorySelection?.(() => [0])).rejects.toThrow(
+      'Synthetic Native read failure'
+    );
+  } finally {
+    await services.dispose?.();
+  }
 });

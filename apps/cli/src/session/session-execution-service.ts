@@ -6089,6 +6089,7 @@ export class SessionExecutionService {
     excludeTurnId?: string
   ): Promise<ReplayPromptResult> {
     const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    if (backend.readHistoryReplay) return backend.readHistoryReplay(excludeTurnId);
     const builder = await backend.foldHistory(
       () => createReplayPromptBuilder({ excludeTurnId }),
       (state, entry) => state.add(entry)

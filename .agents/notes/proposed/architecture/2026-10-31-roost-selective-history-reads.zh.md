@@ -41,7 +41,9 @@ Loro 列标明纳入范围的九项完整正文读取；其输出、目录和最
 
 Native owner 队列将选择和展开绑定到一次 generation／事件观察。dispatch 索引恢复读取字段页；初始 Create 摘要恢复在 Native 内逐条扫描不可变创建字节。
 
-Owner RPC 协商 `sessionHistoryInspection` v1，每个查询页、目标正文和不存在证明携带不透明检查点，即使数值 revision 相同也能区分 generation。旧 owner 通过既有 API 按检查点逐条提供正文。
+Owner RPC 协商 `sessionHistoryInspection` v2。元数据、最新 goal、限定条数的转录和 replay 查询在 owner 命令队列内执行，结果与对应的发布版本一同返回。replay 返回预算内提示词及统计；ID 查询使用已有的单条请求。
+
+通用选择先返回查询字段的摘要，再在一个 owner 任务内核对这些字段并展开目标位置的正文。普通文本编辑不会使未变的选择失效。不支持 v2 的 owner 保留优化前单次 `readAll` 的兼容路径；已声明支持 v2 的接口发生错误时，错误直接传递，不切换路径。既有 v1 请求继续接受。
 
 ## 写入设计
 
