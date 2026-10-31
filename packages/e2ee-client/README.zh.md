@@ -32,6 +32,12 @@
 - `close()` 停止接纳，取消并等待操作，再释放密钥、credential 和数据库所有者。
   close/logout/清缓存不删除身份。组合不创建定时器、文档 Repo 或普通传输。
 
+## 封装 epoch
+
+新文档、Meta 和 Flock 的 seal 在 core 内部选择当前已验证 epoch。
+调用方的旧 epoch 只是提示；缺当前 key 时失败并等待重试，不生成新的旧 epoch 密文。
+已封装旧帧和历史读取保持有效；高于已验证账本的 epoch 提示必须等待追赶后重试。
+
 ## 有界退休
 
 owned host 和 session 的 `close()` 立即停止新工作，每个实际 drain 共用五秒等待预算。

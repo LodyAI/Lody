@@ -97,6 +97,9 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
   if (portable === 'identity-lost' || portable === 'approval-required')
     return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';
+  // Main erased only this device's identity; the member pairs a new device key.
+  if (/\be2ee_device_revoked$/.test(message))
+    return { kind: 'approval-required', code: 'device-revoked' };
   if (message.includes('e2ee_local-evidence-conflict'))
     return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
   if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))

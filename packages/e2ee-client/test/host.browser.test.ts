@@ -123,7 +123,8 @@ it.each(['chromium', 'webkit'] as const)(
         usableEpoch: 0,
         rotationRequired: false,
       });
-      expect((await call(page, 'seal')).ok).toBe(true);
+      expect((await call(page, 'seal')).ok).toBe(false);
+      expect((await call(page, 'openBody')).value).toEqual([72, 105]);
       expect((await call(page, 'stagingUnavailable')).ok).toBe(true);
       expect((await call(page, 'keyRound')).ok).toBe(true);
       expect(record(await call(page, 'status')).usableEpoch).toBe(0);
@@ -133,7 +134,7 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await call(page, 'corruptStaged')).ok).toBe(true);
       expect((await call(page, 'keyRound')).ok).toBe(false);
       expect(record(await call(page, 'status')).usableEpoch).toBe(0);
-      expect((await call(page, 'seal')).ok).toBe(true);
+      expect((await call(page, 'seal')).ok).toBe(false);
       // The publisher can disappear after staging + ledger commit, before mailbox delivery.
       expect((await call(page, 'stageCurrent')).ok).toBe(true);
       expect((await call(page, 'keyRound')).ok).toBe(true);
@@ -142,7 +143,7 @@ it.each(['chromium', 'webkit'] as const)(
         usableEpoch: 1,
         rotationRequired: false,
       });
-      expect((await call(page, 'seal')).ok).toBe(true);
+      expect(record(await call(page, 'sealOldHint')).epoch).toBe(1);
       expect((await call(page, 'openBody')).value).toEqual([72, 105]);
       expect((await call(page, 'revoke')).ok).toBe(true);
       expect((await call(page, 'refresh')).ok).toBe(true);

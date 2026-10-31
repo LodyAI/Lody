@@ -305,7 +305,16 @@ export function createCloudE2eePort(
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
     readEpochGroup: (input) =>
       client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
-        ...input,
+        workspaceId: input.workspaceId,
+        credential: input.credential,
+        // Native discovery also retains the publication signer. The wire key
+        // has exactly four fields; the receiver authenticates the originals.
+        key: {
+          genesis: input.key.genesis,
+          epoch: input.key.epoch,
+          commitment: input.key.commitment,
+          recordHash: input.key.recordHash,
+        },
         ...(options.token === undefined ? {} : { cliToken: options.token }),
       }),
     mailboxCall: async (method, input) => {

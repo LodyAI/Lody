@@ -112,6 +112,9 @@ Unlisted requests retain their existing ordering. [Local control lane decision](
   Streams token factory requires the caller's Scope; it retains Legacy token
   providers until cloud disposal and reports failed cleanup. Existing durable and
   Machine RPC consumers keep the visible Legacy token port until their owners migrate.
+  Epoch staging reads project native locators onto the four-field wire key
+  (`genesis`, `epoch`, `commitment`, `recordHash`); local publication signer metadata
+  stays outside the request. The receiver still verifies the returned originals and HPKE.
 - `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
   cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane

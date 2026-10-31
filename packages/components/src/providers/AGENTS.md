@@ -86,9 +86,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Preserve drafts until authenticated classification; retire and cancel provisional
   transports before recording an encrypted or contradictory verdict.
 - Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
-  leases. No plaintext bypass. Keep retained-epoch sends; select confirmed keys per
-  operation. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
+  leases. No plaintext bypass. Keep already sealed old-epoch sends and historical reads;
+  native hosts select the verified current epoch for each new seal and fail for retry
+  when its key is missing. Cached provider epoch hints never select an older write key. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
   Drain before deleting that instance; retain exact receipts.
+  [Sealing](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md),
   [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
   [transport](../../../../specs/workspace-streams-content.md).
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;

@@ -136,8 +136,10 @@ export type WorkspaceEpochStatus = {
 /** Reception progress only: every non-closed phase permits retained-epoch sends. */
 export type WorkspaceEpochPhase = 'ready' | 'installing' | 'waiting-key' | 'failed' | 'closed';
 
-/** Stable room providers select a confirmed installed epoch per operation.
- * Reception never removes transports or blocks old-epoch sends. Timed-out raw
+/** Stable room providers retain epoch hints for UI/token coordination. Native
+ * hosts select the verified current epoch for new seals; these hints grant no
+ * authority to seal new content at an older epoch. Reception never removes
+ * transports or blocks already sealed old-epoch sends. Timed-out raw
  * work stays owned until settlement; its late receipt cannot commit a selection.
  * @deprecated Compose this Promise SDK boundary when its callers migrate.
  */
