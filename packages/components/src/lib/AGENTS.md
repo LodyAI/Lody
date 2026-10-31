@@ -10,6 +10,8 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 
 - Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
 
+Organization queries require matching authenticated sessions.
+
 ## Electron IPC types
 
 - `electron-ipc-client.ts` may import `ElectronIpcServices` from main-process
