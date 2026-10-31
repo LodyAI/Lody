@@ -269,8 +269,20 @@ heads: signatures/chains detect known rollback/forks, not globally latest state.
 On 2026-10-28, the owner confirmed acceptance of trusting the server not to
 continuously withhold newer heads; the MVP adds no signed freshness proof. Restart or
 clock uncertainty requires revalidation; unrelated content/local work stays usable.
-No network, cache, UI or execution integration is enabled by these primitives.
-See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+The machine-sharing host performs these reads, caches and execution checks for the CLI;
+product enablement remains separate. See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+
+**Derived work (proposed revision, draft).** On 2026-10-31 the owner chose to restore
+work that a shared member's turn derives through the machine (child Sessions, chat,
+Roles, continuations, agent control) by reusing the signed-original chain. The machine
+writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
+row, only while that origin turn is active and only for this machine. At start, the
+machine verifies the origin as the member's own signed, non-derived Turn and authorizes
+the member's rights ∩ the owner's sharing policy ∩ every reached project. The start
+deadline is the origin's signed deadline plus 15 minutes. Derivation is one level deep,
+with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
+not implemented and fails closed; a future version would use a user-approved signature
+from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 
 ### Permission freshness and the separate durable expiry clock
 

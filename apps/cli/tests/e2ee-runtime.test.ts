@@ -762,7 +762,8 @@ describe('machine E2EE local runtime', () => {
             id: string,
             userId: string,
             peer: string,
-            binding: typeof ownerBinding
+            binding: typeof ownerBinding,
+            derivedFrom?: { sessionId: string; userTurnId: string }
           ) =>
             Effect.gen(function* () {
               source.setPeerId(peer as `${number}`);
@@ -776,6 +777,11 @@ describe('machine E2EE local runtime', () => {
               row.set('timestamp', '1970-01-01T00:00:00.100Z');
               row.set('inputConfig', { prompt: id });
               row.set('items', [{ type: 'text', text: id }]);
+              if (derivedFrom) {
+                const origin = row.setContainer('derivedFrom', new LoroMap());
+                origin.set('sessionId', derivedFrom.sessionId);
+                origin.set('userTurnId', derivedFrom.userTurnId);
+              }
               source.commit();
               const update = source.export({ mode: 'update', from });
               const context = {
@@ -803,6 +809,41 @@ describe('machine E2EE local runtime', () => {
           yield* addTurn('revoked', user, '2', otherBinding);
           yield* addTurn('mismatch', displayAccountId, '1', ownerBinding);
           yield* addTurn('edited', user, '1', ownerBinding);
+          yield* addTurn('derived', user, '1', ownerBinding, {
+            sessionId: 'session',
+            userTurnId: 'active',
+          });
+          // The derivation origin is part of the signed input: an origin lookup needs
+          // no dispatch config, and a later edit of the origin invalidates the input.
+          const resolveDerived = (lookup: { origin?: boolean }) =>
+            Effect.scoped(
+              new ExecutionOrigins(originalsFile).resolve(
+                {
+                  workspaceId: 'workspace',
+                  sessionId: 'session',
+                  userTurnId: 'derived',
+                  ...(lookup.origin ? {} : { inputConfig: { prompt: 'derived' } }),
+                },
+                replica,
+                ownerBinding.openAuthenticated,
+                undefined,
+                lookup
+              )
+            );
+          expect(yield* resolveDerived({})).toMatchObject({
+            requesterDevice: hex(owner.publicKey.toBytes()),
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
+          expect(yield* resolveDerived({ origin: true })).toMatchObject({
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
+          const derivedRow = replica.getList('history').get(4) as LoroMap;
+          (derivedRow.get('derivedFrom') as LoroMap).set('userTurnId', 'revoked');
+          replica.commit();
+          expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          derivedRow.delete('derivedFrom');
+          replica.commit();
+          expect(yield* resolveDerived({ origin: true })).toBeUndefined();
           const revokedKey = hex(other.publicKey.toBytes());
           const revocation = yield* signLedgerRecord(
             Result.getOrThrow(

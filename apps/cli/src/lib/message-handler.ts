@@ -6,6 +6,7 @@ import {
   type EncryptedAttachment,
 } from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { decideEncryptedDerivation } from './e2ee/derivation-limits';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
@@ -810,6 +811,8 @@ export class MessageHandler {
     pressureReason: null,
   });
   private executionService: SessionExecutionService;
+  /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
+  private readonly encryptedExecution?: EncryptedAgentExecution;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
@@ -3099,8 +3102,9 @@ export class MessageHandler {
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
+    this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
-      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedExecution: this.encryptedExecution,
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
@@ -6987,6 +6991,30 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
+  private async classifyEncryptedDerivation(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'> {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_derivation_unavailable');
+    const live = this.executionService.reserveEncryptedDerivation(
+      origin.sessionId as SessionId,
+      origin.userTurnId
+    );
+    if (live?.kind === 'owner') return 'owner';
+    // The signed origin decides; a live member reservation alone is not proof.
+    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
+      () => 'denied' as const
+    );
+    return decideEncryptedDerivation({
+      live: live?.kind,
+      verified,
+      targetMachineId: target.machineId,
+      machineId: this.machineId,
+    });
+  }
+
   private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {
     const invocation = this.executionService.getActiveInvocationContext(sessionId);
     return invocation
@@ -7008,6 +7036,12 @@ export class MessageHandler {
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
+          ...(this.encryptedExecution
+            ? {
+                classifyEncryptedDerivation: (origin, target) =>
+                  this.classifyEncryptedDerivation(origin, target),
+              }
+            : {}),
         },
         run
       );
@@ -7338,7 +7372,22 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        // Encrypted: act as the turn's verified principal; a shared member controls
+        // only within that member's own rights for the turn's projects.
+        const control = this.encryptedExecution
+          ? this.executionService.getEncryptedControlPrincipal(sessionId)
+          : ({ kind: 'owner' } as const);
+        const controlAllowed =
+          control?.kind === 'owner' ||
+          (control?.kind === 'member' &&
+            this.encryptedExecution !== undefined &&
+            (await Effect.runPromise(
+              this.encryptedExecution.authorizeAgentControl(
+                control.requesterDevice,
+                control.localProjectIds
+              )
+            ).catch(() => false)));
+        if (!invocation?.requesterUserId || !controlAllowed) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -8010,8 +8059,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
+    // An encrypted shared member's display account is not an identity to attribute.
     const invokingUserId =
-      dispatchContext.source === 'local'
+      dispatchContext.source === 'local' &&
+      (!this.encryptedExecution ||
+        this.executionService.getEncryptedControlPrincipal(message.sessionId)?.kind === 'owner')
         ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
         : undefined;
     const response = await this.previewService.reportCandidate(message, invokingUserId);

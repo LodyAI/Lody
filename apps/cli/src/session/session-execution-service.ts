@@ -8,6 +8,7 @@ import {
 import { AcpConfigurationError } from '@/agent/acp-configuration';
 import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
+import { MAX_DERIVED_TURNS_PER_ORIGIN } from '@/lib/e2ee/derivation-limits';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
@@ -346,7 +347,11 @@ type TurnRuntimeState = {
   userTurnId?: string;
   invocation?: TurnInvocation;
   /** Encrypted only: whose authority admitted the claimed turn's verified signer. */
-  encryptedPrincipal?: 'owner' | 'member';
+  encryptedPrincipal?: 'owner' | 'member' | 'derived';
+  /** Encrypted member turns only: the verified origin device and reached projects. */
+  encryptedOrigin?: { requesterDevice: string; localProjectIds: readonly string[] };
+  /** Inputs derived from this member turn so far (owner decision: bounded per origin). */
+  encryptedDerivations?: number;
   inboxNotificationWork?: { userId: string; originTurnIds: string[] };
   goalControl?: GoalPromptControl;
   session?: ISession;
@@ -2582,6 +2587,7 @@ export class SessionExecutionService {
           runtime.notificationOutcome = undefined;
           // A steered input carries no verified principal of its own here.
           runtime.encryptedPrincipal = undefined;
+          runtime.encryptedOrigin = undefined;
           runtime.invocation = {
             sourceTurnId: options.userTurnId,
             requesterUserId: options.userId,
@@ -5312,6 +5318,13 @@ export class SessionExecutionService {
               if (result.state === 'claimed') {
                 executionPermit = result.permit;
                 runtime.encryptedPrincipal = result.principal;
+                runtime.encryptedOrigin = result.origin
+                  ? {
+                      requesterDevice: result.origin.requesterDevice,
+                      localProjectIds: [...authorized],
+                    }
+                  : undefined;
+                runtime.encryptedDerivations = 0;
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
                 self.deps.logger.debug('[e2ee-rpc-timing]', {
@@ -5921,6 +5934,41 @@ export class SessionExecutionService {
     return this.turnRuntimeBySession.get(sessionId)?.userTurnId;
   }
 
+  /**
+   * Encrypted only: the verified principal of the active turn driving `sourceTurnId`.
+   * A member result reserves one of that origin's bounded derivations; past the
+   * bound, or for any other turn, the result is undefined and callers fail closed.
+   */
+  reserveEncryptedDerivation(
+    sessionId: SessionId,
+    sourceTurnId: string
+  ): { kind: 'owner' } | { kind: 'member' } | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
+      return undefined;
+    if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
+    if (runtime.encryptedPrincipal !== 'member' || !runtime.encryptedOrigin) return undefined;
+    const used = runtime.encryptedDerivations ?? 0;
+    if (used >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
+    runtime.encryptedDerivations = used + 1;
+    return { kind: 'member' };
+  }
+
+  /** Encrypted agent control acts as the turn's verified principal and its projects. */
+  getEncryptedControlPrincipal(
+    sessionId: SessionId
+  ):
+    | { kind: 'owner' }
+    | { kind: 'member'; requesterDevice: string; localProjectIds: readonly string[] }
+    | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime || runtime.cancelRequested) return undefined;
+    if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
+    if (runtime.encryptedPrincipal === 'member' && runtime.encryptedOrigin)
+      return { kind: 'member', ...runtime.encryptedOrigin };
+    return undefined;
+  }
+
   getActiveInvocationContext(sessionId: SessionId):
     | {
         requesterUserId: string;
@@ -5941,12 +5989,13 @@ export class SessionExecutionService {
       return undefined;
     }
     // In encrypted workspaces the history row's userId is unauthenticated display
-    // data. Only a turn whose verified signer is this machine owner's own
-    // membership may lend an identity to derived work (MCP delegation, agent
-    // control); a shared member's turn, or one replaced by a steer, gets none.
+    // data and never authority. Derived work from an owner turn keeps today's
+    // behavior; from a shared member's turn it is re-authorized as that member when
+    // written and when it starts. Derived, steered or unclaimed turns expose none.
     if (
       (this.deps.encryptedExecution || this.deps.encryptedWorkspace) &&
-      runtime.encryptedPrincipal !== 'owner'
+      runtime.encryptedPrincipal !== 'owner' &&
+      runtime.encryptedPrincipal !== 'member'
     ) {
       return undefined;
     }

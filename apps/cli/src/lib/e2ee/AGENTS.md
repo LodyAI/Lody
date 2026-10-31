@@ -25,9 +25,9 @@
   never network-retry.
   A shared grant pins the ledger generation after its policy check, then rechecks the
   signer and machine against that ledger; a later ingest fails `isCurrent()`.
-  Claims record the principal: only a turn signed by the owner's own membership lends
-  its identity to derived work (MCP, agent control). History `userId` is display data;
-  shared-member or steered turns expose no invocation identity.
+  Claims record the principal; history `userId` is display data. A shared member's
+  derivation is written with signed `derivedFrom`, same-machine only, and starts with
+  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
