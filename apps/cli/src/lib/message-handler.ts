@@ -7479,6 +7479,19 @@ export class MessageHandler {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
       const history = backend.history;
+      if (
+        query.kind === 'readMetadata' ||
+        query.kind === 'readLatestGoal' ||
+        query.kind === 'readTranscript' ||
+        query.kind === 'readQuerySnapshot' ||
+        query.kind === 'readSelection' ||
+        query.kind === 'readReplayPrompt'
+      ) {
+        if (!backend.readHistoryInspection)
+          throw new Error('Owner history inspection is unavailable');
+        await backend.flushLocalWrites();
+        return await backend.readHistoryInspection(query);
+      }
       for (let attempt = 0; attempt < 4; attempt += 1) {
         // The read and its revision must straddle no unpublished history write.
         // These are local durability barriers, never remote synchronization.
@@ -7658,7 +7671,12 @@ export class MessageHandler {
           query.kind === 'readQuery' ||
           query.kind === 'readDirectory') &&
           query.atCheckpoint);
-      if (protectedRead && error instanceof Error && 'code' in error && error.code === 'stale') {
+      if (
+        (protectedRead || query.kind === 'readSelection') &&
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'stale' || error.code === 'superseded')
+      ) {
         this.logger.trace(`[${sessionId}] History observation superseded operation=${query.kind}`);
         return {
           type: 'session/history-read_response',

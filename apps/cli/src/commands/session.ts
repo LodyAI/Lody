@@ -1,3 +1,4 @@
+import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
 import type { SessionBackend } from '@/session/session-backend';
 import {
   readProjectDefaultMcpIds,
@@ -173,7 +174,7 @@ import {
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
 import { acquireSessionObservation } from './session-observe-runtime';
@@ -672,7 +673,7 @@ export function selectSessionTranscriptEntries(
 
 /** Count visible rows and hydrate the requested transcript positions. */
 export async function readSessionTranscript(
-  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection'>,
+  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
   options: { all?: boolean; limit?: number; reverse?: boolean }
 ): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
   if (options.all) {
@@ -684,32 +685,23 @@ export async function readSessionTranscript(
   }
   let total = 0,
     positions: number[] = [];
-  const selected = await backend.readHistorySelection(
-    (rows) => {
-      const visible = rows.flatMap((row, index) => {
-        if (row.role !== 'user' && row.role !== 'assistant' && row.role !== 'system') return [];
-        const items = row.items ?? [];
-        if (row.role === 'system' && !items.some((item) => item.type === 'operation_completion'))
-          return [];
-        return items.some(
-          (item) =>
-            item.type === 'image' ||
-            item.type === 'operation_completion' ||
-            (item.type === 'image_group' &&
-              typeof item._imageCount === 'number' &&
-              item._imageCount > 0) ||
-            (item.type === 'text' && item._textNonBlank === true)
-        )
-          ? [index]
-          : [];
-      });
-      total = visible.length;
-      positions = visible.slice(-(options.limit ?? 50));
-      if (options.reverse) positions.reverse();
-      return positions;
-    },
-    { transcriptVisibility: true }
-  );
+  let selected: SessionHistoryInput[];
+  if (backend.readHistoryTranscript) {
+    const result = await backend.readHistoryTranscript(options);
+    total = result.total;
+    positions = result.positions;
+    selected = result.entries;
+  } else {
+    selected = await backend.readHistorySelection(
+      (rows) => {
+        const result = selectTranscriptHistoryPositions(rows, options);
+        total = result.total;
+        positions = result.positions;
+        return positions;
+      },
+      { transcriptVisibility: true }
+    );
+  }
   return {
     total,
     entries: selected.flatMap((entry, index) => {
@@ -1443,13 +1435,7 @@ export async function appendUserPromptHistory(args: {
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
     const candidate = args.knownHistory?.find((entry) => entry.id === historyId);
-    const [selected] = candidate
-      ? []
-      : await backend.readHistorySelection((rows) => {
-          const index = rows.findIndex((row) => row.id === historyId);
-          return index < 0 ? [] : [index];
-        });
-    const existing = candidate ?? selected;
+    const existing = candidate ?? (await readHistoryEntry(backend, historyId));
     if (existing) {
       if (
         existing.role !== 'user' ||

@@ -53,6 +53,10 @@ import type {
  */
 export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
+  readonly readHistoryInspection?: SessionBackend['readHistoryInspection'];
+  readonly readHistoryReplay?: SessionBackend['readHistoryReplay'];
+  readonly readHistoryTranscript?: SessionBackend['readHistoryTranscript'];
+  readonly readHistoryEntry?: SessionBackend['readHistoryEntry'];
   readonly readLatestGoal?: () => Promise<SessionGoalMessage | null>;
   readonly foldHistory?: <T>(
     create: () => T,
@@ -119,6 +123,22 @@ export class RoostSessionBackend implements SessionBackend {
 
   get history(): SessionHistoryReader {
     return this.services.sessionData.history;
+  }
+
+  get readHistoryInspection() {
+    return this.services.readHistoryInspection;
+  }
+
+  get readHistoryReplay() {
+    return this.services.readHistoryReplay;
+  }
+
+  get readHistoryTranscript() {
+    return this.services.readHistoryTranscript;
+  }
+
+  get readHistoryEntry() {
+    return this.services.readHistoryEntry;
   }
 
   async foldHistory<T>(

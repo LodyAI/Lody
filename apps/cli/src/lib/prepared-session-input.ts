@@ -9,7 +9,7 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import type { LoroDocumentManager } from './loro/doc';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 
 /** JSON-only preparation, persisted before any Session mutation. */
 export type PreparedSessionInput = {
@@ -90,10 +90,7 @@ export async function materializePreparedSessionInput(
   );
   for (const entry of [prepared.source, prepared.userTurn]) {
     if (!entry) continue;
-    const [prior] = await backend.readHistorySelection((rows) => {
-      const index = rows.findIndex((row) => row.id === entry.id);
-      return index < 0 ? [] : [index];
-    });
+    const prior = await readHistoryEntry(backend, entry.id);
     if (prior) {
       if (
         prior.role !== entry.role ||
