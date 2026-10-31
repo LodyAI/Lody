@@ -29,6 +29,8 @@ import SessionChatStream from '../ai-gui';
 import { WorkspaceUserImageBlock, WorkspaceSessionFileGroup } from '../ai-gui/view';
 import { SessionReadonlyContext } from '../ai-gui/session-readonly-context';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { cn } from '@/lib/utils';
+import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
 
 const styles = stylex.create({
@@ -114,17 +116,27 @@ export function SessionHistoryView({
   requiresMachine?: boolean;
 }) {
   const { t } = useTranslation();
+  const windowDragClass = useWindowDragRegionClass();
   return (
     <section {...stylex.props(styles.page)}>
       <header
-        {...stylex.props(
-          styles.header,
-          nativeApp && styles.nativeHeader,
-          reserveMacTrafficLightInset && styles.trafficLightInset
+        className={cn(
+          stylex.props(
+            styles.header,
+            nativeApp && styles.nativeHeader,
+            reserveMacTrafficLightInset && styles.trafficLightInset
+          ).className,
+          windowDragClass
         )}
       >
         {onBack && (
-          <Button variant="ghost" icon aria-label={t('common.back')} onClick={onBack}>
+          <Button
+            variant="ghost"
+            icon
+            className={WINDOW_DRAG_EXEMPT_CLASS}
+            aria-label={t('common.back')}
+            onClick={onBack}
+          >
             <ArrowLeft />
           </Button>
         )}
@@ -132,7 +144,12 @@ export function SessionHistoryView({
         <Menu.Root>
           <Menu.Trigger
             render={
-              <Button variant="ghost" icon aria-label={t('sessions.moreActions')}>
+              <Button
+                variant="ghost"
+                icon
+                className={WINDOW_DRAG_EXEMPT_CLASS}
+                aria-label={t('sessions.moreActions')}
+              >
                 <Ellipsis />
               </Button>
             }

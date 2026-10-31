@@ -168,13 +168,19 @@ afterEach(async () => {
   expect(activeReaders).toBe(0);
   container.remove();
   view.dispose();
+  delete window.__LODY_ELECTRON__;
+  delete window.__LODY_PLATFORM__;
 });
-async function render() {
+async function render(onBack?: () => void) {
   await act(async () =>
     root.render(
       <PlatformContext.Provider value={platform}>
         <Provider store={store}>
-          <SessionHistoryReader rootSessionId={sessionId} sessionId={sessionId} />
+          <SessionHistoryReader
+            rootSessionId={sessionId}
+            sessionId={sessionId}
+            onMobileBack={onBack}
+          />
         </Provider>
       </PlatformContext.Provider>
     )
@@ -219,6 +225,28 @@ it('reads history without a composer or machine operation and requires explicit 
   expect(writes).toHaveLength(1);
   expect(writes[0]).toContain('Original historical question.');
   expect(writes[0]).toContain('The complete historical answer.');
+  expect(machineOperations).toBe(0);
+});
+
+it('keeps the history menu, export consent and back navigation working in an Electron window', async () => {
+  window.__LODY_ELECTRON__ = true;
+  window.__LODY_PLATFORM__ = { os: 'darwin', homeDir: '/Users/test' };
+  let returned = false;
+  await render(() => {
+    returned = true;
+  });
+  await selectCopy();
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  expect(writes).toEqual([]); // Opening the menu still grants no decrypted export.
+  const cancel = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Cancel'
+  )!;
+  await act(async () => cancel.click());
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click()
+  );
+  expect(returned).toBe(true);
+  expect(container.textContent).toContain('Prior conversation');
   expect(machineOperations).toBe(0);
 });
 
