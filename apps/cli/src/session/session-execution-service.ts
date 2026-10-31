@@ -1161,7 +1161,7 @@ export class SessionExecutionService {
     const beforeAccept = this.automationBeforeAccept;
     if (!origin || !inbox || !admission || !(await admission({ ...args, origin }))) return false;
     if (origin.workIntentId && !beforeAccept) return false;
-    return inbox.accept(
+    return this.acceptInboxInput(
       {
         workspaceId: this.deps.workspaceId,
         sessionId: args.sessionId,
@@ -1182,6 +1182,25 @@ export class SessionExecutionService {
     this.operationInbox = inbox;
     this.onInboxReleased = onReleased;
     this.notificationWork = notificationWork;
+  }
+  /** A local outbox is not owner acceptance. Check only the first durable Inbox receipt. */
+  private async acceptInboxInput(
+    input: InboxInput,
+    beforeAccept?: () => Promise<boolean>
+  ): Promise<boolean> {
+    const inbox = this.operationInbox;
+    const accept = () => (inbox ? inbox.accept(input, beforeAccept) : Promise.resolve(true));
+    if (input.config.configRevision === undefined) return accept();
+    const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(
+      input.sessionId as SessionId
+    );
+    // Roost checks its immutable history receipt at append; Loro uses the local Inbox receipt.
+    if ((await createSessionBackend(doc)).kind !== 'loro') return accept();
+    return doc.acceptWithConfigRevision(
+      input.config,
+      accept,
+      () => inbox?.inputKind(input, input.inputId) !== undefined
+    );
   }
   async acceptInboxHumanInput(args: {
     sessionId: SessionId;
@@ -1204,7 +1223,7 @@ export class SessionExecutionService {
         return;
       }
     }
-    await this.operationInbox?.accept({
+    await this.acceptInboxInput({
       workspaceId: this.deps.workspaceId,
       sessionId: args.sessionId,
       userId: args.userId,
@@ -4693,7 +4712,24 @@ export class SessionExecutionService {
             }
         : undefined;
     try {
-      if (inboxInput && inboxInput.kind !== 'automatic' && !(await inbox!.accept(inboxInput))) {
+      if (
+        !inbox &&
+        invocation?.requesterUserId &&
+        invocation.inputConfig.configRevision !== undefined
+      )
+        await this.acceptInboxInput({
+          workspaceId: this.deps.workspaceId,
+          sessionId,
+          userId: invocation.requesterUserId,
+          inputId: invocation.sourceTurnId,
+          kind: 'task',
+          config: invocation.inputConfig,
+        });
+      if (
+        inboxInput &&
+        inboxInput.kind !== 'automatic' &&
+        !(await this.acceptInboxInput(inboxInput))
+      ) {
         releaseConflict();
         span.end({ outcome: 'inbox-paused' });
         return 'inbox-paused';

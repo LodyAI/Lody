@@ -2906,12 +2906,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.flushLocalWrites();
   }
 
-  /** Serialize first acceptance with publication; a Roost receipt skips this on retry. */
+  /** Serialize first acceptance and its durable receipt with configuration publication. */
   acceptWithConfigRevision<A>(
     input: { configRevision?: number },
-    accept: () => Promise<A>
+    accept: () => Promise<A>,
+    alreadyAccepted: () => boolean = () => false
   ): Promise<A> {
     const next = this.acpRuntimeConfigPatchSerial.then(() => {
+      if (alreadyAccepted()) return accept();
       if (
         input.configRevision !== undefined &&
         !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
