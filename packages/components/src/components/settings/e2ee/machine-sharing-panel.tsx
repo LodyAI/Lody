@@ -125,6 +125,7 @@ export function MachineSharingPanel({
             <Switch
               checked={effective}
               disabled={!!disabled}
+              data-testid="machine-sharing-toggle"
               aria-label={t('e2ee.machineSharing.team')}
               onCheckedChange={(checked) => onChange({ kind: 'machine', sharedWithTeam: checked })}
             />

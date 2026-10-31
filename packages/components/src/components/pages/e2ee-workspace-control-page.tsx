@@ -396,7 +396,7 @@ function MembersSection(props: {
   const { t } = useTranslation();
   const { names } = props;
   return (
-    <section aria-label={t('e2ee.control.members')} {...stylex.props(styles.section)}>
+    <section data-testid="e2ee-members" aria-label={t('e2ee.control.members')} {...stylex.props(styles.section)}>
       <h2 {...stylex.props(styles.sectionHeading)}>
         {t('e2ee.control.members')}
         <span {...stylex.props(styles.count)}>{props.overview.members.length}</span>
@@ -406,7 +406,7 @@ function MembersSection(props: {
           const profile = names.profile(member.membershipId);
           const name = names.name(member);
           return (
-            <li key={member.membershipId} {...stylex.props(styles.memberRow)}>
+            <li data-testid="e2ee-member" data-membership-id={member.membershipId} key={member.membershipId} {...stylex.props(styles.memberRow)}>
               <Avatar.Root size="medium">
                 {profile?.image != null && profile.image !== '' ? (
                   <Avatar.Image src={profile.image} alt="" />
@@ -485,7 +485,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         </Button>
         <header {...stylex.props(styles.header)}>
           <div {...stylex.props(styles.titleBlock)}>
-            <h1 {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
+            <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.title)}>{t('e2ee.control.title')}</h1>
             <span {...stylex.props(styles.preview)}>{t('e2ee.control.badge')}</span>
           </div>
           {props.onOpen && (

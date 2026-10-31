@@ -18,7 +18,9 @@ export function RouteMessage({
   description = '',
   onRetry,
   actionLabel,
+  testId,
 }: {
+  testId?: string;
   gate: string | null;
   title: string;
   description?: string;
@@ -37,7 +39,7 @@ export function RouteMessage({
 
   if (showRecovery && gate !== null) return <FailedScreenRecovery gate={gate} />;
   return (
-    <div className="flex min-h-[100dvh] w-full items-center justify-center bg-background p-6 text-center">
+    <div data-testid={testId} className="flex min-h-[100dvh] w-full items-center justify-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-1">
         <div className="text-sm font-medium text-foreground">{title}</div>
         {description ? (

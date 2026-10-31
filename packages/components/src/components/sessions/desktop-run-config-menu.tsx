@@ -264,6 +264,7 @@ export function DesktopMachineMenu({
       <Menu.Trigger
         disabled={isDisabled}
         title={disabledReason}
+        data-testid="chat-machine-trigger"
         aria-label={t('chat.machineSelector.placeholder', 'Machine')}
         render={<Button type="button" variant="secondary" size="mini" />}
       >
@@ -284,6 +285,8 @@ export function DesktopMachineMenu({
         {options.map((option) => (
           <Menu.Item
             key={option.value}
+            data-testid="chat-machine-option"
+            data-machine-id={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             icon={Monitor}
