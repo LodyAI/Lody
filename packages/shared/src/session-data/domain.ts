@@ -100,7 +100,7 @@ export type SessionTurnRead =
 
 /** A shallow directory row: identity and state without the turn body. */
 export type SessionDirectoryRow = {
-  /** Attribution/config/schedule fields are complete, including absence. */
+  /** Marks a complete v1 attribution/config/schedule projection. */
   readonly metadataVersion?: 1;
   readonly position: number;
   readonly state: 'ready' | 'invalid' | 'missing' | 'unavailable';
@@ -143,7 +143,7 @@ export type SessionDirectoryScalars = {
   readonly permissionWaitMs?: number;
 };
 
-/** State/configuration observation; never a write replacement. */
+/** Detached identity, state and configuration fields. */
 export type SessionHistoryMetadata = SessionDirectoryScalars &
   Pick<SessionTurn, 'userId' | 'scheduleRun'> & { readonly inputConfig?: SessionTurnInputConfig };
 

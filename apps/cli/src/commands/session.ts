@@ -693,7 +693,7 @@ export function selectSessionTranscriptEntries(
   return selected;
 }
 
-/** Preserve visibility totals and raw positions while hydrating only selected entries. */
+/** Count visible rows and hydrate the requested transcript positions. */
 export async function readSessionTranscript(
   backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection'>,
   options: { all?: boolean; limit?: number; reverse?: boolean }

@@ -1,7 +1,7 @@
 import type { HistoryAction } from './history-actions';
 import { getOperationProgressTurnId } from './operation-progress';
 
-/** Only matching/location evidence. These values must never replace a stored row. */
+/** Fields used to locate records and summarize stored history. */
 export type HistoryQueryRow = {
   _record?: boolean;
   id?: unknown;
@@ -99,9 +99,7 @@ export function historyQueryRow(
   return row;
 }
 
-/** Select a superset of every body the established action reducer can inspect
- * or modify. Identity/order and fallback boundaries remain in the full metadata
- * directory, so insertions and missing-owner decisions keep their original meaning. */
+/** Select reducer positions, including matching owners and fallback tails. */
 export function selectHistoryActionRows(
   rows: readonly HistoryQueryRow[],
   action: HistoryAction
@@ -262,7 +260,7 @@ export function selectAgentHistoryRows(
   });
 }
 
-/** Same diagnostic facts as the complete history summary, without retaining bodies. */
+/** Aggregate item types, abnormal metadata samples and final-row statistics. */
 export function summarizeHistoryQuery(rows: readonly HistoryQueryRow[]): Record<string, unknown> {
   const history = rows.filter((row) => row._record !== false);
   const countTypes = (items: readonly Record<string, unknown>[]) => {

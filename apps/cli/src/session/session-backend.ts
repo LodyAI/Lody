@@ -65,7 +65,7 @@ export interface SessionBackend {
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     options?: { transcriptVisibility?: boolean }
   ): Promise<SessionHistoryInput[]>;
-  /** Complete selected goal, observed locally without reading unrelated bodies. */
+  /** Read the latest goal from local history. */
   readonly readLatestGoal: () => Promise<SessionGoalMessage | null>;
   readonly readLatestUserId?: () => Promise<string | undefined>;
   readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]>;

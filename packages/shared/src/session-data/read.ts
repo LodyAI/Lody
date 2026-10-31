@@ -63,7 +63,7 @@ export async function readLatestUserId(reader: SessionHistoryReader): Promise<st
   }
 }
 
-/** One directory observation. Configuration/state callers never receive bodies. */
+/** Read identity, state and configuration from one metadata observation. */
 export async function readSessionHistoryMetadata(
   reader: Pick<SessionHistoryReader, 'readDirectory' | 'readMetadata'>
 ): Promise<import('./domain').SessionHistoryMetadata[]> {

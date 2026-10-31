@@ -550,8 +550,7 @@ export function buildReplayPromptFromHistory(
   };
 }
 
-/** A single traversal preserves the A/B/C/D decisions while retaining at most
- * the prompt budget per candidate, plus the required unique file paths. */
+/** Accumulate budget-sized A/B/C/D candidates and ordered unique file paths. */
 export function createReplayPromptBuilder(options: Omit<BuildReplayPromptOptions, 'history'> = {}) {
   const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
   const terminalTailChars = options.terminalTailChars ?? DEFAULT_TERMINAL_TAIL_CHARS;

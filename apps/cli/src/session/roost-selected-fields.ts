@@ -13,7 +13,7 @@ import {
 import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from '@lody/shared/session-data';
 import { stageRoostContent } from './roost-content-patches';
 
-/** A tuple projects every array element, preserving positions and empty items. */
+/** Tuple descriptors project arrays by position. */
 const textPresence = Symbol('text-presence');
 type Shape = true | typeof textPresence | { readonly [key: string]: Shape } | readonly [Shape];
 type Source = { path: Path; jsonPath?: Path };
@@ -39,8 +39,7 @@ const define = (value: Record<string, unknown>, name: string, item: unknown) =>
     writable: true,
   });
 
-/** Breadth-first selection keeps requests bounded and never exports an ancestor
- * value to discover its children. Native selects inside serialized state values. */
+/** Batch field paths breadth-first; Native selects within serialized state. */
 async function selectedValue(
   host: RoostNodeStream,
   id: Uint8Array,
@@ -114,8 +113,7 @@ async function selectedValue(
               },
             });
         } else {
-          // Preserve null and malformed primitive values; callers retain their
-          // existing validation and matching rules instead of inventing a row.
+          // Return null and primitive shapes to the caller's validator.
           next.push({ ...task, shape: true });
         }
       }
@@ -326,8 +324,8 @@ async function validateIdentity(
     throw new Error('Roost selected history identity is incomplete');
 }
 
-/** Logical fields use the same segment order and primary-state precedence as
- * complete reads. The owner fences all calls with generation and event cursor. */
+/** Project segments in stored order using primary-state precedence.
+ * The owner supplies the generation/event observation. */
 export async function readRoostSelectedEntries(
   host: RoostNodeStream,
   history: NodeLodyHistory,

@@ -170,7 +170,7 @@ export interface SessionModelSummaryReader {
 /** Authoritative reads. In-process storage returns synchronously; the display
  * cache also accepts delayed reads and fences their results against events. */
 export interface SessionHistoryReader {
-  /** One coherent metadata observation, including compatibility with older owners. */
+  /** Metadata snapshot supplied by the history owner. */
   readMetadata?():
     | readonly import('./domain').SessionHistoryMetadata[]
     | Promise<readonly import('./domain').SessionHistoryMetadata[]>;
