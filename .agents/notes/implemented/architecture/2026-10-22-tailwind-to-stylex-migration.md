@@ -2608,21 +2608,21 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Audited scopes 147–190 remove 119 source utilities, including the six private
-spacing consumers in189.
+Audited scopes 147–191 remove 120 source utilities, including the six private
+spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
 The helper's frozen189 cut contains252/8/21 across30 production sources,
 matched by hash to its successful670-input final build.
-The accepted190 full non-story components cut contains1,357 occurrences in153
+The accepted191 full non-story components cut contains1,356 occurrences in152
 files and730 unresolved expressions across1,397 sources. Its three core roots
-contain1,348/151/726 across791 sources: components919/137/633, legacy UI429/14/93,
+contain1,347/150/726 across791 sources: components918/136/633, legacy UI429/14/93,
 and53 route files0/0/0. The other nine occurrences are eight shared conversation
 column classes and one keyboard-sheet important bottom override. These are
 source lower bounds, not completion rates or whole-branch visual approval.
 
-`inventory-source-through190-accepted-proof.json` freezes those inputs; relative
-to181 only the content pane, layout helper and scheduled-time leaf differ.
+`inventory-source-through191-accepted-proof.json` freezes those inputs; relative
+to190 only the private command-warning Popup differs.
 The helper remains a separate frozen189 input; its exact scan and source hashes
 are in `inventory-helper-source-through189-proof.json` and
 `inventory-helper-v2-after189.json`. Scope185
@@ -2633,6 +2633,12 @@ across84 files while retaining131 unresolved expressions; zero does not prove
 all dynamic classes. No fresh whole-test/renderer qualification is inferred from
 these inventories. Exact positions and unresolved expressions remain reviewable
 in the frozen JSONs and `remaining-source-inventory181.html` (the older181 cut).
+
+Tailwind's automatic scan also consumes source-Markdown examples. Final191 adds
+three arbitrary-property rules from the migration guide; none matches the two
+observed final DOMs. These are emitted rules rather than additional measured
+product class occurrences, so source inventory never substitutes for a full CSS
+comparison. The older measurements of unchanged CSS retain their exact input scope.
 
 The earlier 147 cut removed seven utilities while the scanner fell by three:
 four original `CI_ICON_TONE[state]` strings were outside v2 resolution. That known
@@ -2668,9 +2674,11 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Fabric canvas179 | Default PNGs and GPU pixels match, but a legal zero-specificity ancestor changes computed pointer-events and trusted hit target from DIV to CANVAS. | Both candidate utilities restored, zero credit. Default-only report is superseded by the public-caller counterexample; matching pixels cannot accept changed interaction. |
 | Content pane182 | Five owned layout utilities;18 real Electron PNGs/3,242 scene records match, including theme settings, compact overlay/inert/Escape and focus return. | One light767 state retains12 non-content hover differences. Boot612 fields,432 generated IDs/refs and16 blob URLs are explicit carriers;32 ID values are bijective,108 references resolve to the same nodes or same absence, and actual trace image bytes match. Original OOM/evaluate/restore failures remain. |
 | Private line-height183 and numeric186 | Nine source utilities;39/39 and20/23 PNGs exact,495 and339 target/font records match. Lengths inherited by table cells, original48rem reader, actual navigation/reviewed/copy states are preserved. | Three186 OPENs total111raw/72threshold; all recorded fields match apart from exact asset ports.183's two file-run cleanup outcomes remain unknown. Production CSS and registrations stay intact without a retention patch. |
-| Shared layout helper185 | Twenty source literals;46 formal pairs/41 PNGs exact and5,118 scene records match. Safe-area/keyboard variables and actual250ms transition endpoints are covered;`h-svh` is retained for old-browser/devbar hooks. | Five formal OPENs709raw/zero recorded threshold;4 diagnostic OPENs585raw and8 reused same-source controls (4 vary,832raw) do not establish a paint cause. Three cleanup outcomes remain unknown. All formal captures used the frozen native trial; independent non-empty ordered legacy CSS qualification covers3,950 ordinary/2,866 unlayered/8,596 non-native rules,108 registrations and18 layer declarations, not a new legacy visual replay. The original empty-group projection was invalid and its bytes were overwritten; the independently frozen replacement is authoritative. A new after-only legacy Storybook check fails16 geometry assertions after16 initial readiness failures: the current CSSOM search finds no old `.flex`, `.h-full` or keyboard-padding helper rules and roots are content-box, unlike the original native-environment records. No same-environment Before is established; the unqualified new spec is removed, with source/failures/CSSOM retained in `leaves185-persistent-browser-blocked-proof.json`, and this does not close or replace the original46 comparisons. |
+| Shared layout helper185 | Twenty source literals;46 formal pairs/41 PNGs exact and5,118 scene records match. Safe-area/keyboard variables and actual250ms transition endpoints are covered;`h-svh` is retained for old-browser/devbar hooks. | Five formal OPENs709raw/zero recorded threshold;4 diagnostic OPENs585raw and8 reused same-source controls (4 vary,832raw) do not establish a paint cause. Three cleanup outcomes remain unknown. All formal captures used the frozen native trial; independent non-empty ordered legacy CSS qualification covers3,950 ordinary/2,866 unlayered/8,596 non-native rules,108 registrations and18 layer declarations, not a new legacy visual replay. The original empty-group projection was invalid and its bytes were overwritten; the independently frozen replacement is authoritative. The first after-only test environment retains16 readiness and16 geometry failures: its searched helper rules were absent and roots were content-box. The unchanged97-line test subsequently passes all16 cases in audited healthy190, with loaded preflight, matching helper/fixture hashes and the original geometry, natural250ms transition, focus and draft expectations. The persistent browser suite is restored; the old32 failures and original46 visual comparisons remain separate. Evidence: `leaves185-persistent-browser-blocked-proof.json` and `leaves185-healthy190-after-only-verification.json`. |
 | Native time-input constraint190 | One private native-picker hiding rule;18 full Input and indicator regions are pixel-exact,78 real UA shadow nodes match, and keyboard/controlled-value results remain equal. | Whole view15/18 PNGs exact;three light390 OPENs2094/2112/2094raw have maximum channel delta1 and remain unproved. The constraint does not replace the Input well/font or add a primitive API;no leading/same-pseudo competition exists in this closed call graph. |
 | Private helper spacing189 | Six consumer utilities use five optional CSS-typed properties. Final six shorthand/longhand-order screenshot pairs and342 records match. The56 original healthy states have a final-source real-browser bridge over1,360 records; three Copied records also match. | The original56 images are55 exact and Copy3 are2 exact; two OPENs total68raw/43threshold remain. The bridge is field qualification, not new PNGs, and only18 exact logo-port carriers differ. The naive merge's four actual failures3922raw/3436threshold remain. Caller/Slot order is preserved by omitting overwritten API-owned fields; old dimension/ink-only and ToggleRoot Provider behavior stay unchanged. Two original cleanup outcomes remain unknown; all four final bridge runs close normally. |
+| Private warning interaction191 | One Popup pointer-events constraint;16 pairs,148 target records and1,204 form-geometry records match apart from12 exact class carriers. Original Positioner hit interception, blur and narrow-story clipping remain. | Twelve PNGs exact;four caret-location OPENs total72raw/72threshold remain without a timing-cause claim. The paired After includes192 isolated candidates; a separate final191-only build matches Root inputs. Its documentation scan adds three unused arbitrary-property utility rules; existing ordered rules/registrations remain equal. Final observation is supplemental After-only evidence, not new paired PNGs. |
+| Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 
 The notice's original 18 style fields, native DOM and parent callback were moved

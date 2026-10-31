@@ -165,6 +165,10 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   root/content classes and the element-local safe-area and native-keyboard readers.
   Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
   it is not an unused utility.
+  The persistent
+  [`workspace inset browser suite`](../../tests/e2e/workspace-layout-insets.spec.ts)
+  checks the real composer fixtures, local inset readers, natural keyboard-padding
+  transition, focus and draft retention against a running Storybook build.
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact

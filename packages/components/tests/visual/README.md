@@ -910,6 +910,14 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 
 | `leaves189-acceptance.html` | Six private spacing consumers;final6 keyorder PNGs/342records exact;56 healthy and3Copied states qualified by real-browser field bridges | Original56 images55exact andCopy3 images2exact;twoOPEN68raw/43threshold;four naive-order failures retained; bridges are not new PNGs;original cleanup unknown |
 
+| `leaves191-acceptance.html` | One private warning interaction;16pairs/148targets/1,204form geometry records match,12PNGexact | Four caret-location OPENs72raw/72threshold;original Positioner interception/blur and phone-story clipping retained;final191-only build/smoke separate |
+| `leaves192-public-acceptance-delivery.html` | Zero migration;4direct controls exact and4public opacity regressions | Opacity0.7→1/721raw;Root sources unchanged;full animation-variable shorthand also unsupported by locked compiler mode |
+
+The unchanged workspace-inset browser spec passes16 after-only cases in the
+healthy190 build. The prior32 failures remain recorded as a different environment;
+this adds durable behavior coverage and does not replace the original185 visual
+pairs or their OPENs. See `leaves185-healthy190-after-only-verification.json`.
+
 Root independently reopens original compressed records and decodes PNG RGBA.
 Named carrier exceptions retain both raw values; they never establish whole-object
 equality. The latest fixed component suite passes 620 files/6,209 tests with all
