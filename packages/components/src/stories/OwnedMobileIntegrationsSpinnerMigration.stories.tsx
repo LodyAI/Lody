@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Provider, createStore } from 'jotai';
 import type { CloudApi } from '@lody/platform';
+import type { SettingsWorkspaceRepoWithStatus } from '../components/settings/settings-data-cache';
 import { PlatformContext } from '@lody/platform/react';
 import type { WorkspaceId } from '@lody/shared';
 import { MobileIntegrationsSettings } from '../components/mobile/mobile-integrations-settings';
@@ -15,9 +16,27 @@ const workspaceId = 'settings-story-workspace' as WorkspaceId;
 const emptyRows: never[] = [];
 const disabledIdentity = { enabled: false, authorization: { state: 'missing' as const } };
 const enabledIdentity = { enabled: true, authorization: { state: 'missing' as const } };
-type Mode = 'auth-recovery' | 'repos-loading' | 'preference';
+const initialRepos: SettingsWorkspaceRepoWithStatus[] = [
+  { repoFullName: 'example/atlas', name: 'atlas', repositoryId: 1, private: false, enabled: false },
+  { repoFullName: 'example/beacon', name: 'beacon', repositoryId: 2, private: true, enabled: true },
+  {
+    repoFullName: 'example/cascade',
+    name: 'cascade',
+    repositoryId: 3,
+    private: false,
+    enabled: false,
+  },
+  { repoFullName: 'example/delta', name: 'delta', repositoryId: 4, private: true, enabled: true },
+  { repoFullName: 'example/ember', name: 'ember', repositoryId: 5, private: false, enabled: false },
+  { repoFullName: 'example/forge', name: 'forge', repositoryId: 6, private: true, enabled: true },
+];
+type Mode = 'auth-recovery' | 'repos-loading' | 'preference' | 'repos-ready';
 
 function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
+  const [role, setRole] = useState<'owner' | 'member'>('owner');
+  const [authPending, setAuthPending] = useState(false);
+  const [repos, setRepos] = useState(initialRepos);
+  const [repoWrites, setRepoWrites] = useState(0);
   const [resolved, setResolved] = useState(false);
   const [pending, setPending] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -29,7 +48,7 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
     return next;
   });
   useLayoutEffect(() => {
-    if (!spacing) return;
+    if (!spacing) return undefined;
     const root = document.documentElement;
     const old = root.style.getPropertyValue('--spacing');
     root.style.setProperty('--spacing', '5px');
@@ -46,9 +65,28 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
           case 'github:getPersonalOperationSettings':
             return (enabled ? enabledIdentity : disabledIdentity) as never;
           case 'github:listWorkspaceReposWithStatus':
-            return (mode === 'repos-loading' && !resolved ? undefined : emptyRows) as never;
+            return (
+              mode === 'repos-ready'
+                ? authPending
+                  ? undefined
+                  : repos
+                : mode === 'repos-loading' && !resolved
+                  ? undefined
+                  : emptyRows
+            ) as never;
           case 'github:getWorkspaceRepositories':
-            return emptyRows as never;
+            return (
+              mode === 'repos-ready'
+                ? authPending
+                  ? undefined
+                  : repos.map((repo) => ({
+                      id: repo.repositoryId,
+                      fullName: repo.repoFullName,
+                      name: repo.name,
+                      private: repo.private,
+                    }))
+                : emptyRows
+            ) as never;
           case 'usage:getWorkspaceUsageTimeline':
           case 'usage:getWorkspaceUsageCalendar':
             return undefined;
@@ -57,6 +95,19 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
         }
       },
       useMutation: (operation) => async (args) => {
+        if (operation.name === 'github:setRepoEnabled') {
+          const { repoFullName, enabled: repoEnabled } = args as {
+            repoFullName: string;
+            enabled: boolean;
+          };
+          setRepoWrites((count) => count + 1);
+          setRepos((current) =>
+            current.map((repo) =>
+              repo.repoFullName === repoFullName ? { ...repo, enabled: repoEnabled } : repo
+            )
+          );
+          return undefined as never;
+        }
         if (operation.name !== 'github:setPersonalOperationPreference')
           throw new Error(`Unexpected synthetic integration mutation: ${operation.name}`);
         desiredRef.current = (args as { enabled: boolean }).enabled;
@@ -70,12 +121,12 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
         throw new Error(`Unexpected synthetic integration action: ${operation.name}`);
       },
     }),
-    [enabled, mode, resolved]
+    [authPending, enabled, mode, repos, resolved]
   );
-  const recovering = mode === 'auth-recovery' && !resolved;
+  const recovering = (mode === 'auth-recovery' && !resolved) || authPending;
   return (
     <Provider store={store}>
-      <SettingsStoryProviders>
+      <SettingsStoryProviders role={role}>
         <PlatformContext.Provider value={{ ...TEST_CLOUD_PLATFORM, cloudApi }}>
           <AuthenticatedConvexContext.Provider
             value={{
@@ -93,6 +144,9 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
               data-resolved={resolved}
               data-pending={pending}
               data-spacing={spacing}
+              data-role={role}
+              data-auth-pending={authPending}
+              data-repo-writes={repoWrites}
               style={{
                 minHeight: '100dvh',
                 maxWidth: 640,
@@ -102,10 +156,17 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
                 color: 'hsl(var(--foreground))',
               }}
             >
-              <div style={{ display: 'flex', gap: 12, padding: 12 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: mode === 'repos-ready' ? 'wrap' : undefined,
+                  gap: 12,
+                  padding: 12,
+                }}
+              >
                 <button
                   type="button"
-                  disabled={resolved || mode === 'preference'}
+                  disabled={resolved || mode === 'preference' || mode === 'repos-ready'}
                   onClick={() => setResolved(true)}
                 >
                   Resolve synthetic integration state
@@ -122,6 +183,21 @@ function Fixture({ mode, spacing = false }: { mode: Mode; spacing?: boolean }) {
                 >
                   Complete synthetic preference
                 </button>
+                {mode === 'repos-ready' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRole((current) => (current === 'owner' ? 'member' : 'owner'))
+                      }
+                    >
+                      Toggle synthetic repository role
+                    </button>
+                    <button type="button" onClick={() => setAuthPending((current) => !current)}>
+                      Toggle synthetic authentication pending
+                    </button>
+                  </>
+                ) : null}
               </div>
               <section data-owned-integrations-target="">
                 <SettingsDataCacheProvider>
@@ -151,3 +227,5 @@ export const ReposLoadingRootSpacing: Story = {
 };
 export const Preference: Story = { render: () => <Fixture mode="preference" /> };
 export const PreferenceRootSpacing: Story = { render: () => <Fixture mode="preference" spacing /> };
+
+export const ReposReady: Story = { render: () => <Fixture mode="repos-ready" /> };

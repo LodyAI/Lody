@@ -97,6 +97,7 @@ const styles = stylex.create({
   },
   /** A repository's row: its mark and its name. */
   repoIdentity: { display: 'flex', alignItems: 'center', gap: themeSpace[2], minWidth: 0 },
+  repoDimmed: { opacity: 0.6 },
   repoIcon: { height: themeSpace[4], width: themeSpace[4], flexShrink: 0, opacity: 0.7 },
   /** The note under the card, with the way to fix it. */
   hint: {
@@ -555,7 +556,11 @@ function MobileCloudIntegrationsSettings() {
             {filteredRepos.map((repo) => (
               <MobileSettingsRow
                 key={repo.repoFullName}
-                className={!canManage || !workspaceAuthReady ? 'opacity-60' : undefined}
+                className={
+                  !canManage || !workspaceAuthReady
+                    ? stylex.props(styles.repoDimmed).className
+                    : undefined
+                }
                 label={
                   <div {...stylex.props(styles.repoIdentity)}>
                     <Book {...stylex.props(styles.repoIcon)} />

@@ -25,6 +25,12 @@ class selectors retain their raw utility values and order; one local CVA declara
 provides both the public legacy selector and the private owned selector. Runtime
 StyleX mappings and source-utility removals are counted separately. Private font,
 transition, ring and descendant rules remain until their writer contracts migrate.
+Reviewed private text owners preserve each exact writer and physical reader:
+tracking, leading and weight read their original element-local theme/literal;
+numeric variants read all five numeric variables with empty fallbacks. A writer
+alone is not a substitute for that reader. Full Storybook and standalone CSS
+verification includes token pruning, actual fonts and visible numeric states;
+public Slot, responsive heading and file-tree contracts stay on their audited paths.
 Separator styling follows its existing JavaScript orientation branch; caller-written
 or Radix-normalized data attributes do not choose its axis. Rendering the original
 invalid-orientation case retains its original attribute/style mismatch.

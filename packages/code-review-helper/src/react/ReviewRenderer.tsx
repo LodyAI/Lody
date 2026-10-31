@@ -263,6 +263,12 @@ const rootLayoutStyles = stylex.create({
     borderRadius: 'var(--radius)',
   },
   brandTitle: {
+    '--tw-leading': 'var(--leading-tight)',
+    lineHeight: 'var(--leading-tight)',
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': 'var(--tracking-tight)',
+    letterSpacing: 'var(--tracking-tight)',
     minWidth: 'calc(var(--spacing) * 0)',
     flex: '1',
     overflow: 'hidden',
@@ -321,8 +327,26 @@ const rootLayoutStyles = stylex.create({
     textAlign: 'left',
   },
   groupText: { minWidth: 'calc(var(--spacing) * 0)', flex: '1' },
-  groupTitle: { display: 'block', overflowWrap: 'break-word', fontSize: '13px' },
+  pullRequestNumber: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
+  },
+  groupTitle: {
+    '--tw-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
+    display: 'block',
+    overflowWrap: 'break-word',
+    fontSize: '13px',
+  },
   groupStats: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
     'margin-top': 'calc(var(--spacing) * 0.5)',
     display: 'block',
     fontFamily:
@@ -396,6 +420,9 @@ const rootLayoutStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   mono: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
     fontFamily:
       '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   },
@@ -432,7 +459,15 @@ const rootLayoutStyles = stylex.create({
     flexDirection: 'column',
     gap: 'calc(var(--spacing) * 2)',
   },
-  title: { fontSize: '22px' },
+  title: {
+    '--tw-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    '--tw-font-weight': 'var(--font-weight-bold)',
+    fontWeight: 'var(--font-weight-bold)',
+    '--tw-tracking': 'var(--tracking-tight)',
+    letterSpacing: 'var(--tracking-tight)',
+    fontSize: '22px',
+  },
   pullRequest: {
     display: 'inline-flex',
     width: 'fit-content',
@@ -1377,14 +1412,7 @@ export function ReviewRenderer({
         >
           <div {...stylex.props(rootLayoutStyles.brand)}>
             <img src={lodyIconUrl} alt="Lody" {...stylex.props(rootLayoutStyles.logo)} />
-            <h1
-              className={cn(
-                'font-semibold leading-tight tracking-tight',
-                stylex.props(rootLayoutStyles.brandTitle).className
-              )}
-            >
-              Lody Review
-            </h1>
+            <h1 {...stylex.props(rootLayoutStyles.brandTitle)}>Lody Review</h1>
           </div>
 
           <nav {...stylex.props(rootLayoutStyles.navigation)} aria-label="Review group navigation">
@@ -1414,21 +1442,9 @@ export function ReviewRenderer({
                       onClick={() => navigateToGroup(group.id)}
                     >
                       <span {...stylex.props(rootLayoutStyles.groupText)}>
-                        <span
-                          className={cn(
-                            'font-medium leading-snug',
-                            stylex.props(rootLayoutStyles.groupTitle).className
-                          )}
-                        >
-                          {group.title}
-                        </span>
+                        <span {...stylex.props(rootLayoutStyles.groupTitle)}>{group.title}</span>
                         {stats ? (
-                          <span
-                            className={cn(
-                              'tabular-nums',
-                              stylex.props(rootLayoutStyles.groupStats).className
-                            )}
-                          >
+                          <span {...stylex.props(rootLayoutStyles.groupStats)}>
                             <span {...stylex.props(rootLayoutStyles.additions)}>
                               +{stats.additions}
                             </span>{' '}
@@ -1505,10 +1521,7 @@ export function ReviewRenderer({
               <PanelLeft className="size-4" />
             </Button>
             <div {...stylex.props(rootLayoutStyles.totalStats)}>
-              <span
-                className={cn('tabular-nums', stylex.props(rootLayoutStyles.mono).className)}
-                title="Total added / removed lines"
-              >
+              <span {...stylex.props(rootLayoutStyles.mono)} title="Total added / removed lines">
                 <span {...stylex.props(rootLayoutStyles.additions)}>+{totalStats.additions}</span>{' '}
                 <span {...stylex.props(rootLayoutStyles.deletions)}>−{totalStats.deletions}</span>
               </span>
@@ -1557,14 +1570,7 @@ export function ReviewRenderer({
                   <section aria-label="Review summary" {...stylex.props(rootLayoutStyles.summary)}>
                     {bundle.document.title ? (
                       <div {...stylex.props(rootLayoutStyles.titleBlock)}>
-                        <h1
-                          className={cn(
-                            'font-bold leading-snug tracking-tight',
-                            stylex.props(rootLayoutStyles.title).className
-                          )}
-                        >
-                          {bundle.document.title}
-                        </h1>
+                        <h1 {...stylex.props(rootLayoutStyles.title)}>{bundle.document.title}</h1>
                         {bundle.document.frontmatter.pr ? (
                           <a
                             href={bundle.document.frontmatter.pr.url}
@@ -1573,7 +1579,7 @@ export function ReviewRenderer({
                             {...stylex.props(rootLayoutStyles.pullRequest)}
                           >
                             <ExternalLink {...stylex.props(rootLayoutStyles.externalIcon)} />
-                            <span className="font-medium tabular-nums">
+                            <span {...stylex.props(rootLayoutStyles.pullRequestNumber)}>
                               PR #{bundle.document.frontmatter.pr.number}
                             </span>
                             {bundle.document.frontmatter.pr.title &&
@@ -1726,7 +1732,15 @@ const findingsStyles = stylex.create({
     gap: 'calc(var(--spacing) * 2)',
     'padding-inline': 'calc(var(--spacing) * 0.5)',
   },
-  heading: { fontSize: '11px', textTransform: 'uppercase', color: 'hsl(var(--muted-foreground))' },
+  heading: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': '0.16em',
+    letterSpacing: '0.16em',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
   separator: {
     height: '1px',
     flex: '1',
@@ -1756,6 +1770,12 @@ const findingsStyles = stylex.create({
     transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
   },
   badge: {
+    '--tw-leading': 1,
+    lineHeight: 1,
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': 'var(--tracking-wide)',
+    letterSpacing: 'var(--tracking-wide)',
     marginBottom: 'calc(var(--spacing) * 1.5)',
     display: 'inline-flex',
     height: '17px',
@@ -1768,6 +1788,8 @@ const findingsStyles = stylex.create({
     textTransform: 'uppercase',
   },
   body: {
+    '--tw-leading': 1.7,
+    lineHeight: 1.7,
     minWidth: 0,
     fontSize: '13px',
     color: {
@@ -1779,6 +1801,8 @@ const findingsStyles = stylex.create({
   bodyBlocks: { display: 'grid', gap: 'calc(var(--spacing) * 1.5)' },
   refGlyph: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   refChip: {
+    '--tw-leading': 1,
+    lineHeight: 1,
     'margin-inline': '1px',
     display: 'inline-flex',
     maxWidth: '100%',
@@ -1824,6 +1848,8 @@ const findingsStyles = stylex.create({
   },
   refLabel: { textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' },
   oldRefLabel: {
+    '--tw-tracking': 'var(--tracking-wide)',
+    letterSpacing: 'var(--tracking-wide)',
     fontSize: '8.5px',
     textTransform: 'uppercase',
     color: {
@@ -1851,14 +1877,7 @@ function ReviewFindingsSection({
   return (
     <section aria-label="Review findings" {...stylex.props(findingsStyles.section)}>
       <div {...stylex.props(findingsStyles.headingRow)}>
-        <span
-          className={cn(
-            stylex.props(findingsStyles.heading).className,
-            'font-semibold tracking-[0.16em]'
-          )}
-        >
-          Review
-        </span>
+        <span {...stylex.props(findingsStyles.heading)}>Review</span>
         <span {...stylex.props(findingsStyles.separator)} />
       </div>
       <ul {...stylex.props(findingsStyles.list)}>
@@ -1888,15 +1907,10 @@ function FindingItem({
       id={findingDomId(finding.id)}
       className={cn('crh-finding', stylex.props(findingsStyles.item).className)}
     >
-      <span
-        className={cn(
-          stylex.props(findingsStyles.badge, SEVERITY_MARKER[finding.severity]).className,
-          'font-semibold leading-none tracking-wide'
-        )}
-      >
+      <span {...stylex.props(findingsStyles.badge, SEVERITY_MARKER[finding.severity])}>
         {findingSeverityLabel(finding.severity)}
       </span>
-      <div className={cn(stylex.props(findingsStyles.body).className, 'leading-[1.7]')}>
+      <div {...stylex.props(findingsStyles.body)}>
         <FindingBody markdown={finding.bodyMarkdown} files={files} onJump={onJump} />
       </div>
     </li>
@@ -2328,7 +2342,7 @@ function FindingRefChip({
       onClick={() => onJump(refItem)}
       title={`Jump to ${refItem.path}${refItem.range ? ` line ${refItem.range.start}` : ''}`}
       className={cn(
-        'crh-ref-chip translate-y-[0.18em] leading-none',
+        'crh-ref-chip translate-y-[0.18em]',
         stylex.props(findingsStyles.refChip).className
       )}
     >
@@ -2338,9 +2352,7 @@ function FindingRefChip({
         {lineLabel}
       </span>
       {refItem.side === 'old' ? (
-        <span className={cn('tracking-wide', stylex.props(findingsStyles.oldRefLabel).className)}>
-          old
-        </span>
+        <span {...stylex.props(findingsStyles.oldRefLabel)}>old</span>
       ) : null}
     </button>
   );
@@ -2376,6 +2388,8 @@ const groupSectionStyles = stylex.create({
     gap: 'calc(var(--spacing) * 2.5)',
   },
   index: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
     display: 'inline-flex',
     height: 'calc(var(--spacing) * 6)',
     width: 'calc(var(--spacing) * 6)',
@@ -2391,7 +2405,15 @@ const groupSectionStyles = stylex.create({
     fontSize: '13px',
     color: 'hsl(var(--foreground))',
   },
-  heading: { minWidth: 0, overflowWrap: 'break-word', fontSize: '17px' },
+  heading: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': 'var(--tracking-tight)',
+    letterSpacing: 'var(--tracking-tight)',
+    minWidth: 0,
+    overflowWrap: 'break-word',
+    fontSize: '17px',
+  },
   actions: {
     display: 'flex',
     flexShrink: 0,
@@ -2399,6 +2421,9 @@ const groupSectionStyles = stylex.create({
     gap: 'calc(var(--spacing) * 3)',
   },
   stats: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
     fontFamily:
       '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
     fontSize: '12px',
@@ -2510,21 +2535,19 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
         className={cn('crh-group-header', stylex.props(groupSectionStyles.header).className)}
       >
         <div {...stylex.props(groupSectionStyles.headingRow)}>
-          <span className={cn(stylex.props(groupSectionStyles.index).className, 'font-semibold')}>
-            {index + 1}
-          </span>
+          <span {...stylex.props(groupSectionStyles.index)}>{index + 1}</span>
           <span
             id={headingId}
             className={cn(
               stylex.props(groupSectionStyles.heading).className,
-              'font-semibold leading-snug tracking-tight md:text-lg'
+              'leading-snug md:text-lg'
             )}
           >
             {group.title}
           </span>
         </div>
         <div {...stylex.props(groupSectionStyles.actions)}>
-          <span className={cn(stylex.props(groupSectionStyles.stats).className, 'tabular-nums')}>
+          <span {...stylex.props(groupSectionStyles.stats)}>
             <span {...stylex.props(groupSectionStyles.additions)}>+{groupStats.additions}</span>{' '}
             <span {...stylex.props(groupSectionStyles.deletions)}>−{groupStats.deletions}</span>
           </span>
@@ -2770,6 +2793,10 @@ const treeCommitStyles = stylex.create({
     gap: 'calc(var(--spacing) * 0.5)',
   },
   heading: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': '0.14em',
+    letterSpacing: '0.14em',
     'padding-inline': 'calc(var(--spacing) * 2)',
     'padding-bottom': 'calc(var(--spacing) * 1)',
     fontSize: '10px',
@@ -2889,6 +2916,10 @@ const treeCommitStyles = stylex.create({
     color: 'hsl(var(--github-deletion))',
   },
   commitsToggle: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--tw-tracking': '0.1em',
+    letterSpacing: '0.1em',
     'margin-bottom': 'calc(var(--spacing) * 1.5)',
     display: 'flex',
     alignItems: 'center',
@@ -2921,6 +2952,8 @@ const treeCommitStyles = stylex.create({
     },
   },
   showMore: {
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
     display: 'flex',
     width: '100%',
     alignItems: 'center',
@@ -2960,6 +2993,8 @@ const treeCommitStyles = stylex.create({
     flex: '1',
   },
   subject: {
+    '--tw-leading': 'var(--leading-tight)',
+    lineHeight: 'var(--leading-tight)',
     display: 'block',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -3045,6 +3080,10 @@ const treeCommitStyles = stylex.create({
     padding: 'calc(var(--spacing) * 3)',
   },
   tooltipSubject: {
+    '--tw-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
     fontSize: '12.5px',
     color: 'hsl(var(--foreground))',
   },
@@ -3076,6 +3115,9 @@ const treeCommitStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   copyButton: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
@@ -3160,6 +3202,8 @@ const treeCommitStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   avatar: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
     display: 'flex',
     width: 'calc(var(--spacing) * 6)',
     height: 'calc(var(--spacing) * 6)',
@@ -3190,14 +3234,7 @@ function FileTree({
   }
   return (
     <nav {...stylex.props(treeCommitStyles.tree)} aria-label="Changed files">
-      <p
-        className={cn(
-          'font-semibold tracking-[0.14em]',
-          stylex.props(treeCommitStyles.heading).className
-        )}
-      >
-        Files
-      </p>
+      <p {...stylex.props(treeCommitStyles.heading)}>Files</p>
       {nodes.map((node) => (
         <FileTreeRow
           key={node.path}
@@ -3365,7 +3402,6 @@ function GroupCommits({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'font-semibold tracking-[0.1em]',
           stylex.props(
             treeCommitStyles.commitsToggle,
             treeCommitStyles.commitControlFocus,
@@ -3395,7 +3431,6 @@ function GroupCommits({
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 className={cn(
-                  'font-medium',
                   stylex.props(
                     treeCommitStyles.showMore,
                     treeCommitStyles.commitControlFocus,
@@ -3440,9 +3475,7 @@ function CommitRow({
     <>
       <CommitAvatar name={author} seed={seed} />
       <span {...stylex.props(treeCommitStyles.summary)}>
-        <span className={cn('leading-tight', stylex.props(treeCommitStyles.subject).className)}>
-          {subject}
-        </span>
+        <span {...stylex.props(treeCommitStyles.subject)}>{subject}</span>
         {author ? (
           <span {...stylex.props(treeCommitStyles.author)}>
             {author}
@@ -3499,14 +3532,7 @@ function CommitRow({
           </TooltipTrigger>
           <TooltipContent side="left" align="start" className="w-72 max-w-[18rem] p-0">
             <div {...stylex.props(treeCommitStyles.tooltipBody)}>
-              <p
-                className={cn(
-                  'font-medium leading-snug',
-                  stylex.props(treeCommitStyles.tooltipSubject).className
-                )}
-              >
-                {subject}
-              </p>
+              <p {...stylex.props(treeCommitStyles.tooltipSubject)}>{subject}</p>
               <p {...stylex.props(treeCommitStyles.tooltipMetadata)}>
                 <CommitAvatar name={author} seed={seed} />
                 <span {...stylex.props(treeCommitStyles.tooltipAuthor)}>
@@ -3533,13 +3559,10 @@ function CommitRow({
           onClick={() => void copy()}
           aria-label={`Copy commit id ${shortSha}`}
           title="Copy commit id"
-          className={cn(
-            'tabular-nums',
-            stylex.props(
-              treeCommitStyles.copyButton,
-              treeCommitStyles.commitControlFocus,
-              treeCommitStyles.commitTransitionColors
-            ).className
+          {...stylex.props(
+            treeCommitStyles.copyButton,
+            treeCommitStyles.commitControlFocus,
+            treeCommitStyles.commitTransitionColors
           )}
         >
           {shortSha}
@@ -3565,7 +3588,7 @@ function CommitAvatar({ name, seed }: { readonly name: string; readonly seed: st
   return (
     <span
       aria-hidden
-      className={cn('font-semibold', stylex.props(treeCommitStyles.avatar).className)}
+      {...stylex.props(treeCommitStyles.avatar)}
       style={{ backgroundColor: `hsl(${hue} 42% 40%)` }}
     >
       {initials}
@@ -3623,6 +3646,8 @@ const diffBlockStyles = stylex.create({
     transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
   },
   path: {
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -3638,6 +3663,9 @@ const diffBlockStyles = stylex.create({
     gap: 'calc(var(--spacing) * 2.5)',
   },
   stats: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
     fontFamily:
       '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
     fontSize: '11px',
@@ -3709,6 +3737,8 @@ const contextBlockStyles = stylex.create({
   },
   source: { whiteSpace: 'pre', color: 'hsl(var(--foreground))' },
   status: {
+    '--tw-tracking': 'var(--tracking-wide)',
+    letterSpacing: 'var(--tracking-wide)',
     flexShrink: 0,
     fontFamily:
       '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
@@ -4056,14 +4086,12 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
               )}
             />
             <FileIcon filePath={block.path} {...stylex.props(diffBlockStyles.fileGlyph)} />
-            <span className={cn('font-medium', stylex.props(diffBlockStyles.path).className)}>
-              {block.path}
-            </span>
+            <span {...stylex.props(diffBlockStyles.path)}>{block.path}</span>
             <FileStatusBadge file={block.file} kind={block.kind} />
           </button>
           <div {...stylex.props(diffBlockStyles.tools)}>
             {block.file && block.kind === 'change' && (
-              <span className={cn('tabular-nums', stylex.props(diffBlockStyles.stats).className)}>
+              <span {...stylex.props(diffBlockStyles.stats)}>
                 <span {...stylex.props(diffBlockStyles.additions)}>+{block.file.additions}</span>{' '}
                 <span {...stylex.props(diffBlockStyles.deletions)}>−{block.file.deletions}</span>
               </span>
@@ -4193,10 +4221,7 @@ function FileStatusBadge({
   const detail =
     kind === 'context' ? 'Unchanged file referenced for context' : formatFileStatus(file);
   return (
-    <span
-      className={cn('tracking-wide', stylex.props(contextBlockStyles.status).className)}
-      title={detail}
-    >
+    <span {...stylex.props(contextBlockStyles.status)} title={detail}>
       {shortLabel}
     </span>
   );
@@ -4687,6 +4712,10 @@ const commentStyles = stylex.create({
     'padding-block': 'calc(var(--spacing) * 1.5)',
   },
   composerTitle: {
+    '--tw-leading': 1,
+    lineHeight: 1,
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    fontWeight: 'var(--font-weight-semibold)',
     fontSize: '12px',
     color: 'hsl(var(--foreground))',
   },
@@ -4941,14 +4970,7 @@ function PanelComposer({
   return (
     <div ref={containerRef} {...stylex.props(commentStyles.composer)}>
       <header {...stylex.props(commentStyles.composerHeader)}>
-        <span
-          className={cn(
-            'font-semibold leading-none',
-            stylex.props(commentStyles.composerTitle).className
-          )}
-        >
-          New comment
-        </span>
+        <span {...stylex.props(commentStyles.composerTitle)}>New comment</span>
         <span {...stylex.props(commentStyles.composerPath)}>{fileBaseName(draft.path)}</span>
       </header>
       <textarea

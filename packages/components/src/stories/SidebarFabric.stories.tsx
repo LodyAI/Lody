@@ -7,7 +7,7 @@ import { SidebarFabricBackdrop, SidebarFabricBand } from '@/components/fabric/si
  * story only demonstrates layout/stacking; theme-following is exercised in
  * the LoroSidebar story with real theme tokens.
  */
-function Panel({ label }: { label: string }) {
+function Panel({ label, fabricClassName }: { label: string; fabricClassName?: string }) {
   return (
     <div
       style={{
@@ -22,7 +22,7 @@ function Panel({ label }: { label: string }) {
         flexDirection: 'column',
       }}
     >
-      <SidebarFabricBackdrop />
+      <SidebarFabricBackdrop className={fabricClassName} />
       <div style={{ flex: 1, padding: 16, fontSize: 13 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{label}</div>
         <div style={{ opacity: 0.65 }}>
@@ -41,7 +41,7 @@ function Panel({ label }: { label: string }) {
           borderTop: '1px solid hsl(var(--sidebar-border))',
         }}
       >
-        <SidebarFabricBand />
+        <SidebarFabricBand className={fabricClassName} />
         <span style={{ fontSize: 12, opacity: 0.8 }}>⚙</span>
         <span style={{ fontSize: 12, opacity: 0.8 }}>?</span>
         <span style={{ fontSize: 12, opacity: 0.8 }}>▣</span>
@@ -78,3 +78,27 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const PublicCanvasPointerVariants: Story = {
+  render: () => (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 24,
+        padding: 24,
+        minHeight: '100dvh',
+        background: 'hsl(var(--background))',
+      }}
+    >
+      <Panel
+        label="Zero-specificity public canvas selector"
+        fabricClassName="z-10 [:where(&_canvas)]:pointer-events-auto"
+      />
+      <Panel
+        label="Higher-specificity public canvas selector"
+        fabricClassName="z-10 [&_canvas]:pointer-events-auto"
+      />
+    </div>
+  ),
+};

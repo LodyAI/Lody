@@ -241,6 +241,13 @@ values in the browser. Do not change a shared token for one component without
 checking its other consumers. `rounded-full` compiles to `calc(infinity * 1px)`;
 a fixed `9999px` token can differ for a public component with unbounded sizes.
 
+Keep private writes and physical readers distinct. The locked `tracking-wide`
+rule writes `--tw-tracking`, but `letter-spacing` directly reads `--tracking-wide`;
+`leading-tight` similarly writes `--tw-leading` while `line-height` reads
+`--leading-tight`. Reading the private writer instead changes legal overrides.
+Check token retention in a complete production build with diagnostic fixture
+utilities removed before adding any static theme declaration.
+
 A `stylex.defineVars` value that references an app CSS variable resolves that
 reference where the StyleX variable is defined. An inherited alias does not
 re-read a descendant override. For a migrated declaration that previously read

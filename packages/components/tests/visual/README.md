@@ -893,6 +893,15 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `leaves161-acceptance.html`     | Eight amber migrations; all 96 pairs exact, 476 captured records equal                                 | 188 precise class carriers separate; actual presentational owner after mechanical extraction, not stateful quota/Electron coverage                       |
 | `leaves162-acceptance.html`     | Zero migration; five input classes restored despite 63 paired PNGs matching                            | Two complete-object differences, two strict pre/post failures, and nine missing states per direction remain; three painted diagnostics do not close them |
 
+| `leaves165-acceptance.html` | Ten private tracking/leading utilities;38 pairs/28 exact | Ten OPENs28,779/27,837; incomplete original sidebar and five explicit navigation supplements remain distinct |
+| `leaves169-acceptance.html`, `leaves172-acceptance.html`, `leaves174-acceptance.html` | Twenty-three private weight/leading utilities;112 pairs/90 exact | Twenty-two OPENs838/465; precise asset ports, actual Chrome font rows, portal/control scope and unknown cleanup retained |
+| `leaves170-acceptance.html` | One real Electron chat-route height;12 pairs exact | Two cells retain32boot runtime differences across pre/post; compact desktop390 is not mobile branch |
+| `leaves173-acceptance.html`, `recovery173-fixture-isolation.html` | Four offline-route styles;28 original and28 fixture-recovery pairs exact | Pure synthetic platform; fresh route reuses original component without mutating exported singleton; no backend/IPC claim |
+| `leaves175-acceptance.html`, `leaves181-acceptance.html` | One private opacity and one solo font;36+32 pairs exact | Shared story default12controls exact; explicit128share URL origins across pre/post, all remaining fields strict |
+| `leaves178-acceptance.html` | Six tabular utilities;27 full pairs/16 exact,1512target/font rows | Eleven OPENs775/486; four limited Copied feedback pairs add57/0; two original uncalibrated PR supplements retained rejected |
+| `leaves179-public-caller-acceptance.html` | Zero migration;canvas pointer candidate restored | Default PNG/GPU equality does not accept public ancestor pointer-events and trusted target reversal; original default report retained |
+| `leaves171-acceptance.html`, `leaves177-acceptance.html`, `leaves180-acceptance.html` | Unadopted bounded native-build proposal,zero product credit | Native row180 exact;whole App39raw/0threshold remains OPEN;171/177 failures and original restoration-order mistake retained |
+
 Root independently reopens original compressed records and decodes PNG RGBA.
 Named carrier exceptions retain both raw values; they never establish whole-object
 equality. The latest fixed component suite passes 620 files/6,209 tests with all

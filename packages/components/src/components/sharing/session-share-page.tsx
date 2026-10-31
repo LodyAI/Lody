@@ -87,6 +87,8 @@ const styles = stylex.create({
     borderColor: 'transparent',
     paddingInline: 'calc(var(--spacing) * 3)',
     fontSize: '0.9em',
+    fontWeight: 'var(--font-weight-medium)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   paneNote: {
     margin: 0,
@@ -405,9 +407,7 @@ function ShareConversationPane({
           />
         ) : (
           // A solo conversation uses the strip's active surface and local spacing.
-          <span
-            className={`font-medium ${stylex.props(styles.soloTab, tabPillStyles.active).className}`}
-          >
+          <span {...stylex.props(styles.soloTab, tabPillStyles.active)}>
             <span {...stylex.props(shareSurface.buttonLabel)}>{title}</span>
           </span>
         )}
