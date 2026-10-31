@@ -209,6 +209,7 @@ describe('MessageHandler machine registration', () => {
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
       previewControl: 1,
+      androidEmulator: 1,
       iosSimulator: 1,
       iosSimulatorControls: 1,
       iosSimulatorExterior: 1,

@@ -1,3 +1,5 @@
+import { AndroidEmulatorRemoteResponseSchema } from '@lody/shared';
+import { getAndroidEmulatorViewerSecretContext } from '../src/rpc-secret';
 import { IosSimulatorRemoteResponseSchema } from '@lody/shared';
 import { createRpcSecretRecipient, getIosSimulatorViewerSecretContext } from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
@@ -4115,3 +4117,95 @@ it.each([1, 16])(
     }
   }
 );
+
+it('round trips Android commands and isolates unavailable and denied controls', async () => {
+  const wire: unknown[] = [];
+  const recipient = await createRpcSecretRecipient();
+  const requests = createFakeStreamClient(),
+    responses = createFakeStreamClient();
+  const forward =
+    (destination: ReturnType<typeof createFakeStreamClient>) =>
+    async (_streamId: string, value: unknown) => {
+      wire.push(value);
+      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+      return '1';
+    };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId: 'w' as WorkspaceId,
+    machineId: 'm' as MachineId,
+    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    controlAndroidEmulator: async (params) => {
+      if (params.proof.requestToken !== 'synthetic-preview-proof') throw new Error('Access denied');
+      return {
+        type: 'android-emulator/control_response',
+        sessionId: params.sessionId,
+        success: true,
+        preview:
+          params.command.action === 'start'
+            ? {
+                operationId: 'op',
+                id: params.command.id,
+                phase: 'ready',
+                transport: 'remote',
+                viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+              }
+            : undefined,
+      };
+    },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: 'w',
+    machineId: 'm',
+    streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+  });
+  await server.start();
+  try {
+    const result = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'start', id: 'Pixel_8' },
+      proof: previewProof,
+      responseRecipient: recipient,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      preview: {
+        phase: 'ready',
+        viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+        id: 'Pixel_8',
+      },
+    });
+    expect(JSON.stringify(wire)).not.toContain('synthetic-viewer-secret');
+    expect(JSON.stringify(wire)).not.toContain('https://viewer.example');
+    expect(AndroidEmulatorRemoteResponseSchema.safeParse(result).success).toBe(false);
+    const envelopeResponse = wire.find(
+      (v): v is { result: unknown } => typeof v === 'object' && v !== null && 'result' in v
+    );
+    const envelope = AndroidEmulatorRemoteResponseSchema.parse(envelopeResponse?.result).preview
+      ?.viewerUrlEnvelope;
+    if (!envelope) throw Error('Missing encrypted viewer capability');
+    const context = getAndroidEmulatorViewerSecretContext({
+      workspaceId: 'w',
+      machineId: 'm',
+      sessionId: 's',
+      requestId: previewProof.requestId,
+    });
+    await expect((await createRpcSecretRecipient()).decrypt(envelope, context)).rejects.toThrow();
+    await expect(recipient.decrypt(envelope, context + 'other-request')).rejects.toThrow();
+
+    const denied = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'list' },
+      proof: { ...previewProof, requestToken: 'forged' },
+      responseRecipient: recipient,
+    });
+    expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
+  } finally {
+    client.stop();
+    server.stop();
+  }
+});

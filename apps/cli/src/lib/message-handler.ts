@@ -1,3 +1,4 @@
+import { AndroidEmulatorService } from '@/android-emulator/service';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
@@ -800,6 +801,7 @@ export class MessageHandler {
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
+  private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
@@ -3279,9 +3281,9 @@ export class MessageHandler {
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
       remotePreview: this.cloudPort.remotePreview,
     });
-    this.iosSimulatorService = new IosSimulatorService({
+    const devicePreviewOptions = {
       iceServers: this.cloudPort.remotePreview?.simulatorIceServers
-        ? async (sessionId) => {
+        ? async (sessionId: string) => {
             const record = await this.workspaceDocument.repo.getDocMeta(
               getSessionRoomId(sessionId as SessionId)
             );
@@ -3307,15 +3309,10 @@ export class MessageHandler {
             });
           }
         : undefined,
-      onAgentPreviewStarted: async (sessionId, operationId) => {
-        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
-          iosSimulatorPreviewRequestId: operationId,
-        } satisfies Partial<SessionMeta>);
-      },
       workspaceId: this.workspaceId,
       logger: this.logger,
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl ?? '',
-      authorize: async (request) => {
+      authorize: async (request: { sessionId: string; requestedByUserId: string }) => {
         const record = await this.workspaceDocument.repo.getDocMeta(
           getSessionRoomId(request.sessionId as SessionId)
         );
@@ -3328,6 +3325,22 @@ export class MessageHandler {
         ) {
           throw new Error('Simulator session access denied.');
         }
+      },
+    };
+    this.iosSimulatorService = new IosSimulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          iosSimulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
+      },
+    });
+    this.androidEmulatorService = new AndroidEmulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          androidEmulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
       },
     });
     const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
@@ -3599,6 +3612,15 @@ export class MessageHandler {
               request.sessionId as SessionId,
               request.requestedByUserId,
               { action: 'ios-simulator', command: request.command, responseKey },
+              proof
+            )
+          ),
+        controlAndroidEmulator: async ({ proof, responseKey, ...request }) =>
+          this.androidEmulatorService.control(request, true, () =>
+            this.previewService.authorizeRemoteControl(
+              request.sessionId as SessionId,
+              request.requestedByUserId,
+              { action: 'android-emulator', command: request.command, responseKey },
               proof
             )
           ),
@@ -4173,6 +4195,7 @@ export class MessageHandler {
           if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
           // Revoke media before unrelated ACP/Browser cleanup can fail.
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionArchived(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
@@ -4182,6 +4205,7 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (sessionId) void this.iosSimulatorService.closeSession(sessionId);
+          if (sessionId) void this.androidEmulatorService.closeSession(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['userId', 'machineId'] }
       ),
@@ -4192,6 +4216,7 @@ export class MessageHandler {
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionDeleted(sessionId);
         },
         { kinds: ['doc-existence-changed'] }
@@ -4335,7 +4360,10 @@ export class MessageHandler {
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.finalizeACPState(sessionId);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
@@ -4685,7 +4713,10 @@ export class MessageHandler {
       childSessionIds.map(async (childSessionId) => {
         this.clearSessionActivePresence(childSessionId);
         this.closeSessionTerminals?.(childSessionId);
-        await this.iosSimulatorService.closeSession(childSessionId);
+        await Promise.all([
+          this.iosSimulatorService.closeSession(childSessionId),
+          this.androidEmulatorService.closeSession(childSessionId),
+        ]);
         await this.finalizeACPState(childSessionId);
         await this.previewService.closeSessionPreviewForCleanup(childSessionId, reason);
         await this.terminateSessionForRelease(childSessionId);
@@ -7262,6 +7293,25 @@ export class MessageHandler {
       }
       case 'ios-simulator/control':
         return this.iosSimulatorService.control(request.params, false);
+      case 'android-emulator/agent-control': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation?.requesterUserId) {
+          return {
+            type: 'android-emulator/control_response' as const,
+            sessionId,
+            success: false,
+            error: 'denied' as const,
+          };
+        }
+        return this.androidEmulatorService.controlFromAgent({
+          sessionId,
+          requestedByUserId: invocation.requesterUserId,
+          command: request.params.command,
+        });
+      }
+      case 'android-emulator/control':
+        return this.androidEmulatorService.control(request.params, false);
       case 'session/preview-endpoint-acquire':
         return await this.previewService.acquireEndpoint({
           machineId: request.machineId as MachineId,
@@ -8759,11 +8809,13 @@ export class MessageHandler {
     this.remoteBackfillAbort?.abort();
     this.remoteBackfillAbort = new AbortController();
     this.iosSimulatorService.enableRemote();
+    this.androidEmulatorService.enableRemote();
     await this.scanAndBackfillLocalSessionFiles();
   }
 
   disableRemoteBackfill(): void {
     this.iosSimulatorService?.revokeRemote();
+    this.androidEmulatorService?.revokeRemote();
     // Close the window: abort in-flight uploads and supersede every started
     // task so a resumed backfill cannot commit post-revoke (S5/D10).
     this.remoteBackfillGeneration += 1;
@@ -10583,7 +10635,10 @@ export class MessageHandler {
     );
     this.cancelPendingHistoryWatches();
     this.historyOwnerAbort.abort();
-    await this.iosSimulatorService.closeAll();
+    await Promise.all([
+      this.iosSimulatorService.closeAll(),
+      this.androidEmulatorService.closeAll(),
+    ]);
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;
     this.sessionActivePresence.native.retire();
@@ -11018,7 +11073,10 @@ export class MessageHandler {
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session cleaned by GC');
 
     // 2. Terminate session process first — if later steps throw, the process

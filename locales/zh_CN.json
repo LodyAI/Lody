@@ -5928,5 +5928,12 @@
   "e2ee.machineSharing.state.pending": "等待确认",
   "e2ee.machineSharing.lastVersion": "上次验证版本",
   "Lody could not fully quit. Please restart Lody.": "Lody 未能完全退出，请重新启动。",
-  "Retry quit": "重试退出"
+  "Retry quit": "重试退出",
+  "sessions.devicePreview.back": "返回",
+  "sessions.devicePreview.thisMachine": "这台机器",
+  "sessions.androidEmulator.environmentTitle": "Android SDK 不可用",
+  "sessions.androidEmulator.environmentDetail": "请在这台机器上安装 Android SDK 并配置 AVD，然后刷新。",
+  "sessions.androidEmulator.emptyDetail": "请在 Android Studio 的 Device Manager 中创建 AVD，然后刷新。",
+  "sessions.detailTabs.androidEmulator": "Android 模拟器",
+  "sessions.devicePreview.rotate": "旋转"
 }

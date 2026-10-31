@@ -1,3 +1,4 @@
+import { useDevicePreviewPlatform } from './device-preview-platform';
 import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import {
@@ -24,7 +25,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { IosSimulatorDeviceControl } from '@lody/shared';
+import type { DevicePreviewControl as IosSimulatorDeviceControl } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Toggle } from '@lody/ui/toggle';
@@ -68,7 +69,7 @@ export type IosSimulatorControlsProps = {
 };
 
 type ControlItem = {
-  id: string;
+  id: IosSimulatorControlId;
   label: string;
   icon: Icon;
   disabled: boolean;
@@ -116,6 +117,7 @@ const styles = stylex.create({
 });
 
 function useControlGroups(props: IosSimulatorControlsProps) {
+  const platform = useDevicePreviewPlatform();
   const { t } = useTranslation();
   const { controlsSupported, availability, pendingControl, onControl, onTypeText, onOpenUrl } =
     props;
@@ -139,6 +141,9 @@ function useControlGroups(props: IosSimulatorControlsProps) {
       label: t('sessions.iosSimulator.controls.navigation', 'Navigation'),
       keepAt: 'narrow',
       items: [
+        ...(availability.back
+          ? [item('back', t('sessions.devicePreview.back', 'Back'), RotateCcw, button('back'))]
+          : []),
         item('home', t('sessions.iosSimulator.controls.home', 'Home'), House, button('home')),
         item(
           'app-switcher',
@@ -162,7 +167,9 @@ function useControlGroups(props: IosSimulatorControlsProps) {
         ),
         item(
           'rotate-right',
-          t('sessions.iosSimulator.controls.rotateRight', 'Rotate right'),
+          platform === 'android'
+            ? t('sessions.devicePreview.rotate', 'Rotate')
+            : t('sessions.iosSimulator.controls.rotateRight', 'Rotate right'),
           RotateCw,
           () => onControl({ kind: 'rotate', direction: 'right' })
         ),
@@ -216,7 +223,14 @@ function useControlGroups(props: IosSimulatorControlsProps) {
       ],
     },
   ];
-  return groups;
+  return platform === 'android'
+    ? groups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((entry) => availability[entry.id]),
+        }))
+        .filter((group) => group.items.length > 0)
+    : groups;
 }
 
 function ToolbarIconButton({

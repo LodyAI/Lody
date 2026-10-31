@@ -27,7 +27,7 @@ import {
   IOS_SIMULATOR_PREPARING_MAX_POLLS,
   writeIosSimulatorSelectedDevice,
 } from '../src/lib/ios-simulator/ios-simulator-model';
-import { SessionIosSimulatorPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
+import { SessionDevicePreviewPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -163,6 +163,8 @@ afterEach(() => {
 
 async function renderPanel(options: {
   machine: ReturnType<typeof createFakeMachine>;
+  platform?: 'ios' | 'android';
+  androidControl?: WorkspaceRuntime['requestAndroidEmulatorControl'];
   meta?: MachineMeta;
   presence?: 'synced' | 'idle';
   localMachine?: boolean;
@@ -175,6 +177,7 @@ async function renderPanel(options: {
     workspaceId: WORKSPACE,
     workspaceSlug: 'sim',
     requestIosSimulatorControl: options.machine.requestIosSimulatorControl,
+    requestAndroidEmulatorControl: options.androidControl,
   } as unknown as WorkspaceRuntime);
   store.set(machineMetaCacheAtom, {
     [getMachineRoomId(MACHINE)]: options.meta ?? macMeta({ iosSimulator: 1 }),
@@ -190,7 +193,8 @@ async function renderPanel(options: {
         createElement(
           Provider,
           { store },
-          createElement(SessionIosSimulatorPanel, {
+          createElement(SessionDevicePreviewPanel, {
+            platform: options.platform,
             session: SESSION,
             active,
             onAttachScreenshot: options.onAttachScreenshot,
@@ -1136,3 +1140,35 @@ it.each(['null', 'file://'])(
     expect(fresh.peer?.closed).toBe(true);
   }
 );
+
+it('uses Android capability on Linux and renders configured AVDs without touching the iOS lifecycle', async () => {
+  const machine = createFakeMachine({ devices: [] });
+  await renderPanel({
+    machine,
+    platform: 'android',
+    localMachine: true,
+    meta: { ...macMeta({ androidEmulator: 1 }), os: 'linux' },
+    androidControl: async ({ command }) => ({
+      type: 'android-emulator/control_response',
+      sessionId: SESSION.id,
+      success: true,
+      devices:
+        command.action === 'list'
+          ? [
+              {
+                id: 'Pixel_A',
+                name: 'Pixel A',
+                runtime: 'Android',
+                deviceType: 'AVD',
+                state: 'Shutdown',
+                available: true,
+                occupancy: 'available',
+              },
+            ]
+          : undefined,
+    }),
+  });
+  expect(text()).toContain('Pixel A');
+  expect(text()).not.toContain('Xcode');
+  expect(machine.commands).toEqual([]);
+});

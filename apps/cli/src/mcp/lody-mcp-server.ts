@@ -1,3 +1,4 @@
+import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
@@ -4147,6 +4148,22 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
         {
           method: 'ios-simulator/agent-control',
+          machineId: ctx.machineId,
+          workspaceId: ctx.workspaceId,
+          params: { sessionId: ctx.sessionId, command },
+        },
+        { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+      )
+    );
+    if (!response.ok) throw new Error('Simulator control unavailable.');
+    return response.result;
+  });
+  registerAndroidEmulatorPreviewTool(server, async (command) => {
+    const ctx = getSessionContext();
+    const response = await Effect.runPromise(
+      makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
+        {
+          method: 'android-emulator/agent-control',
           machineId: ctx.machineId,
           workspaceId: ctx.workspaceId,
           params: { sessionId: ctx.sessionId, command },

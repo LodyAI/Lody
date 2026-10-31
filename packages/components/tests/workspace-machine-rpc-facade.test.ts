@@ -377,6 +377,56 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
   });
 
+  it('sends Android Emulator control to this machine without a login token, proof or cloud', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    const requests: unknown[] = [];
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          requests.push(request);
+          return {
+            ok: true,
+            result: {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              devices: [],
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestAndroidEmulatorControl({
+        machineId: localMachineId,
+        sessionId,
+        requestedByUserId: 'local-owner',
+        command: { action: 'list' },
+      })
+    ).resolves.toMatchObject({ success: true, devices: [] });
+    expect(requests).toMatchObject([
+      {
+        method: 'android-emulator/control',
+        params: { sessionId, requestedByUserId: 'local-owner', command: { action: 'list' } },
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
   it('signs the exact remote iOS Simulator command with the preview handshake nonce', async () => {
     const runtimeNonce = '00000000-0000-4000-8000-000000000002';
     const command = { action: 'stop', operationId: 'op-7' } as const;

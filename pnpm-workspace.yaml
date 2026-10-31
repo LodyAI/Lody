@@ -259,6 +259,8 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # Tango Consumable needs one class identity across ADB and scrcpy streams.
+  '@yume-chan/stream-extra': 2.6.1
   # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
   'undici@>=6.23.0 <6.29.1': 6.29.1
   'undici@>=7.18.0 <7.30.1': 7.30.1

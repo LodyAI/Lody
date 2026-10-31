@@ -5937,5 +5937,12 @@
   "e2ee.machineSharing.state.pending": "Pending confirmation",
   "e2ee.machineSharing.lastVersion": "Last verified version",
   "Lody could not fully quit. Please restart Lody.": "Lody could not fully quit. Please restart Lody.",
-  "Retry quit": "Retry quit"
+  "Retry quit": "Retry quit",
+  "sessions.devicePreview.back": "Back",
+  "sessions.devicePreview.thisMachine": "this machine",
+  "sessions.androidEmulator.environmentTitle": "Android SDK is unavailable",
+  "sessions.androidEmulator.environmentDetail": "Install the Android SDK and configure an AVD on this machine, then refresh.",
+  "sessions.androidEmulator.emptyDetail": "Create an AVD in Android Studio Device Manager, then refresh.",
+  "sessions.detailTabs.androidEmulator": "Android Emulator",
+  "sessions.devicePreview.rotate": "Rotate"
 }

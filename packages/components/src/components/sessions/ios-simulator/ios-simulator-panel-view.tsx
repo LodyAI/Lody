@@ -1,3 +1,4 @@
+import { useDevicePreviewPlatform } from './device-preview-platform';
 import type { IosSimulatorExterior } from '@lody/shared';
 import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -404,6 +405,7 @@ export function IosSimulatorPanelView({
   const { t } = useTranslation();
   const stateLabel = useIosSimulatorDeviceStateLabel();
   const errorCopy = useIosSimulatorErrorCopy();
+  const platform = useDevicePreviewPlatform();
   const runtimes = catalog.phase === 'ready' ? catalog.runtimes : [];
   const devices = catalog.phase === 'ready' ? catalog.devices : [];
   const deviceByUdid = new Map(devices.map((device) => [device.udid, device]));
@@ -488,10 +490,17 @@ export function IosSimulatorPanelView({
           title={t('sessions.iosSimulator.catalog.emptyTitle', 'No simulators on {{machine}}', {
             machine: machineName,
           })}
-          detail={t(
-            'sessions.iosSimulator.catalog.emptyDetail',
-            'Add one in Xcode under Window › Devices and Simulators, then refresh.'
-          )}
+          detail={
+            platform === 'android'
+              ? t(
+                  'sessions.androidEmulator.emptyDetail',
+                  'Create an AVD in Android Studio Device Manager, then refresh.'
+                )
+              : t(
+                  'sessions.iosSimulator.catalog.emptyDetail',
+                  'Add one in Xcode under Window › Devices and Simulators, then refresh.'
+                )
+          }
         >
           {refreshButton}
         </Message>

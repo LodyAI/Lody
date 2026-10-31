@@ -1,14 +1,16 @@
+import { DevicePreviewPlatformContext } from './device-preview-platform';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsIosSimulatorControls,
+  machineSupportsAndroidEmulatorProtocol,
   machineSupportsIosSimulatorExterior,
   IosSimulatorExteriorAssetSchema,
   isIosSimulatorBezelPng,
   type IosSimulatorExterior,
   type IosSimulatorCommand,
-  type IosSimulatorDeviceControl,
+  type DevicePreviewControl as IosSimulatorDeviceControl,
   type IosSimulatorResponse,
   type SessionMeta,
 } from '@lody/shared';
@@ -30,6 +32,7 @@ import {
 } from '@/lib/ios-simulator/ios-simulator-hardware';
 import { toast } from '@/lib/toast';
 import {
+  androidEmulatorResponseForPanel,
   IOS_SIMULATOR_PREPARING_MAX_POLLS,
   IOS_SIMULATOR_PREPARING_POLL_MS,
   buildIosSimulatorDiagnostics,
@@ -60,6 +63,7 @@ import {
 } from './ios-simulator-panel-view';
 
 type SessionIosSimulatorPanelProps = {
+  platform?: 'ios' | 'android';
   session: Pick<SessionMeta, 'id' | 'machineId'>;
   /** On screen: the only state in which it polls; the viewer is told otherwise. */
   active?: boolean;
@@ -94,19 +98,22 @@ const appOrigin = (): string => (typeof window === 'undefined' ? '' : window.loc
  * across an in-place switch. Unmounting never stops a preview: panel mount is
  * not preview ownership.
  */
-export function SessionIosSimulatorPanel(props: SessionIosSimulatorPanelProps) {
+export function SessionDevicePreviewPanel(props: SessionIosSimulatorPanelProps) {
   const user = useAtomValue(userAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   return (
-    <SessionIosSimulatorPanelController
-      key={`${user?.id}:${runtime?.workspaceId}:${props.session.id}:${props.session.machineId}`}
-      {...props}
-    />
+    <DevicePreviewPlatformContext.Provider value={props.platform ?? 'ios'}>
+      <SessionIosSimulatorPanelController
+        key={`${props.platform ?? 'ios'}:${user?.id}:${runtime?.workspaceId}:${props.session.id}:${props.session.machineId}`}
+        {...props}
+      />
+    </DevicePreviewPlatformContext.Provider>
   );
 }
 
 function SessionIosSimulatorPanelController({
   session,
+  platform = 'ios',
   active = true,
   leadingSlot,
   controlsLayout = 'toolbar',
@@ -119,7 +126,12 @@ function SessionIosSimulatorPanelController({
   const machineOnline = useAtomValue(machineOnlineStatusAtomFamily(session.machineId));
   const localMachineId = useAtomValue(localMachineIdAtom);
   const isLocalMachine = localMachineId === session.machineId;
-  const availability = getIosSimulatorPanelAvailability(machine);
+  const availability =
+    platform === 'android'
+      ? machineSupportsAndroidEmulatorProtocol(machine)
+        ? 'available'
+        : 'upgrade-required'
+      : getIosSimulatorPanelAvailability(machine);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
   const blocker: IosSimulatorPanelBlocker | null =
@@ -136,10 +148,10 @@ function SessionIosSimulatorPanelController({
             accountId: user?.id,
             workspaceId: runtime.workspaceId,
             machineId: session.machineId,
-            sessionId: session.id,
+            sessionId: platform === 'android' ? `android:${session.id}` : session.id,
           }
         : null,
-    [runtime, session.id, session.machineId, user?.id]
+    [platform, runtime, session.id, session.machineId, user?.id]
   );
 
   const [catalog, setCatalog] = useState<IosSimulatorCatalogState>({ phase: 'loading' });
@@ -167,6 +179,16 @@ function SessionIosSimulatorPanelController({
   const request = useCallback(
     async (command: IosSimulatorCommand): Promise<IosSimulatorResponse | null> => {
       if (!runtime || !requesterUserId) return null;
+      if (platform === 'android') {
+        if (command.action === 'exterior') return null;
+        const result = await runtime.requestAndroidEmulatorControl({
+          machineId: session.machineId,
+          sessionId: session.id,
+          requestedByUserId: requesterUserId,
+          command: command.action === 'start' ? { action: 'start', id: command.udid } : command,
+        });
+        return androidEmulatorResponseForPanel(result);
+      }
       return runtime.requestIosSimulatorControl({
         machineId: session.machineId,
         sessionId: session.id,
@@ -175,7 +197,7 @@ function SessionIosSimulatorPanelController({
         timeoutMs: command.action === 'exterior' ? 45000 : undefined,
       });
     },
-    [requesterUserId, runtime, session.id, session.machineId]
+    [platform, requesterUserId, runtime, session.id, session.machineId]
   );
 
   const refreshCatalog = useCallback(async () => {
@@ -297,7 +319,7 @@ function SessionIosSimulatorPanelController({
     imageUrl: string;
   }>();
   const exteriorUdid = selectedUdid;
-  const supportsExterior = machineSupportsIosSimulatorExterior(machine);
+  const supportsExterior = platform === 'ios' && machineSupportsIosSimulatorExterior(machine);
   useEffect(() => {
     if (!live || !exteriorUdid || !supportsExterior) return undefined;
     let cancelled = false;
@@ -434,13 +456,15 @@ function SessionIosSimulatorPanelController({
 
   const viewerRef = useRef<IosSimulatorViewerHandle>(null);
   const [turns, setTurns] = useState<IosSimulatorQuarterTurns>(0);
-  const [viewMode, setViewMode] = useState<IosSimulatorViewMode>('device');
+  const [viewMode, setViewMode] = useState<IosSimulatorViewMode>(
+    platform === 'android' ? 'screen' : 'device'
+  );
   const [fullscreen, setFullscreen] = useState(false);
   const controlTicket = useRef<object | null>(null);
   const [pendingControl, setPendingControl] = useState<IosSimulatorControlId | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [inputKind, setInputKind] = useState<IosSimulatorInputKind | null>(null);
-  const machineName = machine?.name ?? t('sessions.iosSimulator.thisMac', 'this Mac');
+  const machineName = machine?.name ?? t('sessions.devicePreview.thisMachine', 'this machine');
 
   // A new operation is a new stream in its own orientation.
   useEffect(() => {
@@ -465,7 +489,10 @@ function SessionIosSimulatorPanelController({
       ),
     [statusDevice?.deviceType, statusDevice?.family, statusDevice?.name]
   );
-  const controlsSupported = machineSupportsIosSimulatorControls(machine);
+  const controlsSupported =
+    platform === 'android'
+      ? machineSupportsAndroidEmulatorProtocol(machine)
+      : machineSupportsIosSimulatorControls(machine);
 
   const sendControl = useCallback(
     async (control: IosSimulatorDeviceControl): Promise<boolean> => {
@@ -583,7 +610,24 @@ function SessionIosSimulatorPanelController({
           'Update Lody on {{machine}} to use simulator controls',
           { machine: machineName }
         ),
-        availability: getIosSimulatorControlAvailability(hardware),
+        availability:
+          platform === 'android'
+            ? {
+                home: true,
+                back: true,
+                'app-switcher': true,
+                lock: false,
+                'rotate-left': false,
+                'rotate-right': true,
+                shake: false,
+                'volume-up': false,
+                'volume-down': false,
+                action: false,
+                text: true,
+                appearance: false,
+                'open-url': false,
+              }
+            : getIosSimulatorControlAvailability(hardware),
         pendingControl,
         capturing,
         canAttach: Boolean(onAttachScreenshot),
@@ -712,4 +756,8 @@ function SessionIosSimulatorPanelController({
       />
     </>
   );
+}
+
+export function SessionIosSimulatorPanel(props: SessionIosSimulatorPanelProps) {
+  return <SessionDevicePreviewPanel {...props} platform="ios" />;
 }

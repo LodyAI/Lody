@@ -1,0 +1,24 @@
+import { createServer } from 'node:net';
+import { once } from 'node:events';
+import { it, expect } from 'vitest';
+import { createAdbConnector } from './adb-connector';
+it('abort settles a pending ADB read and joins owned sockets', async () => {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw Error('address');
+  const abort = new AbortController();
+  const connector = createAdbConnector(abort.signal, address.port);
+  const incoming = once(server, 'connection');
+  const stream = await connector.connect();
+  const [peer] = await incoming;
+  const reader = stream.readable.getReader();
+  const reading = reader.read();
+  abort.abort();
+  await expect(reading).rejects.toThrow();
+  await stream.closed;
+  await connector.close();
+  peer.destroy();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});

@@ -1,3 +1,9 @@
+import {
+  AndroidEmulatorRemoteResponseSchema,
+  type AndroidEmulatorRequest,
+  type AndroidEmulatorResponse,
+} from '@lody/shared';
+import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
 import { LoroStreamsRpcResponseSchema } from './rpc';
 import { isE2eeReadQuery, type E2eeQueryInput, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
@@ -203,7 +209,9 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
   const request = raw as { method?: unknown; params?: unknown };
   if (
     typeof request.method === 'string' &&
-    (request.method.startsWith('session/preview-') || request.method === 'ios-simulator/control')
+    (request.method.startsWith('session/preview-') ||
+      request.method === 'ios-simulator/control' ||
+      request.method === 'android-emulator/control')
   ) {
     return { method: request.method, params: '[REDACTED PREVIEW CONTROL]' };
   }
@@ -538,6 +546,9 @@ type RpcServerDeps = {
   controlIosSimulator?: (
     args: IosSimulatorRequest & { proof: PreviewControlProof; responseKey: RpcSecretPublicKey }
   ) => Promise<IosSimulatorResponse>;
+  controlAndroidEmulator?: (
+    args: AndroidEmulatorRequest & { proof: PreviewControlProof; responseKey: RpcSecretPublicKey }
+  ) => Promise<AndroidEmulatorResponse>;
   getSessionPreviewStatus?: (args: {
     sessionId: SessionId;
     requestedByUserId: string;
@@ -2036,6 +2047,30 @@ export class LoroStreamsMachineRpcServer {
           await appendResultResponse(request.replyTo, request.id, request.method, wire);
           return;
         }
+        case 'android-emulator/control': {
+          if (!this.deps.controlAndroidEmulator)
+            throw new Error('Android Emulator is not supported by this machine.');
+          const response = await this.deps.controlAndroidEmulator(request.params);
+          const { viewerUrl, ...preview } = response.preview ?? {};
+          const viewerUrlEnvelope = viewerUrl
+            ? await encryptRpcSecret(
+                request.params.responseKey,
+                viewerUrl,
+                getAndroidEmulatorViewerSecretContext({
+                  workspaceId: this.deps.workspaceId,
+                  machineId: this.deps.machineId,
+                  sessionId: request.params.sessionId,
+                  requestId: request.params.proof.requestId,
+                })
+              )
+            : undefined;
+          const wire = AndroidEmulatorRemoteResponseSchema.parse({
+            ...response,
+            preview: response.preview ? { ...preview, viewerUrlEnvelope } : undefined,
+          });
+          await appendResultResponse(request.replyTo, request.id, request.method, wire);
+          return;
+        }
         case 'session/preview-status': {
           if (!this.deps.getSessionPreviewStatus) {
             await appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -2313,6 +2348,7 @@ export class LoroStreamsMachineRpcServer {
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse
       | IosSimulatorResponse
+      | AndroidEmulatorResponse
       | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
       | LocalProjectControlResponse,
