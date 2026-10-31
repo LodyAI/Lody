@@ -91,8 +91,10 @@ A notification failure cannot replay Agent execution.
   then applies mode, model, and dependent options in that order. This prevents model switches
   from resetting an already-applied effort. A refused required selection fails the input
   before prompting, while retaining the agent's actual partial changes. The execution
-  service validates a new Loro input's captured revision when its owner first accepts it;
-  the existing durable Inbox receipt preserves accepted queue/retry requirements.
+  service rejects stale human revisions against the loaded Loro session at first acceptance;
+  this does not require a preexisting native connection after restart. Missing revisions
+  load through the existing room sync within the configuration budget or fail visibly.
+  Approved system derivations and durable Inbox receipts preserve frozen queue/retry requirements.
 - `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
   guidance only after execution verifies this Session's temporary branch in an ordinary
   new independent GitHub/local worktree.

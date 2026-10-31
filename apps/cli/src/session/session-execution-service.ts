@@ -1166,7 +1166,9 @@ export class SessionExecutionService {
     const beforeAccept = this.automationBeforeAccept;
     if (!origin || !inbox || !admission || !(await admission({ ...args, origin }))) return false;
     if (origin.workIntentId && !beforeAccept) return false;
-    return this.acceptInboxInput(
+    // This authority already verified the derived action/source. Its frozen
+    // requirements are not a new human selection against an old renderer baseline.
+    return inbox.accept(
       {
         workspaceId: this.deps.workspaceId,
         sessionId: args.sessionId,
@@ -1213,19 +1215,32 @@ export class SessionExecutionService {
     };
     return doc.acceptWithConfigRevision(
       input.config,
-      async () => ((await terminal()) ? false : accept()),
+      async () => (this.shutdownAbort.signal.aborted || (await terminal()) ? false : accept()),
       async () => inbox?.inputKind(input, input.inputId) !== undefined || (await terminal()),
-      async () => {
+      async (error) => {
+        if (this.shutdownAbort.signal.aborted) return false;
         // This runs before a Turn owner exists. Publish the failure under the same
         // acceptance queue so duplicate offers cannot emit a second notice or run.
         await this.deps.recordChatFailure(
           doc,
-          'session_config_changed',
-          'The configuration was updated elsewhere. Resend with the current configuration.'
+          error.message.startsWith('SESSION_CONFIG_CHANGED:')
+            ? 'session_config_changed'
+            : 'turn_pre_prompt_failed',
+          error.message.startsWith('SESSION_CONFIG_CHANGED:')
+            ? 'The configuration was updated elsewhere. Resend with the current configuration.'
+            : 'The session configuration could not be loaded. Please resend after the session finishes syncing.'
         );
         await this.setTerminalUserTurnStatus(sessionId, doc, input.inputId, 'failed');
         await this.abandonInboxInput(sessionId, input.inputId);
         return false;
+      },
+      {
+        waitForSync: () =>
+          withTimeout(
+            waitForSteer(doc.waitForRemoteSync(), this.shutdownAbort.signal),
+            TURN_BUDGETS.configurationMs,
+            'Session configuration sync timed out'
+          ),
       }
     );
   }

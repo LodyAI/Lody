@@ -12,7 +12,11 @@ Supersedes: [仅警告的模型拒绝策略](../../archived/bug-fix/2026-10-09-m
 
 ## 决定与替代方案
 
-[Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。首次执行端准入在配置发布串行队列内检查捕获的 revision。Loro 在同一队列内写入已有的机器本地 Inbox 接纳回执，回执查询也在队列内执行，避免并发重复接纳与配置发布交错。该持久回执或 Roost 不可变历史接纳回执使重试、重启跳过重复检查；renderer outbox 或本地等待附件记录不等于 owner 接纳。历史请求重建和队列提升保留捕获的 revision，已接纳队列保留冻结值。加密会话只比较 native owner 已确认并本地持久化的会话文档，不把 RPC 或元数据 hint 当作当前 revision。
+[Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。Loro 首次执行端准入只拒绝低于已加载会话 revision 的用户输入。检查、机器本地 Inbox 持久接纳和回执查询共用配置发布串行队列。该回执或 Roost 不可变历史接纳回执使重试、重启跳过重复检查；renderer outbox 不等于 owner 接纳。历史请求重建与队列提升保留冻结要求。
+
+已加载 revision 与原生连接确认是两种证明。Loro 崩溃重开或文档尚无 revision 时，只等待已有的初始房间同步，受 30 秒配置预算限制，再读取已加载 revision，不把旧代次当作新连接确认；正常派发随后加载或建立原生连接，并在 prompt 前确认、持久化所需配置。加载失败、超时或仍缺 revision 时走既有可见的执行前失败与输入终态，不让输入永久 pending；晚到同步不会复活该输入。关闭时取消本地等待，保留原输入供下次启动处理，不写入晚到失败；底层同步仍由既有文档所有者保管。加密准入只读 native 已验证的受保护会话文档，不用 RPC 或元数据的当前 revision hint。Roost 的连接确认准入和原生 steer 确认规则保持不变。
+
+可信系统派生输入仍需动作及来源 authority、接纳前守卫批准，随后进入既有 Inbox。继承 revision 作为冻结来源保留，不按用户新配置选择比较；后续队列提升和重试复用 owner 回执。仅提供 `_lodyAutomation` 字段不能取得权限，加密工作区的 Automations 产品策略仍保持禁用。
 
 Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_failed` 提示及失败终态。拒绝与接纳共用串行队列，重复投递不会重复提示或执行。原文和冻结配置保留在历史中；显式恢复使用当前已提交配置创建新输入，不复活旧执行或改写其冻结配置。失败提示写入错误继续向外报告，不视为成功准入。
 
@@ -28,10 +32,7 @@ Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_fail
 
 `AcpConfiguration` 是 SDK 操作的窄服务；应用器及初始、恢复两个消费者组合原生 Effect。匹配的 steer 不应用配置。AgentClient 传输、进程释放及 SessionDocument Repo 持久化仍是上游 Promise 边界，不能宣称完整 ACP 或 Session 生命周期迁移。[迁移台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账) 记录此限制。没有新 runtime、cache、后台重试或期望状态存储。
 
-本地 owner 重启时会作废磁盘中的旧确认快照，直到新连接接管。接纳与 steer
-要求当前 revision 已完成本地持久化，仅出现在 mirror 中不算确认。steer 在异步
-准备结束、真正注入前同步重查连接、持久化确认和请求值；明确不匹配进入普通队列，
-不确定则直接失败。配置结果不确定时在 Turn 释放阶段关闭旧连接。
+原生 steer 在异步准备结束、真正注入前同步重查连接代次、已持久化确认和请求值；明确不匹配进入普通队列，不确定则失败。配置结果不确定时在 Turn 释放阶段关闭旧连接。Loro 首次准入读取会话 revision，不以这种原生连接确认作为重开前提。
 
 ## 兼容性与证据
 

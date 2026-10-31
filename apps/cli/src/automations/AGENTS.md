@@ -23,6 +23,7 @@
   resource owners. Scope close joins interpreter and owner reads; no ambient shell or env.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
+- Approved derived inputs use the existing Inbox after source/action admission; inherited revisions are frozen requirements, not new human configuration selections.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
   Stop blocks continuation admission, not authorized condition reads; only explicit

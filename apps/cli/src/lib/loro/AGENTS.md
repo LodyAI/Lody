@@ -58,7 +58,7 @@ Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `create
 ## Shared ACP runtime config contains no secrets
 
 `SessionDocument.beginAcpRuntimeConfig` and `applyAcpRuntimeConfigPatch` are the durable boundary for the
-workspace-shared runtime baseline. First-input revision validation and its owner-acceptance write share the publication queue; retry proofs are read inside that queue. It must remove every option id matched by
+workspace-shared runtime baseline. First-input revision validation and its owner-acceptance write share the publication queue; retry proofs are read inside that queue. Loro input admission uses the loaded revision independently of native connection readiness; prompting and steer retain live confirmation. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like
 selector values to collaborators.

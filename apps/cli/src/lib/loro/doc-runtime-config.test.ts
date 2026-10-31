@@ -62,6 +62,54 @@ describe('SessionDocument ACP runtime config', () => {
     ).resolves.toBe('accepted');
   });
 
+  it('loads the Loro input revision without manufacturing live connection confirmation', async () => {
+    const doc = createDocument();
+    doc.mirror!.setState((state) => {
+      state.acpRuntimeConfig = { ...connection, revision: 1, modeId: 'default' };
+      return state;
+    });
+    const entered = Promise.withResolvers<void>();
+    const synced = Promise.withResolvers<void>();
+    doc.waitForRemoteSync = async () => {
+      entered.resolve();
+      await synced.promise;
+    };
+    const accept = doc.acceptWithConfigRevision(
+      { configRevision: 3 },
+      async () => 'accepted',
+      () => false,
+      undefined,
+      { waitForSync: () => doc.waitForRemoteSync() }
+    );
+    await entered.promise;
+    doc.mirror!.setState((state) => {
+      state.acpRuntimeConfig = { ...connection, state: 'unknown', revision: 3, modeId: 'plan' };
+      return state;
+    });
+    synced.resolve();
+    expect(await accept).toBe('accepted');
+    expect(doc.isAcpConfigurationConfirmed(connection.generation)).toBe(false);
+    await expect(
+      doc.acceptWithConfigRevision(
+        { configRevision: 2 },
+        async () => 'unexpected',
+        () => false,
+        undefined,
+        { waitForSync: () => doc.waitForRemoteSync() }
+      )
+    ).rejects.toThrow('SESSION_CONFIG_CHANGED');
+    // A renderer ahead of the loaded snapshot is not an old-baseline write.
+    expect(
+      await doc.acceptWithConfigRevision(
+        { configRevision: 4 },
+        async () => 'accepted',
+        () => false,
+        undefined,
+        { waitForSync: () => doc.waitForRemoteSync() }
+      )
+    ).toBe('accepted');
+  });
+
   it('keeps confirmed changes independently of newer history and queue inputs', async () => {
     const doc = createDocument();
     await doc.beginAcpRuntimeConfig('turn-1', {

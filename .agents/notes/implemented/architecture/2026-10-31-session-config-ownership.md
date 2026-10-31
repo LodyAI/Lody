@@ -18,19 +18,32 @@ failure stops submission and preserves actual partial changes.
 
 The [Spec](../../../../specs/session-config-ownership.md) defines this ownership
 boundary. A connection generation fences observations even if ACP reuses a session
-id; a revision orders publication independently of history. First owner acceptance
-checks the captured revision in the publication serial queue. Loro records its
-existing machine-local Inbox acceptance while holding that queue; the receipt
-lookup also runs inside the queue so concurrent duplicate accepts cannot race a
-publication. That durable receipt, or Roost's immutable history acceptance, bypasses
-rechecking on retry/restart. A renderer outbox or local held-send record is not
-owner acceptance. History reconstruction and queue promotion preserve the captured
-revision. Queued inputs keep their frozen values. Encrypted sessions compare only
-the native owner's confirmed, locally persisted session document, never an RPC or
-metadata hint for the current revision. A persisted snapshot cannot establish
-live confirmation after restart: the local owner invalidates it until a connection
-attaches. Admission and steer require the current revision to have completed local
-persistence, not merely appeared in the document mirror.
+id; a revision orders publication independently of history. At first owner
+acceptance, Loro rejects a captured user revision only when it is lower than the
+loaded session revision. The check, durable machine-local Inbox acceptance and
+receipt lookup share the configuration publication queue. Existing Inbox receipts,
+or Roost's immutable history acceptance, bypass rechecking on retry/restart. A
+renderer outbox is not owner acceptance. History reconstruction and queue promotion
+preserve captured requirements.
+
+Loaded revision and native connection confirmation are different proofs. After a crash, Loro
+waits for its already-owned initial room sync within the 30-second configuration
+budget, then reads the loaded revision without manufacturing a live generation.
+The same bounded wait applies if the loaded document has no revision. Normal
+dispatch then loads/establishes the native connection and confirms and persists
+required configuration before prompting. A missing revision or failed/timed-out load yields the existing
+visible pre-prompt failure and a terminal input, not a permanently pending send.
+Late sync never revives that input. Shutdown cancels the local waiter, preserves
+the original for restart, and prevents late failure writes; the document owner
+retains its underlying sync. Encrypted admission reads only the native
+protected session document, never a current-revision hint from RPC or metadata.
+Roost's live-confirmation admission and native steer confirmation remain unchanged.
+
+Trusted system derivations enter the existing Inbox only after their action/source
+authority and before-accept guard approve them. Their inherited revision is preserved
+as frozen provenance, not compared as a new human configuration selection. Subsequent
+queue promotion/retry reuses that owner receipt. An `_lodyAutomation` field alone
+is not authority, and encrypted Automations remain disabled by product policy.
 
 A stale first Loro input is terminalized as failed with a durable `chat_failed`
 notice before a Turn exists. This rejection shares the acceptance queue, so

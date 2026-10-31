@@ -1,3 +1,4 @@
+import { TURN_BUDGETS } from '../src/session/turn-budgets';
 import { AutomationLedger } from '../src/automations/storage/ledger';
 import { dispatchQuotaSchedule } from '../src/automations/compat/quota-schedule';
 import {
@@ -2990,7 +2991,10 @@ describe('SessionExecutionService', () => {
       | 'backfill-device-revoked'
       | 'backfill-network'
       | 'stale-config'
+      | 'reopened-config'
+      | 'derived-config'
   ) => {
+    const configCase = ['stale-config', 'reopened-config', 'derived-config'].includes(mode);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -3161,10 +3165,19 @@ describe('SessionExecutionService', () => {
             prompt: 'hi',
             cliType: 'builtin',
             agentType: 'codex',
-            ...(mode === 'stale-config'
-              ? { configRevision: 1, modeId: 'plan', modelId: 'old-model' }
-              : {}),
+            ...(configCase ? { configRevision: 1, modeId: 'plan', modelId: 'old-model' } : {}),
           };
+          if (mode === 'derived-config')
+            Object.assign(inputConfig, {
+              _lodyAutomation: {
+                invocationId: 'derived-action',
+                ruleId: 'approved-rule',
+                ruleRevision: 1,
+                eventRef: 'source-event',
+                authorizationUserId: user,
+                nativeSessionId: 'acp-config',
+              },
+            });
           const row = source.getList('history').insertContainer(0, new LoroMap());
           row.set('id', 'turn-user-1');
           row.set('role', 'user');
@@ -3458,7 +3471,7 @@ describe('SessionExecutionService', () => {
       };
       const host = composed.encryptedWorkspace;
       await host.refresh();
-      const sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+      let sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
       const protection = host.content.resolve({
         kind: 'doc',
         docId: 'session-production-session',
@@ -3483,7 +3496,7 @@ describe('SessionExecutionService', () => {
         sessionDoc.handle.doc.import(snapshot);
         snapshot.fill(0);
       }
-      if (mode === 'stale-config') {
+      if (configCase) {
         // This owner reads only the session imported through the real protected provider above.
         const read = await sessionDoc.sessionData.history.readTurn('turn-user-1');
         if (read.state !== 'ready' || !read.turn.inputConfig)
@@ -3496,14 +3509,24 @@ describe('SessionExecutionService', () => {
           modelId: 'old-model',
         });
         await sessionDoc.flushLocalWrites();
-        await sessionDoc.applyAcpRuntimeConfigPatch('', {
-          acpSessionId: 'acp-config',
-          generation: 'verified-owner',
-          state: 'ready',
-          modeId: 'default',
-          modelId: 'new-model',
-        });
+        if (mode !== 'reopened-config')
+          await sessionDoc.applyAcpRuntimeConfigPatch('', {
+            acpSessionId: 'acp-config',
+            generation: 'verified-owner',
+            state: 'ready',
+            modeId: 'default',
+            modelId: 'new-model',
+          });
         await sessionDoc.flushLocalWrites();
+        if (mode === 'reopened-config') {
+          await lody.documentManager.cleanSessionDoc(sessionId);
+          sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+          expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toMatchObject({
+            revision: 1,
+            state: 'ready',
+          });
+          expect(sessionDoc.isAcpConfigurationConfirmed('verified-owner')).toBe(false);
+        }
         const store = new LodyOperationStore(path.join(directory, 'config-inputs.sqlite'), () =>
           Date.now()
         );
@@ -3580,7 +3603,17 @@ describe('SessionExecutionService', () => {
               updateAcpCapabilities: async () => {},
             } as never,
             applyAcpModeAndModel: () =>
-              Effect.sync(() => {
+              Effect.promise(async () => {
+                if (mode === 'reopened-config') {
+                  await sessionDoc.beginAcpRuntimeConfig('', {
+                    acpSessionId: 'acp-config',
+                    generation: 'reopened-native',
+                    state: 'ready',
+                    modeId: 'plan',
+                    modelId: 'old-model',
+                  });
+                  await sessionDoc.flushLocalWrites();
+                }
                 submitted.push('configuration-applied');
               }),
           })
@@ -3598,6 +3631,38 @@ describe('SessionExecutionService', () => {
             userTurnId: 'turn-user-1',
             acpSessionConfig: read.turn.inputConfig,
           } as const;
+          if (mode !== 'stale-config') {
+            if (mode === 'derived-config') {
+              // Internal owner admission is synthetic; encrypted Automations policy is not enabled.
+              service.setAutomationAdmission(
+                async (args) =>
+                  args.turnId === 'turn-user-1' && args.origin.invocationId === 'derived-action',
+                () => true
+              );
+              expect(
+                await service.acceptAutomationInput({
+                  sessionId,
+                  turnId: 'turn-user-1',
+                  userId: user,
+                  config: read.turn.inputConfig,
+                })
+              ).toBe(true);
+            }
+            await service.continueSession(request);
+            expect(submitted).toEqual(['configuration-applied', 'prompt']);
+            expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+              state: 'ready',
+              turn: { status: 'handled', inputConfig: read.turn.inputConfig },
+            });
+            expect(
+              (await sessionDoc.sessionData.history.readAll())
+                .flatMap((turn) => turn.items ?? [])
+                .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+            ).toEqual([]);
+            if (mode === 'reopened-config')
+              expect(sessionDoc.isAcpConfigurationConfirmed('reopened-native')).toBe(true);
+            return;
+          }
           for (let attempt = 0; attempt < 2; attempt++) {
             await service.continueSession(request);
             expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
@@ -3759,6 +3824,10 @@ describe('SessionExecutionService', () => {
 
   it('rejects stale configuration using the production verified encrypted Loro session', () =>
     runProductionSignedTurn('stale-config'));
+  it('bootstraps a fresh input from the production encrypted Loro persisted revision after reopen', () =>
+    runProductionSignedTurn('reopened-config'));
+  it('accepts approved derived work with its inherited revision through production encrypted Loro', () =>
+    runProductionSignedTurn('derived-config'));
 
   it('executes the real UI account ID through production Lody construction without injected authorization', () =>
     runProductionSignedTurn('account'));
@@ -12996,6 +13065,171 @@ describe('Operation Inbox execution boundary', () => {
       }
     }
   );
+
+  it('bootstraps a fresh Loro input after reopening a persisted configuration without a live generation', async () => {
+    const prompts: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      prompts.push('prompt');
+      return { stopReason: 'end_turn' };
+    });
+    const peer = await revisionInput(f);
+    const reopened = new SessionDocument(
+      f.deps.workspaceDocument.repo,
+      f.message.sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    const { LoroDoc } = await import('loro-crdt');
+    const reopenedStorage = new LoroDoc();
+    reopenedStorage.import(f.doc.handle!.doc.export({ mode: 'snapshot' }));
+    composeTestSessionDoc(reopened, { doc: reopenedStorage });
+    f.deps.workspaceDocument.getOrCreateSessionDoc = async () => reopened;
+    const apply = f.deps.applyAcpModeAndModel;
+    f.deps.applyAcpModeAndModel = (session, input, context) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await reopened.beginAcpRuntimeConfig('', {
+            acpSessionId: 'acp-inbox' as ACPSessionId,
+            generation: 'reopened-native',
+            state: 'ready',
+            modeId: input.modeId,
+            modelId: input.modelId,
+          });
+          await reopened.flushLocalWrites();
+        });
+        yield* apply(session, input, context);
+      });
+    try {
+      expect(reopened.isAcpConfigurationConfirmed('config-owner')).toBe(false);
+      await f.service.continueSession(peer.request);
+      expect(prompts).toEqual(['prompt']);
+      expect(reopened.isAcpConfigurationConfirmed('reopened-native')).toBe(true);
+      expect(await reopened.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { status: 'handled', inputConfig: peer.config },
+      });
+    } finally {
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
+
+  it.each(['timeout', 'shutdown'])(
+    'bounds a missing Loro configuration wait and never dispatches after late sync (%s)',
+    async (end) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const prompts: string[] = [];
+      const f = inboxExecutionFixture(async () => {
+        prompts.push('prompt');
+        return { stopReason: 'end_turn' };
+      });
+      const peer = await revisionInput(f);
+      const entered = Promise.withResolvers<void>();
+      const synced = Promise.withResolvers<void>();
+      f.doc.handle!.doc.getMap('acpRuntimeConfig').clear();
+      f.doc.handle!.doc.commit();
+      f.doc.waitForRemoteSync = async () => {
+        entered.resolve();
+        await synced.promise;
+      };
+      try {
+        const pending = f.service.continueSession(peer.request);
+        await entered.promise;
+        if (end === 'shutdown') f.service.quiesceInboxExecutions();
+        else await vi.advanceTimersByTimeAsync(TURN_BUDGETS.configurationMs);
+        await pending;
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { status: end === 'shutdown' ? 'seen' : 'failed', inputConfig: peer.config },
+        });
+        expect(
+          (await f.doc.sessionData.history.readAll())
+            .flatMap((turn) => turn.items ?? [])
+            .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+        ).toMatchObject(end === 'shutdown' ? [] : [{ meta: { reason: 'turn_pre_prompt_failed' } }]);
+        synced.resolve();
+        await synced.promise;
+        expect(prompts).toEqual([]);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        synced.resolve();
+        peer.clientDoc.free();
+        await f.close();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('admits trusted Loro derived inputs with inherited revisions without exempting human input', async () => {
+    const prompts: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      prompts.push('prompt');
+      return { stopReason: 'end_turn' };
+    });
+    const peer = await revisionInput(f);
+    const origin = {
+      invocationId: 'continuation',
+      ruleId: 'approved-rule',
+      ruleRevision: 1,
+      eventRef: 'capacity-event',
+      authorizationUserId: 'user-1',
+      nativeSessionId: 'acp-inbox',
+    };
+    const config = { ...peer.config, _lodyAutomation: origin };
+    try {
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'config-input',
+        userId: 'user-1',
+        config: peer.config,
+      });
+      await f.service.continueSession(peer.request);
+      prompts.length = 0;
+      await peer.advanceOwner();
+      f.service.setAutomationAdmission(
+        async (args) =>
+          args.turnId === 'derived-input' && args.origin.invocationId === 'continuation',
+        () => true
+      );
+      expect(
+        await f.service.acceptAutomationInput({
+          sessionId: f.message.sessionId,
+          turnId: 'forged-input',
+          userId: 'user-1',
+          config,
+        })
+      ).toBe(false);
+      await f.doc.appendUserTurn({
+        id: 'derived-input',
+        role: 'user',
+        userId: 'user-1',
+        status: 'pending',
+        timestamp: '2026-10-31T00:01:00Z',
+        items: [{ type: 'text', text: config.prompt }],
+        inputConfig: config,
+      });
+      expect(
+        await f.service.acceptAutomationInput({
+          sessionId: f.message.sessionId,
+          turnId: 'derived-input',
+          userId: 'user-1',
+          config,
+        })
+      ).toBe(true);
+      await f.service.continueSession(
+        { ...peer.request, userTurnId: 'derived-input', acpSessionConfig: config },
+        { dispatchSource: 'queue' }
+      );
+      expect(prompts).toEqual(['prompt']);
+      expect(await f.doc.sessionData.history.readTurn('derived-input')).toMatchObject({
+        state: 'ready',
+        turn: { status: 'handled', inputConfig: config },
+      });
+    } finally {
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
 
   it('surfaces a rejected-input failure write error without accepting or losing the input', async () => {
     const f = inboxExecutionFixture(async () => {
