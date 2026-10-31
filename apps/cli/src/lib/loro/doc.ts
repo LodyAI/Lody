@@ -2906,32 +2906,19 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.flushLocalWrites();
   }
 
-  /** Serialize first acceptance and its durable receipt with configuration publication. */
+  /** Serialize first acceptance with publication; a Roost receipt skips this on retry. */
   acceptWithConfigRevision<A>(
     input: { configRevision?: number },
-    accept: () => Promise<A>,
-    alreadyAccepted: () => boolean | Promise<boolean> = () => false,
-    rejectChanged?: () => Promise<A>
+    accept: () => Promise<A>
   ): Promise<A> {
-    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
-      if (await alreadyAccepted()) return accept();
+    const next = this.acpRuntimeConfigPatchSerial.then(() => {
       if (
         input.configRevision !== undefined &&
         !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
       ) {
         throw new Error('SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.');
       }
-      try {
-        assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
-      } catch (error) {
-        if (
-          rejectChanged &&
-          error instanceof Error &&
-          error.message.startsWith('SESSION_CONFIG_CHANGED:')
-        )
-          return rejectChanged();
-        throw error;
-      }
+      assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
       return accept();
     });
     this.acpRuntimeConfigPatchSerial = next.then(

@@ -12,9 +12,7 @@ Supersedes: [仅警告的模型拒绝策略](../../archived/bug-fix/2026-10-09-m
 
 ## 决定与替代方案
 
-[Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。首次执行端准入在配置发布串行队列内检查捕获的 revision。Loro 在同一队列内写入已有的机器本地 Inbox 接纳回执，回执查询也在队列内执行，避免并发重复接纳与配置发布交错。该持久回执或 Roost 不可变历史接纳回执使重试、重启跳过重复检查；renderer outbox 或本地等待附件记录不等于 owner 接纳。历史请求重建和队列提升保留捕获的 revision，已接纳队列保留冻结值。加密会话只比较 native owner 已确认并本地持久化的会话文档，不把 RPC 或元数据 hint 当作当前 revision。
-
-Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_failed` 提示及失败终态。拒绝与接纳共用串行队列，重复投递不会重复提示或执行。原文和冻结配置保留在历史中；显式恢复使用当前已提交配置创建新输入，不复活旧执行或改写其冻结配置。失败提示写入错误继续向外报告，不视为成功准入。
+[Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。首次执行端准入在配置发布串行队列内检查捕获的 revision。已有不可变 Roost 回执在重试、重启后不再检查；本地等待附件的准入不等于该回执。队列保留冻结值。
 
 仅使用索引修复正文加载问题仍保留多个基线；移动优先级链到另一个 hook 也保留歧义。通用命令总线或整个 Session 迁移超出配置职责。因此继续使用既有 SessionDocument 控制持久化与原始请求释放所有者。
 
@@ -28,6 +26,7 @@ Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_fail
 
 `AcpConfiguration` 是 SDK 操作的窄服务；应用器及初始、恢复两个消费者组合原生 Effect。匹配的 steer 不应用配置。AgentClient 传输、进程释放及 SessionDocument Repo 持久化仍是上游 Promise 边界，不能宣称完整 ACP 或 Session 生命周期迁移。[迁移台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账) 记录此限制。没有新 runtime、cache、后台重试或期望状态存储。
 
+
 本地 owner 重启时会作废磁盘中的旧确认快照，直到新连接接管。接纳与 steer
 要求当前 revision 已完成本地持久化，仅出现在 mirror 中不算确认。steer 在异步
 准备结束、真正注入前同步重查连接、持久化确认和请求值；明确不匹配进入普通队列，
@@ -37,4 +36,4 @@ Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_fail
 
 更新客户端以 `sessionConfiguration` v1 限制发送；旧机器仍可读取历史及 Stop。旧快照不能建立确认。打开会话不启动 Agent；未指定字段在执行时继承，具体值必须应用。历史导入不创造当前状态；Fork 发布目标连接真实响应。能力删除保留具体选择并报错，不静默换默认值。
 
-合成行为测试覆盖部分拒绝、矛盾确认、false、中断、复用 ACP id、本地写入失败、准入与重启、双 Loro 客户端的陈旧首次输入、已验证加密会话准入、冻结队列、正文缺失及草稿保留。仓库级检查及打包、真实 provider UI 验收需另行报告，不代表已证明每次线上反馈的具体原因。
+合成行为测试覆盖部分拒绝、矛盾确认、false、中断、复用 ACP id、本地写入失败、准入与重启、冻结队列、正文缺失及草稿保留。仓库级检查及打包、真实 provider UI 验收需另行报告，不代表已证明每次线上反馈的具体原因。

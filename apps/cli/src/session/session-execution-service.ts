@@ -1166,7 +1166,7 @@ export class SessionExecutionService {
     const beforeAccept = this.automationBeforeAccept;
     if (!origin || !inbox || !admission || !(await admission({ ...args, origin }))) return false;
     if (origin.workIntentId && !beforeAccept) return false;
-    return this.acceptInboxInput(
+    return inbox.accept(
       {
         workspaceId: this.deps.workspaceId,
         sessionId: args.sessionId,
@@ -1188,53 +1188,12 @@ export class SessionExecutionService {
     this.onInboxReleased = onReleased;
     this.notificationWork = notificationWork;
   }
-  /** A local outbox is not owner acceptance. Check only the first durable Inbox receipt. */
-  private async acceptInboxInput(
-    input: InboxInput,
-    beforeAccept?: () => Promise<boolean>
-  ): Promise<boolean> {
-    const inbox = this.operationInbox;
-    const accept = () => (inbox ? inbox.accept(input, beforeAccept) : Promise.resolve(true));
-    if (input.config.configRevision === undefined) return accept();
-    const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(
-      input.sessionId as SessionId
-    );
-    // Roost checks its immutable history receipt at append; Loro uses the local Inbox receipt.
-    const backend = await createSessionBackend(doc);
-    if (backend.kind !== 'loro') return accept();
-    const sessionId = input.sessionId as SessionId;
-    const terminal = async () => {
-      if (this.getTerminalUserTurnStatusWithoutEntry(sessionId, input.inputId)) return true;
-      const read = await backend.readTurn(input.inputId);
-      return (
-        read.state === 'ready' &&
-        ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')
-      );
-    };
-    return doc.acceptWithConfigRevision(
-      input.config,
-      async () => ((await terminal()) ? false : accept()),
-      async () => inbox?.inputKind(input, input.inputId) !== undefined || (await terminal()),
-      async () => {
-        // This runs before a Turn owner exists. Publish the failure under the same
-        // acceptance queue so duplicate offers cannot emit a second notice or run.
-        await this.deps.recordChatFailure(
-          doc,
-          'session_config_changed',
-          'The configuration was updated elsewhere. Resend with the current configuration.'
-        );
-        await this.setTerminalUserTurnStatus(sessionId, doc, input.inputId, 'failed');
-        await this.abandonInboxInput(sessionId, input.inputId);
-        return false;
-      }
-    );
-  }
   async acceptInboxHumanInput(args: {
     sessionId: SessionId;
     inputId: string;
     userId: string;
     config: SessionTurnInputConfig;
-  }): Promise<boolean> {
+  }): Promise<void> {
     if (this.operationInbox) {
       const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
       const meta = await doc.getMetaState();
@@ -1247,10 +1206,10 @@ export class SessionExecutionService {
             ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')))
       ) {
         await this.abandonInboxInput(args.sessionId, args.inputId);
-        return false;
+        return;
       }
     }
-    return this.acceptInboxInput({
+    await this.operationInbox?.accept({
       workspaceId: this.deps.workspaceId,
       sessionId: args.sessionId,
       userId: args.userId,
@@ -4750,30 +4709,7 @@ export class SessionExecutionService {
             }
         : undefined;
     try {
-      if (
-        !inbox &&
-        invocation?.requesterUserId &&
-        invocation.inputConfig.configRevision !== undefined
-      ) {
-        const accepted = await this.acceptInboxInput({
-          workspaceId: this.deps.workspaceId,
-          sessionId,
-          userId: invocation.requesterUserId,
-          inputId: invocation.sourceTurnId,
-          kind: 'task',
-          config: invocation.inputConfig,
-        });
-        if (!accepted) {
-          releaseConflict();
-          span.end({ outcome: 'input-rejected' });
-          return 'input-rejected';
-        }
-      }
-      if (
-        inboxInput &&
-        inboxInput.kind !== 'automatic' &&
-        !(await this.acceptInboxInput(inboxInput))
-      ) {
+      if (inboxInput && inboxInput.kind !== 'automatic' && !(await inbox!.accept(inboxInput))) {
         releaseConflict();
         span.end({ outcome: 'inbox-paused' });
         return 'inbox-paused';
