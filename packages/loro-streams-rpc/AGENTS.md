@@ -18,6 +18,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   The closed pure-read list uses fresh read authority, never execution journals; other admitted
   Code Collab/preview actions require write authority and execution claims. Keep same-member
   machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+- Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
+  returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
+  senders withhold input only for a known withdrawal.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:

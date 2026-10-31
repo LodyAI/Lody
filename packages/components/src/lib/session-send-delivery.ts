@@ -10,7 +10,9 @@ import {
   type SessionTurnInputConfig,
 } from '@lody/shared';
 import debug from 'debug';
+import i18next from 'i18next';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
+import { SessionInputNotSentError } from './session-accepted-inputs';
 import { throwIfSendAborted } from './session-send-resources';
 
 const log = debug('lody:session-send');
@@ -42,7 +44,10 @@ export type SessionSendRuntime = Pick<
   'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
 > &
   Partial<
-    Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'>
+    Pick<
+      WorkspaceRuntime,
+      'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'
+    >
   >;
 
 /** Trusted human-send provenance, committed before history or queue activation. */
@@ -110,6 +115,7 @@ export async function writeUserTurn(
   send: UserTurnSend,
   signal?: AbortSignal
 ): Promise<void> {
+  await refuseKnownWithdrawnTarget(runtime, send);
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
@@ -117,6 +123,34 @@ export async function writeUserTurn(
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/**
+ * Encrypted machines also start pending input discovered in synced history, so a
+ * withdrawal this host has already verified must refuse the send before anything
+ * is written. Every other preparation outcome is unknown here: the input is written
+ * and the receiving machine still authorizes it.
+ */
+async function refuseKnownWithdrawnTarget(runtime: SessionSendRuntime, send: UserTurnSend) {
+  if (runtime.contentMode !== 'e2ee' || !runtime.prepareEncryptedDispatch) return;
+  const inputConfig = normalizeSessionTurnInputConfig(send.entry.inputConfig);
+  const userId = send.entry.userId?.trim();
+  const machineId =
+    (send.creation?.machineId as MachineId | undefined) ??
+    (await readMachineId(runtime, send.sessionId));
+  if (!machineId || !inputConfig || !userId || !send.entry.timestamp) return;
+  try {
+    await runtime.prepareEncryptedDispatch(machineId, {
+      sessionId: send.sessionId,
+      userTurnId: send.entry.id,
+      userId,
+      timestamp: send.entry.timestamp,
+      inputConfig,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'e2ee_machine_not_shared')
+      throw new SessionInputNotSentError(i18next.t('e2ee.machineSharing.issue.notShared'));
+  }
 }
 
 /** Only local control metadata; this does not write history or start execution. */

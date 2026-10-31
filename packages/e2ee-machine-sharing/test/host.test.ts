@@ -264,6 +264,8 @@ describe('native machine-sharing control and execution', () => {
             f.remote
           )
         );
+        // Not yet observed by this host: the owner-approved < 15 minute read keeps its grant.
+        expect(yield* allow()).toMatchObject({ allowed: true, reason: 'team' });
         yield* f.run(machine.read('fixture-machine', f.remote));
         expect(yield* allow()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
         f.setHead(old);

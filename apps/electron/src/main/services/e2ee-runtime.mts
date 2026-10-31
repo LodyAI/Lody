@@ -1777,12 +1777,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               ? (machineId) =>
                   Effect.gen(function* () {
                     const status = yield* entry.status()
-                    return (yield* entry.sharing.authorize(
+                    const decision = yield* entry.sharing.authorize(
                       machineId,
                       status.signingPublicKey ?? '',
                       undefined,
                       withSharingHistory(entry, workspaceId, remote, readHistory)
-                    )).allowed
+                    )
+                    // An unverifiable policy is not a known withdrawal.
+                    if (!decision.allowed && decision.reason === 'policy-unavailable')
+                      return yield* Effect.fail(new Error('e2ee_machine_sharing_unavailable'))
+                    return decision.allowed
                   })
               : undefined
           )

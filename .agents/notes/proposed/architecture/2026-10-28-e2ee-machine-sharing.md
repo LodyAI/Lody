@@ -116,3 +116,25 @@ already holds those encrypted documents, so this filter is presentation, not a s
 boundary. The receiving machine still authorizes every execution. Hook and store tests
 use fake timers and deferred reads; no two-member product run is claimed.
 
+
+## Sender withdrawal gate
+
+A machine discovers encrypted input in two ways: the signed RPC fast path and pending
+turns in synced session history. History origins are authenticated by their writer, so
+a pending user turn is executable once it syncs. An honest sender that has already
+verified a withdrawal therefore must not write that input. Before any metadata,
+receipt or history write, an encrypted send prepares its dispatch. If the host returns
+the verified denial `e2ee_machine_not_shared`, the send fails as not sent and the
+composer keeps the draft. `prepareDispatch` reports an unverifiable policy separately
+as `e2ee_machine_sharing_unavailable`. That outcome, like timeouts and transport
+failures, stays unknown: the input is written as before and the receiving machine
+decides. Writing first and repairing the turn afterwards was rejected because upload
+and a machine's history discovery race the repair.
+
+The receiving machine was not changed. Policies live in the server's sharing store,
+not in workspace data the machine syncs, and its execution check reuses an
+authenticated read younger than 15 minutes. A withdrawal that the machine has not yet
+observed is the owner-approved unknown window. The host test pins both halves: the
+fresh grant survives an unobserved withdrawal, and the host's own verified read denies
+at once. A send that a sender knew was withdrawn is refused before any write; a sender
+that cannot verify still relies on that window.

@@ -135,7 +135,13 @@ export function createEncryptedDispatchLegacy(options: {
       const original = await Effect.runPromise(
         Effect.tryPromise({
           try: () => options.prepare(machineId, input),
-          catch: () => new Error('e2ee_rpc_prepare'),
+          // Keep the host's verified withdrawal distinct: senders refuse to write that input.
+          catch: (cause) =>
+            new Error(
+              cause instanceof Error && /(?:^|: )e2ee_machine_not_shared$/.test(cause.message)
+                ? 'e2ee_machine_not_shared'
+                : 'e2ee_rpc_prepare'
+            ),
         }).pipe(Effect.timeout('200 millis'))
       );
       if (closed) throw new Error('e2ee_rpc_closed');
