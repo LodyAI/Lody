@@ -280,8 +280,9 @@ row, only while that origin turn is active and only for this machine. At start, 
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
 the member's rights ∩ the owner's sharing policy ∩ every reached project. The start
 deadline is the origin's signed deadline plus 15 minutes. Derivation is one level deep,
-with at most 20 inputs per origin. Owner work is unchanged; cross-machine derivation
-fails closed pending decision. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
+with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
+not implemented and fails closed; a future version would use a user-approved signature
+from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 
 ### Permission freshness and the separate durable expiry clock
 

@@ -38,13 +38,28 @@ The owner settled these points on 2026-10-31, relayed by the E2EE coordinator.
   - One level. A derived turn exposes no invocation identity and cannot steer.
   - At most 20 derived inputs per origin turn, matching the largest single Agent batch
     (20 targets).
-- **Cross-machine.** A member derivation that targets another machine is refused when it
-  is written (`e2ee_derivation_cross_machine_unsupported`). The extension point is
+- **Cross-machine.** The owner decided on 2026-10-31 that the first version does not
+  derive across machines. A member derivation that targets another machine is refused when
+  it is written (`e2ee_derivation_cross_machine_unsupported`). The extension point is
   `decideEncryptedDerivation`.
 - **Agent control.** iOS control from a member turn requires that member's rights for the
   turn's projects. Preview attribution stays owner-only.
 - **Owner work.** Unchanged. It has no `derivedFrom` and keeps owner authority, including
   operation recovery after its turn ended.
+
+## Cross-machine derivation (future)
+
+This is a direction the owner prefers, not an approved design; it is left for later Spec
+discussion.
+
+- When an agent wants to derive work on another machine, the originating user receives an
+  approval request.
+- If the user approves on one of their own personal devices, that device produces the
+  signature. It binds the workspace, genesis, origin turn, target machine, target operation
+  and expiry.
+- The target machine verifies that signature and authorizes the originating member's rights
+  ∩ the target machine's sharing policy ∩ the project scope.
+- The target machine does not need to read the origin session.
 
 ## Alternatives
 

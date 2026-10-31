@@ -211,7 +211,7 @@ owner 于 2026-10-28 已确认接受信任服务端不持续隐藏新 head 的�
 chat、Role、续跑、agent 控制）。机器只在来源轮次活跃、且目标为本机时写出这种输入，并在已签名的行内记录
 `derivedFrom: { sessionId, userTurnId }`。启动时，机器验证来源是该成员本人签名、非派生的轮次，并按"成员权限 ∩
 所有者共享策略 ∩ 所涉每个项目"授权。开始期限为来源签名期限加 15 分钟。派生只允许一层，每个来源最多 20 个输入。
-所有者工作不变；跨机器派生在决定前一律失败封闭。见[派生工作](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.zh.md)。
+所有者工作不变。跨机器派生未实现，一律失败封闭；未来版本将改为经发起成员在其个人设备上审批签名。见[派生工作](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.zh.md)。
 
 ### 权限新鲜度与独立的持久过期时钟
 
