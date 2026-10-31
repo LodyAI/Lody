@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: https://github.com/LodyAI/Lody/pull/2131
+PR: https://github.com/LodyAI/Lody/pull/2152
 Owner revision: 2026-10-31
 
 [English](2026-10-27-e2ee-epoch-receive-barrier.md)
@@ -13,7 +13,7 @@ Owner revision: 2026-10-31
 
 ## 取舍与保留的 bug 修复
 
-owner 修订的是 #2131 缺当前 key 时严格拒绝的策略，不回退旧 renderer 缓存提示的修复。当前 key 已安装时必须优先使用。桌面原生、CLI、便携/浏览器文档绑定共用 core 的 `writeEpoch: current` 选择，覆盖文档、Meta、Flock 的 update 与 snapshot。RPC/执行准入独立且不变。不新增后端 epoch 强制检查、网络请求、替换 key、明文回退或线上格式。
+owner 修订的是 [#2131](https://github.com/LodyAI/Lody/pull/2131) 缺当前 key 时严格拒绝的策略，不回退旧 renderer 缓存提示的修复。当前 key 已安装时必须优先使用。桌面原生、CLI、便携/浏览器文档绑定共用 core 的 `writeEpoch: current` 选择，覆盖文档、Meta、Flock 的 update 与 snapshot。RPC/执行准入独立且不变。不新增后端 epoch 强制检查、网络请求、替换 key、明文回退或线上格式。
 
 只有 installed-key 的真实 `missing-key` 结果允许尝试最新可用旧 key；其 publication 和 commitment 必须属于同一真实账本。存储、托管、commitment 或权限失败不能变成缺 key 的成功回退。core 仍在加密前和签名后检查当前成员/设备权限；移除或撤销的设备、Guest、Recovery 不获得写入权限。打开旧 key 后会再次读取当前 key，让并发安装的新 key 在加密前优先。
 

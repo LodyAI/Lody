@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: https://github.com/LodyAI/Lody/pull/2131
+PR: https://github.com/LodyAI/Lody/pull/2152
 Owner revision: 2026-10-31
 
 [中文](2026-10-27-e2ee-epoch-receive-barrier.zh.md)
@@ -13,7 +13,7 @@ Every new content seal prefers the verified current epoch inside the host, regar
 
 ## Decision and retained bug fix
 
-The owner revises #2131's strict refusal while a current key is missing, not its stale-renderer bug fix. A current installed key always wins over an old provider hint. Desktop native, CLI and portable/browser document bindings share core's `writeEpoch: current` selector, covering document, Meta and Flock updates and snapshots. RPC/execution admission remains separate and unchanged. No backend epoch enforcement, new network request, replacement key, plaintext fallback or online format change is introduced.
+The owner revises [#2131](https://github.com/LodyAI/Lody/pull/2131)'s strict refusal while a current key is missing, not its stale-renderer bug fix. A current installed key always wins over an old provider hint. Desktop native, CLI and portable/browser document bindings share core's `writeEpoch: current` selector, covering document, Meta and Flock updates and snapshots. RPC/execution admission remains separate and unchanged. No backend epoch enforcement, new network request, replacement key, plaintext fallback or online format change is introduced.
 
 Only an actual installed-key `missing-key` result permits trying the newest available older key. Its publication and commitment must belong to the same genuine ledger. Storage, protection, commitment and permission failures never become missing-key success. Core repeats current member/device permission checks before encryption and after signing; removed/revoked devices, Guest and Recovery writers gain no authority. The selector checks current installation again after opening an old candidate, so a concurrently installed current key wins before encryption.
 
