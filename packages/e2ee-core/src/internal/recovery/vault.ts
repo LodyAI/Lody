@@ -19,6 +19,7 @@ import {
   sameCiphertext,
   ciphertextDigest,
   usePrf,
+  useCanonicalSecret,
   type VaultCiphertext,
   type VerifiedPasskeyPrf,
 } from './crypto';
@@ -259,8 +260,9 @@ const makeSession = Effect.fnUntraced(function* (input: {
       attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
       (plain) =>
         attempt(() => {
-          const value = ownRecoveryPackage(
-            Result.getOrThrow(Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain)))
+          // ownRecoveryPackage returns copies; the decoded temporaries are wiped.
+          const value = useCanonicalSecret(plain, (decoded) =>
+            ownRecoveryPackage(decoded as RecoveryPrivatePackage)
           );
           if (
             value.genesis !== ref.genesis ||
@@ -563,10 +565,8 @@ const makeSession = Effect.fnUntraced(function* (input: {
             attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
             (plain) =>
               attempt(() => {
-                const value = ownRecoveryPackage(
-                  Result.getOrThrow(
-                    Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain))
-                  )
+                const value = useCanonicalSecret(plain, (decoded) =>
+                  ownRecoveryPackage(decoded as RecoveryPrivatePackage)
                 );
                 return {
                   reference: {
