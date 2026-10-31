@@ -27,7 +27,8 @@ import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
 import * as memberJoining from './e2ee-member-join.mts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
-import { desktopE2eeFailure } from './e2ee-diagnostics.mts'
+import { desktopE2eeFailure, rememberDesktopE2eeFailure } from './e2ee-diagnostics.mts'
+import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console, env = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
@@ -52,16 +53,18 @@ async function load(relative, dependencies, console = globalThis.console, env = 
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
-          : id === '../../services/e2ee-member-join.mjs'
-            ? memberJoining
-            : id === '../../services/e2ee-cloud-errors.mjs'
-              ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
-              : id === '../../services/e2ee-personal-pairing.mjs'
-                ? { PersonalPairingOfferSchema }
-                : id === '../../services/e2ee-client-loss-probe'
-                  ? // Production default: the E2E probe is disabled and forwards work.
-                    { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
-                  : require(id)
+          : id === './e2ee-diagnostics.mjs'
+            ? { rememberDesktopE2eeFailure }
+            : id === '../../services/e2ee-member-join.mjs'
+              ? memberJoining
+              : id === '../../services/e2ee-cloud-errors.mjs'
+                ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
+                : id === '../../services/e2ee-personal-pairing.mjs'
+                  ? { PersonalPairingOfferSchema }
+                  : id === '../../services/e2ee-client-loss-probe'
+                    ? // Production default: the E2E probe is disabled and forwards work.
+                      { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
+                    : require(id)
     }
   )
   return exports
@@ -493,6 +496,24 @@ void test('only unavailable custody exposes the availability fallback code', asy
     corrupt.api.withDesktopE2eeAccount(() => Effect.void),
     /e2ee_corrupt/
   )
+  const native = await account()
+  const original = new Error('synthetic private native failure')
+  for (const [source, operation] of [
+    ['account-operation', () => native.api.withDesktopE2eeAccount(() => Effect.fail(original))],
+    [
+      'runtime-operation',
+      () => native.api.runDesktopE2eeOperation('account', Effect.fail(original))
+    ]
+  ]) {
+    await assert.rejects(operation(), (error) => {
+      assert.equal(error.message, 'e2ee_host_operation_failed')
+      assert.equal(error.cause, undefined)
+      return true
+    })
+    assert.equal(desktopE2eeFailure().source, source)
+    assert.equal(desktopE2eeFailure().cause, original)
+  }
+  await native.api.closeDesktopE2eeAccount()
 })
 
 void test('main cached identity follows resolved sessions, transport failures and definitive sign-out without a new query', async () => {
@@ -1007,6 +1028,52 @@ async function personalJoinFixture(t) {
   }
   return { open, rows, relay, db, workspaceId, append, admit, client, remote }
 }
+
+void test('a confirmed link invitation closes through the quit barrier and reopens its committed encrypted identity', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('link-owner')
+  await owner.create()
+  const before = await owner.ipc.status(f.workspaceId)
+  let published
+  f.client.memberCreateInvitation = ({ offer }) =>
+    f.remote(() => {
+      published = structuredClone(offer)
+      return { offer }
+    })
+  const invitation = await owner.ipc.createMemberInvitation({
+    workspaceId: f.workspaceId,
+    mode: 'link'
+  })
+  assert.deepEqual(invitation, published)
+  let didQuit = false
+  const barrier = createDesktopQuitBarrier({
+    stop: async () =>
+      assert.deepEqual(
+        await drainMainProcessQuitResources([{ name: 'e2ee', close: owner.close }]),
+        []
+      ),
+    quit: () => {
+      didQuit = true
+    },
+    reportFailure: (error) => {
+      throw error
+    }
+  })
+  await barrier({ preventDefault() {} })
+  assert.equal(didQuit, true)
+  const reopened = await f.open('link-owner')
+  await reopened.attach()
+  const after = await reopened.ipc.status(f.workspaceId)
+  for (const key of [
+    'genesisHash',
+    'headHash',
+    'length',
+    'epoch',
+    'hasCurrentKey',
+    'hasDeviceCredential'
+  ])
+    assert.deepEqual(after[key], before[key], key)
+})
 
 void test('personal join IPC bridges the control-page observation outside the account lock and retains an offline proof', async (t) => {
   const f = await personalJoinFixture(t)

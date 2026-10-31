@@ -70,6 +70,12 @@ A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` o
 withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
 resets. Relaunching quits the embedded CLI: never make it a default recovery step.
 
+Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
+Unconfirmed work keeps its original owner until main exits, with a warning bounded
+to five seconds and a nonzero exit. Never replace custody or clear pending writes
+on a waiter deadline. CLI and shell process owners must still confirm release
+before main can terminate. Quit diagnostics name phases, never credentials or causes.
+
 ## Auto-update
 
 - Sparkle load failure falls back to electron-updater. Sparkle UI stays silent;

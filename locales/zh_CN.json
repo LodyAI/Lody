@@ -1486,6 +1486,8 @@
   "desktop.unloadConfirm.stay": "留下",
   "desktop.unloadConfirm.leave": "离开",
   "desktop.unloadConfirm.quit": "退出",
+  "desktop.quitUnconfirmed.title": "Lody 正在退出，部分工作尚未确认完成",
+  "desktop.quitUnconfirmed.detail": "部分最近更改尚未确认保存，未保存的更改可能丢失。已保留的加密数据会留待下次启动恢复。Lody 将在五秒后自动关闭。",
   "menu.view": "显示",
   "menu.window": "窗口",
   "mobile.filterDrawer.activeHeading": "已选中的筛选",
