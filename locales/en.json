@@ -5825,6 +5825,7 @@
   "e2ee.remoteMachine.osProtection": "Keys are protected by the machine’s operating system key store.",
   "e2ee.remoteMachine.machine": "Machine: {{id}}",
   "e2ee.remoteMachine.error": "Pairing could not finish. Check the connection and retry. Existing approval is preserved.",
+  "e2ee.remoteMachine.keyRevoked": "This machine's previous identity was revoked. Create a new command and run it on the machine with an updated Lody; it creates a new identity before pairing.",
   "e2ee.remoteMachine.status.pending": "Waiting for the machine to connect.",
   "e2ee.remoteMachine.status.claimed": "Connected. Compare the summary below.",
   "e2ee.remoteMachine.status.admitting": "Approval is being checked. Resume to reconcile the original request.",

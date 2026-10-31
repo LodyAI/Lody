@@ -4245,6 +4245,100 @@ describe('machine E2EE local runtime', () => {
   });
 });
 
+it('records an exact device revocation so the next offer uses a fresh identity offline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-device-revoked-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
+  const accountId = 'revoked-account';
+  const root = join(
+    getLodyDataDir(),
+    'e2ee',
+    createHash('sha256').update(accountId).digest('hex'),
+    'workspace'
+  );
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  try {
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const key = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+    );
+    let revoked = false;
+    const removed: string[] = [];
+    host = await openCliE2eeWorkspaceLegacy({
+      accountId,
+      ...binding,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+      onRemoved: async (reason) => {
+        removed.push(String(reason));
+      },
+      cloud: {
+        getHistory: async () => {
+          if (revoked) throw new Error('unauthorized');
+          return page(fixture.records);
+        },
+        getContentToken: async () => {
+          throw new CloudE2eeDeviceRevoked();
+        },
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort,
+    });
+    await host.refresh();
+    revoked = true;
+    await host.refresh();
+    await host.removalCleanup();
+    expect(removed).toEqual(['device-revoked']);
+    // Membership and local data stay; only this identity is retired.
+    await expect(fs.readFile(join(root, 'removed.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await fs.readFile(join(root, 'revoked-device.json'), 'utf8'))).toEqual({
+      genesisHash: binding.genesisHash,
+      signingPublicKey: key,
+    });
+    await host.close();
+    host = undefined;
+    const next = await prepareCliE2eeMachineLegacy({
+      accountId,
+      ...binding,
+      machineId: 'synthetic-machine',
+      frontendSigningPublicKey: fixture.sender,
+      membershipId: 'ef'.repeat(16),
+      pairingSessionId: 'ef'.repeat(16),
+      keyring: noKeyring,
+    });
+    if ('superseded' in next) throw new Error('unexpected supersession');
+    expect(next.signingPublicKey).not.toBe(key);
+    // The retired original stays as historical evidence; it is never offered again.
+    expect(
+      await fs.readFile(
+        join(root, 'custody', `${binding.genesisHash}-${key}.machine-revoked.device`)
+      )
+    ).toBeInstanceOf(Buffer);
+  } finally {
+    await host?.close().catch(() => undefined);
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receipt-error'] as const)(
   'member removal drains the machine owner before erasing managed data and requires a fresh member (%s)',
   async (source) => {
@@ -4692,6 +4786,163 @@ describe('remote machine command', () => {
       expect(clock).toBe(0);
     } finally {
       activation.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('re-pairs a revoked machine with a fresh identity instead of offering its revoked key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-revoked-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { makeDesktopRemotePairing } = yield* Effect.promise(
+            () => import('../../electron/src/main/services/e2ee-remote-pairing.mts')
+          );
+          const { pairRemoteMachineLegacy } = yield* Effect.promise(
+            () => import('../src/lib/e2ee/remote-pairing')
+          );
+          const { CloudE2eeDeviceRevoked } = yield* Effect.promise(
+            () => import('../src/lib/cloud-e2ee-errors')
+          );
+          const custody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'owner'),
+            wrapper,
+          });
+          const prepared = yield* custody.prepareDevice();
+          const signed = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(21))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(31))),
+            membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(11))),
+          });
+          const signer = yield* custody.retainDevice(signed.genesis, prepared);
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: signed.genesis,
+              records: [signed.record],
+              checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+            })
+          );
+          const db = new DatabaseSync(join(directory, 'desktop.sqlite'));
+          yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+          db.exec('CREATE TABLE records(position INTEGER PRIMARY KEY, record BLOB)');
+          db.prepare('INSERT INTO records VALUES(0,?)').run(signed.record);
+          const append = (record: Uint8Array) => {
+            view = Result.getOrThrow(
+              extendLedger(view, [record], {
+                length: view.length + 1,
+                head: hashRecordBytes(record),
+              })
+            );
+            db.prepare('INSERT INTO records VALUES(?,?)').run(view.length - 1, record);
+          };
+          const remote = makeDesktopRemotePairing({
+            db,
+            workspaceId: 'workspace',
+            genesis: signed.genesis,
+            genesisRecord: signed.record,
+            signer,
+            current: () => Effect.succeed(view),
+          });
+          const args = {
+            accountId: 'remote-account',
+            deploymentUrl: 'https://cloud.synthetic.test',
+            ingressUrl: 'https://edge.synthetic.test',
+          };
+          // First pairing: admitted into the verified ledger.
+          const first = yield* remote.offer(args);
+          const original = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...first, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in original) throw new Error('unexpected supersession');
+          const material = (value: typeof original) => ({
+            ...value,
+            machineId: 'machine',
+            ok: true as const,
+            type: 'prepare' as const,
+          });
+          const request = yield* remote.approve(
+            first.pairingSessionId,
+            yield* remote.stage(first.pairingSessionId, material(original))
+          );
+          if (!request) throw new Error('expected admission');
+          append(new Uint8Array(Buffer.from(request.recordHex, 'hex')));
+          yield* remote.retire(first.pairingSessionId);
+          // The owner revokes the stopped machine; core keeps its keys in device history.
+          append(
+            yield* signLedgerRecord(
+              Result.getOrThrow(
+                prepareLedgerCommand(view, signer.publicKey, {
+                  _tag: 'RevokeDevice',
+                  target: Result.getOrThrow(
+                    Bytes.signingPublicKey(
+                      new Uint8Array(Buffer.from(original.signingPublicKey, 'hex'))
+                    )
+                  ),
+                })
+              ),
+              signer
+            )
+          );
+          // A machine that cannot learn its revocation still offers the old key:
+          // the desktop names the reason instead of a generic invalid input.
+          const unknowing = yield* remote.offer(args);
+          const reused = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...unknowing, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in reused) throw new Error('unexpected supersession');
+          expect(reused.signingPublicKey).toBe(original.signingPublicKey);
+          const refused = yield* Effect.result(
+            remote.stage(unknowing.pairingSessionId, material(reused))
+          );
+          expect(Result.isFailure(refused) && refused.failure).toMatchObject({
+            message: 'e2ee_pairing_key_revoked',
+          });
+          yield* remote.retire(unknowing.pairingSessionId, true);
+          // The real command path learns the exact revocation and offers a new identity.
+          const next = yield* remote.offer(args);
+          const probes: string[] = [];
+          let staged: string | undefined;
+          const outcome = yield* Effect.promise(() =>
+            pairRemoteMachineLegacy({
+              encodedOffer: Buffer.from(JSON.stringify(next)).toString('base64url'),
+              machineId: 'machine',
+              keyring: noKeyring,
+              signal: new AbortController().signal,
+              cloud: {
+                getContentToken: async (input: { credential: string }) => {
+                  probes.push(input.credential);
+                  throw new CloudE2eeDeviceRevoked();
+                },
+              } as unknown as CloudE2eePort,
+              claim: async (body) => {
+                const sent = JSON.parse(body).material;
+                staged = await Effect.runPromise(remote.stage(next.pairingSessionId, sent));
+                return {
+                  pairingSessionId: next.pairingSessionId,
+                  status: 'cancelled',
+                  expiresAt: next.expiresAt,
+                  material: sent,
+                  location: null,
+                };
+              },
+              show: () => {},
+            }).catch((error: unknown) => error)
+          );
+          expect(outcome).toMatchObject({ message: 'e2ee_pairing_cancelled_create_new_command' });
+          expect(probes).toHaveLength(1);
+          expect(staged).toEqual(expect.any(String));
+          const fresh = JSON.parse(
+            String(db.prepare('SELECT material FROM remote_local_pairing').get()?.material)
+          ) as { signingPublicKey: string; encryptionPublicKey: string };
+          expect(fresh.signingPublicKey).not.toBe(original.signingPublicKey);
+          expect(fresh.encryptionPublicKey).not.toBe(original.encryptionPublicKey);
+        })
+      );
+    } finally {
       vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
     }

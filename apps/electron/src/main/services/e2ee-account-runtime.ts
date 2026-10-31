@@ -670,6 +670,7 @@ function publicE2eeFailure(error: unknown): Error {
     'closed',
     'corrupt',
     'invalid-input',
+    'pairing_key_revoked',
     'storage',
     'invalid-ledger',
     'machine_not_owned',

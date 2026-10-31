@@ -49,6 +49,8 @@
   genesis waits for the first authoritative list outcome (list, rejection, subscription
   error or shutdown), then fails closed; a cached match proceeds offline
   ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
+  A known-revoked identity (device receipt or exact `e2ee_device_revoked`) is archived
+  before a new offer; never offer a revoked key ([re-pairing](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md#re-pairing-a-revoked-machine)).
   After admission, `lody machine pair` treats a missing key as a bounded wait for desktop
   delivery, never as failure; other activation errors stay terminal
   ([remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)).

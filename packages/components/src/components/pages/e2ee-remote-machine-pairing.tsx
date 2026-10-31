@@ -34,7 +34,8 @@ export function E2eeRemoteMachinePairing({
   );
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  // A revoked identity cannot be readmitted; the machine must create a new one.
+  const [error, setError] = useState<false | 'generic' | 'key-revoked'>(false);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -59,8 +60,13 @@ export function E2eeRemoteMachinePairing({
     setError(false);
     try {
       await work();
-    } catch {
-      if (active.current) setError(true);
+    } catch (cause) {
+      if (active.current)
+        setError(
+          cause instanceof Error && /\be2ee_pairing_key_revoked$/.test(cause.message)
+            ? 'key-revoked'
+            : 'generic'
+        );
     } finally {
       if (active.current) setBusy(false);
     }
@@ -82,7 +88,13 @@ export function E2eeRemoteMachinePairing({
         <Card.Description>{t('e2ee.remoteMachine.description')}</Card.Description>
       </Card.Header>
       <div>
-        {error && <p role="alert">{t('e2ee.remoteMachine.error')}</p>}
+        {error && (
+          <p role="alert">
+            {t(
+              error === 'key-revoked' ? 'e2ee.remoteMachine.keyRevoked' : 'e2ee.remoteMachine.error'
+            )}
+          </p>
+        )}
         {session && (
           <>
             <Textarea
