@@ -135,7 +135,7 @@ channel is implemented. Existing encrypted PR-poller isolation remains intact.
 Failure finalization evidence for quota recovery is distinct from successful history
 finalization; it cannot authorize unread-success publication.
 
-Settings default off and affect future observations. Disabling revokes new submissions;
+Settings default off and affect future observations. Enabling capacity recovery also admits a recorded failure for the current input once. Disabling revokes new submissions;
 cancellation addresses an accepted input. Policy dispatch is internal Lody code.
 
 - **Quota recovery:** typed exhaustion retains the original native conversation,

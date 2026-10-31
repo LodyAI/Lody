@@ -486,8 +486,31 @@ export async function createAutomationWorkspaceLegacy(options: {
               )
                 throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               await sessionContext(sessionId);
-              if (command.type === 'configure')
-                configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now);
+              if (command.type === 'configure') {
+                const record =
+                  command.settings.recoverCapacity === true
+                    ? await lody.documentManager.repo.getDocMeta(
+                        getSessionRoomId(sessionId as SessionId)
+                      )
+                    : undefined;
+                const meta = record?.meta as SessionMeta | undefined;
+                const currentTurn =
+                  meta?.userId === auth.userId &&
+                  meta.machineId === auth.machineId &&
+                  !isLoroRepoDocDeleted(record)
+                    ? meta.latestUserMsgId
+                    : undefined;
+                const wasEnabled =
+                  sessionPolicySettings(ledger, sessionId).recoverCapacity === true;
+                ledger.configureSession(
+                  () =>
+                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now),
+                  sessionId,
+                  auth.userId,
+                  !wasEnabled ? currentTurn : undefined,
+                  now
+                );
+              }
               await runtime.runPromise(service.wake);
               return sessionPolicySettings(ledger, sessionId);
             }

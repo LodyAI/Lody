@@ -50,8 +50,7 @@ Host; cross-device and Web access need a separate authorization contract.
   ChatGPT profile. Grok has an eligibility branch but its extension is not
   initialized in this checkout, so it remains unverified. Other builtin adapters
   have no `rateLimits.query` capability, and API-key, branded, Magpie and
-  credential-override configs are not eligible. The Claude-only scheduled
-  `continue` shortcut remains available; see the [restoration decision](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.md).
+  credential-override configs are not eligible. The Claude failure banner enables Session recovery rather than creating a Schedule; see the [restoration decision](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.md).
 - Local Electron uses a scoped IPC bridge to list and cancel waits and read or
   configure Session policies. While the Session is visible it polls the Host;
   rejected reads show unavailable state and Session switches discard late results.

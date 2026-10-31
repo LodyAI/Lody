@@ -42,7 +42,7 @@ UI 绝不能把“送达未知”说成成功；只有被 Stop 挡住的接续�
   都上报 `rateLimits.query`；Codex 必须是 ChatGPT profile。Grok 有资格判断分支，
   但当前 checkout 的扩展未初始化，仍属未验证。其他 builtin adapter 没有
   `rateLimits.query`；API-key、branded、Magpie 和凭据覆盖配置都不符合资格。
-  Claude 专用定时 `continue` 快捷方式仍然可用；见[恢复决定](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.zh.md)。
+  Claude 失败提示开启 Session 恢复，不再创建 Schedule；见[恢复决定](../../implemented/feature/2026-10-30-restore-quota-continue-shortcut.zh.md)。
 - 本机 Electron 通过限定范围的 IPC 列出、取消等待并读取、修改会话设置。会话可见时
   轮询 Host；读取失败显示不可用，切换会话时丢弃迟到的结果。返回 renderer 前过滤
   Host 数据。远程机器、Web 和能力发现仍未接入。针对 Stop 的显式恢复现已复用

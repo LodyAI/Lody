@@ -268,5 +268,8 @@ export function classifyCapacityFailure(
   if (codex === 'serverOverloaded') return 'provider_overloaded';
   if (codex === 'usageLimitExceeded' || codex === 'usage_limit_exceeded') return 'quota_exhausted';
   if (getStringField(parsed.data, 'errorKind') === 'rate_limit') return 'rate_limited';
+  // Claude's explicit session-limit failure may omit errorKind.
+  if (/You've hit your session limit\s*·\s*resets\b/i.test(parsed.message))
+    return 'quota_exhausted';
   return undefined;
 }
