@@ -1486,6 +1486,8 @@
   "desktop.unloadConfirm.stay": "Stay",
   "desktop.unloadConfirm.leave": "Leave",
   "desktop.unloadConfirm.quit": "Quit",
+  "desktop.quitUnconfirmed.title": "Some work was unconfirmed at the previous exit",
+  "desktop.quitUnconfirmed.detail": "Lody could not confirm all recent changes were saved. Unsaved changes may have been lost. Persisted encrypted data has been kept.",
   "menu.view": "View",
   "menu.window": "Window",
   "mobile.filterDrawer.activeHeading": "Active filters",
