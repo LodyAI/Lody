@@ -5,6 +5,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import {
   machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryWatch,
 } from '@lody/shared';
@@ -4696,6 +4697,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+          coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
           watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),

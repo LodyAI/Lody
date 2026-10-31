@@ -1,5 +1,10 @@
+import { z } from 'zod';
 import {
   SessionHistoryChangesSchema,
+  ResumeFromExternalChatHistoryMetaSchema,
+  buildReplayPromptFromHistory,
+  resolveLatestSessionGoalFromHistory,
+  type SessionHistoryInput,
   type SessionHistoryReadQuery,
   type SessionHistoryReadResponse,
   type SessionHistoryWriteOperation,
@@ -13,18 +18,88 @@ import {
   type SessionHistoryReader,
   type SessionImportResult,
   type SessionTurnRead,
+  historyQueryRow,
+  type HistoryQueryRow,
+  readSessionHistoryMetadata,
+  createRoostDirectoryRow,
 } from '@lody/shared/session-data';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { RoostSessionBackendServices } from './roost-session-backend';
 
 /** A command client has no native history owner, even when it runs on that machine. */
 export type RoostSessionRpc = {
+  readonly coherentInspection?: boolean;
   read(query: SessionHistoryReadQuery): Promise<SessionHistoryReadResponse>;
   write(
     operation: SessionHistoryWriteOperation,
     payload: Record<string, unknown>
   ): Promise<SessionHistoryWriteResponse>;
 };
+
+const historyEntriesSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      role: z.enum(['user', 'assistant', 'system']),
+      timestamp: z.string(),
+    })
+    .passthrough()
+);
+const querySnapshotSchema = z
+  .object({
+    token: z.string().regex(/^[a-f0-9]{64}$/),
+    rows: z.array(z.record(z.string(), z.unknown())),
+  })
+  .strict();
+const transcriptResultSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    positions: z.array(z.number().int().nonnegative()),
+    entries: historyEntriesSchema,
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.positions.length === value.entries.length && value.total >= value.entries.length
+  );
+const goalResultSchema = z
+  .object({
+    type: z.literal('goal'),
+    threadId: z.string(),
+    objective: z.string(),
+    status: z.string(),
+  })
+  .passthrough()
+  .nullable();
+const replayResultSchema = z
+  .object({
+    promptText: z.string(),
+    stats: z
+      .object({
+        usedChars: z.number().int().nonnegative(),
+        truncated: z.boolean(),
+        terminalOmitted: z.boolean(),
+        terminalTailApplied: z.boolean(),
+        thinkingOmitted: z.boolean(),
+        pathsCount: z.number().int().nonnegative(),
+        messagesIncluded: z.number().int().nonnegative(),
+      })
+      .strict(),
+    noticeMeta: ResumeFromExternalChatHistoryMetaSchema,
+  })
+  .strict();
+const queryRow = (entry: SessionHistoryInput, visibility = false): HistoryQueryRow =>
+  historyQueryRow(
+    entry,
+    {
+      field: (value, key) =>
+        value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+      scalar: (value) => value,
+      length: (value) => (Array.isArray(value) ? value.length : 0),
+      at: (value, index) => (value as unknown[])[index],
+    },
+    visibility
+  );
 
 export function createRoostRpcSessionServices(
   doc: SessionDocument,
@@ -35,10 +110,12 @@ export function createRoostRpcSessionServices(
     if (disposed) throw new Error('Owner history reader is disposed');
     const response = await rpc.read(query);
     if (!response.success || response.sessionId !== doc.sessionId || response.result === undefined)
-      throw new Error(response.error ?? 'Owner history read failed');
+      throw Object.assign(new Error(response.error ?? 'Owner history read failed'), {
+        code: response.retryReason === 'superseded' ? 'superseded' : 'history_read_failed',
+      });
     return response;
   };
-  const read = async <T>(query: SessionHistoryReadQuery): Promise<T> =>
+  const readResult = async <T>(query: SessionHistoryReadQuery): Promise<T> =>
     (await readResponse(query)).result as T;
   const readRange = async <T>(
     kind: 'readRange' | 'readDirectory',
@@ -87,7 +164,7 @@ export function createRoostRpcSessionServices(
     const change = response.historyChange ?? {
       kind: 'structure' as const,
       from: 0,
-      to: response.historyCount ?? (await read<number>({ kind: 'count' })),
+      to: response.historyCount ?? (await readResult<number>({ kind: 'count' })),
     };
     notify(change);
     return response.result as T;
@@ -137,16 +214,34 @@ export function createRoostRpcSessionServices(
           }, delay);
       });
   };
+  const readEntries = async (query: SessionHistoryReadQuery) =>
+    historyEntriesSchema.parse(await readResult<unknown>(query)) as SessionHistoryInput[];
+  const readLegacy = () => readEntries({ kind: 'readAll' });
+  const snapshot = async (options?: {
+    from?: number;
+    to?: number;
+    transcriptVisibility?: boolean;
+  }) =>
+    querySnapshotSchema.parse(await readResult<unknown>({ kind: 'readQuerySnapshot', ...options }));
   const history: SessionHistoryReader = {
-    count: () => read<number>({ kind: 'count' }),
-    readAt: (position) => read<SessionTurnRead>({ kind: 'readAt', position }),
-    readTurn: (turnId) => read<SessionTurnRead>({ kind: 'readTurn', turnId }),
+    readMetadata: async () => {
+      const entries = rpc.coherentInspection
+        ? await readEntries({ kind: 'readMetadata' })
+        : await readLegacy();
+      return readSessionHistoryMetadata({
+        readDirectory: () =>
+          entries.map((entry, position) => createRoostDirectoryRow(position, entry)),
+      });
+    },
+    count: () => readResult<number>({ kind: 'count' }),
+    readAt: (position) => readResult<SessionTurnRead>({ kind: 'readAt', position }),
+    readTurn: (turnId) => readResult<SessionTurnRead>({ kind: 'readTurn', turnId }),
     readRange: (from, to) => readRange('readRange', from, to),
     readDirectory: (from, to) => readRange('readDirectory', from, to),
-    readLatestDirectoryPage: (limit) => read({ kind: 'readLatestPage', limit }),
-    readOlderDirectoryPage: (cursor, limit) => read({ kind: 'readOlderPage', cursor, limit }),
-    readAll: () => read({ kind: 'readAll' }),
-    readTurnOutput: (userTurnId) => read({ kind: 'readTurnOutput', userTurnId }),
+    readLatestDirectoryPage: (limit) => readResult({ kind: 'readLatestPage', limit }),
+    readOlderDirectoryPage: (cursor, limit) => readResult({ kind: 'readOlderPage', cursor, limit }),
+    readAll: () => readResult({ kind: 'readAll' }),
+    readTurnOutput: (userTurnId) => readResult({ kind: 'readTurnOutput', userTurnId }),
     observe(listener) {
       listeners.add(listener);
       const initialPage = readResponse({
@@ -177,6 +272,91 @@ export function createRoostRpcSessionServices(
     throw new Error('Agent execution requires the session history owner');
   };
   return {
+    readHistoryEntry: async (turnId) => {
+      if (!rpc.coherentInspection) return (await readLegacy()).find((entry) => entry.id === turnId);
+      const read = await history.readTurn(turnId);
+      if (read.state === 'ready') return read.turn as SessionHistoryInput;
+      if (read.state === 'missing') return undefined;
+      throw new Error('Owner history entry is unavailable');
+    },
+    readLatestGoal: async () => {
+      if (!rpc.coherentInspection) return resolveLatestSessionGoalFromHistory(await readLegacy());
+      const goal = goalResultSchema.parse(await readResult<unknown>({ kind: 'readLatestGoal' }));
+      return resolveLatestSessionGoalFromHistory([{ items: goal ? [goal] : [] }]);
+    },
+    ...(rpc.coherentInspection
+      ? {
+          readHistoryTranscript: async ({
+            limit,
+            reverse,
+          }: {
+            limit?: number;
+            reverse?: boolean;
+          }) => {
+            const value = transcriptResultSchema.parse(
+              await readResult<unknown>({ kind: 'readTranscript', limit, reverse })
+            );
+            return { ...value, entries: value.entries as SessionHistoryInput[] };
+          },
+        }
+      : {}),
+    readHistoryQuery: async (options) => {
+      if (rpc.coherentInspection) return (await snapshot(options)).rows;
+      return (await readLegacy())
+        .slice(options?.from ?? 0, options?.to)
+        .map((entry) => queryRow(entry, options?.transcriptVisibility));
+    },
+    readHistorySelection: async (select, options) => {
+      if (!rpc.coherentInspection) {
+        const entries = await readLegacy();
+        return select(entries.map((entry) => queryRow(entry, options?.transcriptVisibility))).map(
+          (position) => {
+            const entry = entries[position];
+            if (!Number.isSafeInteger(position) || !entry)
+              throw new Error('Invalid history selection');
+            return entry;
+          }
+        );
+      }
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const current = await snapshot(options);
+          const positions = select(current.rows);
+          return await readEntries({
+            kind: 'readSelection',
+            positions,
+            token: current.token,
+            ...options,
+          });
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !('code' in error) ||
+            error.code !== 'superseded' ||
+            attempt >= 2
+          )
+            throw error;
+        }
+      }
+    },
+    ...(!rpc.coherentInspection
+      ? {
+          foldHistory: async <T>(
+            create: () => T,
+            visit: (state: T, entry: SessionHistoryInput) => void
+          ) => {
+            const state = create();
+            for (const entry of await readLegacy()) visit(state, entry);
+            return state;
+          },
+        }
+      : {}),
+    readHistoryReplay: async (excludeTurnId) =>
+      rpc.coherentInspection
+        ? replayResultSchema.parse(
+            await readResult<unknown>({ kind: 'readReplayPrompt', excludeTurnId })
+          )
+        : buildReplayPromptFromHistory({ history: await readLegacy(), excludeTurnId }),
     sessionData: createRoostSessionData({
       sessionId: doc.sessionId,
       history,

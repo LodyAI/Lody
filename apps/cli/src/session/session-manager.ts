@@ -1694,7 +1694,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               sessionId: config.parentSessionId ?? config.sessionId!,
               phase: 'setup',
               logger: this.logger,
-              backend: await createSessionBackend(ownerDoc, await ownerDoc.getMetaState()),
+              backend: await createSessionBackend(ownerDoc),
               insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
             }),
           });
@@ -1762,7 +1762,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           sessionId: config.sessionId!,
           phase: 'setup',
           logger: this.logger,
-          backend: await createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
+          backend: await createSessionBackend(sessionDoc),
           insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
         });
         await runWorktreeSetup({

@@ -34,6 +34,55 @@ export async function readLatestTurn(
   }
 }
 
+/** Find the newest attributed user turn through bounded directory observations. */
+export async function readLatestUserId(reader: SessionHistoryReader): Promise<string | undefined> {
+  const limit = 40;
+  let page =
+    reader.readLatestDirectoryPage && reader.readOlderDirectoryPage
+      ? await reader.readLatestDirectoryPage(limit)
+      : undefined;
+  let rows = page?.rows ?? (await reader.readDirectory(0, await reader.count()));
+  for (;;) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      if (!row?.turnId || row.scalars?.role !== 'user') continue;
+      if (typeof row.userId === 'string' && row.userId.trim()) return row.userId;
+      if (row.metadataVersion !== 1) {
+        const read = await reader.readTurn(row.turnId);
+        if (
+          read.state === 'ready' &&
+          typeof read.turn.userId === 'string' &&
+          read.turn.userId.trim()
+        )
+          return read.turn.userId;
+      }
+    }
+    if (!page?.hasMoreOlder || !page.cursor || !reader.readOlderDirectoryPage) return undefined;
+    page = await reader.readOlderDirectoryPage(page.cursor, limit);
+    rows = page.rows;
+  }
+}
+
+/** Read identity, state and configuration from one metadata observation. */
+export async function readSessionHistoryMetadata(
+  reader: Pick<SessionHistoryReader, 'readDirectory' | 'readMetadata'>
+): Promise<import('./domain').SessionHistoryMetadata[]> {
+  if (reader.readMetadata) return [...(await reader.readMetadata())];
+  const rows = await reader.readDirectory(0, Number.MAX_SAFE_INTEGER);
+  return rows.flatMap((row) =>
+    row.scalars
+      ? [
+          {
+            ...row.scalars,
+            inputConfig: normalizeSessionTurnInputConfig(row.inputConfig),
+            ...(row.userId !== undefined ? { userId: row.userId } : {}),
+            ...(row.scheduleRun !== undefined ? { scheduleRun: row.scheduleRun } : {}),
+          },
+        ]
+      : []
+  );
+}
+
 /** Legacy business projection. Keep the authoritative readAll/snapshot unchanged
  * for export and hashes; dispatch consumers normalize their input configuration.
  * Invalid raw slots are skipped here, never removed from stored history. */

@@ -8,6 +8,7 @@ import {
   type HistoryIdentity,
   type ForkAndActivateInput,
   type RestoreActiveBranchInput,
+  type ReplaceActiveBranchMembersInput,
   type HistoryInputIdentity,
 } from '@loro-dev/roost/lody-history';
 import type {
@@ -391,6 +392,12 @@ export class RoostHistoryGeneration {
 
   fork(input: ForkAndActivateInput, cursor: bigint) {
     return this.activate(input.operationId, cursor, (history) => history.forkAndActivate(input));
+  }
+
+  replaceMembers(input: ReplaceActiveBranchMembersInput, cursor: bigint) {
+    return this.activate(input.operationId, cursor, (history) =>
+      history.replaceActiveBranchMembers(input)
+    );
   }
 
   restore(input: RestoreActiveBranchInput, cursor: bigint) {
