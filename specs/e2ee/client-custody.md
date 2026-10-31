@@ -112,10 +112,12 @@ before approved replacement; only the incoming identity is eligible for ready.
 On close stop new operations, drain actual work, then release ownership and owned
 buffers. A late callback cannot revive a retired runtime. Ordinary cache cleanup,
 logout and scope close retain identity and unresolved originals. Hard reset is an
-explicit separate action. Credential-confirmed terminal removal follows the
-existing desktop retention exception: bind the originating incarnation, drain only
+explicit separate action. Credential-confirmed terminal removal, and credential-confirmed revocation of
+this device, follow the existing desktop retention exception: bind the originating incarnation, drain only
 its workspace, retain cleanup evidence and spare other accounts/workspaces and
-replacement identities. Neither cleanup nor storage loss revokes copies elsewhere.
+replacement identities. Device revocation erases only this device's identity and
+keeps the membership; pairing again installs a new identity. Neither cleanup nor
+storage loss revokes copies elsewhere.
 
 ## Responsibility and acceptance
 
