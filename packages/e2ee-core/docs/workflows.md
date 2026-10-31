@@ -232,7 +232,12 @@ current (setup, test, replace, skip) and performs a restore. A recovery device
 admits a new personal device, then that device installs every epoch key.
 Each private package is canonical CBOR with `formatVersion: 1`; a missing or
 other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
-Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read. The
+Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read.
+`deriveRecoveryAccessCredential` derives R's service access credential (HKDF-SHA256
+over R's seed, salt genesis, info `lody-e2ee/recovery-credential/v1\0` plus R's
+public key). Setup passes its SHA-256 to `submitOriginal` with R's admission and
+`null` with every other record; `E2eeWorkspace` hands it to the platform's
+`registerRecoveryCredential` before submitting, because its ledger port carries no credential. The
 scheme is specified in the whitepaper's backup and recovery section and
 [recovery vault](../../../specs/e2ee/recovery-vault.md).
 

@@ -1,6 +1,6 @@
 # Recovery vault
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)
 Translation: current
 
 [中文](recovery-vault.zh.md)
@@ -9,7 +9,7 @@ Translation: current
 
 On 2026-10-28, owner Zixuan Chen (zxch3n) approved only these boundaries, recorded in the [approval note](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md) ([approval update #2032](https://github.com/LodyAI/Lody/pull/2032)). Recovery admission keeps the existing ledger tag 4 and `lody-e2ee/possess/v2\0` bytes; genesis is unchanged. The encrypted recovery package uses `formatVersion: 1` and contains the recovery generation and trusted ledger material; the trust anchor must be independently confirmed. An encrypted package, its source locator or a server response alone does not establish that anchor or prove the latest ledger head.
 
-Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries are approved; the remaining vault design and this Spec as a whole remain **draft**, and the recovery vault is outside the MVP. The core package carries `formatVersion: 1` and rejects any other or missing version; its private keys must be the exact 48-byte RFC 8410 PKCS#8 encodings for Ed25519 and X25519 (accepted by the owner on 2026-10-31, see the approval note). Approval does not establish deployed or real-device behavior.
+Before recovery is accepted, import R's keys, independently confirm the trust anchor, actually decrypt a current-epoch envelope addressed to R and verify the recovered key against its ledger commitment. The R signature binds the encryption public key but alone does not prove possession of its private key. The package version and these boundaries were approved on 2026-10-28; on 2026-10-31 the owner approved this Spec as a whole ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-desktop-integration)). The recovery vault remains outside the MVP. The core package carries `formatVersion: 1` and rejects any other or missing version; its private keys must be the exact 48-byte RFC 8410 PKCS#8 encodings for Ed25519 and X25519 (accepted by the owner on 2026-10-31, see the approval note). Approval does not establish deployed or real-device behavior.
 
 ## Recovery material and ciphertext
 
@@ -104,6 +104,82 @@ collection API. A local journal cannot prove that another session has no pending
 reference. Explicit risk-confirmed cleanup of retired indexed entries remains a
 separate operation and requires an up-to-date index CAS.
 
+## Desktop product integration
+
+On 2026-10-31 the owner decided the six integration questions, relayed by the E2EE
+coordinator, and approved this section with the rest of the Spec.
+Research, rejected options and evidence are in the [desktop integration note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.md).
+Nothing here changes MVP behavior: every capability stays behind a default-off
+gate, and existing encrypted workspaces, pairing and ledgers behave as before.
+
+**Scenario.** A user who lost every paired device signs in on a new desktop and
+uses an offline recovery file to regain their encrypted workspaces. Pairing with a
+surviving device remains the primary path; the vault covers the case where no
+device survives. Without a vault or a surviving device, that content is lost.
+
+**One vault per account.** An account has one vault and one recovery file; the
+vault index holds one entry per workspace membership. Desktop security settings
+create the vault and write the file only to a location the user chooses; Lody never
+uploads or syncs the file. The user enables recovery per workspace explicitly.
+Setup admits that workspace's R through the user's active personal device and runs
+the real envelope test. Status is shown per workspace and per epoch; a new epoch
+needs a new test.
+
+**V on a desktop requires user presence for every use.** A personal desktop may keep
+V only under an OS key whose every use requires the user's presence: on macOS a
+Keychain item with user-presence access control (Touch ID or the account password),
+on Windows a Windows Hello or credential prompt. This is a deliberate exception,
+for V alone, to the rule that personal-device keys need no per-use approval. When
+the platform cannot enforce presence, V is not stored and the user selects the
+recovery file whenever V is needed. V is never stored silently. Retaining V lets
+setup of a new workspace and per-epoch tests run without the file.
+
+**Recovery-device authentication.** R's service access credential is derived with
+HKDF-SHA256 from R's 32-byte Ed25519 private seed, salt = genesis hash and info =
+`lody-e2ee/recovery-credential/v1\0` followed by R's signing public key. The
+personal device registers SHA-256 of the derived credential through the existing
+`credentialHash` field when it appends R's admission. On restore the new device
+derives the same credential from the decrypted package, uses it for R's mailbox
+read and C's admission append, then discards it. The package format is unchanged;
+holding R's private key already confers R's ledger authority, so the credential adds
+no new capability.
+
+**Restore and notification.** On a device without an identity for a workspace,
+"Restore from recovery file" sits next to pairing. It opens the vault, asks the user
+to confirm the trust anchor independently, decrypts R's current-epoch envelope,
+checks its commitment, then has R admit a new personal device C. After C's admission
+commits, the service notifies every active device of the account and the account
+email that workspace X was restored on a new device with the recovery file. There
+is no forced R replacement, owner approval or cooldown. The notification informs
+the user; it is not a security control, and a hostile service can suppress it.
+The R-signed admission remains visible in the verified ledger.
+
+**Passkey PRF.** The PRF wrap uses a native macOS AuthenticationServices module on
+macOS 15 or newer. Prerequisites: a Lody RP domain serving an apple-app-site-association
+file, the `webcredentials:` associated-domains entitlement, a provisioning profile
+embedded in the signed app, and review of the native dependency. Only a real
+ceremony that reports PRF `enabled: true` with a 32-byte `results.first` may wrap or
+unlock V; there is no fallback. Other platforms and versions use the file.
+
+**Package keys.** The owner accepted the exact 48-byte RFC 8410 PKCS#8 encodings for
+both private keys ([#2124](https://github.com/LodyAI/Lody/pull/2124)).
+
+**Service and current gap.** The service stores only opaque immutable entries and
+the index CAS declared in `packages/cloud-api`, isolated per account. CAS checks in
+the same transaction that every referenced entry exists. The private backend
+already has a `recovery` device kind, but it implements no `e2eeRecoveryVault`
+function, no Recovery credential registration, no R-authenticated mailbox read or
+append, and no restore notification. Until those exist, the desktop loop cannot run
+against the real service.
+
+**Threat model.** Account access controls retrieval and the file controls
+decryption. Anyone holding both can read every recovered workspace and admit
+devices until R is revoked; the service operator plus the file is equivalent.
+The file alone grants nothing without the account's ciphertext. Loss of the file
+loses only that recovery path. On a desktop retaining V, malware that can obtain the
+user's presence approval can unlock V. The service can withhold or roll back
+ciphertext; local pins detect rollback only on a device that saw a newer revision.
+
 ## Boundaries and validation
 
 Core defines platform-neutral encrypted storage and local-journal ports and owns
@@ -116,5 +192,5 @@ decryption, rather than providing cryptographic two-factor protection.
 
 The [whitepaper](whitepaper.md), [permission ledger](permission-ledger.zh.md) and
 [host protection](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory) define the
-surrounding boundaries. This revision remains draft for human review; tests and
-translation do not approve it or enable product E2EE.
+surrounding boundaries. Approval of this revision is not implementation, deployment
+or real-device acceptance; tests and translation do not enable product E2EE.

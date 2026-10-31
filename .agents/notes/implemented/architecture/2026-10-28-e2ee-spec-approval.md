@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance; recovery vault remains draft.
+Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance. On 2026-10-31 the owner approved the recovery vault Spec revision recorded below.
 
 ## Decision
 
@@ -42,3 +42,16 @@ On 2026-10-29, owner Zixuan Chen, through the E2EE coordinator, approved shorten
 ## Device revocation retention exception
 
 On 2026-10-31, owner Zixuan Chen (zxch3n), through the E2EE coordinator, approved extending the ordinary key-retention exception to a credential-confirmed revocation of this device, at revision `145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc`. The approved texts are [desktop custody](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/desktop-custody.md) (blob `cbfc986784d7fe89a162bf0fd29f16b76124574a`, Chinese `7cecb36a44e25ba814110fc68240ff3c80ec4c61`), [client custody](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/client-custody.md) (blob `d19dd471113d3f61ef5451a414761e21b1552898`, Chinese `1ea279bfd0abd707a78c053c46cc5f416611364c`) and the [whitepaper](https://github.com/LodyAI/Lody/blob/145c7a5e61e71b04f8b89e7801b01bb0fcccd9fc/specs/e2ee/whitepaper.md) paragraphs on self-device revocation and deletion (blob `dd0aab07ada8c2220cd0fae4beb80d2b894b49b8`, Chinese `fcb311aa398f0f9fb6a883d311039ac2e8266ddc`). Scope: only the exact typed revocation result qualifies; cleanup erases only this device's workspace identity, content and keys, keeps the membership and the member's other devices, and allows pairing again with a new identity. Ordinary failures still never authorize deletion. This is honest-client cleanup, not secure erasure of earlier copies. The rationale is in [desktop device revocation](2026-10-30-e2ee-desktop-device-revocation.md).
+
+## Recovery vault desktop integration
+
+On 2026-10-31, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, explicitly approved the recovery vault Spec at revision `cd752bbfff7a8cb11f11570ed6b76853075d9565` ([PR #2123](https://github.com/LodyAI/Lody/pull/2123)). The approved [English text](https://github.com/LodyAI/Lody/blob/cd752bbfff7a8cb11f11570ed6b76853075d9565/specs/e2ee/recovery-vault.md) has Git blob `b380514af1a0b43f9d26f93cbe0419717596a2f6`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/cd752bbfff7a8cb11f11570ed6b76853075d9565/specs/e2ee/recovery-vault.zh.md) has Git blob `23a1cd28ea6451858844859c31405bad66b95bb0`. The approved revision is `cd752bbf`; later changes to the Spec are editorial only (approval metadata and wording that the Spec is approved). The approval covers the six desktop integration decisions:
+
+1. One vault and one recovery file per account.
+2. V may be retained on a desktop only behind per-use user presence (macOS Keychain user-presence access control; Windows Hello or a credential prompt). This is an exception for V alone; without platform support the user supplies the file and V is never stored silently.
+3. R's access credential is HKDF-SHA256 over R's 32-byte Ed25519 seed, with salt = genesis hash and info = `lody-e2ee/recovery-credential/v1\0` followed by R's signing public key. The SHA-256 of that credential is registered through the existing `credentialHash`. The package format is unchanged.
+4. Passkey PRF uses a native macOS 15+ AuthenticationServices module with a Lody `webcredentials:` associated domain, AASA and an embedded provisioning profile, after native dependency review. A real ceremony must report PRF enabled with a 32-byte `results.first`; there is no fallback.
+5. The exact 48-byte RFC 8410 PKCS#8 package key encoding.
+6. A successful restore notifies the account's active devices and email; there is no forced R replacement, owner approval or cooldown.
+
+Approval establishes intent only, not implementation, deployment or real-device acceptance. The private backend gap remains: no `e2eeRecoveryVault` storage, Recovery credential registration, R-authenticated mailbox access or restore notification. The recovery vault remains outside the MVP.
