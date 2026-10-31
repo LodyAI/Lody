@@ -73,8 +73,8 @@ Roost 结构编辑使用 SDK 成员 manifest 引用已有物理段，重新插�
 
 [Native 合同套件](../../../../apps/cli/tests/roost-session-backend-contract.test.ts)覆盖冷恢复、目标读取、回执恢复和分支变化；[RPC 测试](../../../../apps/cli/src/session/roost-session-backend.test.ts)覆盖检查点／generation 变化。[Writer 测试](../../../../packages/shared/tests/history-writer.test.ts)与 [Agent 存储测试](../../../../apps/cli/tests/session-history-storage.test.ts)比较持久化结果和范围补偿；[重放测试](../../../../apps/cli/src/lib/replay-prompt-builder.test.ts)精确比较不同预算下的 prompt 与统计。
 
-Electron 验收覆盖两后端的续聊、Fork、目标、队列和未读状态。本地验证使用匹配的源码 SDK 与 Native 包。
+Electron 验收覆盖两后端的续聊、Fork、目标、队列和未读状态。依赖验证使用已发布的 `@loro-dev/roost@0.3.1` 和 `@loro-dev/roost-node@0.3.1`。
 
 ## 依赖
 
-[Roost #29](https://github.com/loro-dev/roost/pull/29)提供 SDK／Native 接口；[基础 #2132](https://github.com/LodyAI/Lody/pull/2132)包含共用查询与 Roost 接入，[Loro #2133](https://github.com/LodyAI/Lody/pull/2133)在其上补充目标写入。已发布的 0.3.0 缺少新接口，配套 SDK／Native 发布后需更新 Lody 依赖版本和锁文件。
+[Roost #29](https://github.com/loro-dev/roost/pull/29)提供 SDK／Native 接口；[基础 #2132](https://github.com/LodyAI/Lody/pull/2132)包含共用查询与 Roost 接入，[Loro #2133](https://github.com/LodyAI/Lody/pull/2133)在其上补充目标写入。Lody 通过 SDK 与 Native 0.3.1 使用上述接口，锁文件包含全部六个精确版本的平台包。

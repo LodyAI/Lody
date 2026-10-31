@@ -73,8 +73,8 @@ These are single-process synthetic measurements. Peak RSS includes setup and Nat
 
 The [Native contract suite](../../../../apps/cli/tests/roost-session-backend-contract.test.ts) exercises cold repair, selected reads, receipt recovery and branch changes. [RPC tests](../../../../apps/cli/src/session/roost-session-backend.test.ts) cover checkpoint/generation changes. [Writer tests](../../../../packages/shared/tests/history-writer.test.ts) and [Agent storage tests](../../../../apps/cli/tests/session-history-storage.test.ts) compare persisted results and range compensation. [Replay tests](../../../../apps/cli/src/lib/replay-prompt-builder.test.ts) compare exact prompts and statistics across budget boundaries.
 
-Electron acceptance covers follow-up messages, Fork, goals, queue and unread state on both backends. Local validation uses matching source SDK and Native packages.
+Electron acceptance covers follow-up messages, Fork, goals, queue and unread state on both backends. Dependency validation uses published `@loro-dev/roost@0.3.1` and `@loro-dev/roost-node@0.3.1`.
 
 ## Dependencies
 
-[Roost #29](https://github.com/loro-dev/roost/pull/29) supplies the SDK/Native APIs. [Foundation #2132](https://github.com/LodyAI/Lody/pull/2132) contains common queries and Roost integration; [Loro #2133](https://github.com/LodyAI/Lody/pull/2133) adds selected writes on that base. Published 0.3.0 lacks the new APIs; Lody's dependency versions and lockfile need updating after the paired SDK/Native release.
+[Roost #29](https://github.com/loro-dev/roost/pull/29) supplies the SDK/Native APIs. [Foundation #2132](https://github.com/LodyAI/Lody/pull/2132) contains common queries and Roost integration; [Loro #2133](https://github.com/LodyAI/Lody/pull/2133) adds selected writes on that base. Lody consumes these APIs through SDK and Native 0.3.1, with all six exact-version platform packages in the lockfile.
