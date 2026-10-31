@@ -1,6 +1,6 @@
 # Desktop stops and cleans up a revoked device
 
-Status: proposed
+Status: implemented
 Translation: current
 PR: [#2122](https://github.com/LodyAI/Lody/pull/2122)
 
@@ -22,7 +22,7 @@ unaffected, and the user can pair the device again.
 - **Classification.** Only the exact code becomes `E2eeDeviceRevokedError`. It still
   extends `BackendError` with reason `unauthorized`, so every other caller keeps its
   previous behavior. The rejected alternative in
-  [member controls and local removal](2026-10-28-e2ee-member-controls-and-local-removal.md)
+  [member controls and local removal](../../proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.md)
   still holds: a generic unauthorized response, an unclassified message, a network
   failure or an account problem never authorizes deletion.
 - **Same receipt, same cleanup.** Every IPC site that handled member removal now
@@ -51,10 +51,16 @@ unaffected, and the user can pair the device again.
 ## Limits
 
 This is honest-client cleanup, not secure erasure of copies made earlier. Issued
-content tokens keep their bounded lifetime, as for member removal. The approved
-[client custody Spec](../../../../specs/e2ee/client-custody.md) names
-"credential-confirmed terminal removal" as the retention exception; applying it to
-device revocation is the owner's decision recorded here, and the Spec wording has
-not been changed. Tests use real SQLite, custody and IPC with synthetic cloud
+content tokens keep their bounded lifetime, as for member removal. On 2026-10-31 the owner approved
+applying the retention exception to credential-confirmed revocation of this device;
+the [desktop custody](../../../../specs/e2ee/desktop-custody.md),
+[client custody](../../../../specs/e2ee/client-custody.md) and
+[whitepaper](../../../../specs/e2ee/whitepaper.md) Specs state it, and the
+[approval record](2026-10-28-e2ee-spec-approval.md#device-revocation-retention-exception)
+gives the scope. Deleting on revocation is chosen because a lost or stolen device is
+the main reason to revoke one; an accidental revoke costs only a resync, and edits
+not yet sent could no longer be submitted with the revoked signing key anyway.
+Stopping without deleting, or deleting after a delay, were rejected: both leave the
+plaintext cache readable on a lost device. Tests use real SQLite, custody and IPC with synthetic cloud
 results, plus component tests. No live server, packaged app or second-device
 re-pair journey was run.
