@@ -71,6 +71,7 @@ export function useVisibleLocalProjectsFromMachineIndex(
   );
   const sharedProjectIdsByMachineId = visibleMachineIndex.sharedProjectIdsByMachineId;
   const rawAccessRows = useMemo(() => {
+    if (!enabled) return EMPTY_ACCESS_ROWS;
     const ordinary = legacyQueriesEnabled
       ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS)
       : EMPTY_ACCESS_ROWS;
@@ -90,7 +91,13 @@ export function useVisibleLocalProjectsFromMachineIndex(
         });
     }
     return [...ordinary, ...shared];
-  }, [accessByMachineId, legacyQueriesEnabled, queriedAccessRows, sharedProjectIdsByMachineId]);
+  }, [
+    accessByMachineId,
+    enabled,
+    legacyQueriesEnabled,
+    queriedAccessRows,
+    sharedProjectIdsByMachineId,
+  ]);
   const isLoading =
     enabled &&
     (machineVisibilityLoading ||
