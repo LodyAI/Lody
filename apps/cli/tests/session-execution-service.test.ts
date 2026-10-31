@@ -13384,8 +13384,53 @@ describe('Operation Inbox execution boundary', () => {
         const history = await (await createSessionBackend(f.doc)).readHistory();
         expect(history.find((turn) => turn.id === 'assistant:human-input')?.fileDiff?.map((diff) => diff.filePath)).toEqual(['one.txt']);
       }
-    }
-  );
+    } finally { finish.resolve(); await f.close(); fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([false, true])('keeps newer dirty/unpushed flags after old stats (deadline=%s)', async (expires) => {
+    if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const started = createDeferred<void>(), finishOld = createDeferred<void>(), newerWritten = createDeferred<void>();
+    let dirty = false, firstMerge = true, n = 0;
+    const f = inboxExecutionFixture(async () => { if (++n === 2) dirty = true; return { stopReason: 'end_turn' }; });
+    const repo = f.deps.workspaceDocument.repo;
+    const upsert = repo.upsertDocMeta.bind(repo);
+    repo.upsertDocMeta = async (id, patch) => {
+      await upsert(id, patch);
+      if (patch.workspaceDirty === true) newerWritten.resolve();
+    };
+    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
+      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
+    f.session.exec = async (_cmd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
+      if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify')) return 'a'.repeat(40)+'\n';
+      if (args[0] === 'merge-base') {
+        if (firstMerge) { firstMerge = false; started.resolve(); await finishOld.promise; }
+        return 'a'.repeat(40)+'\n';
+      }
+      if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
+      if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
+      return '';
+    };
+    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
+    try {
+      await upsert(getSessionRoomId(message.sessionId), { project: message.project, workspaceDirty: false, workspaceUnpushed: false });
+      await f.accept(); const first = f.service.continueSession(message); await started.promise;
+      if (expires) {
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeDefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeUndefined();
+      }
+      const next = { ...message, userTurnId: 'newer' };
+      await finishFirstThenRunNext(f, first, finishOld, next, newerWritten.promise); await newerWritten.promise;
+      expect(n).toBe(2);
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+      finishOld.resolve(); await f.service.drainInboxExecutions();
+      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
+    } finally { finishOld.resolve(); await f.close(); if (expires) vi.useRealTimers(); }
+  });
 
   it.each([
     { stage: 'diff', action: 'shutdown' },
@@ -13401,6 +13446,7 @@ describe('Operation Inbox execution boundary', () => {
     if (stage === 'diff') f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, _turn, signal) => {
       signals.push(signal); entered.resolve(); await raw.promise; return true;
     };
+    else f.deps.turnFinalization.flushSessionUsage = async () => { entered.resolve(); await raw.promise; };
     let run: Promise<unknown> | undefined;
     try {
       await f.accept();
@@ -13414,7 +13460,7 @@ describe('Operation Inbox execution boundary', () => {
       const released = f.service.waitForInboxReleases();
       await vi.advanceTimersByTimeAsync(shutdown ? 7_000 : 1_000);
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
-      expect((f.service as any).liveInboxExecutionIds.size).toBe(0);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
       const db = new Database(f.storePath, { readonly: true });
       try {
         expect(db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)).toEqual([{ outcome: 'user_stop' }]);
@@ -13534,9 +13580,7 @@ describe('Operation Inbox execution boundary', () => {
       });
       expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
 
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
-        true
-      );
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
       let drained = false;
       const drain = f.service.drainInboxExecutions().then(() => { drained = true; });
       await vi.advanceTimersByTimeAsync(0);
