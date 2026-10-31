@@ -7,8 +7,7 @@ import {
   getServerNow,
   getMachineRoomId,
   resolveNewSessionHistoryBackend,
-  machineSupportsProtocolCapability,
-  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsSessionHistoryInspection,
   type MachineMeta,
   getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
@@ -394,11 +393,7 @@ export function createCommandSessionHistoryFactory(
       | undefined;
     resolveNewSessionHistoryBackend(machine, { requested: 'roost' });
     return createRoostRpcSessionServices(doc, {
-      inspection: machineSupportsProtocolCapability(
-        machine,
-        MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection,
-        1
-      ),
+      coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
         const response = await withRpc(target, (client) =>
           client.requestSessionHistoryRead({

@@ -52,6 +52,18 @@ export interface SessionBackend {
 
   initialize(options: { skipAutoRead: boolean }): Promise<void>;
   readHistory(): Promise<SessionHistoryInput[]>;
+  readonly readHistoryInspection?: (
+    query: import('@lody/shared').SessionHistoryInspectionQuery
+  ) => Promise<import('@lody/shared').SessionHistoryReadResponse>;
+  readonly readHistoryReplay?: (
+    excludeTurnId?: string
+  ) => Promise<import('@lody/shared').ReplayPromptResult>;
+  readonly readHistoryTranscript?: (options: { limit?: number; reverse?: boolean }) => Promise<{
+    total: number;
+    positions: number[];
+    entries: SessionHistoryInput[];
+  }>;
+  readonly readHistoryEntry?: (turnId: string) => Promise<SessionHistoryInput | undefined>;
   foldHistory<T>(
     create: () => T,
     visit: (state: T, entry: SessionHistoryInput) => void
@@ -175,6 +187,19 @@ export type QueuePromotionResult = {
   operationId: string;
   entry: SessionHistoryInput;
 };
+
+/** Read the first stored occurrence, retaining duplicate-ID semantics on Loro. */
+export async function readHistoryEntry(
+  backend: Pick<SessionBackend, 'readHistoryEntry' | 'readHistorySelection'>,
+  turnId: string
+): Promise<SessionHistoryInput | undefined> {
+  if (backend.readHistoryEntry) return backend.readHistoryEntry(turnId);
+  const [entry] = await backend.readHistorySelection((rows) => {
+    const index = rows.findIndex((row) => row.id === turnId);
+    return index < 0 ? [] : [index];
+  });
+  return entry;
+}
 
 /** Explicit failure when a persisted backend has no installed product adapter. */
 export class SessionBackendUnavailableError extends Error {

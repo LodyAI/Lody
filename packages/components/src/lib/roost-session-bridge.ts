@@ -31,6 +31,7 @@ import {
   type SessionTurn,
   type SessionTurnRead,
   type SessionInputAcceptanceResult,
+  readSessionHistoryMetadata,
 } from '@lody/shared/session-data';
 import { sendLocalSessionControl } from './electron-ipc-client';
 import { RoostHistoryError, SessionHistoryRequestError } from './roost-history-error';
@@ -70,6 +71,7 @@ type RoostHistoryTransport = {
 };
 
 type RoostHistoryObservationOptions = {
+  readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
   readonly watch?: boolean | (() => boolean);
   readonly patches?: boolean | (() => boolean);
@@ -244,6 +246,10 @@ const createRoostSessionDataFactoryFromTransport =
       typeof options.incremental === 'function'
         ? options.incremental()
         : options.incremental === true;
+    const coherentInspectionEnabled = () =>
+      typeof options.coherentInspection === 'function'
+        ? options.coherentInspection()
+        : options.coherentInspection === true;
     const active = () => options.active?.() ?? true;
     const patchesEnabled = () =>
       incrementalEnabled() &&
@@ -409,6 +415,9 @@ const createRoostSessionDataFactoryFromTransport =
       from: number,
       to: number
     ): Promise<readonly SessionDirectoryRow[]> => {
+      const count = await readCount();
+      from = Math.max(0, Math.min(from, count));
+      to = Math.max(from, Math.min(to, count));
       if (await canReadCache()) {
         const stored = await cached(() => cache.readRows(from, to));
         if (stored) return stored.map((entry) => entry.row);
@@ -436,7 +445,10 @@ const createRoostSessionDataFactoryFromTransport =
     };
 
     const readEntries = async (
-      query: Extract<SessionHistoryReadQuery, { kind: 'readAll' | 'readTurnOutput' }>
+      query: Extract<
+        SessionHistoryReadQuery,
+        { kind: 'readAll' | 'readTurnOutput' | 'readMetadata' }
+      >
     ) => validateHistory(await readHistory(query), 'Roost history read');
 
     const readRange = async (from: number, to: number): Promise<readonly SessionTurnRead[]> => {
@@ -988,6 +1000,15 @@ const createRoostSessionDataFactoryFromTransport =
     const unsubscribeWake = options.subscribeWake?.(scheduleRefresh);
 
     const history: SessionHistoryReader = {
+      readMetadata: async () => {
+        const entries = coherentInspectionEnabled()
+          ? await readEntries({ kind: 'readMetadata' })
+          : await history.readAll();
+        return readSessionHistoryMetadata({
+          readDirectory: () =>
+            entries.map((entry, position) => createRoostDirectoryRow(position, entry)),
+        });
+      },
       count: readCount,
       async readAt(position) {
         if (await canReadCache()) {

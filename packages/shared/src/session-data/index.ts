@@ -73,6 +73,7 @@ export * from './token-usage';
 export {
   summarizeHistoryQuery,
   historyQueryRow,
+  selectTranscriptHistoryPositions,
   selectHistoryActionRows,
   selectAgentHistoryRows,
   type HistoryQueryRow,

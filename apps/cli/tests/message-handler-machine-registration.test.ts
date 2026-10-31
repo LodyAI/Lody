@@ -198,7 +198,7 @@ describe('MessageHandler machine registration', () => {
       memoryProviders: 1,
       sessionHistory: 3,
       sessionHistoryIncremental: 1,
-      sessionHistoryInspection: 1,
+      sessionHistoryInspection: 2,
       sessionHistoryWatch: 1,
       sessionHistoryPatches: 1,
       sessionInputAcceptance: 1,
