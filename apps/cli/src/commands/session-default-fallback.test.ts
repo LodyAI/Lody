@@ -124,6 +124,8 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
   const sessions = new Map<SessionId, SessionDocument>();
   const dispatched: SessionHistoryInput[] = [];
   const manager = {
+    // An ordinary workspace: delegated inputs keep their existing, unencrypted path.
+    isEncryptedWorkspace: () => false,
     repo: {
       watch: () => ({ unsubscribe: () => undefined }),
       getMeta: () => ({
