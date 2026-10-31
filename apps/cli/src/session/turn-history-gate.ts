@@ -39,9 +39,9 @@ export type TurnHistoryGateArgs = {
   logger: Logger;
   sessionId: SessionId;
   userTurnId: string;
-  /** Check the selected identity without materializing the transcript. */
+  /** Check whether the expected user turn is present. */
   hasUserTurn?: (turnId: string) => Promise<boolean>;
-  /** Compatibility for existing gate owners. */
+  /** History source used when hasUserTurn is absent. */
   readHistory?: () => Promise<SessionHistoryInput[]>;
   /** Subscribe to local doc changes (remote imports included); returns unsubscribe. */
   subscribeHistory: (listener: () => void) => (() => void) | undefined;
