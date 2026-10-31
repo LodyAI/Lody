@@ -2406,13 +2406,18 @@ const groupSectionStyles = stylex.create({
     color: 'hsl(var(--foreground))',
   },
   heading: {
+    '--tw-leading': 'var(--leading-snug)',
+    lineHeight: {
+      default: 'var(--leading-snug)',
+      '@media (width >= 48rem)': 'var(--tw-leading,var(--text-lg--line-height))',
+    },
     '--tw-font-weight': 'var(--font-weight-semibold)',
     fontWeight: 'var(--font-weight-semibold)',
     '--tw-tracking': 'var(--tracking-tight)',
     letterSpacing: 'var(--tracking-tight)',
     minWidth: 0,
     overflowWrap: 'break-word',
-    fontSize: '17px',
+    fontSize: { default: '17px', '@media (width >= 48rem)': 'var(--text-lg)' },
   },
   actions: {
     display: 'flex',
@@ -2536,13 +2541,7 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
       >
         <div {...stylex.props(groupSectionStyles.headingRow)}>
           <span {...stylex.props(groupSectionStyles.index)}>{index + 1}</span>
-          <span
-            id={headingId}
-            className={cn(
-              stylex.props(groupSectionStyles.heading).className,
-              'leading-snug md:text-lg'
-            )}
-          >
+          <span id={headingId} {...stylex.props(groupSectionStyles.heading)}>
             {group.title}
           </span>
         </div>
@@ -2903,6 +2902,11 @@ const treeCommitStyles = stylex.create({
     },
   },
   stats: {
+    '--tw-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,)',
+    '--tw-leading': '1',
+    lineHeight: '1',
     'margin-left': 'auto',
     flexShrink: 0,
     fontFamily:
@@ -3100,6 +3104,8 @@ const treeCommitStyles = stylex.create({
     whiteSpace: 'nowrap',
   },
   tooltipMessage: {
+    '--tw-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
     display: '-webkit-box',
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: 6,
@@ -3183,6 +3189,8 @@ const treeCommitStyles = stylex.create({
     height: 'calc(var(--spacing) * 3.5)',
   },
   expandedBody: {
+    '--tw-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
     whiteSpace: 'pre-wrap',
     borderTopStyle: 'var(--tw-border-style)',
     borderTopWidth: '1px',
@@ -3363,12 +3371,7 @@ function FileTreeRow({
           {node.name}
         </span>
         {stats ? (
-          <span
-            className={cn(
-              'tabular-nums leading-none',
-              stylex.props(treeCommitStyles.stats).className
-            )}
-          >
+          <span {...stylex.props(treeCommitStyles.stats)}>
             <span {...stylex.props(treeCommitStyles.additions)}>+{stats.additions}</span>{' '}
             <span {...stylex.props(treeCommitStyles.deletions)}>−{stats.deletions}</span>
           </span>
@@ -3540,16 +3543,7 @@ function CommitRow({
                   {date ? ` · ${date}` : ''}
                 </span>
               </p>
-              {body ? (
-                <p
-                  className={cn(
-                    'leading-5',
-                    stylex.props(treeCommitStyles.tooltipMessage).className
-                  )}
-                >
-                  {body}
-                </p>
-              ) : null}
+              {body ? <p {...stylex.props(treeCommitStyles.tooltipMessage)}>{body}</p> : null}
               <code {...stylex.props(treeCommitStyles.tooltipSha)}>{sha}</code>
             </div>
           </TooltipContent>
@@ -3573,11 +3567,7 @@ function CommitRow({
           )}
         </button>
       </div>
-      {hasBody && expanded && (
-        <div className={cn('leading-5', stylex.props(treeCommitStyles.expandedBody).className)}>
-          {body}
-        </div>
-      )}
+      {hasBody && expanded && <div {...stylex.props(treeCommitStyles.expandedBody)}>{body}</div>}
     </div>
   );
 }
@@ -3714,6 +3704,8 @@ const contextBlockStyles = stylex.create({
   icon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   scroll: { overflowX: 'auto', padding: 'calc(var(--spacing) * 2)' },
   table: {
+    '--tw-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
     width: '100%',
     borderCollapse: 'collapse',
     fontFamily:
@@ -4191,7 +4183,7 @@ function ContextBody({ block }: { readonly block: ReviewResolvedBlock }) {
         <span>Context from current commit</span>
       </div>
       <div {...stylex.props(contextBlockStyles.scroll)}>
-        <table className={cn('leading-5', stylex.props(contextBlockStyles.table).className)}>
+        <table {...stylex.props(contextBlockStyles.table)}>
           <tbody>
             {displayLines.map((line, index) => {
               const lineNumber = start + index;
@@ -4731,6 +4723,8 @@ const commentStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   textarea: {
+    '--tw-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
     '--tw-outline-style': 'none',
     outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
     outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
@@ -4842,6 +4836,8 @@ const commentStyles = stylex.create({
     height: 'calc(var(--spacing) * 3.5)',
   },
   threadBody: {
+    '--tw-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
     'padding-inline': 'calc(var(--spacing) * 3)',
     'padding-block': 'calc(var(--spacing) * 2.5)',
     fontSize: '13px',
@@ -4978,7 +4974,7 @@ function PanelComposer({
         value={draft.body}
         placeholder="Leave a comment…"
         aria-label={`Comment on ${fileBaseName(draft.path)} line ${draft.lineNumber}`}
-        className={cn('leading-6', stylex.props(commentStyles.textarea).className)}
+        {...stylex.props(commentStyles.textarea)}
         onChange={(event) => onChange(event.currentTarget.value)}
         onInput={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -5076,12 +5072,7 @@ function ThreadCard({
           </Button>
         )}
       </header>
-      <div
-        className={cn(
-          'crh-line-annotation leading-6',
-          stylex.props(commentStyles.threadBody).className
-        )}
-      >
+      <div className={cn('crh-line-annotation', stylex.props(commentStyles.threadBody).className)}>
         {item.body}
       </div>
     </article>

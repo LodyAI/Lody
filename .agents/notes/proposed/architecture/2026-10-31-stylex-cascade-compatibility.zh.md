@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-将公开 Tailwind 缺省样式移到更早的 StyleX 层，可能改变调用方胜负，即使截图相同。独立有限 native 提取到 Tailwind 之前的 utilities 本层后，原 54 对 Storybook 与十二对 standalone consumer 保持一致。最终隔离提议为每个客户端 compiler 分配私有 CSS，保留开发 atom 以服务在途 response，并静态折叠真正有类型的 shim；实际 Electron 的 native 行像素相同，但整 App 像素 OPEN 仍保留。不支持通用 Slot 替代、App SSR 或此 owner 的保状态 HMR。最终状态矩阵和完整 consumer 类型仍在审查，Root 生产配置、依赖与锁文件未改变。
+将公开 Tailwind 缺省值移到不同 CSS 层会改变受支持调用方的优先级。前置 utilities 本层方案保持原 66 对浏览器状态和真实 Electron 试集成的可见标签行，但三个新增 arbitrary-property 调用方改变宽度、最小宽度与命中链。named utility 控制仍同；问题是 twMerge 不消除的 named／arbitrary-property 原规则顺序。十三个试集成源码／配置／依赖路径已完整恢复，九个默认值迁移信用为零。保原顺序的替代仍为提议，私有 UI 迁移独立继续。
 
 ## 证据与限制
 
@@ -58,7 +58,7 @@ Root 生产路径采用该方案。
 
 锁定的 0.19 unplugin 不能视为两个隔离 collector：实例共享全局规则 store。类型声明中的 `legacyDisableLayers` 没有传给原生处理器，关闭 layers 后仍增加优先级 selector。实验直接调用原生处理器，同时设置 `useLayers: false` 与 `legacyDisableLayers: true`，不转换 selector、不提高特异性。Babel 的缺省 import-source 行为也需要显式隔离，不能认为设置自定义 source 就会排除普通 StyleX import。
 
-## 最终有限提议仍在审查
+## 有限试集成与顺序反例
 
 冻结 171／180 补丁为十一文件／348 改动行，仅处理 AdaptiveTabStrip 九个默认值、
 七个 distinct atom。所有 client 模式都有私有 CSS 文件，只替换一个 owned CSS import
@@ -75,11 +75,34 @@ optimizer 复用、原 TSX source map 与普通 HMR 已实际验证；164 原失
 已采完整几何同，整 App 仍有 39 原始／零阈值像素 OPEN。静态 camera opacity 保持设计的
 0.48，没有暂停或强制动画。171／177 旧 OPEN 及一次先恢复后退出的 harness 错误单列。
 修正运行在全部自有 App 进程退出后才恢复 1,222 renderer 文件，335 个 main／CLI／lock
-字节不变。components 类型与七 owning 测试通过。最终 54／12 状态矩阵重跑及完整
-Electron 类型仍在检查；实际集成前，这些隔离结果在 Root 的迁移信用为零。
+字节不变。components 类型与七 owning 测试通过。最终冻结 171 重跑的 54 个 Storybook、十二个 standalone 对照全通过，含 46 个不变普通控制；
+Root 独立重读全部 pre/post Brotli 并解码 PNG，覆盖 3,022 条 scene 记录及 720 个精确 class
+载体。raw class 字符串不同，含三个相同属性的直接调用方用例；不把渲染相同称为字符串
+合同相同。冻结镜像的完整 Electron node／web 类型通过，未调用 CLI 前置构建。这些子集结果的生产迁移信用为零。
+
+初始 factory 还漏掉 Windows 规范化模块 ID。最小 normalizePath 修正在虚拟文件系统中
+使用真实 compiler／Vite 函数通过 Win／POSIX 行为验证，真实 macOS consumer JS／CSS
+字节同；不等于 Windows 整机运行。保留的三个 compiler 测试使用明确 pending-read 信号，
+不依赖调度时机。原补丁及原矩阵不变。
+
+当前输入试集成184实际应用十三路径，两官方 renderer 均构建 9,087 modules，3,946 普通及
+2,864 unlayered 规则全同。真实 App native 裁切零像素差，整页 312 原始／零阈值像素仍
+OPEN。四 class、46 boot 变量、一 HTML boot style、两个关联 panel ID 差异明确单列；
+不代表整页字段或动画历史等价。
+
+188 用同一 literal caller fixture 在两个完整构建中渲染真正 Adaptive 组件。
+[width:0px] 使 strip598→16px，[min-width:840px] 使 viewport598→840px，
+[overflow:visible] 改变裁切及真实命中链。默认与三个 named utility 控制相同。
+twMerge 保留 named default 与 arbitrary property；Tailwind 原本把后者排在对应 named
+utility 之前，全部 native atom 提前会反转结果。不能以 CSS 补丁或默认成功接受这些反例。
+
+Root 已把十三试集成路径恢复为原字节，并移除六个新增文件。compiler／依赖／lock 路径
+未采用，九个 Adaptive 默认仍保留 Tailwind。真实截图见 leaves188-counterexample.html，
+精确恢复见 root188-native-rejection-restoration-proof.json；171／177／180／184 的原成功、
+OPEN 和失败证据都保留。
 
 ## 提议的下一边界
 
 只为明确识别、且全部调用方与状态合同已证明的原生缺省样式，评估一个小提取路径。为其使用独立编译身份和 atom 前缀，保留普通路径，并验证最终真实 CSS 顺序。公开 raw selector、Slot 行为以及 state／query utility 继续使用现有路径，直到各自的顺序合同有等价替代。
 
-在集成构建改动前，需证明实际应用、Storybook 和 standalone 输出遵守相同边界，审查碰撞、变量、注册与每条保留规则，重跑真实调用方回归和普通 StyleX 控制。默认截图、empty-caller guard，或十三个原生用例通过，都不能批准任意公开 Slot 迁移。目前没有选择全局提取顺序，也没有退役任何兼容 API。
+在集成构建改动前，需证明实际应用、Storybook 和 standalone 输出遵守相同边界，审查碰撞、变量、注册与每条保留规则，重跑 named／arbitrary-property 调用方、变体、shorthand 交互和普通 StyleX 控制。默认截图、empty-caller guard，或十三个原生用例通过，都不能批准任意公开 Slot 迁移。目前没有选择全局提取顺序，也没有退役任何兼容 API。

@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults into the earlier StyleX layer can change which caller styles win, even when screenshots match. A separate, bounded native extraction into utilities before Tailwind preserves the original 54 Storybook and twelve standalone consumer pairs. The final isolated proposal gives each client compiler private CSS, retains development atoms for in-flight responses and folds a real typed shim; actual Electron captures have an exact native row but retain whole-App pixel OPENs. General Slot replacement, App SSR and state-preserving owner HMR are unsupported. Root production configuration, dependencies and lockfile remain unchanged while the final state matrix and complete consumer types are reviewed.
+Moving public Tailwind defaults between CSS layers changes supported caller precedence. An early flat-utilities route preserves 66 existing browser pairs and the visible native row in a real Electron trial, but three additional arbitrary-property callers change width, minimum width and hit testing. Named utility controls still match: the failure is the original ordering between named and arbitrary-property rules, which `twMerge` does not remove. All thirteen trial source/configuration/dependency paths were restored and its nine defaults receive zero migration credit. Ordering-aware replacement remains proposed; private owned UI migration continues independently.
 
 ## Evidence and limits
 
@@ -72,7 +72,7 @@ The original five direct-caller frames omitted `items-end` from the fixture's Ta
 
 The installed 0.19 unplugin cannot be treated as two isolated collectors: its instances share a global rule store. Its declared `legacyDisableLayers` option is not forwarded to the native rule processor; disabling layers still adds priority selectors. The experiment calls the native processor directly with both `useLayers: false` and `legacyDisableLayers: true`. It does not transform selectors or increase specificity. Babel's default import-source handling also requires explicit isolation rather than assuming a custom source excludes ordinary StyleX imports.
 
-## Final bounded proposal under review
+## Bounded trial and the ordering rejection
 
 The frozen171/180 patch is eleven files/348 changed lines for nine defaults and
 seven distinct atoms in AdaptiveTabStrip. It gives every client mode a private
@@ -96,12 +96,44 @@ the whole App retains 39 raw/zero-threshold pixels OPEN. Static camera opacity
 stays its designed 0.48; no animation was paused or forced. Earlier 171/177 OPENs
 and a restoration-before-exit harness mistake remain distinct. The corrected run
 quits all owned App processes before restoring all 1,222 renderer files; 335
-main/CLI/lock guards match. Components types and seven owning tests pass. Final
-54/12 state-matrix replay and complete Electron types are still being checked;
-these isolated results earn zero Root migration credit until actual integration.
+main/CLI/lock guards match. Components types and seven owning tests pass. The final frozen171 replay passes all 54 Storybook and twelve standalone pairs,
+including 46 unchanged ordinary controls; Root independently reopens all full
+pre/post Brotli records and decodes PNGs (3,022 scene records, 720 exact class
+carriers). Raw class strings differ, including three direct same-property caller
+cases, despite matching rendering. Complete Electron node/web types pass in the
+frozen mirror without CLI prerequisites. These subset results earn zero production migration credit.
+
+The initial factory also missed Windows-normalized module IDs. A minimal
+`normalizePath` correction passes real compiler/Vite-function Win/POSIX tests in a
+virtual filesystem; actual macOS consumer JS/CSS bytes match. This is not a
+Windows OS run. A retained three-case compiler test uses explicit pending-read
+signals, not scheduler timing. The historical patch and original matrices remain
+unchanged.
+
+The current-input trial184 applied thirteen paths, compiled both official
+renderers (9,087 modules each), and preserved all 3,946 ordinary and 2,864 unlayered
+rules. Its real App native crop has zero differing pixels; the whole viewport
+retains 312 raw/zero-threshold pixels OPEN. Four class carriers, 46 boot-variable
+values, one HTML boot style and two linked panel IDs are explicit differences.
+This does not establish whole-page field or animation-history equivalence.
+
+Trial188 then renders the real Adaptive component with the same literal caller
+fixture in two complete builds. `[width:0px]` changes strip width598→16px,
+`[min-width:840px]` changes viewport598→840px, and `[overflow:visible]` changes
+item clipping and the real hit-test chain. Default and three named utility
+controls match. `twMerge` retains the named defaults beside arbitrary properties;
+Tailwind originally sorts those arbitrary-property rules before the named
+utility. Putting every native atom before Tailwind reverses that outcome.
+No CSS patch or default-only success can accept these counterexamples.
+
+Root restored all thirteen trial paths to their original bytes and removed the
+six newly added files. The compiler/dependency/lock route is not adopted; the nine
+Adaptive defaults remain Tailwind. `leaves188-counterexample.html` owns the real
+captures and `root188-native-rejection-restoration-proof.json` the exact rollback.
+All171/177/180/184 successes, OPENs and failures remain historical evidence.
 
 ## Proposed next boundary
 
 Evaluate a small extraction route only for an explicitly identified native default whose complete caller and state contract is demonstrated. Give that route distinct compiler identities and atom prefixes, preserve the ordinary route, and test the actual final CSS order. Keep public raw selectors, Slot behavior and state/query utilities on their existing paths until their separate ordering contracts have an equivalent replacement.
 
-Before integrating a build change, demonstrate that the real application, Storybook and standalone output share that boundary; audit collisions, variables, registrations and every retained rule. Repeat the real caller regressions and normal StyleX controls. A default screenshot, an empty caller guard, or thirteen passing native cases cannot approve arbitrary public Slot migration. No global extraction order has been selected, and no compatibility API has been retired.
+Before integrating a build change, demonstrate that the real application, Storybook and standalone output share that boundary; audit collisions, variables, registrations and every retained rule. Repeat named and arbitrary-property callers, variants, shorthand interactions and normal StyleX controls. A default screenshot, an empty caller guard, or thirteen passing native cases cannot approve arbitrary public Slot migration. No global extraction order has been selected, and no compatibility API has been retired.

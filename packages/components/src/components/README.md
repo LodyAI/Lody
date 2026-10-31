@@ -161,6 +161,10 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+  [`workspace-layout-utils.ts`](workspace-layout-utils.ts) owns the shared StyleX
+  root/content classes and the element-local safe-area and native-keyboard readers.
+  Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
+  it is not an unused utility.
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact

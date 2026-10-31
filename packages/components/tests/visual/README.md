@@ -902,6 +902,12 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `leaves179-public-caller-acceptance.html` | Zero migration;canvas pointer candidate restored | Default PNG/GPU equality does not accept public ancestor pointer-events and trusted target reversal; original default report retained |
 | `leaves171-acceptance.html`, `leaves177-acceptance.html`, `leaves180-acceptance.html` | Unadopted bounded native-build proposal,zero product credit | Native row180 exact;whole App39raw/0threshold remains OPEN;171/177 failures and original restoration-order mistake retained |
 
+| `leaves182-acceptance.html` | Five content-pane utilities;18 Electron PNGs exact,3,242 scene records | One state retains12 non-content hover-field differences; boot/ID/blob carriers and original harness failures separate |
+| `leaves183-acceptance.html`, `leaves186-acceptance.html` | Nine private typography utilities;39/39 and20/23 PNGs exact | Three186 OPENs111raw/72threshold;183 file cleanup unknown; registrations retained without a patch |
+| `leaves185-acceptance-final.html` | Twenty layout-helper literals;46 formal/41exact,5,118 scene records | Five formal OPENs709raw; diagnostics/controls and three unknown cleanups separate; ordered legacy CSS qualification is not a new visual replay |
+| `leaves190-candidate.html` | One closed time-picker constraint adopted by Root;18 Input/indicator ROIs and78 UA nodes exact | Whole-view15/18exact;three OPENs2094/2112/2094raw,maximum channel delta1; frozen candidate predates Root adoption |
+| `leaves171-final-matrix-acceptance.html`, `leaves184-acceptance.html`, `leaves188-counterexample.html` | Rejected native compiler route;zero migration credit | Earlier66 exact pairs and actual-App crop equality do not accept three arbitrary-property size/clipping/hit regressions; all trial source/config/lock changes restored |
+
 Root independently reopens original compressed records and decodes PNG RGBA.
 Named carrier exceptions retain both raw values; they never establish whole-object
 equality. The latest fixed component suite passes 620 files/6,209 tests with all

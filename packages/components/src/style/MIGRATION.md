@@ -44,10 +44,13 @@ equivalent replacement. Runtime mappings with retained source literals are not
 source-removal credit, and a counterexample withdraws the claimed mapping.
 
 A [separate extraction proposal](../../../../.agents/notes/proposed/architecture/2026-10-31-stylex-cascade-compatibility.md)
-records the measured boundary for native defaults. Flat utilities routing with
-isolated atoms can preserve selected native callers, while real Slot and query
-cases still fail. It has not changed this build: do not switch global layers or
-add two unplugin instances on the strength of native-only screenshots.
+records the measured boundary for native defaults. Early flat utilities pass
+selected native matrices but reverse supported arbitrary-property callers:
+`[width:0px]`, `[min-width:840px]` and `[overflow:visible]` change actual size or
+hit testing because `twMerge` retains them beside named defaults. The compiler
+trial was fully restored; no build/dependency route is adopted. Preserve named,
+arbitrary-property, variant and shorthand order before replacing these defaults;
+do not use a class-name guard, a specificity patch or default-only screenshots.
 
 The independent helper controls' reviewed internal call graph and original raw
 selectors are separate contracts. Their local ordinary/Slot split is not a recipe

@@ -13,6 +13,7 @@ import { PopoverActionChip } from '../sessions/info-chip';
 
 const styles = stylex.create({
   fields: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  manualTimeInput: { '::-webkit-calendar-picker-indicator': { display: 'none' } },
   shortcuts: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
   popover: {
     display: 'flex',
@@ -78,7 +79,7 @@ export function ScheduledMessageTimeFields({
         {t('scheduledMessage.dateAndTime')}
         <Input
           type="datetime-local"
-          className="[&::-webkit-calendar-picker-indicator]:hidden"
+          {...stylex.props(styles.manualTimeInput)}
           value={local}
           disabled={disabled}
           aria-invalid={invalid}

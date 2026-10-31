@@ -30,7 +30,14 @@ tracking, leading and weight read their original element-local theme/literal;
 numeric variants read all five numeric variables with empty fallbacks. A writer
 alone is not a substitute for that reader. Full Storybook and standalone CSS
 verification includes token pruning, actual fonts and visible numeric states;
-public Slot, responsive heading and file-tree contracts stay on their audited paths.
+public Slot contracts stay on their audited paths. Reviewed responsive headings
+keep the original rem media condition, local text token and private-leading reader.
+Numeric and length line-height owners preserve all five numeric variables and
+inherited lengths, including smaller table cells. During coexistence, Tailwind
+can still retain a utility because a StyleX value contains the same keyword;
+check complete production CSS before adding duplicate registrations. Removing
+Tailwind itself will also require explicit ownership of every retained writer
+registration and fallback.
 Separator styling follows its existing JavaScript orientation branch; caller-written
 or Radix-normalized data attributes do not choose its axis. Rendering the original
 invalid-orientation case retains its original attribute/style mismatch.

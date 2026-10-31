@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Provider, createStore } from 'jotai';
 import { Monitor } from 'lucide-react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import type {
   AgentConfigId,
   MachineId,
@@ -20,6 +22,7 @@ import {
   getMobileMainLayoutRootClassName,
   getMobileMainLayoutContentClassName,
 } from '@/components/main-layout';
+import { getWebWorkspaceLayoutRootClassName } from '@/components/workspace-layout-utils';
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
@@ -34,6 +37,20 @@ const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
 const STORY_AGENT_CONFIG_ID = 'agent-storybook' as AgentConfigId;
 const STORY_SESSION_ID = 'session-storybook' as SessionId;
 const STORY_AUTH_TOKEN = 'storybook-token';
+
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'local:layout-story-user', name: 'Layout story user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      { id: STORY_WORKSPACE_ID, name: 'Layout Story Workspace', slug: 'storybook', role: 'owner' },
+    ],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
 
 const DEVICE_WIDTH = 390;
 const DEVICE_HEIGHT = 844;
@@ -156,7 +173,9 @@ function SessionChatContent() {
 }
 
 /** Chat landing content (shared between desktop preview & fullscreen). */
-function ChatLandingContent() {
+type WorkspaceRootFamily = 'mobile' | 'web' | 'settings';
+
+function ChatLandingContent({ rootFamily = 'mobile' }: { rootFamily?: WorkspaceRootFamily }) {
   const handleSubmit = fn();
   const handleOpenMobileDrawer = fn();
   const [prompt, setPrompt] = useState('');
@@ -185,8 +204,15 @@ function ChatLandingContent() {
   );
 
   return (
-    <div className={getMobileMainLayoutRootClassName()}>
-      <div className={getMobileMainLayoutContentClassName()}>
+    <div
+      data-owned-workspace-root={rootFamily}
+      className={
+        rootFamily === 'mobile'
+          ? getMobileMainLayoutRootClassName()
+          : getWebWorkspaceLayoutRootClassName({ settingsRoute: rootFamily === 'settings' })
+      }
+    >
+      <div data-owned-workspace-content="" className={getMobileMainLayoutContentClassName()}>
         <ChatLandingView
           tone="dark"
           isMobile
@@ -284,6 +310,13 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
 
 const meta = {
   title: 'Mobile/ViewportKeyboard',
+  decorators: [
+    (Story) => (
+      <PlatformContext value={storyPlatform}>
+        <Story />
+      </PlatformContext>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta;
 
@@ -340,4 +373,47 @@ export const ChatLandingDevice: Story = {
   parameters: { layout: 'fullscreen' },
   render: () => <ChatLandingContent />,
   globals: { theme: 'dark' },
+};
+
+/** Fixed CSS-variable inputs exercise the exported layout helpers with real landing controls. */
+function OwnedRootProbe({
+  family,
+  inset = false,
+}: {
+  family: WorkspaceRootFamily;
+  inset?: boolean;
+}) {
+  const variables = {
+    '--safe-area-top': inset ? '27px' : '0px',
+    '--safe-area-left': inset ? '11px' : '0px',
+    '--safe-area-right': inset ? '13px' : '0px',
+    '--native-keyboard-height': inset ? '260px' : '0px',
+    '--ease-out': 'cubic-bezier(0.2, 0.7, 0.3, 1)',
+    height: '100vh',
+  } as CSSProperties;
+  return (
+    <div data-layout-probe-input={inset ? 'native-inset' : 'zero'} style={variables}>
+      <ChatLandingContent rootFamily={family} />
+    </div>
+  );
+}
+
+export const OwnedRootMobileDefault: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="mobile" />,
+};
+
+export const OwnedRootMobileNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="mobile" inset />,
+};
+
+export const OwnedRootWebNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="web" inset />,
+};
+
+export const OwnedRootSettingsNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="settings" inset />,
 };

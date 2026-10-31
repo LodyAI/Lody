@@ -1850,13 +1850,19 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-147–181 的已审计范围移除 78 处源码 utility；另六处重复尺寸／shrink 单列清理。
-helper 截至 178 的冻结库存为 267 处／8 文件／21 未解析，覆盖 30 份生产源码。
-主组件三根截至 181 的观察库存为 1,361 处／153 文件／726 未解析，覆盖 791 份源码：
-components 932／139／633，legacy UI 429／14／93，53 个 route 文件为 0／0／0。
-这些是源码下界，不是完成率。161→181 冻结输入仅两个 route、移动集成行和单会话分享
-标题四文件不同；不包含尚未采用的 native 编译提议或下一布局单元。精确输入与扫描见
-`inventory-source-through181-observed-proof.json` 和 `inventory-v2-through181-observed-*.json`。
+147–190 已审计范围移除113处源码 utility，不含在途189。另六处重复尺寸／shrink单列清理。
+九个 native 编译试验默认值已因188恢复，信用零。helper冻结186为258／8／21，覆盖30源。
+已接受190的全非story components源码为1,357处／153文件／730未解析，覆盖1,397源；
+其中三核心根为1,348／151／726，覆盖791源：components919／137／633、legacy UI429／14／93、
+53个route文件0／0／0。额外九处为共享conversation column八类及键盘sheet important bottom一类。
+这些是源码下界，不是完成率或整branch视觉通过。
+
+精确输入见inventory-source-through190-accepted-proof.json；相较181仅content pane、layout helper
+及scheduled-time leaf三个核心文件不同。helper单独使用186冻结源，不含189 API工作。
+185手工审计移除二十literal，但原仅七个在v2解析范围；保留的h-svh hook也未计入此下界。
+147原字典缺口仍单列。独立@lody/ui的84源识别零utility，仍有131未解析表达式；零不证明
+所有动态类。库存不带来新增整套测试／renderer资格，精确位置及未解析值保留在冻结JSON；
+remaining-source-inventory181.html是此前181范围，未冒充当前完整branch。
 
 147 实际移除七处，但扫描只减少三处：`CI_ICON_TONE[state]` 原四字符串未被 v2 解析。
 这个已知缺口不改变统计方法，也不增加迁移信用。
@@ -1889,6 +1895,11 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 离线 workspace route173 | 四处；28 对 PNG 与已采字段全同，四组实际 online／offline／Refresh／恢复流程。新 route fixture 恢复又完整复现原 28 个 After。 | 平台 port 是纯内存合成实现，不是实后端／IPC。修正 fixture 在新 route 中使用原组件，不修改导出 route singleton；生成 route tree 排序漂移两源均同，未纳入提交。 |
 | 移动集成175与单会话分享标题181 | 各一处；36 与 32 PNG 全同，3,788 与 4,356 scene 记录。覆盖禁用／认证／角色／搜索／Switch 流程及真实字体 Token 边界。 | 移动 role provider 默认值有 12 对控制；分享 origin 在 pre/post 共 128 个精确 URL 载体差异，路径、链接行为与图片字节同。story 旧 effect return 机械显式为 undefined，保留原采集 hash。 |
 | Fabric canvas179 | 默认 PNG 与 GPU 像素同，但合法零特异性祖先改变 pointer-events 与真实命中 DIV→CANVAS。 | 两候选 utility 恢复，信用零。默认报告由公开调用方反例补充纠正；像素相同不能接受交互变化。 |
+| Content pane182 | 五处owned布局；18对真实Electron PNG与3,242 scene记录同，含实际主题设置、compact遮罩／inert／Escape及焦点回传。 | light767一格保留12个非content hover差。612 boot字段、432生成ID／引用、16blob URL载体单列；32值双射、108引用指向相同节点或同样缺失，trace图片实体字节同。OOM／evaluate／restore原失败保留。 |
+| 私有行高183与数字186 | 九处；39／39及20／23 PNG同，495与339目标／字体记录同；table继承length、原48rem reader、导航／reviewed／copy结果保持。 | 186三个OPEN共111原始／72阈值；全部已录字段仅精确图片端口差。183两file运行cleanup未知。完整生产CSS／注册不变，无保活补丁。 |
+| 共享layout helper185 | 二十源码literal；46正式对41PNG同，5,118 scene记录；覆盖safearea／keyboard及真实250ms过渡端点，h-svh保留旧浏览器／devbar hook。 | 原五OPEN709原始／零记录阈值；另4诊断OPEN585原始、8复用同源control中4变832原始，均不证明精确原因。三cleanup未知。原矩阵在冻结native试验环境，恢复legacy的独立非空有序资格为3,950 ordinary／2,866 unlayered／8,596非native规则、108注册及18层声明全同，不是新legacy视觉重采。首空组投影无效且原bytes被覆盖，采用另冻的独立proof。 |
+| 原生时间输入约束190 | 一处隐藏native picker；18 Input完整区域与indicator区域像素全同，78真实UA shadow节点同，键盘与controlled value保持。 | 整图15／18同，三个light390 OPEN2094／2112／2094原始像素、最大channel差1，原因未证。闭合调用图无leading／同pseudo竞争，不替换Input well／字体，也无新primitive API。 |
+| Native编译试验188 | 三个真实arbitrary-property调用方使strip598→16px、viewport598→840px、裁切／命中改变，默认与named控制仍同。 | 十三试集成路径全恢复，六新增文件及三临时依赖link已移除，cache包未删。九默认仍Tailwind。此前66对成功与实际App312原始OPEN只保留为证据，不作接受结论。 |
 
 提示的原 18 个样式字段、原生 DOM 和父级回调原样移出；配额、翻译、telemetry 与 settings
 仍由原页面负责。父级最终仅清理一个空悬注释，其 runtime token AST 与构建输入同，

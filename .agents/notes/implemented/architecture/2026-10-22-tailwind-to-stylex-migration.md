@@ -2608,17 +2608,27 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Audited scopes 147–181 remove 78 source utilities. Six redundant size/shrink
-occurrences remain separate cleanup. The frozen helper through 178 contains
-267 occurrences in eight files and 21 unresolved expressions across 30 sources.
-The observed three core roots through 181 contain 1,361 occurrences in 153 files
-and 726 unresolved expressions across 791 sources: components 932/139/633,
-legacy UI 429/14/93, routes 0/0/0 across 53 route files. These are source lower
-bounds, not completion rates. The frozen 161→181 inputs differ only in the two
-routes, mobile integration rows and solo share title; neither the unadopted native
-compiler proposal nor the next layout unit is included. Exact inputs and scans
-are in `inventory-source-through181-observed-proof.json` and
-`inventory-v2-through181-observed-*.json`.
+Audited scopes 147–190 remove 113 source utilities; in-progress189 is excluded.
+Six redundant size/shrink occurrences remain separate cleanup. The nine native
+compiler-trial defaults were restored after188 and receive zero credit.
+The helper's frozen186 cut contains258/8/21 across30 production sources.
+The accepted190 full non-story components cut contains1,357 occurrences in153
+files and730 unresolved expressions across1,397 sources. Its three core roots
+contain1,348/151/726 across791 sources: components919/137/633, legacy UI429/14/93,
+and53 route files0/0/0. The other nine occurrences are eight shared conversation
+column classes and one keyboard-sheet important bottom override. These are
+source lower bounds, not completion rates or whole-branch visual approval.
+
+`inventory-source-through190-accepted-proof.json` freezes those inputs; relative
+to181 only the content pane, layout helper and scheduled-time leaf differ.
+The helper remains a separate frozen186 input, excluding189 API work. Scope185
+removes twenty manually audited literals but only seven were in v2 resolution;
+its retained `h-svh` hook is also outside that lower bound. The earlier147 dictionary
+gap remains separate. The independent `@lody/ui` scan recognizes zero utilities
+across84 files while retaining131 unresolved expressions; zero does not prove
+all dynamic classes. No fresh whole-test/renderer qualification is inferred from
+these inventories. Exact positions and unresolved expressions remain reviewable
+in the frozen JSONs and `remaining-source-inventory181.html` (the older181 cut).
 
 The earlier 147 cut removed seven utilities while the scanner fell by three:
 four original `CI_ICON_TONE[state]` strings were outside v2 resolution. That known
@@ -2652,6 +2662,11 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Offline workspace route173 | Four utilities; 28 PNGs and captured fields exact; four actual online/offline/Refresh/recovery flows. A fresh-route fixture recovery reproduces all 28 original After captures exactly. | Pure in-memory synthetic platform ports, not live backend/IPC. The corrected fixture uses the original component in a fresh route and does not mutate the exported route singleton. Generated route-tree ordering drift is unchanged by either style source and is excluded. |
 | Mobile integrations175 and solo share title181 | One utility each; 36 and 32 PNGs exact, with 3,788 and 4,356 captured scene records. Disabled/auth/role/search/Switch flows and native font-token boundaries are covered. | Mobile role-provider defaults retain 12 control pairs. Share origin differences are 128 exact URL carriers across pre/post; paths, link behavior and actual logo bytes match. The story's existing inconsistent effect return is mechanically made explicit `undefined`; original capture hashes remain retained. |
 | Fabric canvas179 | Default PNGs and GPU pixels match, but a legal zero-specificity ancestor changes computed pointer-events and trusted hit target from DIV to CANVAS. | Both candidate utilities restored, zero credit. Default-only report is superseded by the public-caller counterexample; matching pixels cannot accept changed interaction. |
+| Content pane182 | Five owned layout utilities;18 real Electron PNGs/3,242 scene records match, including theme settings, compact overlay/inert/Escape and focus return. | One light767 state retains12 non-content hover differences. Boot612 fields,432 generated IDs/refs and16 blob URLs are explicit carriers;32 ID values are bijective,108 references resolve to the same nodes or same absence, and actual trace image bytes match. Original OOM/evaluate/restore failures remain. |
+| Private line-height183 and numeric186 | Nine source utilities;39/39 and20/23 PNGs exact,495 and339 target/font records match. Lengths inherited by table cells, original48rem reader, actual navigation/reviewed/copy states are preserved. | Three186 OPENs total111raw/72threshold; all recorded fields match apart from exact asset ports.183's two file-run cleanup outcomes remain unknown. Production CSS and registrations stay intact without a retention patch. |
+| Shared layout helper185 | Twenty source literals;46 formal pairs/41 PNGs exact and5,118 scene records match. Safe-area/keyboard variables and actual250ms transition endpoints are covered;`h-svh` is retained for old-browser/devbar hooks. | Five formal OPENs709raw/zero recorded threshold;4 diagnostic OPENs585raw and8 reused same-source controls (4 vary,832raw) do not establish a paint cause. Three cleanup outcomes remain unknown. All formal captures used the frozen native trial; independent non-empty ordered legacy CSS qualification covers3,950 ordinary/2,866 unlayered/8,596 non-native rules,108 registrations and18 layer declarations, not a new legacy visual replay. The original empty-group projection was invalid and its bytes were overwritten; the independently frozen replacement is authoritative. |
+| Native time-input constraint190 | One private native-picker hiding rule;18 full Input and indicator regions are pixel-exact,78 real UA shadow nodes match, and keyboard/controlled-value results remain equal. | Whole view15/18 PNGs exact;three light390 OPENs2094/2112/2094raw have maximum channel delta1 and remain unproved. The constraint does not replace the Input well/font or add a primitive API;no leading/same-pseudo competition exists in this closed call graph. |
+| Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 
 The notice's original 18 style fields, native DOM and parent callback were moved
 without changing quota, translation, telemetry or settings ownership. Its parent

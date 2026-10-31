@@ -146,7 +146,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           // Capture before inert can blur the opener during the open commit.
           returnFocusRef.current = event.target;
         }}
-        className="relative flex min-w-0 flex-1 overflow-hidden"
+        className={stylex.props(styles.content).className}
       >
         <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
@@ -161,6 +161,16 @@ const styles = stylex.create({
   /** The settings route's single pane, under the window drag strip. */
   settingsPane: {
     minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  /** The content pane shrinks beside the sidebar and clips its own viewport. */
+  content: {
+    position: 'relative',
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: '0%',
