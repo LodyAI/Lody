@@ -74,7 +74,8 @@ export function createEncryptedSharedMachineStore(options: {
     publish(next);
   };
   const pump = () => {
-    while (!disposed && running < READ_CONCURRENCY && queue.length > 0) {
+    while (running < READ_CONCURRENCY && queue.length > 0) {
+      if (disposed) return;
       const machineId = queue.shift()!;
       queued.delete(machineId);
       const ticket = (sequence.get(machineId) ?? 0) + 1;

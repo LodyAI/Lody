@@ -44,14 +44,14 @@ export function useEncryptedSharedMachines(input: {
   const hasPort = Boolean(readMachineSharing);
   useEffect(() => {
     if (!accountId || !workspaceId || !readMachineSharing) return undefined;
-    const lease = acquireEncryptedSharedMachineStore({ accountId, workspaceId }, () =>
+    const acquired = acquireEncryptedSharedMachineStore({ accountId, workspaceId }, () =>
       createEncryptedSharedMachineStore({
         workspaceId,
         port: { readMachineSharing },
       })
     );
-    setLease(lease);
-    const refresh = () => lease.store.refresh();
+    setLease(acquired);
+    const refresh = () => acquired.store.refresh();
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
@@ -63,7 +63,7 @@ export function useEncryptedSharedMachines(input: {
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', onVisible);
       setLease(null);
-      lease.release();
+      acquired.release();
     };
     // The port is stable per platform; only account/workspace scope the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
