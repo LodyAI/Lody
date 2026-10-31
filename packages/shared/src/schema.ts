@@ -706,6 +706,12 @@ export const sessionHistorySchema = schema.LoroMap({
     },
     { required: false }
   ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
+    { required: false }
+  ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**

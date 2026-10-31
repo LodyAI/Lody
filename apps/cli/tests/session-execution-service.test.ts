@@ -3023,6 +3023,7 @@ describe('SessionExecutionService', () => {
     const source = new LoroDoc();
     const submitted: string[] = [];
     const invocations: Array<{ requesterUserId: string } | undefined> = [];
+    const derivations: Array<'owner' | 'member' | undefined> = [];
     const presence = bindTestPresenceApplication(createSilentLogger());
     const execute = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>) =>
       Effect.runPromise(Effect.scoped(effect));
@@ -3662,6 +3663,9 @@ describe('SessionExecutionService', () => {
           onPrompt: async (service) => {
             submitted.push('hi');
             invocations.push(service.getActiveInvocationContext(sessionId as SessionId));
+            derivations.push(
+              service.reserveEncryptedDerivation(sessionId as SessionId, 'turn-user-1')?.kind
+            );
           },
         });
       if (backfillFailure) {
@@ -3708,13 +3712,13 @@ describe('SessionExecutionService', () => {
       const before = historyReads.length;
       const result = await dispatch();
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
-      // Only a turn verified as signed by the machine owner's own membership may
-      // lend its identity to derived work (MCP, iOS control). A shared member's
-      // turn gets none, whatever display userId its history row claims.
-      if (!deniedSigner)
-        expect(invocations[0]?.requesterUserId).toBe(
-          mode === 'other-member-shared' ? undefined : user
-        );
+      // Derived work follows the verified signer, never the history row's display
+      // userId: the owner's own turn derives as owner; a shared member's turn derives
+      // as that member, re-authorized when the derived input is written and started.
+      if (!deniedSigner) {
+        expect(invocations[0]?.requesterUserId).toBe(user);
+        expect(derivations[0]).toBe(mode === 'other-member-shared' ? 'member' : 'owner');
+      }
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
       expect(result.failureMessages).toEqual(
         mode === 'other-member' || mode === 'other-member-closed'

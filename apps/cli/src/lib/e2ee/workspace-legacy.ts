@@ -1308,6 +1308,8 @@ async function openWorkspaceOwned(
             membershipId
           )
         : null,
+    /** This machine's signing key: the only author of derived inputs. */
+    signingPublicKey: opened.signingPublicKey,
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,
@@ -1316,11 +1318,19 @@ async function openWorkspaceOwned(
     authorizeScheduleExecution,
     authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
       run(authorizeScheduleExecution(request, doc)),
-    resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc?: LoroDoc) =>
+    resolveVerifiedExecutionOriginal: (
+      intent: EncryptedExecutionIntent,
+      doc?: LoroDoc,
+      lookup: { readonly origin?: boolean } = {}
+    ) =>
       Effect.scoped(
         Effect.gen(function* () {
           if (closed || intent.workspaceId !== options.workspaceId) return undefined;
-          const fromDoc = doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
+          // Origin lookups and this machine's own inputs always use the signed row,
+          // whose `derivedFrom` the dispatch fast path cannot carry.
+          const fromDoc = lookup.origin
+            ? undefined
+            : doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
           // This original cache is an accelerator, never the actual-start journal.
           // Its local I/O fault cannot block the independently signed durable origin.
           const cached = yield* rpc
@@ -1341,14 +1351,17 @@ async function openWorkspaceOwned(
               !isDeepStrictEqual(verified.args.inputConfig ?? {}, intent.inputConfig ?? {})
             )
               return undefined;
-            const device = state.devices.get(verified.requesterDevice);
-            const member = device && state.members.get(hex(device.membershipId.toBytes()));
-            if (!member) return undefined;
-            return {
-              requesterDevice: verified.requesterDevice,
-              requesterCryptoUserId: hex(member.userId.toBytes()),
-              expiresAt: verified.expiresAt,
-            };
+            // A self-authored input may be derived; only its signed row says so.
+            if (verified.requesterDevice !== opened.signingPublicKey) {
+              const device = state.devices.get(verified.requesterDevice);
+              const member = device && state.members.get(hex(device.membershipId.toBytes()));
+              if (!member) return undefined;
+              return {
+                requesterDevice: verified.requesterDevice,
+                requesterCryptoUserId: hex(member.userId.toBytes()),
+                expiresAt: verified.expiresAt,
+              };
+            }
           }
           if (!doc) return undefined;
           return yield* executionOrigins.resolve(
@@ -1365,7 +1378,8 @@ async function openWorkspaceOwned(
                 );
                 return yield* contentBinding.openAuthenticated(request);
               }),
-            originRecovery?.recover
+            originRecovery?.recover,
+            lookup
           );
         })
       ),

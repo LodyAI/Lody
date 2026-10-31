@@ -205,12 +205,23 @@ export class Lody {
             userTurnId,
             at: Date.now(),
           }),
-        resolveVerifiedOriginal: (intent) => {
-          const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
-          return e2ee && typeof e2ee.resolveVerifiedExecutionOriginal === 'function'
-            ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
-            : Effect.succeed(undefined);
+        resolveVerifiedOriginal: (intent, lookup) => {
+          const owner = manager;
+          const loaded = owner?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          if (!e2ee || typeof e2ee.resolveVerifiedExecutionOriginal !== 'function')
+            return Effect.succeed(undefined);
+          const resolve = e2ee.resolveVerifiedExecutionOriginal;
+          if (loaded || !lookup?.origin || !owner) return resolve(intent, loaded, lookup);
+          // A derivation origin may live in a session this daemon has not opened yet.
+          return Effect.tryPromise({
+            try: () => owner.getOrCreateSessionDoc(intent.sessionId as SessionId),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.flatMap((session) => resolve(intent, session.handle?.doc, lookup)),
+            Effect.catch(() => Effect.succeed(undefined))
+          );
         },
+        ...(typeof e2ee.signingPublicKey === 'string' ? { selfDevice: e2ee.signingPublicKey } : {}),
       });
     }
     // Commands the daemon executes may touch Sessions owned by other machines; their
