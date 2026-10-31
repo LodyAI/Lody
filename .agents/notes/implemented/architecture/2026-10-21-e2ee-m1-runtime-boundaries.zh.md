@@ -86,6 +86,7 @@ veto 和 sheet 进入/返回。
 veto 的对话框。这不是完整产品旅程。原报告只记录到 `Quit renderer closing`，不能证明
 该次命中 veto 还是缺失 closed 事件；不能把候选当作历史栈事实。所属窗口测试用假时钟
 覆盖这两条路径与迟到回答失效。
+renderer veto 与期限修正见 [PR #2167](https://github.com/LodyAI/Lody/pull/2167)。
 
 retained 起点跨重启累计新增 64 条才压缩。原始历史完整验证、新缓存提交且旧 feed Scope 关闭后，仅清理被替换的 SQLite 及 sidecar；保留原始记录、pin 和冲突证据。完整账本只在本地首屏、末页或需要升级时经过 IPC，不随每个中间页回传。
 

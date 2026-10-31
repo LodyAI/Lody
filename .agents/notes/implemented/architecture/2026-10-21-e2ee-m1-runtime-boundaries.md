@@ -105,6 +105,7 @@ The reported run records only `Quit renderer closing`, so it cannot establish
 whether that run hit the veto or the missing-closed case. Neither candidate is
 presented as an observed historical stack. Owning window tests pin both paths and
 late-answer invalidation with fake clocks.
+The renderer veto/deadline correction is [PR #2167](https://github.com/LodyAI/Lody/pull/2167).
 
 Retained origins compact after 64 added records across reopen. Successful, verified rebuilding closes the replaced feed scope and removes only its SQLite file/sidecars; originals, pins and conflicting evidence are preserved. IPC publishes the full ledger at initial local display and at the final page or an upgrade stop, rather than each page.
 
