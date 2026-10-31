@@ -18,7 +18,7 @@ import type {
   CapacityObservation,
 } from '@lody/shared/automations';
 import { AutomationLedger, automationIdentity } from './storage/ledger';
-import { configureSessionPolicies } from './policies/session';
+import { configureSessionPolicies, internalPolicy } from './policies/session';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
@@ -331,6 +331,259 @@ describe('Automation durability', () => {
 });
 
 describe('Capacity evidence', () => {
+  it.each([
+    [undefined, Number.MAX_SAFE_INTEGER],
+    [Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER - 1],
+  ])('waits for quota evidence with reset estimate %s', async (retryAt, expectedRetryAt) => {
+    const { ledger } = fixture();
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 1);
+    const work = {
+      id: 'unknown-quota',
+      ownerUserId: 'user',
+      updatedAt: 1,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'account',
+      fingerprint: 'config-version',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    ledger.recordWork(work, {
+      ...event,
+      id: work.id,
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      subject: work.id,
+      data: {
+        workId: work.id,
+        bindingId: work.bindingId,
+        ...(retryAt === undefined ? {} : { retryAt }),
+      },
+    });
+    const delivery = required(ledger.deliveries().find((item) => item.event.id === work.id));
+    const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 101);
+    ledger.finishDelivery(delivery, undefined, 101);
+    let submitted = false;
+    const host = Layer.succeed(AutomationHost, {
+      authorize: () =>
+        Effect.succeed({ value: 'unknown' as const, reason: 'capacity_observation_stale' }),
+      condition: () => Effect.succeed({ value: 'yes' as const, reason: 'current' }),
+      prepare: () => Effect.succeed({ state: 'resolved' as const, prepared: {} }),
+      submit: () =>
+        Effect.sync(() => {
+          submitted = true;
+          return { state: 'settled' as const };
+        }),
+      reconcile: () => Effect.succeed({ state: 'settled' as const }),
+      cancel: () => Effect.succeed({ state: 'cancelled' as const }),
+      report: () => Effect.void,
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.pass;
+          expect(ledger.receipt(receipt.id)).toMatchObject({
+            state: 'blocked',
+            retryAt: expectedRetryAt,
+          });
+          expect(submitted).toBe(false);
+        }).pipe(Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))))
+      )
+    );
+  });
+  it('keeps an availability wake that arrives while a quota check is in flight', async () => {
+    const { ledger } = fixture();
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 1);
+    const work = {
+      id: 'race-work',
+      ownerUserId: 'user',
+      updatedAt: 1,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'account',
+      fingerprint: 'config-version',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    ledger.recordWork(work, {
+      ...event,
+      id: work.id,
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      subject: work.id,
+      data: { workId: work.id, bindingId: work.bindingId },
+    });
+    const delivery = required(ledger.deliveries().find((item) => item.event.id === work.id));
+    const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 101);
+    ledger.finishDelivery(delivery, undefined, 101);
+    const entered = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const submitted = Deferred.makeUnsafe<void>();
+    let checks = 0;
+    const host = Layer.succeed(AutomationHost, {
+      authorize: () =>
+        ++checks === 1
+          ? Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as({
+                value: 'no' as const,
+                reason: 'capacity_exhausted',
+                retryAt: Number.MAX_SAFE_INTEGER,
+              })
+            )
+          : Effect.succeed({ value: 'yes' as const, reason: 'authorized' }),
+      condition: () => Effect.succeed({ value: 'yes' as const, reason: 'current' }),
+      prepare: () => Effect.succeed({ state: 'resolved' as const, prepared: {} }),
+      submit: () =>
+        Deferred.succeed(submitted, undefined).pipe(Effect.as({ state: 'settled' as const })),
+      reconcile: () => Effect.succeed({ state: 'settled' as const }),
+      cancel: () => Effect.succeed({ state: 'cancelled' as const }),
+      report: () => Effect.void,
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* Deferred.await(entered);
+          const now = yield* Clock.currentTimeMillis;
+          observeCapacity(
+            ledger,
+            { bindingId: 'account', fingerprint: 'config-version' },
+            {
+              fetchedAtEpochSeconds: Math.floor(now / 1000),
+              rateLimits: [
+                {
+                  limitId: 'quota',
+                  scope: { providerId: 'provider' },
+                  windows: [
+                    { usedPercent: 0, windowDurationSeconds: 18000, resetsAtEpochSeconds: null },
+                  ],
+                },
+              ],
+            },
+            'push',
+            now
+          );
+          yield* runtime.wake;
+          yield* Deferred.succeed(release, undefined);
+          yield* Deferred.await(submitted);
+          yield* runtime.pass;
+          expect(ledger.receipt(receipt.id)?.state).toBe('settled');
+        }).pipe(
+          Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))),
+          Effect.timeout('5 seconds')
+        )
+      )
+    );
+  });
+  it('wakes only matching quota work on a confirmed available observation, including after restart', () => {
+    const { ledger, open } = fixture();
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 1);
+    const work = {
+      id: 'quota-work',
+      ownerUserId: 'user',
+      updatedAt: 1,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'account',
+      fingerprint: 'config-version',
+      modelId: 'model-a',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    ledger.recordWork(work, {
+      ...event,
+      id: work.id,
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      subject: work.id,
+      data: { workId: work.id, bindingId: work.bindingId, retryAt: 500000 },
+    });
+    const delivery = required(ledger.deliveries().find((item) => item.event.id === work.id));
+    const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 101);
+    ledger.update(receipt.id, 'accepted', { state: 'blocked', retryAt: 500000 }, 101);
+    const overloaded = { ...work, id: 'overloaded-work' };
+    ledger.recordWork(overloaded, {
+      ...event,
+      id: overloaded.id,
+      source: 'session/session',
+      type: 'provider.model.overloaded',
+      subject: overloaded.id,
+      data: { workId: overloaded.id, bindingId: overloaded.bindingId, retryAt: 500000 },
+    });
+    const overloadedDelivery = required(
+      ledger.deliveries().find((item) => item.event.id === overloaded.id)
+    );
+    const overloadedReceipt = ledger.accept(
+      overloadedDelivery,
+      required(internalPolicy(overloadedDelivery)[0]),
+      101
+    );
+    ledger.update(overloadedReceipt.id, 'accepted', { state: 'blocked', retryAt: 500000 }, 101);
+    const snapshot = (usedPercent: number): RateLimitsSnapshot => ({
+      fetchedAtEpochSeconds: 100,
+      rateLimits: [
+        {
+          limitId: 'quota',
+          scope: { providerId: 'provider', modelId: 'model-a' },
+          windows: [{ usedPercent, windowDurationSeconds: 18000, resetsAtEpochSeconds: 500 }],
+        },
+      ],
+    });
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'other' },
+      snapshot(0),
+      'push',
+      100000
+    );
+    expect(ledger.receipt(receipt.id)?.retryAt).toBe(500000);
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(100),
+      'push',
+      100000
+    );
+    expect(ledger.receipt(receipt.id)?.retryAt).toBe(500000);
+    const available = { ...snapshot(0), fetchedAtEpochSeconds: 101 };
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      available,
+      'push',
+      101000
+    );
+    expect(ledger.receipt(receipt.id)).toMatchObject({ retryAt: 101000, capacityWakeRevision: 1 });
+    expect(ledger.receipt(overloadedReceipt.id)?.retryAt).toBe(500000);
+    ledger.close();
+    const recovered = open();
+    expect(recovered.pending(101000).map((item) => item.id)).toContain(receipt.id);
+    observeCapacity(
+      recovered,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      available,
+      'push',
+      101000
+    );
+    expect(recovered.receipt(receipt.id)?.capacityWakeRevision).toBe(1);
+  });
   const observation: CapacityObservation = {
     bindingId: 'account',
     fingerprint: 'config-version',

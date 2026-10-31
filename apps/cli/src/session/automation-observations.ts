@@ -63,5 +63,9 @@ export type SessionAutomationObservation = {
 export type AutomationObservationSink = {
   stage(observation: SessionAutomationObservation): void;
   turn(observation: SessionAutomationObservation): Promise<void>;
-  capacity(binding: ProviderBinding, snapshot: RateLimitsSnapshot, source: 'query'): Promise<void>;
+  capacity(
+    binding: ProviderBinding,
+    snapshot: RateLimitsSnapshot,
+    source: 'query' | 'push'
+  ): Promise<void>;
 };

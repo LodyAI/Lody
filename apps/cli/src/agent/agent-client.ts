@@ -26,7 +26,6 @@ import {
   type LodyGoalCapability,
   type LodySessionActivityUpdate,
   type LodySubagentSnapshot,
-  type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
@@ -535,7 +534,7 @@ export interface AgentClientOptions {
   ): Promise<acp.RequestPermissionResponse>;
   onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
-  onRateLimitUpdate?(limits: RateLimit): void;
+  onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
@@ -1590,9 +1589,7 @@ export class AgentClient implements acp.Client {
         return;
       case 'rateLimits':
         this.latestCapacityObservation = event.snapshot;
-        for (const rateLimit of event.snapshot.rateLimits) {
-          this.options.onRateLimitUpdate?.(rateLimit);
-        }
+        if (event.snapshot.rateLimits.length) this.options.onRateLimitUpdate?.(event.snapshot);
         return;
       case 'legacyProposedPlan':
         this.options.onUpdateMessage(

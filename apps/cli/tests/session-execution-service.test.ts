@@ -15789,6 +15789,33 @@ describe('Provider quota refresh', () => {
     }
   });
 
+  it('forwards pushed capacity snapshots with the originating binding to Automation', async () => {
+    const harness = quotaHarness();
+    const observed = createDeferred<{
+      bindingId: string;
+      fingerprint: string;
+      snapshot: typeof snapshot;
+      source: string;
+    }>();
+    harness.service.setAutomationObservations({
+      stage: () => {},
+      turn: async () => {},
+      capacity: async (binding, value, source) =>
+        observed.resolve({ ...binding, snapshot: value, source }),
+    });
+    harness.service.noteProviderRateLimitsUpdate(
+      capabilityConfigId,
+      { bindingId: capabilityConfigId, fingerprint: 'origin' },
+      snapshot
+    );
+    expect(await observed.promise).toEqual({
+      bindingId: capabilityConfigId,
+      fingerprint: 'origin',
+      snapshot,
+      source: 'push',
+    });
+  });
+
   it.each([
     ['codex', 'OPENAI_API_KEY'],
     ['claude', 'ANTHROPIC_BASE_URL'],
@@ -15857,7 +15884,7 @@ describe('Provider quota refresh', () => {
         const request = harness.service.refreshProviderRateLimits(capabilityConfigId);
         if (mode !== 'unsupported') await ready.promise;
         if (mode === 'push') {
-          harness.service.noteProviderRateLimitsUpdate(capabilityConfigId);
+          harness.service.noteProviderRateLimitsUpdate(capabilityConfigId, undefined, snapshot);
           harness.rows.set(key, 'newer-push');
         }
         if (mode === 'deleted') harness.remove();

@@ -607,15 +607,19 @@ describe('AgentClient plan mode permission restoration', () => {
       );
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        limitName: null,
-        planName: '"pro"',
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 18,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            limitName: null,
+            planName: '"pro"',
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 18,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
@@ -634,19 +638,23 @@ describe('AgentClient plan mode permission restoration', () => {
       await expect(client.extMethod('_acp_ext:session_rate_limits', limits)).resolves.toEqual({});
 
       expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        limitId: 'codex',
-        planName: null,
-        scope: { providerId: 'codex' },
-        windows: [
+        rateLimits: [
           {
-            usedPercent: 3,
-            windowDurationSeconds: 18000,
-            resetsAtEpochSeconds: 1777288209,
-          },
-          {
-            usedPercent: 82,
-            windowDurationSeconds: 604800,
-            resetsAtEpochSeconds: 1777400602,
+            limitId: 'codex',
+            planName: null,
+            scope: { providerId: 'codex' },
+            windows: [
+              {
+                usedPercent: 3,
+                windowDurationSeconds: 18000,
+                resetsAtEpochSeconds: 1777288209,
+              },
+              {
+                usedPercent: 82,
+                windowDurationSeconds: 604800,
+                resetsAtEpochSeconds: 1777400602,
+              },
+            ],
           },
         ],
       });
