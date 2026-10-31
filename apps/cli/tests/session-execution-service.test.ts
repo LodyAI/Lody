@@ -3241,6 +3241,34 @@ describe('SessionExecutionService', () => {
             plaintext: source.export({ mode: 'snapshot' }),
             additionalData: () => snapshotAAD,
           });
+          let resend: { sealed: typeof sealed; update: Uint8Array } | undefined;
+          if (mode === 'stale-config') {
+            const next = source.getList('history').insertContainer(1, new LoroMap());
+            for (const [key, value] of Object.entries({
+              id: 'config-resend',
+              role: 'user',
+              userId: user,
+              timestamp: new Date().toISOString(),
+              status: 'pending',
+              inputConfig: {
+                ...inputConfig,
+                configRevision: 2,
+                modeId: 'default',
+                modelId: 'new-model',
+              },
+              items: [{ type: 'text', text: 'hi' }],
+            }))
+              next.set(key, value);
+            source.commit();
+            const resendUpdate = source.export({ mode: 'update' });
+            const body = new Uint8Array(resendUpdate.length + 4);
+            new DataView(body.buffer).setUint32(0, resendUpdate.length, false);
+            body.set(resendUpdate, 4);
+            resend = {
+              sealed: yield* binding.seal({ context, plaintext: body, additionalData: () => aad }),
+              update: resendUpdate,
+            };
+          }
           if (mode === 'revoked-device')
             yield* append({ _tag: 'RevokeDevice', target: originalSigner.publicKey });
           if (mode === 'guest')
@@ -3304,6 +3332,8 @@ describe('SessionExecutionService', () => {
           };
           return {
             sharingVersion,
+            initialUpdate: update,
+            resend,
             genesis,
             snapshot,
             snapshotAAD,
@@ -3442,7 +3472,7 @@ describe('SessionExecutionService', () => {
         });
       // First connection/restart can reconstruct the state from a snapshot
       // without ever opening the author's signed creation update locally.
-      if (!snapshotOnly) sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
+      if (!snapshotOnly) sessionDoc.handle.doc.import(fixture.initialUpdate);
       else {
         const snapshot = await protection.config.provider.open({
           ...fixture.snapshot,
@@ -3489,8 +3519,60 @@ describe('SessionExecutionService', () => {
         const service = new SessionExecutionService(
           createBaseDeps({
             workspaceId,
+            sessionManager: {
+              getSession: () => ({
+                sessionId,
+                acpSessionId: 'acp-config',
+                agentClient: {
+                  isCreated: () => true,
+                  currentModel: undefined,
+                  cancel: async () => {},
+                  prompt: async () => {
+                    submitted.push('prompt');
+                    return { stopReason: 'end_turn' };
+                  },
+                },
+                terminalManager: {},
+                getWorkdir: () => '/tmp',
+                getHostWorkdir: () => '/tmp',
+                getParentSessionId: () => undefined,
+                exec: async () => '',
+                terminate: async () => {},
+                updateGitIdentity: () => false,
+                createAgent: async () => 'acp-config',
+                applyExecutionPlaneLimits: async () => {},
+              }),
+              getPendingSession: () => null,
+              validateSessionCredentials: async () => {},
+            } as never,
+            createAssistantEntryForTurn: async (_sid, doc, turnId, _model, parentId) => {
+              await doc.sessionData.commands.applyHistoryAction({
+                kind: 'upsert-turn',
+                turn: {
+                  id: turnId,
+                  role: 'assistant',
+                  userTurnId: parentId,
+                  timestamp: new Date().toISOString(),
+                  items: [{ type: 'text', text: 'Synthetic response' }],
+                  finished: false,
+                },
+              });
+            },
             encryptedWorkspace: true,
             encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
+            recordChatFailure: async (doc, reason, message) => {
+              await doc.sessionData.commands.applyHistoryAction({
+                kind: 'upsert-turn',
+                turn: {
+                  id: 'config-rejection',
+                  role: 'system',
+                  timestamp: new Date().toISOString(),
+                  items: [
+                    { type: 'system_notice', name: 'chat_failed', meta: { reason, message } },
+                  ],
+                },
+              });
+            },
             workspaceDocument: {
               repo: lody.documentManager.repo,
               getOrCreateSessionDoc: async () => sessionDoc,
@@ -3504,19 +3586,30 @@ describe('SessionExecutionService', () => {
         );
         service.setOperationInbox(bridge);
         try {
-          await expect(
-            service.continueSession({
-              type: 'session/chat',
-              sessionId,
-              machineId: 'machine-1',
-              workspaceId,
-              userId: user,
-              userName: 'Synthetic',
-              userEmail: 'synthetic@example.test',
-              userTurnId: 'turn-user-1',
-              acpSessionConfig: read.turn.inputConfig,
-            })
-          ).rejects.toThrow('SESSION_CONFIG_CHANGED');
+          const request = {
+            type: 'session/chat',
+            sessionId,
+            machineId: 'machine-1',
+            workspaceId,
+            userId: user,
+            userName: 'Synthetic',
+            userEmail: 'synthetic@example.test',
+            userTurnId: 'turn-user-1',
+            acpSessionConfig: read.turn.inputConfig,
+          } as const;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            await service.continueSession(request);
+            expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+              state: 'ready',
+              turn: { status: 'failed', inputConfig: read.turn.inputConfig },
+            });
+            expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+          }
+          expect(
+            (await sessionDoc.sessionData.history.readAll())
+              .flatMap((turn) => turn.items ?? [])
+              .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+          ).toMatchObject([{ meta: { reason: 'session_config_changed' } }]);
           expect(submitted).toEqual([]);
           expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toMatchObject({
             revision: 2,
@@ -3526,6 +3619,30 @@ describe('SessionExecutionService', () => {
           expect(
             store.inbox.inputKind({ workspaceId, sessionId, userId: user }, 'turn-user-1')
           ).toBeUndefined();
+          if (!fixture.resend || !sessionDoc.handle) throw new Error('Missing signed resend');
+          await protection.config.provider.open({
+            ...fixture.resend.sealed,
+            context: fixture.context,
+            additionalData: fixture.aad,
+          });
+          sessionDoc.handle.doc.import(fixture.resend.update);
+          const resend = await sessionDoc.sessionData.history.readTurn('config-resend');
+          if (resend.state !== 'ready' || !resend.turn.inputConfig)
+            throw new Error('Missing verified resend');
+          await service.continueSession({
+            ...request,
+            userTurnId: 'config-resend',
+            acpSessionConfig: resend.turn.inputConfig,
+          });
+          expect(submitted).toEqual(['configuration-applied', 'prompt']);
+          expect(await sessionDoc.sessionData.history.readTurn('config-resend')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'handled' },
+          });
+          expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'failed' },
+          });
         } finally {
           await service.drainInboxExecutions();
           await bridge.close();
@@ -12794,32 +12911,111 @@ describe('Operation Inbox execution boundary', () => {
     };
   }
 
-  it('rejects an unaccepted stale client revision before real Loro configuration application', async () => {
-    const prompts: string[] = [];
+  it.each([true, false])(
+    'fails a stale first Loro input visibly once and resends with current configuration (Inbox=%s)',
+    async (withInbox) => {
+      const prompts: string[] = [];
+      const f = inboxExecutionFixture(async () => {
+        prompts.push('submitted');
+        return { stopReason: 'end_turn' };
+      });
+      const peer = await revisionInput(f);
+      if (!withInbox) f.service.setOperationInbox(undefined);
+      try {
+        await peer.advanceOwner();
+        expect((await f.doc.getDocState())?.humanInputReceipts?.['config-input']).toEqual({
+          userId: 'user-1',
+        });
+        await f.doc.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'config-input',
+          status: 'seen',
+        });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const executor = attempt === 0 ? f.service : new SessionExecutionService(f.deps);
+          if (withInbox) executor.setOperationInbox(f.bridge);
+          await executor.continueSession(peer.request);
+          expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'failed', inputConfig: peer.config },
+          });
+          expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        }
+        const notices = (await f.doc.sessionData.history.readAll())
+          .flatMap((turn) => turn.items ?? [])
+          .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+        expect(notices).toMatchObject([{ meta: { reason: 'session_config_changed' } }]);
+        expect(peer.active).toEqual({ modeId: 'default', modelId: 'new-model' });
+        expect(prompts).toEqual([]);
+        expect(
+          f.store.inbox.inputKind(
+            { workspaceId: 'workspace-1', sessionId: f.message.sessionId, userId: 'user-1' },
+            'config-input'
+          )
+        ).toBeUndefined();
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { inputConfig: peer.config },
+        });
+        const current = {
+          ...peer.config,
+          configRevision: 2,
+          modeId: 'default',
+          modelId: 'new-model',
+        };
+        await f.doc.appendUserTurn({
+          id: 'config-resend',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          timestamp: '2026-10-31T00:01:00Z',
+          items: [{ type: 'text', text: current.prompt }],
+          inputConfig: current,
+        });
+        await f.service.continueSession({
+          ...peer.request,
+          userTurnId: 'config-resend',
+          acpSessionConfig: current,
+        });
+        expect(prompts).toEqual(['submitted']);
+        expect(await f.doc.sessionData.history.readTurn('config-resend')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'handled' },
+        });
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'failed' },
+        });
+      } finally {
+        peer.clientDoc.free();
+        await f.close();
+      }
+    }
+  );
+
+  it('surfaces a rejected-input failure write error without accepting or losing the input', async () => {
     const f = inboxExecutionFixture(async () => {
-      prompts.push('submitted');
-      return { stopReason: 'end_turn' };
+      throw new Error('must not prompt');
     });
     const peer = await revisionInput(f);
+    const writeFailure = f.deps.recordChatFailure;
     try {
       await peer.advanceOwner();
-      expect((await f.doc.getDocState())?.humanInputReceipts?.['config-input']).toEqual({
-        userId: 'user-1',
-      });
+      f.deps.recordChatFailure = async () => {
+        throw new Error('synthetic storage failure');
+      };
       await expect(f.service.continueSession(peer.request)).rejects.toThrow(
-        'SESSION_CONFIG_CHANGED'
+        'synthetic storage failure'
       );
-      expect(peer.active).toEqual({ modeId: 'default', modelId: 'new-model' });
-      expect(prompts).toEqual([]);
-      expect(
-        f.store.inbox.inputKind(
-          { workspaceId: 'workspace-1', sessionId: f.message.sessionId, userId: 'user-1' },
-          'config-input'
-        )
-      ).toBeUndefined();
       expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
         state: 'ready',
-        turn: { inputConfig: peer.config },
+        turn: { inputConfig: peer.config, status: 'seen' },
+      });
+      f.deps.recordChatFailure = writeFailure;
+      await f.service.continueSession(peer.request);
+      expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { inputConfig: peer.config, status: 'failed' },
       });
     } finally {
       peer.clientDoc.free();

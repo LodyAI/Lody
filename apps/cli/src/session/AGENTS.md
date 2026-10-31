@@ -59,7 +59,7 @@
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
-- Configuration application composes native Effect under the Turn owner and persists locally before prompting. Connection generations fence observations independently of history. First acceptance and its durable receipt share the publication queue. Existing Roost/Inbox owner receipts skip revalidation; renderer outboxes do not. History and queue dispatch preserve revisions. Matched steer never mutates configuration.
+- Configuration applies under the Turn owner using native Effect and persists before prompting. Generations fence observations. Acceptance, durable receipts and stale-input failure share the publication queue. Roost/Inbox receipts skip revalidation; renderer outboxes do not. Dispatch preserves revisions. Failed inputs never redispatch; recovery creates new input with current configuration. Matched steer never mutates configuration.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =

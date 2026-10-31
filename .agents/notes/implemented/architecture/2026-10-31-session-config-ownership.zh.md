@@ -14,6 +14,8 @@ Supersedes: [仅警告的模型拒绝策略](../../archived/bug-fix/2026-10-09-m
 
 [Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。首次执行端准入在配置发布串行队列内检查捕获的 revision。Loro 在同一队列内写入已有的机器本地 Inbox 接纳回执，回执查询也在队列内执行，避免并发重复接纳与配置发布交错。该持久回执或 Roost 不可变历史接纳回执使重试、重启跳过重复检查；renderer outbox 或本地等待附件记录不等于 owner 接纳。历史请求重建和队列提升保留捕获的 revision，已接纳队列保留冻结值。加密会话只比较 native owner 已确认并本地持久化的会话文档，不把 RPC 或元数据 hint 当作当前 revision。
 
+Loro 首次输入 revision 陈旧时，在 Turn 建立前写入持久 `chat_failed` 提示及失败终态。拒绝与接纳共用串行队列，重复投递不会重复提示或执行。原文和冻结配置保留在历史中；显式恢复使用当前已提交配置创建新输入，不复活旧执行或改写其冻结配置。失败提示写入错误继续向外报告，不视为成功准入。
+
 仅使用索引修复正文加载问题仍保留多个基线；移动优先级链到另一个 hook 也保留歧义。通用命令总线或整个 Session 迁移超出配置职责。因此继续使用既有 SessionDocument 控制持久化与原始请求释放所有者。
 
 [等待发送记录](../bug-fix/2026-09-30-composer-pending-send-config.zh.md) 继续约束 Role/MCP 来源，其运行配置桥接被替代。[私有草稿](../bug-fix/2026-10-07-session-run-config-drafts.zh.md) 仍负责捕获编辑代次的消费；模式、模型及依赖选项的[顺序](../bug-fix/2026-10-13-acp-model-effort-order.zh.md) 仍必要。原先仅模型拒绝发出警告且继续执行，现所有 provider 的必要配置拒绝都会失败。公开错误标识字段，不暴露请求值或 provider 原始载荷。

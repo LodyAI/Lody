@@ -32,6 +32,13 @@ live confirmation after restart: the local owner invalidates it until a connecti
 attaches. Admission and steer require the current revision to have completed local
 persistence, not merely appeared in the document mirror.
 
+A stale first Loro input is terminalized as failed with a durable `chat_failed`
+notice before a Turn exists. This rejection shares the acceptance queue, so
+repeated offers cannot create another notice or prompt. The original content and
+frozen configuration remain in history; explicit recovery sends a new input with
+the currently committed configuration, never revives the old execution or replaces its frozen configuration.
+A failed notice write remains an error rather than successful admission.
+
 The index-only hydration fix would retain competing baselines. Moving that priority
 chain into another hook would preserve the ambiguity. A general command bus or
 whole-Session migration would expand beyond the config responsibility. Existing

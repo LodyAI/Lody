@@ -6004,5 +6004,8 @@
   "e2ee.machineSharing.state.pending": "Pending confirmation",
   "e2ee.machineSharing.lastVersion": "Last verified version",
   "Lody could not fully quit. Please restart Lody.": "Lody could not fully quit. Please restart Lody.",
-  "Retry quit": "Retry quit"
+  "Retry quit": "Retry quit",
+  "sessions.systemNotices.chatFailed.sessionConfigChanged": "The configuration was updated elsewhere. Resend with the current configuration.",
+  "sessions.messageStatus.failedResend": "Failed — resend",
+  "sessions.resendUndelivered.failedDescription": "Send the same content as a new message with the current configuration? Any work already completed could be repeated."
 }

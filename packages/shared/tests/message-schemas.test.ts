@@ -81,6 +81,15 @@ describe('message-schemas system_notice', () => {
     }
   });
 
+  it('preserves the configuration rejection notice through history parsing', () => {
+    const notice = {
+      type: 'system_notice',
+      name: 'chat_failed',
+      meta: { reason: 'session_config_changed', message: 'Resend with the current configuration.' },
+    };
+    expect(MessageContentSchema.parse(notice)).toEqual(notice);
+  });
+
   it('accepts an actionable diagnostic code on a generic chat failure reason', () => {
     const result = MessageContentSchema.safeParse({
       type: 'system_notice',

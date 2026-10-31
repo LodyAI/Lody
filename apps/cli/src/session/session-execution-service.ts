@@ -1195,11 +1195,33 @@ export class SessionExecutionService {
       input.sessionId as SessionId
     );
     // Roost checks its immutable history receipt at append; Loro uses the local Inbox receipt.
-    if ((await createSessionBackend(doc)).kind !== 'loro') return accept();
+    const backend = await createSessionBackend(doc);
+    if (backend.kind !== 'loro') return accept();
+    const sessionId = input.sessionId as SessionId;
+    const terminal = async () => {
+      if (this.getTerminalUserTurnStatusWithoutEntry(sessionId, input.inputId)) return true;
+      const read = await backend.readTurn(input.inputId);
+      return (
+        read.state === 'ready' &&
+        ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')
+      );
+    };
     return doc.acceptWithConfigRevision(
       input.config,
-      accept,
-      () => inbox?.inputKind(input, input.inputId) !== undefined
+      async () => ((await terminal()) ? false : accept()),
+      async () => inbox?.inputKind(input, input.inputId) !== undefined || (await terminal()),
+      async () => {
+        // This runs before a Turn owner exists. Publish the failure under the same
+        // acceptance queue so duplicate offers cannot emit a second notice or run.
+        await this.deps.recordChatFailure(
+          doc,
+          'session_config_changed',
+          'The configuration was updated elsewhere. Resend with the current configuration.'
+        );
+        await this.setTerminalUserTurnStatus(sessionId, doc, input.inputId, 'failed');
+        await this.abandonInboxInput(sessionId, input.inputId);
+        return false;
+      }
     );
   }
   async acceptInboxHumanInput(args: {
@@ -1207,7 +1229,7 @@ export class SessionExecutionService {
     inputId: string;
     userId: string;
     config: SessionTurnInputConfig;
-  }): Promise<void> {
+  }): Promise<boolean> {
     if (this.operationInbox) {
       const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
       const meta = await doc.getMetaState();
@@ -1220,10 +1242,10 @@ export class SessionExecutionService {
             ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')))
       ) {
         await this.abandonInboxInput(args.sessionId, args.inputId);
-        return;
+        return false;
       }
     }
-    await this.acceptInboxInput({
+    return this.acceptInboxInput({
       workspaceId: this.deps.workspaceId,
       sessionId: args.sessionId,
       userId: args.userId,
@@ -4716,8 +4738,8 @@ export class SessionExecutionService {
         !inbox &&
         invocation?.requesterUserId &&
         invocation.inputConfig.configRevision !== undefined
-      )
-        await this.acceptInboxInput({
+      ) {
+        const accepted = await this.acceptInboxInput({
           workspaceId: this.deps.workspaceId,
           sessionId,
           userId: invocation.requesterUserId,
@@ -4725,6 +4747,12 @@ export class SessionExecutionService {
           kind: 'task',
           config: invocation.inputConfig,
         });
+        if (!accepted) {
+          releaseConflict();
+          span.end({ outcome: 'input-rejected' });
+          return 'input-rejected';
+        }
+      }
       if (
         inboxInput &&
         inboxInput.kind !== 'automatic' &&

@@ -761,12 +761,13 @@ export class SessionDispatchWatcher {
       }
 
       if (offer.inputOrigin === 'human') {
-        await this.deps.executionService.acceptInboxHumanInput?.({
+        const accepted = await this.deps.executionService.acceptInboxHumanInput?.({
           sessionId,
           inputId: userTurnId,
           userId: offer.userId,
           config: offer.inputConfig,
         });
+        if (accepted === false) return finish('already-terminal');
       }
 
       // Sweep expired entries across all sessions on every accept. A turn that
