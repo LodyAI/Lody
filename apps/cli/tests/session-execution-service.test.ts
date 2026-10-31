@@ -2726,7 +2726,10 @@ describe('SessionExecutionService', () => {
         getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
         getPendingSession: vi.fn(() => null),
         createSession: vi.fn(async (config: SessionConfig) => {
-          options.restore?.push(config);
+          // Like SessionManager, preparation rereads the Project group from synced metadata.
+          const current = options.meta?.projectRun as SessionConfig['projectRun'];
+          if (current) await config.authorizeExecutionInputs?.({ projectRun: current });
+          options.restore?.push({ ...config, projectRun: current ?? config.projectRun });
           restored = true;
           return activeSession;
         }),
@@ -3561,6 +3564,57 @@ describe('SessionExecutionService', () => {
         expect(result.failureMessages.join('\n')).not.toContain('p2');
         expect(started).toHaveLength(1);
         expect(started[0]?.project).toBeUndefined();
+      } finally {
+        f.close();
+      }
+    });
+    it('refuses a Project group member added to synced metadata after authorization', async () => {
+      const f = encryptedExecutionFixture();
+      const group = (...ids: string[]) => ({
+        id: 'group',
+        name: 'Group',
+        root: 'group',
+        members: Object.fromEntries(
+          ids.map((id, o) => [
+            id,
+            {
+              o,
+              src: { kind: 'local', machineId: 'machine-1', localProjectId: id },
+              placement: { kind: 'root', dir: id },
+              path: id,
+              base: 'main',
+            },
+          ])
+        ),
+      });
+      const meta: Record<string, unknown> = { projectRun: group('p1') };
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          shared.claim(intent).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                meta.projectRun = group('p1', 'p2');
+              })
+            )
+          ),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([['p1']]);
+        // Before the fix the session manager adopted the reread group, including p2.
+        expect(started).toEqual([]);
+        expect(result.failureMessages.join('\n')).toContain('e2ee_machine_not_shared');
       } finally {
         f.close();
       }

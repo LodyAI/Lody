@@ -163,7 +163,16 @@ process starts, refusing anything outside the authorized set. Registry rows are 
 so any member can write them; in encrypted workspaces a row counts only while its
 `rootPath` still hashes to its project ID, which this machine derived from the canonical
 root it registered. A rewritten path therefore resolves as missing instead of
-redirecting an authorized project.
+redirecting an authorized project. Registration, root reconciliation and this check all
+canonicalize through `localProjectsLegacy` with the native `realpath`, so on-disk case on
+a case-insensitive volume hashes the same each time; the non-native Effect path layer
+never creates IDs and must not be used for this check.
+
+The session manager also rereads synced Project groups and parent projects while it
+prepares directories, so that reread happens after the claim. Every such read now
+passes `SessionConfig.authorizeExecutionInputs`, which recomputes the scope for the
+snapshot actually used and rejects any project outside the authorized set before a
+member is resolved or a directory is prepared.
 
 A projectless conversation (`kind: 'none'`, a Lody-managed chat directory or managed
 GitHub clone) needs only the machine switch. The draft foundations Spec makes absent

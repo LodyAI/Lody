@@ -369,6 +369,8 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
     );
     if (rootPath !== null) {
       if (!options.verifyProjectIdentity) return rootPath;
+      // Same native canonicalization as registration (`prepareProject`) and root
+      // reconciliation, so on-disk case and symlinks hash identically on every host.
       try {
         return localProjectsLegacy.createLocalProjectId(rootPath) === localProjectId
           ? rootPath

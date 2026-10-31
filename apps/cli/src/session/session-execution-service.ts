@@ -5914,6 +5914,18 @@ export class SessionExecutionService {
     });
   }
 
+  /** The session manager rereads Project groups and parents; each read must stay in scope. */
+  private encryptedInputGuard(
+    authorized: readonly LocalProjectId[]
+  ): NonNullable<SessionConfig['authorizeExecutionInputs']> {
+    return (input) =>
+      this.assertEncryptedScopeWithin(authorized, {
+        projects: [input.project],
+        projectRuns: [input.projectRun],
+        live: null,
+      });
+  }
+
   /** Refuse a start whose directories were changed after authorization. */
   private async assertEncryptedScopeWithin(
     authorized: readonly LocalProjectId[],
@@ -6295,6 +6307,7 @@ export class SessionExecutionService {
             live: null,
           })
         );
+        restoreConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
       }
       const restoreAttempt = Effect.gen(function* () {
         if (resumeSessionId) {
@@ -7439,6 +7452,7 @@ export class SessionExecutionService {
           if (authorizedIds) {
             const allowed = authorizedIds;
             yield* self.tryPromise(() => self.assertEncryptedScopeWithin(allowed, scopeInputs()));
+            sessionConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
           }
           const session = yield* self.startWithTransientRetry({
             sessionId,
