@@ -180,6 +180,44 @@ describe('SessionDocument ACP runtime config', () => {
     expect(doc.mirror?.getState().acpRuntimeConfig?.state).toBe('unknown');
   });
 
+  it('checks the durable acceptance receipt inside the publication queue for duplicate first claims', async () => {
+    const doc = createDocument();
+    await doc.beginAcpRuntimeConfig('', { ...connection, modeId: 'plan' });
+    await doc.flushLocalWrites();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let receipt = false;
+    const first = doc.acceptWithConfigRevision(
+      { configRevision: 1 },
+      async () => {
+        entered.resolve();
+        await release.promise;
+        receipt = true;
+        return 'first';
+      },
+      () => receipt
+    );
+    await entered.promise;
+    const update = doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'default' });
+    const duplicate = doc.acceptWithConfigRevision(
+      { configRevision: 1 },
+      async () => 'duplicate',
+      () => receipt
+    );
+    release.resolve();
+    expect(await first).toBe('first');
+    await update;
+    expect(await duplicate).toBe('duplicate');
+    await doc.flushLocalWrites();
+    await expect(
+      doc.acceptWithConfigRevision(
+        { configRevision: 1 },
+        async () => 'new',
+        () => false
+      )
+    ).rejects.toThrow('SESSION_CONFIG_CHANGED');
+  });
+
   it('does not accept persisted confirmation until a live generation attaches after restart', async () => {
     const doc = createDocument();
     doc.mirror?.setState((state) => {

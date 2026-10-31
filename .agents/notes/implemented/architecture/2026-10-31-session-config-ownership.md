@@ -19,12 +19,25 @@ failure stops submission and preserves actual partial changes.
 The [Spec](../../../../specs/session-config-ownership.md) defines this ownership
 boundary. A connection generation fences observations even if ACP reuses a session
 id; a revision orders publication independently of history. First owner acceptance
-checks the captured revision in the publication serial queue. An immutable Roost
-receipt bypasses rechecking on retry/restart; local held-send admission is not that
-receipt. Queued inputs keep their frozen values. A persisted snapshot cannot establish
+checks the captured revision in the publication serial queue. Loro records its
+existing machine-local Inbox acceptance while holding that queue; the receipt
+lookup also runs inside the queue so concurrent duplicate accepts cannot race a
+publication. That durable receipt, or Roost's immutable history acceptance, bypasses
+rechecking on retry/restart. A renderer outbox or local held-send record is not
+owner acceptance. History reconstruction and queue promotion preserve the captured
+revision. Queued inputs keep their frozen values. Encrypted sessions compare only
+the native owner's confirmed, locally persisted session document, never an RPC or
+metadata hint for the current revision. A persisted snapshot cannot establish
 live confirmation after restart: the local owner invalidates it until a connection
 attaches. Admission and steer require the current revision to have completed local
 persistence, not merely appeared in the document mirror.
+
+A stale first Loro input is terminalized as failed with a durable `chat_failed`
+notice before a Turn exists. This rejection shares the acceptance queue, so
+repeated offers cannot create another notice or prompt. The original content and
+frozen configuration remain in history; explicit recovery sends a new input with
+the currently committed configuration, never revives the old execution or replaces its frozen configuration.
+A failed notice write remains an error rather than successful admission.
 
 The index-only hydration fix would retain competing baselines. Moving that priority
 chain into another hook would preserve the ambiguity. A general command bus or
@@ -79,7 +92,8 @@ a fork publishes its target connection's actual response. Capability removal kee
 concrete selections visible with an error, never silently substitutes defaults.
 
 Synthetic behavioral suites cover partial refusal, contradiction, boolean false,
-interruption, reused ACP ids, local write failure, admission/restart, frozen queues,
+interruption, reused ACP ids, local write failure, admission/restart, two Loro
+clients with a stale first input, verified encrypted session admission, frozen queues,
 missing bodies and draft retention.
 Repository-wide checks and packaged/live-provider UI acceptance must be reported
 separately; these tests do not establish the cause of every original live report.
