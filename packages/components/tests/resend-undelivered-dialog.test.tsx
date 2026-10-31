@@ -127,6 +127,38 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     expect(document.body.textContent).not.toContain('did not run');
   });
 
+  it.each(['en', 'zh_CN'])(
+    'recovers a failed revision input as a new send in %s',
+    async (language) => {
+      await initI18n(language);
+      const sends: unknown[] = [];
+      const failedMessage = {
+        ...undeliveredMessage,
+        id: 'stale-config-input',
+        status: 'failed',
+        inputConfig: {
+          ...undeliveredMessage.inputConfig,
+          configRevision: 1,
+          modeId: 'plan',
+          modelId: 'old',
+        },
+      } as SessionHistoryParsed;
+      await renderRow(async (id, blocks) => {
+        sends.push({ id, blocks });
+        return true;
+      }, failedMessage);
+      const label = language === 'en' ? 'Failed — resend' : '发送失败，重新发送';
+      await click(document.body.querySelector(`button[aria-label="${label}"]`)!);
+      expect(document.body.textContent).toContain(
+        language === 'en' ? 'current configuration' : '当前配置'
+      );
+      await click(queryBodyButton(language === 'en' ? 'Resend message' : '重新发送上一条消息'));
+      expect(sends).toEqual([
+        { id: 'stale-config-input', blocks: buildResendInputBlocks(failedMessage) },
+      ]);
+    }
+  );
+
   it('cancels without resending', async () => {
     const onResendUndelivered = vi.fn(async () => true);
     await renderRow(onResendUndelivered);

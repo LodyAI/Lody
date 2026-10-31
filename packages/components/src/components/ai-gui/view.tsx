@@ -3455,6 +3455,11 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.agentNoOutput',
           'The agent ended the turn without producing any output — you can retry your message'
         );
+      case 'session_config_changed':
+        return t(
+          'sessions.systemNotices.chatFailed.sessionConfigChanged',
+          'The configuration was updated elsewhere. Resend with the current configuration.'
+        );
       case 'turn_pre_prompt_failed':
         return t(
           'sessions.systemNotices.chatFailed.turnPrePromptFailed',
@@ -3896,9 +3901,12 @@ const UserMessageRowView = ({
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
   const isDeliveryUnknown = message.status === 'delivery_unknown';
-  const recoveryLabel = isDeliveryUnknown
-    ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
-    : t('sessions.messageStatus.notDelivered', 'Not delivered');
+  const isFailed = message.status === 'failed';
+  const recoveryLabel = isFailed
+    ? t('sessions.messageStatus.failedResend', 'Failed — resend')
+    : isDeliveryUnknown
+      ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+      : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
   // Missing-history recovery negatively acknowledged this exact turn
   // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
@@ -3913,7 +3921,11 @@ const UserMessageRowView = ({
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
-    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered && !isDeliveryUnknown;
+    useIsMessageSendingVisible(message.id) &&
+    !isDelivered &&
+    !isUndelivered &&
+    !isDeliveryUnknown &&
+    !isFailed;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
@@ -4031,7 +4043,7 @@ const UserMessageRowView = ({
             </span>
           ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered || isDeliveryUnknown ? (
+          {isUndelivered || isDeliveryUnknown || isFailed ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -4253,6 +4265,7 @@ const UserMessageRowView = ({
       {onResendUndelivered ? (
         <ResendUndeliveredDialog
           deliveryUnknown={isDeliveryUnknown}
+          failed={isFailed}
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
@@ -4346,12 +4359,14 @@ const ResendUndeliveredDialog = ({
   isResending,
   onConfirm,
   deliveryUnknown = false,
+  failed = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
   onConfirm: () => void;
   deliveryUnknown?: boolean;
+  failed?: boolean;
 }) => {
   const { t } = useTranslation();
   return (
@@ -4359,20 +4374,27 @@ const ResendUndeliveredDialog = ({
       <AlertDialog.Content>
         <AlertDialog.Header>
           <AlertDialog.Title>
-            {deliveryUnknown
-              ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
-              : t('sessions.resendUndelivered.title', 'Message not delivered')}
+            {failed
+              ? t('sessions.messageStatus.failedResend', 'Failed — resend')
+              : deliveryUnknown
+                ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+                : t('sessions.resendUndelivered.title', 'Message not delivered')}
           </AlertDialog.Title>
           <AlertDialog.Description>
-            {deliveryUnknown
+            {failed
               ? t(
-                  'sessions.resendUndelivered.unknownDescription',
-                  'The agent may already have applied this guidance. Sending it as a new message could repeat work. Send again?'
+                  'sessions.resendUndelivered.failedDescription',
+                  'Send the same content as a new message with the current configuration? Any work already completed could be repeated.'
                 )
-              : t(
-                  'sessions.resendUndelivered.description',
-                  'This message never reached the agent, so it did not run. Resend the same content as a new message?'
-                )}
+              : deliveryUnknown
+                ? t(
+                    'sessions.resendUndelivered.unknownDescription',
+                    'The agent may already have applied this guidance. Sending it as a new message could repeat work. Send again?'
+                  )
+                : t(
+                    'sessions.resendUndelivered.description',
+                    'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+                  )}
           </AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>

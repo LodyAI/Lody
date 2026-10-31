@@ -434,6 +434,45 @@ describe('SessionDispatchWatcher', () => {
     expect(startSession).not.toHaveBeenCalled();
   });
 
+  it('does not stash or activate an input rejected at first owner acceptance', async () => {
+    const id = 'session-rejected-input' as SessionId;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: { getDocMeta: async () => ({ meta: { id, machineId: 'machine-1' } }) },
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        acceptInboxHumanInput: async () => false,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(
+          await watcher.offerRpcTurn({
+            sessionId: id,
+            userTurnId: 'stale-input',
+            userId: 'user-1',
+            timestamp: '2026-10-31T00:00:00Z',
+            inputOrigin: 'human',
+            inputConfig: { prompt: 'Preserve me', configRevision: 1 },
+          })
+        ).toBe('already-terminal');
+        expect(
+          (watcher as unknown as { rpcTurnStash: Map<string, unknown> }).rpcTurnStash.size
+        ).toBe(0);
+        expect(
+          (watcher as unknown as { sessionCheckChains: Map<string, unknown> }).sessionCheckChains
+            .size
+        ).toBe(0);
+      }
+    } finally {
+      await watcher.stop();
+    }
+  });
+
   it('dispatches a stashed RPC turn before its history entry syncs', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
@@ -2130,7 +2169,7 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
-  it('hydrates queued mq items into pending turns before dispatching', async () => {
+  const verifyQueuedRevision = async (hasReusableSession: boolean) => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
     const cancelSession = vi.fn(async () => ({ success: true }));
@@ -2152,6 +2191,7 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2226,7 +2266,7 @@ describe('SessionDispatchWatcher', () => {
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
-          hasReusableSession: false,
+          hasReusableSession,
         })),
         continueSession,
         startSession,
@@ -2238,7 +2278,7 @@ describe('SessionDispatchWatcher', () => {
     await watcher.start();
 
     await vi.waitFor(() => {
-      expect(startSession).toHaveBeenCalledTimes(1);
+      expect(hasReusableSession ? continueSession : startSession).toHaveBeenCalledTimes(1);
     });
     expect(queue).toHaveLength(0);
     expect(history[0]).toEqual(
@@ -2250,6 +2290,7 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2261,14 +2302,15 @@ describe('SessionDispatchWatcher', () => {
     );
     // The promoted turn is published for dispatch, not just written to history.
     expect(promotedPointer).toBe('queued-mq-1');
-    expect(startSession).toHaveBeenCalledWith(
+    expect(hasReusableSession ? continueSession : startSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'session/create',
+        type: hasReusableSession ? 'session/chat' : 'session/create',
         sessionId,
         userTurnId: 'queued-mq-1',
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          configRevision: 5,
           agentRoleSnapshot: {
             id: 'role-reviewer',
             revision: 7,
@@ -2279,7 +2321,11 @@ describe('SessionDispatchWatcher', () => {
       }),
       { dispatchSource: 'queue' }
     );
-  });
+  };
+  it.each([false, true])(
+    'hydrates queued mq items before dispatch (reusable=%s)',
+    verifyQueuedRevision
+  );
 
   it('repairs activation after a history-only queue commit without duplicating or replaying turns', async () => {
     const id = 'queue-retry' as SessionId;

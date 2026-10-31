@@ -1359,6 +1359,7 @@ export type ChatFailedReason =
   // resolve the prompt instead (observed: an over-limit context answered with
   // HTTP 400), which would otherwise be recorded as an ordinary completion.
   | 'agent_no_output'
+  | 'session_config_changed'
   | 'turn_pre_prompt_failed'
   | 'message_delivery_failed'
   | 'machine_access_denied' // requester is not authorized to use this machine (definitive backend deny)
