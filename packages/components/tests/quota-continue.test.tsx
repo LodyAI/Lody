@@ -8,6 +8,7 @@ import { initReactI18next } from 'react-i18next';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getRateLimitEntryKey,
+  getSessionRoomId,
   ScheduleRepository,
   type SessionHistory,
   type SessionMeta,
@@ -15,22 +16,29 @@ import {
 } from '@lody/shared';
 import en from '../../../locales/en.json';
 import { userAtom } from '../src/atoms';
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { runtimeAtom } from '../src/atoms/runtime';
-import { QuotaContinueAction } from '../src/components/schedules/quota-continue-action';
+import { SessionLimitContinueAction } from '../src/components/schedules/quota-continue-action';
+import { MessageRowView } from '../src/components/ai-gui/view';
 import {
   findClaudeSessionLimit,
   quotaContinueIdentity,
   legacyQuotaContinueId,
   quotaContinueReset,
+  quotaContinueSendAt,
 } from '../src/components/schedules/quota-continue';
 
-const NOW = Date.parse('2026-10-27T01:00:00Z');
-const RESET = NOW + 60 * 60 * 1000;
+const NOW = Date.parse('2026-10-27T14:00:00Z');
+const RESET = Date.parse('2026-10-27T14:30:00Z');
 const state = vi.hoisted(() => ({
   turns: [] as SessionHistory[],
   machine: null as any,
   registry: { ready: true, rows: [], error: undefined },
   allowed: true,
+  recoveryEnabled: false,
+}));
+vi.mock('../src/components/sessions/use-local-session-continuation', () => ({
+  useLocalSessionContinuation: () => ({ recoveryEnabled: state.recoveryEnabled }),
 }));
 vi.mock('../src/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: () => ({ enabled: true, workspaceId: 'workspace' }),
@@ -88,7 +96,7 @@ const user = () => ({
     mcpServerIds: ['mcp-test'],
   },
 });
-const failed = (message = "You've hit your session limit · resets 10am (Asia/Shanghai)") =>
+const failed = (message = "You've hit your session limit · resets 2:30pm (UTC)") =>
   entry('failure', 'system', [
     { type: 'system_notice', name: 'chat_failed', meta: { reason: 'acp_internal_error', message } },
   ]);
@@ -113,11 +121,12 @@ describe('Claude quota continuation', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     state.turns = [user(), failed()];
     state.allowed = true;
+    state.recoveryEnabled = false;
     state.registry = { ready: true, rows: [], error: undefined };
     state.machine = {
       id: 'machine',
       ownerUserId: 'owner',
-      timeZone: 'Asia/Shanghai',
+      timeZone: 'UTC',
       protocolCapabilities: { schedules: 3 },
       raceLimits: limits(),
     };
@@ -157,8 +166,10 @@ describe('Claude quota continuation', () => {
     vi.restoreAllMocks();
     getDefaultStore().set(runtimeAtom, null);
   });
-  const render = async () => {
-    await act(async () => root.render(<QuotaContinueAction session={session} visible />));
+  const render = async (entryId = 'failure') => {
+    await act(async () =>
+      root.render(<SessionLimitContinueAction session={{ ...session }} entryId={entryId} />)
+    );
   };
   const click = async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
@@ -174,7 +185,8 @@ describe('Claude quota continuation', () => {
 
   it('creates one full-message reservation after reset without consuming history or draft content', async () => {
     await render();
-    expect(container.textContent).toBe('Send continue after reset');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+    expect(container.textContent).toContain('Schedule');
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button')!.click();
       container.querySelector<HTMLButtonElement>('button')!.click();
@@ -187,15 +199,17 @@ describe('Claude quota continuation', () => {
       mcpServerIds: ['mcp-test'],
     });
     expect(document?.definition).toMatchObject({
-      trigger: { kind: 'once', at: new Date(RESET + 1000).toISOString() },
+      trigger: { kind: 'once', at: new Date(RESET + 60_000).toISOString() },
       destination: { kind: 'existing_session', sessionId: 'session' },
       agent: { modelId: 'claude-test', modeId: 'safe', configOptionValues: { plan_mode: false } },
     });
     expect(state.turns[0]?.items).toEqual([{ type: 'text', text: 'Original task' }]);
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
     expect(document?.timeline).toHaveLength(1);
     await render();
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
   });
 
   it('reuses the durable reservation after the shortcut remounts', async () => {
@@ -209,14 +223,15 @@ describe('Claude quota continuation', () => {
       quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId
     );
     expect(document?.timeline).toHaveLength(1);
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
   });
 
   it('keeps an existing legacy reservation visible without creating a second one', async () => {
     const oldId = legacyQuotaContinueId('workspace', 'session', RESET);
     state.registry.rows = [{ scheduleId: oldId }] as never[];
     await render();
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
     await click();
     expect(
       await repository.read(quotaContinueIdentity('workspace', 'session', RESET, 'user').scheduleId)
@@ -224,16 +239,15 @@ describe('Claude quota continuation', () => {
   });
 
   it('does not offer a new reservation while automatic capacity recovery is enabled', async () => {
-    await act(async () =>
-      root.render(<QuotaContinueAction session={session} visible autoRecoveryEnabled />)
-    );
+    state.recoveryEnabled = true;
+    await render();
     expect(container.querySelector('button')).toBeNull();
+    state.recoveryEnabled = false;
     await render();
     await click();
-    await act(async () =>
-      root.render(<QuotaContinueAction session={session} visible autoRecoveryEnabled />)
-    );
-    expect(container.textContent).toContain('View scheduled continue');
+    state.recoveryEnabled = true;
+    await render();
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
   });
 
   it('rechecks expiry at click time and never sends immediately', async () => {
@@ -249,10 +263,11 @@ describe('Claude quota continuation', () => {
     failFlush = true;
     await render();
     await click();
-    expect(container.textContent).toContain('Send continue after reset');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
     failFlush = false;
     await click();
-    expect(container.textContent).toContain('View scheduled continue');
+    expect(container.textContent).toContain('Continue scheduled for 2:31 PM UTC');
+    expect(container.textContent).toContain('View');
     expect(
       (
         await repository.read(
@@ -310,6 +325,52 @@ describe('Claude quota continuation', () => {
       resetsAtEpochSeconds: RESET / 1000 + 86400,
     });
     expect(quotaContinueReset({ failure, session, rateLimits, now: NOW })).toBeNull();
+  });
+  it('mounts the shortcut inside the failed message banner', async () => {
+    getDefaultStore().set(sessionMetaCacheAtom, {
+      [getSessionRoomId(session.id)]: session,
+    });
+    await act(async () =>
+      root.render(<MessageRowView message={failed()} sessionId={session.id as never} />)
+    );
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Agent internal error');
+    expect(alert?.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+    expect(
+      [...(alert?.querySelectorAll('button') ?? [])].some((button) =>
+        button.textContent?.includes('Schedule')
+      )
+    ).toBe(true);
+  });
+  it('rounds the trigger to the first full minute after reset', () => {
+    expect(quotaContinueSendAt(RESET)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 30_000)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 59_999)).toBe(RESET + 60_000);
+    expect(quotaContinueSendAt(RESET + 60_000)).toBe(RESET + 120_000);
+  });
+  it('uses the assistant host row when the notice is folded onto it', async () => {
+    state.turns = [
+      user(),
+      entry('assistant', 'assistant', [{ type: 'text', text: 'Partial answer' }]),
+      failed(),
+    ];
+    expect(findClaudeSessionLimit(state.turns)?.noticeId).toBe('assistant');
+    await render('assistant');
+    expect(container.textContent).toContain('Schedule one “continue” message for 2:31 PM UTC');
+  });
+  it('does not render the shortcut on a different failure entry', async () => {
+    await render('an-older-failure');
+    expect(container.textContent).toBe('');
+  });
+  it('does not show the shortcut after the conversation recovered', async () => {
+    state.turns = [
+      user(),
+      failed(),
+      entry('recovered', 'assistant', [{ type: 'text', text: 'Done' }]),
+    ];
+    expect(findClaudeSessionLimit(state.turns)).toBeNull();
+    await render();
+    expect(container.textContent).toBe('');
   });
   it('hides the action for old machines and another owner', async () => {
     state.machine.protocolCapabilities.schedules = 2;

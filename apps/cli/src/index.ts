@@ -36,6 +36,7 @@ import { scheduleCommand } from './commands/schedule';
 import { automationCommand } from './commands/automation';
 import { syncCommand } from './commands/sync';
 import { workspaceCommand } from './commands/workspace';
+import { dshCommand } from './commands/dsh';
 import { agentConfigCommand } from './commands/agent-config';
 import { machineCommand } from './commands/machine';
 import { exportCommand } from './commands/export';
@@ -46,6 +47,7 @@ import { githubCommand } from './commands/github';
 import { daemonCommand } from './commands/daemon';
 import { daemonRunnerCommand } from './commands/daemon-runner';
 import { internalCommand } from './commands/internal';
+import { e2eeCommand } from './commands/e2ee';
 import { feedbackCommand } from './commands/feedback';
 import { mcpCommand } from './commands/mcp';
 import { agentRoleCommand } from './commands/discovery';
@@ -112,6 +114,7 @@ program.addCommand(automationCommand);
 program.addCommand(syncCommand);
 program.addCommand(workspaceCommand);
 program.addCommand(agentConfigCommand);
+program.addCommand(dshCommand);
 program.addCommand(mcpCommand);
 program.addCommand(agentRoleCommand);
 program.addCommand(operationCommand);
@@ -124,6 +127,7 @@ program.addCommand(daemonCommand);
 program.addCommand(daemonRunnerCommand);
 program.addCommand(internalCommand);
 program.addCommand(feedbackCommand);
+program.addCommand(e2eeCommand, { hidden: true });
 // Configure commander to show help when no arguments provided
 program.configureHelp({
   sortSubcommands: true,

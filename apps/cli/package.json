@@ -123,7 +123,8 @@
     "yaml": "2.8.2",
     "yauzl": "^3.4.0",
     "zod": "catalog:",
-    "zstd-stream": "^1.1.0"
+    "zstd-stream": "^1.1.0",
+    "@lody/e2ee-machine-sharing": "workspace:*"
   },
   "files": [
     "dist",

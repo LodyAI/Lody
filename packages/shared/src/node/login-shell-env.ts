@@ -1,5 +1,5 @@
 /**
- * The user's login-shell environment, probed once through the process layer.
+ * The user's login-shell environment, cached through the process layer.
  *
  * GUI and daemon launches (macOS launchd, Linux .desktop, systemd, npx) inherit
  * a minimal PATH without the directories users install tools into (Homebrew,
@@ -247,6 +247,7 @@ export const LoginShellCacheLive = Layer.effect(
     const probe = yield* Ref.make<Fiber.Fiber<NodeJS.ProcessEnv | null, ProbeError> | undefined>(
       undefined
     );
+    const retryAt = yield* Ref.make(0);
     const closed = yield* Ref.make(false);
     const receipt = yield* Ref.make<
       Deferred.Deferred<void, LoginShellCacheShutdownFailed> | undefined
@@ -256,14 +257,31 @@ export const LoginShellCacheLive = Layer.effect(
         Effect.gen(function* () {
           if (yield* Ref.get(closed)) return yield* Effect.fail(new LoginShellCacheClosed());
           const existing = yield* Ref.get(probe);
-          if (existing) return existing;
+          if (existing) {
+            const exit = existing.pollUnsafe();
+            // A completed Fiber includes command-scope cleanup. Never replace an
+            // unresolved process owner, or let frequent reads spin failed probes.
+            if (
+              !exit ||
+              Exit.isSuccess(exit) ||
+              exit.cause.reasons.some(
+                (reason) =>
+                  Cause.isDieReason(reason) && reason.defect instanceof ProcessReleaseFailed
+              ) ||
+              (yield* Clock.currentTimeMillis) < (yield* Ref.get(retryAt))
+            )
+              return existing;
+          }
           const fiber = yield* Effect.forkIn(
             source.probe().pipe(
               Effect.interruptible,
               Effect.tapCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.void
-                  : report(cause).pipe(Effect.catchCause(() => Effect.void))
+                Effect.gen(function* () {
+                  yield* Ref.set(retryAt, (yield* Clock.currentTimeMillis) + 5_000);
+                  if (!Cause.hasInterruptsOnly(cause)) {
+                    yield* report(cause).pipe(Effect.catchCause(() => Effect.void));
+                  }
+                })
               )
             ),
             owner

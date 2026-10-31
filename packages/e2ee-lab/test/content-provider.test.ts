@@ -550,6 +550,16 @@ describe('public update provider with released CRDT SDK', () => {
               streamUrl: url,
               path,
             });
+            // Automatic verified-history fallback reaches the real SQL barrier.
+            // Refusing that write must retain both halves of the prior durable pair.
+            const fault = new Database(path);
+            try {
+              fault.exec(
+                'CREATE TRIGGER reject_recovery BEFORE INSERT ON lab_document_state BEGIN SELECT RAISE(IGNORE); END'
+              );
+            } finally {
+              fault.close();
+            }
             expect(Exit.isFailure(yield* Effect.exit(reader.pull()))).toBe(true);
             expect(yield* reader.status()).toBe('document-stopped');
             expect(yield* reader.cursor()).toBeNull();
@@ -563,14 +573,6 @@ describe('public update provider with released CRDT SDK', () => {
             yield* other.append('independent B');
             yield* other.pull();
             expect(yield* other.text()).toBe('independent B');
-            const fault = new Database(path);
-            try {
-              fault.exec(
-                'CREATE TRIGGER reject_recovery BEFORE INSERT ON lab_document_state BEGIN SELECT RAISE(IGNORE); END'
-              );
-            } finally {
-              fault.close();
-            }
             expect(Exit.isFailure(yield* Effect.exit(reader.recoverFromFullHistory()))).toBe(true);
             expect(yield* reader.cursor()).toBeNull();
             expect(yield* reader.status()).toBe('document-stopped');
@@ -634,7 +636,7 @@ describe('public update provider with released CRDT SDK', () => {
             expect(Exit.isFailure(yield* Effect.exit(unavailable.recoverFromFullHistory()))).toBe(
               true
             );
-            expect(yield* unavailable.status()).toBe('document-stopped');
+            expect(yield* unavailable.status()).toBe('active');
             expect(yield* unavailable.cursor()).toBeNull();
             expect(yield* other.status()).toBe('active');
           })

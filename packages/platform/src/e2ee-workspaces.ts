@@ -9,6 +9,17 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
+import type { ReadonlyStore } from './store';
+import type { PlatformSessionState } from './provider';
+
+/** Synchronous, pure assembly of a borrowed runtime port. The application owns
+ * resource acquisition, its executor and retirement (including unfinished close).
+ * Do not acquire custody or perform I/O during this factory call. The live session
+ * supplies account routing only; the runtime must verify every operation itself. */
+export type E2eeRuntimeFactory = (input: {
+  readonly session: ReadonlyStore<PlatformSessionState>;
+}) => E2eeWorkspaceRuntime | undefined;
+
 /** Public creation intent. The host verifies accountId against its signed-in account. */
 export interface E2eeWorkspacePrepareInput {
   readonly accountId: string;
@@ -68,14 +79,23 @@ export interface E2eeRuntimeStatus {
   readonly position: string | null;
   readonly epoch: number;
   readonly rotationRequired: boolean;
+  /** Ephemeral host reader owner; never persisted or an authorization credential. */
+  readonly readerOwner?: string;
+  /** Current self membership, derived only from the host's verified ledger. */
+  readonly signingPublicKey?: string;
+  readonly membershipId?: string | null;
+  readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
+  /** Confirmed retained key for local history/admission; not authority for new seals.
+   * Native sealing always selects the current verified epoch. */
+  readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
   readonly hasDeviceCredential?: boolean;
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The main process's own public export, for ledger display without another replay. */
+/** The host's own public export, for ledger display without another replay. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
@@ -83,8 +103,75 @@ export interface E2eeRuntimeLedgerView {
   /** Absolute ledger positions; a snapshot-origin host need not hold the prefix. */
   readonly recordPositions?: readonly number[];
 }
-/** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
+/** Facts from the host's current verified ledger, never cloud projections. */
+export interface E2eeManagementState {
+  readonly epoch: number;
+  readonly rotationRequired: boolean;
+  readonly mayRotate: boolean;
+  readonly updatePending: boolean;
+  readonly recoveryIssue?: 'candidate-unavailable';
+  readonly devices: readonly {
+    key: string;
+    kind: 'personal' | 'machine' | 'recovery';
+    machineId: string | null;
+    self: boolean;
+    mayRevoke: boolean;
+  }[];
+}
+/** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
+  readonly readerLeases?: 'preallocated-v1';
+  readMachineSharing?(
+    workspaceId: string,
+    machineId: string
+  ): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingView>;
+  updateMachineSharing?(
+    workspaceId: string,
+    machineId: string,
+    generation: string,
+    requestId: string,
+    change: import('./e2ee-machine-sharing').E2eeMachineSharingChange
+  ): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingWriteResult>;
+
+  managementState?(workspaceId: string): Promise<E2eeManagementState>;
+  updateKeys?(workspaceId: string): Promise<void>;
+  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  /** Explicit management intent; the host signs once and retains the exact original. */
+  removeMember?(workspaceId: string, membershipId: string): Promise<void>;
+  /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */
+  setMemberRole?(
+    workspaceId: string,
+    membershipId: string,
+    role: 'admin' | 'member'
+  ): Promise<void>;
+  /** Create public email/link pins using a current manager's native device. */
+  createMemberInvitation?(input: {
+    workspaceId: string;
+    mode: 'email' | 'link';
+    email?: string;
+  }): Promise<import('@lody/cloud-api').E2eeMemberOffer>;
+  prepareMemberJoin?(
+    offer: import('@lody/cloud-api').E2eeMemberOffer
+  ): Promise<import('@lody/cloud-api').E2eeMemberRequest>;
+  pendingMemberJoin?(
+    workspaceId: string
+  ): Promise<{ offer: import('@lody/cloud-api').E2eeMemberOffer; requestId: string | null } | null>;
+  memberJoinRequests?(
+    workspaceId: string
+  ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
+  /** Automatic mode is permitted only for an accepted, targeted email invitation. */
+  approveMemberJoin?(
+    workspaceId: string,
+    requestId: string,
+    mode: 'automatic' | 'explicit'
+  ): Promise<{ admitted: boolean; keyPending: boolean }>;
+  rejectMemberJoin?(workspaceId: string, requestId: string): Promise<{ state: 'rejected' }>;
+  revokeMemberInvitation?(workspaceId: string, token: string): Promise<{ revoked: true }>;
+  claimMemberJoin?(
+    workspaceId: string,
+    requestId: string
+  ): Promise<{ ready: boolean; state: string }>;
   personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
   preparePersonalJoin?(
     offer: E2eePersonalPairingOffer
@@ -103,7 +190,7 @@ export interface E2eeWorkspaceRuntime {
     signingPublicKey: string;
     encryptionPublicKey: string;
     credentialHash: string;
-    protection: 'os-keystore';
+    protection: 'os-keystore' | 'web-crypto';
   }>;
   approvePersonalJoin?(
     workspaceId: string,
@@ -121,6 +208,24 @@ export interface E2eeWorkspaceRuntime {
   account(options?: {
     token?: string;
   }): Promise<{ userId: string; source: 'network' | 'offline' } | null>;
+  beginRemoteMachinePairing?(
+    workspaceId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { command: string }>;
+  inspectRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<
+    import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { summary: string | null }
+  >;
+  approveRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string,
+    summary: string
+  ): Promise<{ admitted: boolean; ready: boolean }>;
+  cancelRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus>;
   /** Prepare public same-user machine evidence; this never admits the device. */
   prepareLocalAgent?(
     workspaceId: string
@@ -130,16 +235,49 @@ export interface E2eeWorkspaceRuntime {
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  refresh(workspaceId: string): Promise<E2eeRuntimeStatus>;
+  /** Ledger-only refresh separates discovery from retryable background key reception. */
+  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
-    rejectedToken?: string
+    rejectedToken?: string,
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareFeatureRpc?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
+  prepareDispatch?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
+  acceptDispatchResponse?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frameHex: string
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
+  /** Explicitly archive local originals and require fresh independently approved pairing. */
+  resetIdentity?(input: {
+    workspaceId?: string;
+    resetId: string;
+    confirm: true;
+  }): Promise<{ archive: string | null }>;
+  /** Archive the local CLI machine identity; retain the desktop personal identity. */
+  resetLocalAgent?(input: { workspaceId: string; resetId: string; confirm: true }): Promise<void>;
   recordCreated(input: {
     workspaceId: string;
     genesisHash: string;
@@ -147,9 +285,18 @@ export interface E2eeWorkspaceRuntime {
   }): Promise<void>;
   open(
     workspaceId: string,
-    observed?: { genesisHash: string; headHash: string; length: number }
+    observed?: { genesisHash: string; headHash: string; length: number },
+    expectedAccountId?: string,
+    readerOwner?: string
   ): Promise<E2eeRuntimeStatus>;
-  close(workspaceId: string): Promise<void>;
+  close(workspaceId: string, expectedAccountId?: string, readerOwner?: string): Promise<void>;
+  /** Read retained verified identity without granting this window a reader.
+   * The host binds the expected account and releases its temporary read before
+   * returning. Missing on older hosts; callers must not fall back to status. */
+  readIdentity?(input: { accountId: string; workspaceId: string }): Promise<{
+    workspaceId: string;
+    genesisHash: string;
+  }>;
   status(workspaceId: string): Promise<E2eeRuntimeStatus>;
   ingestLedgerRecords(
     workspaceId: string,
@@ -170,6 +317,7 @@ export type E2eeContentContext = {
   continuationOffset?: string;
 };
 export type E2eeContentSeal = {
+  /** Minimum expected verified epoch. Hosts seal at their current epoch and reject future hints. */
   epoch: number;
   room: E2eeContentRoom;
   context: E2eeContentContext;

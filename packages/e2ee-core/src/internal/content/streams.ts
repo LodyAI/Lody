@@ -1,4 +1,4 @@
-import { Deferred, Effect, Result } from 'effect';
+import { Deferred, Effect, Option, Result } from 'effect';
 import type {
   PayloadProtectionOpenInput,
   PayloadProtectionSealInput,
@@ -7,6 +7,8 @@ import type {
 import * as Bytes from '../foundation/bytes';
 import { disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
+import { InstalledKeyError } from '../keys/installed-keys';
+import { VerifiedLedger } from '../ledger/verified-ledger';
 import { ContentError } from '../foundation/errors';
 import { epochHistoryPacket, requireLedgerContinuation, type LedgerView } from '../ledger';
 import { commitEpochKey } from '../keys/history';
@@ -21,7 +23,8 @@ import {
   contentSigningBytes,
   type ContentScope,
 } from '../foundation/content-format';
-import { scopedDocumentKey } from './document-key';
+import { documentKeyForScope, scopedDocumentKey } from './document-key';
+import { openContentAead } from '../crypto/content';
 import { admitDocument, authenticateDocument, openDocument, sealDocument } from './index';
 import { verifySignatureEffect, NativeSignatureError } from '../foundation/signature';
 import { bytesEqual } from '../foundation/cbor';
@@ -38,7 +41,8 @@ export function makeStreamsUpdateBinding(input: {
   readonly genesis: Bytes.GenesisHash;
   readonly resource: string;
   readonly model: 'loro' | 'flock';
-  /** A number pins writes to that epoch; current selects from each genuine ledger read. */
+  /** A number pins writes to that epoch; current prefers each genuine ledger’s current key.
+   * Only genuinely missing keys may use the optional VerifiedLedger retained-key grace. */
   readonly writeEpoch: number | 'current';
   readonly signer: DeviceSigner;
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
@@ -58,6 +62,13 @@ export function makeStreamsUpdateBinding(input: {
       publicKey: yield* Effect.fromResult(Bytes.signingPublicKey(input.signer.publicKey.toBytes())),
       sign: input.signer.sign.bind(input.signer),
     });
+    const verified = yield* Effect.serviceOption(VerifiedLedger);
+    const allowRetained = (epoch: number) =>
+      Option.isSome(verified) && verified.value.canWriteRetainedEpoch
+        ? verified.value.canWriteRetainedEpoch(epoch)
+        : Effect.succeed(false);
+    const missing = (cause: unknown) =>
+      cause instanceof InstalledKeyError && cause.reason === 'missing-key';
     const lookup = input.ledger;
     const readKey = input.readEpochKey;
     let closed = false;
@@ -142,6 +153,23 @@ export function makeStreamsUpdateBinding(input: {
             ? 'flock-snapshot'
             : 'flock-update',
     });
+    const useKey = <A, E, R>(
+      view: LedgerView,
+      number: number,
+      kind: 'update_batch' | 'snapshot',
+      owned: Bytes.EpochKey,
+      use: (key: import('./document-key').DocumentKey) => Effect.Effect<A, E, R>
+    ) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* guard();
+          const packet = yield* Effect.fromResult(epochHistoryPacket(view, number));
+          const commitment = yield* Effect.fromResult(commitEpochKey(anchor, number, owned));
+          if (!packet.commitment.equals(commitment)) return yield* error('commitment-mismatch');
+          const key = yield* scopedDocumentKey(scope(number, kind), owned);
+          return yield* use(key);
+        })
+      );
     const withKey = <A, E, R>(
       view: LedgerView,
       number: number,
@@ -150,18 +178,137 @@ export function makeStreamsUpdateBinding(input: {
     ) =>
       Effect.acquireUseRelease(
         readKey(number).pipe(Effect.mapError(() => error('missing-read-key'))),
-        (owned) =>
-          Effect.scoped(
-            Effect.gen(function* () {
-              yield* guard();
-              const packet = yield* Effect.fromResult(epochHistoryPacket(view, number));
-              const commitment = yield* Effect.fromResult(commitEpochKey(anchor, number, owned));
-              if (!packet.commitment.equals(commitment)) return yield* error('commitment-mismatch');
-              const key = yield* scopedDocumentKey(scope(number, kind), owned);
-              return yield* use(key);
-            })
-          ),
+        (owned) => useKey(view, number, kind, owned, use),
         (owned) => Effect.sync(() => disposeEpochKey(owned))
+      );
+    const selectWriteKey = Effect.fnUntraced(function* (view: LedgerView) {
+      const current = writeEpoch === 'current' ? view.inspectState().epoch.number : writeEpoch;
+      const first = yield* Effect.result(readKey(current));
+      if (Result.isSuccess(first)) return { epoch: current, owned: first.success };
+      if (writeEpoch !== 'current' || !missing(first.failure))
+        return yield* error('missing-read-key');
+      for (let epoch = current - 1; epoch >= 0; epoch--) {
+        const result = yield* Effect.result(readKey(epoch));
+        if (Result.isSuccess(result)) return { epoch, owned: result.success };
+        if (!missing(result.failure)) return yield* error('missing-read-key');
+      }
+      return yield* error('key-update-required');
+    });
+    const withWriteKey = <A, E, R>(
+      view: LedgerView,
+      kind: 'update_batch' | 'snapshot',
+      use: (epoch: number, key: import('./document-key').DocumentKey) => Effect.Effect<A, E, R>
+    ) =>
+      Effect.acquireUseRelease(
+        selectWriteKey(view),
+        (selected) =>
+          Effect.gen(function* () {
+            const current = view.inspectState().epoch.number;
+            if (writeEpoch !== 'current' || selected.epoch === current)
+              return yield* useKey(view, selected.epoch, kind, selected.owned, (key) =>
+                use(selected.epoch, key)
+              );
+            // Installation while an older key was opening must win before encryption.
+            return yield* Effect.acquireUseRelease(
+              Effect.result(readKey(current)),
+              (result) =>
+                Effect.gen(function* () {
+                  if (Result.isSuccess(result))
+                    return yield* useKey(view, current, kind, result.success, (key) =>
+                      use(current, key)
+                    );
+                  if (!missing(result.failure)) return yield* error('missing-read-key');
+                  if (!(yield* allowRetained(selected.epoch)))
+                    return yield* error('key-update-required');
+                  const output = yield* useKey(view, selected.epoch, kind, selected.owned, (key) =>
+                    use(selected.epoch, key)
+                  );
+                  if (!(yield* allowRetained(selected.epoch)))
+                    return yield* error('key-update-required');
+                  return output;
+                }),
+              (result) =>
+                Result.isSuccess(result)
+                  ? Effect.sync(() => disposeEpochKey(result.success))
+                  : Effect.void
+            );
+          }),
+        (selected) => Effect.sync(() => disposeEpochKey(selected.owned))
+      );
+    const openAuthenticated = (request: PayloadProtectionOpenInput) =>
+      lease(
+        Effect.gen(function* () {
+          const selected = yield* Effect.fromResult(context(request.context));
+          if (
+            !(request.header instanceof Uint8Array) ||
+            !bytesEqual(request.header, selected.header)
+          )
+            return yield* error('unsupported-streams-header');
+          const metadata = yield* Effect.fromResult(
+            inspectContentFrame(request.sealed, scope(0, selected.kind).purpose)
+          );
+          const frame = new Uint8Array(request.sealed);
+          const binding = yield* Effect.fromResult(
+            copyContentAdditionalData(request.additionalData)
+          );
+          const view = yield* ledger();
+          // Untrusted epoch metadata cannot trigger key lookup until fixed historical authentication succeeds.
+          const authenticated = yield* Effect.fromResult(
+            authenticateDocument(view, scope(metadata.epoch, selected.kind), frame, binding)
+          );
+          return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
+            Effect.gen(function* () {
+              const opened = yield* Effect.fromResult(
+                selected.kind === 'snapshot'
+                  ? Result.gen(function* () {
+                      // frame and binding are owned copies already authenticated above.
+                      const parsed = yield* parseContentFrame(
+                        frame,
+                        scope(metadata.epoch, selected.kind).purpose
+                      );
+                      const leaf = yield* documentKeyForScope(
+                        key,
+                        scope(metadata.epoch, selected.kind)
+                      );
+                      const plaintext = yield* openContentAead(
+                        leaf,
+                        authenticated.header,
+                        parsed.nonce,
+                        parsed.ciphertext,
+                        binding
+                      );
+                      return { header: authenticated.header, plaintext };
+                    })
+                  : openDocument(view, scope(metadata.epoch, selected.kind), key, frame, binding)
+              );
+              return yield* Effect.acquireUseRelease(
+                Effect.succeed(opened.plaintext),
+                (plaintext) =>
+                  Effect.gen(function* () {
+                    if (
+                      selected.kind === 'snapshot' &&
+                      opened.header.continuationOffset !== selected.continuationOffset
+                    )
+                      return yield* error('invalid-snapshot-offset');
+                    const latest = yield* ledger();
+                    // The owned snapshot frame was authenticated before key lookup.
+                    // Genuine ledger continuation preserves its historical author.
+                    if (selected.kind !== 'snapshot')
+                      yield* Effect.fromResult(
+                        authenticateDocument(
+                          latest,
+                          scope(metadata.epoch, selected.kind),
+                          frame,
+                          binding
+                        )
+                      );
+                    return { plaintext: new Uint8Array(plaintext), author: authenticated.author };
+                  }),
+                (plaintext) => Effect.sync(() => plaintext.fill(0))
+              );
+            })
+          );
+        })
       );
     return Object.freeze({
       maxSealOverheadBytes: STREAMS_MAX_SEAL_OVERHEAD_BYTES,
@@ -186,9 +333,7 @@ export function makeStreamsUpdateBinding(input: {
               (plaintext) =>
                 Effect.gen(function* () {
                   const view = yield* ledger();
-                  const epoch =
-                    writeEpoch === 'current' ? view.inspectState().epoch.number : writeEpoch;
-                  const sealed = yield* withKey(view, epoch, selected.kind, (key) =>
+                  const sealed = yield* withWriteKey(view, selected.kind, (epoch, key) =>
                     sealDocument({
                       scope: scope(epoch, selected.kind),
                       documentKey: key,
@@ -208,58 +353,10 @@ export function makeStreamsUpdateBinding(input: {
             );
           })
         ),
+      /** Verified historical author plus owned plaintext; this grants no execution permission. */
+      openAuthenticated,
       open: (request: PayloadProtectionOpenInput) =>
-        lease(
-          Effect.gen(function* () {
-            const selected = yield* Effect.fromResult(context(request.context));
-            if (
-              !(request.header instanceof Uint8Array) ||
-              !bytesEqual(request.header, selected.header)
-            )
-              return yield* error('unsupported-streams-header');
-            const metadata = yield* Effect.fromResult(
-              inspectContentFrame(request.sealed, scope(0, selected.kind).purpose)
-            );
-            const frame = new Uint8Array(request.sealed);
-            const binding = yield* Effect.fromResult(
-              copyContentAdditionalData(request.additionalData)
-            );
-            const view = yield* ledger();
-            // Untrusted epoch metadata cannot trigger key lookup until fixed historical authentication succeeds.
-            yield* Effect.fromResult(
-              authenticateDocument(view, scope(metadata.epoch, selected.kind), frame, binding)
-            );
-            return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
-              Effect.gen(function* () {
-                const opened = yield* Effect.fromResult(
-                  openDocument(view, scope(metadata.epoch, selected.kind), key, frame, binding)
-                );
-                return yield* Effect.acquireUseRelease(
-                  Effect.succeed(opened.plaintext),
-                  (plaintext) =>
-                    Effect.gen(function* () {
-                      if (
-                        selected.kind === 'snapshot' &&
-                        opened.header.continuationOffset !== selected.continuationOffset
-                      )
-                        return yield* error('invalid-snapshot-offset');
-                      const latest = yield* ledger();
-                      yield* Effect.fromResult(
-                        authenticateDocument(
-                          latest,
-                          scope(metadata.epoch, selected.kind),
-                          frame,
-                          binding
-                        )
-                      );
-                      return new Uint8Array(plaintext);
-                    }),
-                  (plaintext) => Effect.sync(() => plaintext.fill(0))
-                );
-              })
-            );
-          })
-        ),
+        openAuthenticated(request).pipe(Effect.map((opened) => opened.plaintext)),
     });
   });
 }

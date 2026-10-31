@@ -8,7 +8,11 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
-    }
+    },
+    "./e2ee-native": "./src/e2ee-native.ts",
+    "./e2ee-resource": "./src/e2ee-resource.ts",
+    "./e2ee-streams": "./src/e2ee-streams.ts",
+    "./e2ee-client": "./src/e2ee-client.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -19,12 +23,16 @@
   "dependencies": {
     "@loro-dev/streams-client": "catalog:",
     "@lody/shared": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "effect": "catalog:",
+    "@lody/e2ee-core": "workspace:*",
+    "@noble/hashes": "2.2.0"
   },
   "devDependencies": {
     "@loro-dev/loro-cli": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "esbuild": "0.28.2"
   }
 }

@@ -44,7 +44,16 @@ context/message-flow.md "Upstream".
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
-  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
+  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
+  a supported standalone Node from the final launch PATH in the target working directory.
+  Missing, unsupported or unexecutable Node fails before npx with installation guidance. All session, probe,
+  history and protocol-auth launches share this check. `Session.createAgent` runs it
+  inside each startup attempt, after shell, credential and memory environment
+  merges; the checked environment goes to both executable resolution and sandbox
+  spawn. The probe freezes `process.execPath`, so directory-sensitive Node managers
+  cannot select a different runtime afterwards. Inaccessible PATH directories are
+  skipped; a selected executable failing its probe still fails the launch. See the
+  [system Node decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-dsh-system-node.md). It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
   while preset and session directories remain filesystem paths. Its Windows bootstrap
   suppresses child consoles inside npm and DSH, including the pinned native Job
@@ -57,7 +66,10 @@ context/message-flow.md "Upstream".
   URLs, device codes, expiry, and Claude's optional browser-returned code input.
 - `acp-binary-manager.ts` — registry binary-distribution agents (tar/zip install).
 - `npx-cache.ts` — npx cache isolation plus poisoning detection/purge for resilient
-  registry launches.
+  registry launches. Cold initialize timeouts retain downloaded `_cacache` content and
+  unrelated installs; only matching package `_npx` directories may be removed before
+  the existing cleanup/retry. True npm cache corruption retains the whole Lody-cache
+  fallback. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 - `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability probing,
   startup health, analytics. Each capability probe owns a unique writable temporary
   workspace for process startup and `session/new`, independent of the daemon cwd.
@@ -121,11 +133,20 @@ the MCP child with `session/close` or Agent teardown.
 
 ### Workspace MCP resolution is two phases
 
-`loadExternalMcpServers` (catalog sync + document read) runs BEFORE `initialize` so its
-remote round trip overlaps spawn and the handshake, and the selector it resolves to applies
-the agent's advertised `http` capability at `newSession`. Awaiting the load between
-`initialize` and `newSession` would put a remote sync — up to its 5s budget — on the
-critical path of every session establishment while the agent process sits idle.
+`loadExternalMcpServers` runs BEFORE `initialize`, and the selector it resolves to applies
+the agent's advertised `http` capability at `newSession`. Loading reuses the daemon's
+live workspace catalog: only its first baseline may wait, for up to one second,
+overlapping spawn and the handshake. If that wait expires but every frozen selected
+ID exists locally, startup uses those rows and emits a `configWarning` that the
+configuration has not been confirmed with the remote. Local authentication is prepared
+only after checking all selected rows. A missing selected row preserves the original
+typed cold error; startup rechecks once at provider-session establishment. If still
+missing and unconfirmed, initialization rejects before `newSession`/load/resume/fork.
+This avoids freezing an incomplete tool selection while allowing offline startup from
+persisted configuration. The same reader continues recovering independently, and a
+later load after its baseline uses ordinary reads without the cold warning. Existing
+startup owners retain process and relay cleanup. Other configuration diagnostics
+remain best effort. Empty selections skip the catalog entirely.
 
 ### Steer delivery classification
 
@@ -148,6 +169,31 @@ fails; ending a local waiter never manufactures a provider refusal.
 `<Lody data root>/dsh/providers/<encoded Provider ID>` and launches the pinned closure
 through `dsh --profile lody-acp`. Its profile composes `@deepseek-ai/dsh-base`, a
 content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final host guard.
+Startup reconciles only the base/host bundle entries, preserving user dependencies,
+other package-manager fields and user bundle order. User `pnpm-workspace.yaml`,
+lockfiles and patches survive startup and upgrades.
+
+Manage plugins from the local terminal:
+
+```sh
+lody dsh plugin add <package-or-path> --agent-config <provider-id>
+lody dsh plugin remove <package-name> --agent-config <provider-id>
+```
+
+Omit `--agent-config` to choose a local builtin DSH Provider interactively; scripts
+must supply the id. Lody must be running so the command can read Provider ids/names
+from its local daemon, across active workspaces, without cloud catalog requests.
+The command invokes the pinned native `dsh plugin --profile lody-acp …` with that
+Provider's `DSH_HOME` and pinned pnpm. It forwards native arguments, terminal I/O,
+caller cwd and environment; saved Provider API credentials are not loaded.
+Local paths and GitHub/Git specs follow the native DSH/package-manager support.
+The selected profile cannot be overridden. Startup and CLI package operations share
+a Provider-home file lock; Ctrl-C cancels the child before releasing that lock.
+Native DSH owns installation state and error recovery; Lody does not roll back
+selected files after a partial package-manager failure. Reconnect sessions after
+changes. The UI does not list or manage plugins, and no remote plugin RPC exists.
+Stop Lody before running external `dsh plugin` commands against that same profile.
+See the [plugin management decision](../../../../.agents/notes/implemented/feature/2026-10-26-dsh-plugin-management.md).
 Only missing user patches are created. DSH itself recreates the empty `cordis.yml`
 include root; Lody does not duplicate that write. The host guard preserves ACP and
 history paths and disables product telemetry, inventory and logging, so the host keeps
@@ -163,14 +209,16 @@ URLs are normalized by the extension to the Messages `/anthropic` root before pr
 construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named. Existing sessions/query data remain under
-the daemon's previous `DSH_HOME` (or `~/.dsh`). Old settings/profiles are left untouched;
+the daemon's previous `DSH_HOME` (or `~/.dsh`). During read-only history import, missing
+Provider-home images are read from that legacy home's attachment store; new images still
+use the Provider store. Old settings/profiles are left untouched;
 move desired customizations to the YAML path shown in Provider details. See the
 [settings contract](../../../../specs/deepseek-harness-settings.md).
 
 On Windows, both session and probe/title spawns resolve the selected npx shim from
 the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
-with Lody's Node. This keeps the full pinned closure out of `cmd.exe`, whose
-8191-character limit is smaller than the package argument list. Native executable
+with the validated standalone Node. This keeps the full pinned closure out of
+`cmd.exe`, whose 8191-character limit is smaller than the package argument list. Native executable
 shims remain direct launches; a script shim without the standard npm entry fails
 with an actionable error instead of falling through to another installation.
 Cache isolation, startup budgets, and retries still see the original npx command
@@ -204,6 +252,14 @@ production upload/readback. The CLI rejects adapter/manifest version drift. See 
 The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
+
+Corrupt caches are reported absent with a warning; launch never executes them. Installation
+publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing
+paths untouched, including same-version replacements. Status, installation and launch share a
+selector: filter the base and all completed generations by current pins and host compatibility,
+then rank eligible candidates by installedAt and command. Best-effort cleanup conservatively retains corrupt originals and generation trees
+because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
+progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
 Completed caches written before metadata schema v1 remain reusable through a separate strict
 legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
@@ -269,10 +325,19 @@ per-model reasoning-effort ladders on that session response as
 Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
 is a context window). Vendor model `_meta` never enters the CLI.
 
+Commands have separate ownership: only independent probes replace the Provider's
+startup command preview. Real sessions retain their commands in `AgentClient` and
+publish them through the existing Session runtime-config path; an explicit empty
+list clears that Session's menu. Session capability writes preserve the latest
+same-runtime preview without copying project commands into it. A capability entry
+without a confirmed probe list is re-probed; an empty probed list is confirmed.
+
 Capability cache versions are freshness markers, not read barriers. A newer client continues
 to render understood fields from an older daemon's parsed entry while scheduling a replacement
 probe; likewise, an older client may use the understood portion of a newer entry. Runtime
 override entries still apply only when their source-version suffix matches the selected override.
+Pre-v11 command lists are omitted because they can contain another project's
+commands; understood models and other capability fields remain readable.
 
 ### Session titles
 
@@ -302,6 +367,10 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+When a Provider loses its account reference, session startup and isolated titles use
+`CodexProfileStore.isAccountBound`: the durable binding marker precedes the legacy
+profile scan. Bound titles skip with a debug message, preserving the draft without
+sending task text through native default credentials.
 
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
@@ -365,6 +434,8 @@ OpenAI environment configuration and requires a user-installed ACP plugin.
 
 `login-shell-env.ts` contains only Legacy launcher/binding boundaries. CLI index owns
 the native LoginShellCache runtime and waits for its producer at daemon/command exit.
+Successful environments remain cached; completed failures retry on the next read after
+five seconds. Unconfirmed process release retains its owner and prevents a second probe.
 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 

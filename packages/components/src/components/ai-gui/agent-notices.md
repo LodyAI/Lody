@@ -31,11 +31,11 @@ agent's answer and the agent's own warning about it.
 
 ## One banner, two tones
 
-- A tinted header line carrying the tone colour, then the raw error in the same
-  band — always open, never behind a modal or a disclosure. The previous
-  `chat_failed` modal put the payload one click away on a surface the reader had
-  no reason to expect; `chat-failed-detail-dialog.tsx` is no longer reached from
-  the conversation.
+- A soft tone well carrying the glyph and label, then the raw error at the
+  well's leading edge — always open, never behind a modal or a disclosure. The
+  previous `chat_failed` modal put the payload one click away on a surface the
+  reader had no reason to expect; `chat-failed-detail-dialog.tsx` is no longer
+  reached from the conversation.
 - Failure detail uses the full raw message once, without prepending its extracted
   summary. Prefix stripping and JSON extraction can produce a different string
   with the same information, so exact-string deduplication cannot prevent echoes.
@@ -43,15 +43,38 @@ agent's answer and the agent's own warning about it.
   an exact title-only payload adds no detail. Copy keeps the full diagnostic report.
 - The block spans the conversation column. An earlier fit-content card left a
   ragged right edge, and a header rule split one short message into two boxes.
-- The surface mixes the tone toward the neutral border rather than fading it, so
-  the card still reads as "warning" or "failure" at a glance without a vivid
-  slab competing with the answer it comments on.
+- The well has no ring. Every other conversation surface is a fill (user bubble,
+  code block, tool sheet); a tint-bordered alert was the only outlined block and
+  read as chrome dropped on top of the prose. The ~4.5% tone tint still reads as
+  "warning" or "failure" at a glance without a vivid slab.
+- The body starts at the well's leading edge, under the glyph, rather than
+  indenting under the label. Agent text is arbitrary and often long; a hanging
+  indent narrowed it for no reading benefit, and the user explicitly asked for
+  the full width.
+- The glyph and label share one `alignItems: center` header row, so the 14px
+  glyph sits on the label's optical line. Do not hand-tune a top margin on the
+  glyph.
 - Failure keeps the semantic `--destructive`. Warning uses amber, not
   `--status-warning`: that token resolves to a brown in this theme and reads as
   neither warning nor anything else at 14px.
-- The hairline is a `box-shadow` ring, not `border-[0.5px]`. Chromium rounds a
-  0.5px border up to a full pixel at EVERY device pixel ratio, so the utility
-  renders identically to `border` and buys nothing.
+- Label and detail use the subheadline role (13px at the default UI size), the
+  same compact type as the activity timeline; the previous footnote size made
+  the notice smaller than the conversation around it.
+
+## Stop control diagnostics
+
+Stop diagnostics use the existing `agent_warning` carrier because the task may still
+be running. `sessionCancelFailed` identifies provider-cancel rejection,
+`sessionStopTimedOut` identifies the existing five-second drain expiring before
+forced termination, and `sessionTerminationFailed` identifies failed termination.
+Each has a localized title and guidance followed by the original diagnostic message.
+Older readers can still show the message as an ordinary warning.
+
+The notice remains open in the conversation. It neither completes the assistant nor
+claims that sending the Stop RPC stopped the provider. Repeated Stop does not add
+another notice for the same turn and phase; a later turn can report the same error.
+The [implementation decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-stop-failure-notices.md)
+records the ownership and reporting limits.
 
 ## Copying failures
 
@@ -68,7 +91,7 @@ header row's trailing edge and the detail takes its own full-width line beneath
 it, so copying costs no separate control row. When a capacity retry action is
 present the header is already occupied, so copy keeps its footer row rather than
 squeezing the title between two controls. This layout applies at every viewport
-width. Long unbroken paths wrap within the detail instead of overflowing the card.
+width. Long unbroken paths wrap within the detail instead of overflowing the well.
 
 ## Capacity retry
 

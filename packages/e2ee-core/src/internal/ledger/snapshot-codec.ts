@@ -14,8 +14,10 @@ import { keyId } from '../foundation/identifiers';
 import { retainedSigningPublicKey } from '../foundation/owned-bytes';
 import { verifySignature } from '../foundation/signature';
 import { LedgerError } from './errors';
+import { decodeMachineId, encodeMachineId } from './machine-id';
 import { fail, type DeviceKind, type Role } from './records';
 import {
+  SUPPORTED_CAPABILITIES,
   hashAt,
   stateGet,
   type InternalState,
@@ -30,18 +32,18 @@ const lift = <A>(r: Result.Result<A, { readonly code: LedgerError['code'] }>) =>
   Result.mapError(r, (e) => new LedgerError({ code: e.code }));
 /**
  * Format versions of the compact authorization-state encoding `S`. Current-only:
- * decoders reject every other version as `unknown-version`. Version 1 bytes were
- * written with the pre-compact layout, so the compact layout is version 2.
+ * decoders reject every other version as `unknown-version`. Version 4 also preserves declared capabilities; older layouts
+ * cannot restore those facts and are rejected without migration.
  */
-const SNAPSHOT_BODY_VERSION = 2;
+const SNAPSHOT_BODY_VERSION = 4;
 /** Retained envelope version; the digest body shares it so the digest is derivable from retained bytes. */
-const RETAINED_VERSION = 2;
-const DIGEST_DOMAIN = 'snapshot-digest/v2';
+const RETAINED_VERSION = 4;
+const DIGEST_DOMAIN = 'snapshot-digest/v4';
 const digestOfBody = (body: Uint8Array) =>
   lift(Bytes.recordHash(sha256(concat([domain(DIGEST_DOMAIN), body]))));
 /**
- * Deterministic CBOR: the digest body `[2, genesis, length, head, S]` is the
- * retained array `[2, genesis, length, head, S, verification]` with a 5-element
+ * Deterministic CBOR: the digest body `[4, genesis, length, head, S]` is the
+ * retained array `[4, genesis, length, head, S, verification]` with a 5-element
  * head and without its last one-byte element, so the digest needs no second encoding.
  */
 const retainedDigest = (bytes: Uint8Array) =>
@@ -156,17 +158,19 @@ export const headAttestationSigningBytes = (genesis: Bytes.GenesisHash, head: By
  * - memberships, by membership ID: ID (16) | user ID (32) | role (1),
  *   role 0 = removed, 1 owner, 2 admin, 3 member, 4 guest;
  * - devices, by signing key: signing key (32) | encryption key (32) |
- *   membership index (u32 BE) | status (1), status 0 = retired, 1 personal,
- *   2 machine, 3 recovery;
+ *   membership index (u32 BE) | kind (1: 0 personal, 1 machine, 2 recovery) |
+ *   active (1: 0 retired, 1 current);
+ * - machine bindings for every historical machine, by device index: device index
+ *   (u32 BE) | UTF-8 byte length (u16 BE) | exact UTF-8 (1..256 bytes);
  * - joins, by device index: device index (u32 BE) | request ID (16);
  * - epoch commitments 0..n (32 each) and history packets 1..n (72 each).
  *
  * Each fact is stored once. Used keys, membership IDs, closed joins and
  * commitments are the tables themselves; current members and devices are the
- * rows with a nonzero role or status.
+ * rows with a nonzero role or active flag.
  */
 const MEMBERSHIP_ROW = 49;
-const DEVICE_ROW = 69;
+const DEVICE_ROW = 70;
 const JOIN_ROW = 20;
 const COMMITMENT_ROW = 32;
 const PACKET_ROW = 72;
@@ -188,6 +192,7 @@ function authState(s: InternalState): CborValue {
   const deviceKeys = [...HashMap.keys(s.deviceHistory)].sort(byKey);
   const deviceIndex = new Map(deviceKeys.map((key, index) => [key, index]));
   const devices = new Uint8Array(deviceKeys.length * DEVICE_ROW);
+  const machineRows: Uint8Array[] = [];
   deviceKeys.forEach((key, index) => {
     const at = index * DEVICE_ROW;
     const record = stateGet(s.deviceHistory, key)!;
@@ -195,7 +200,16 @@ function authState(s: InternalState): CborValue {
     devices.set(record.encryptionPublicKey.toBytes(), at + 32);
     writeIndex(devices, at + 64, membershipIndex.get(id(record.membershipId))!);
     const current = stateGet(s.devices, key);
-    devices[at + 68] = current ? kinds.indexOf(current.kind) + 1 : 0;
+    devices[at + 68] = kinds.indexOf(record.kind);
+    devices[at + 69] = current ? 1 : 0;
+    if (record.kind === 'machine') {
+      const machineId = Result.getOrThrow(encodeMachineId(record.machineId));
+      const binding = new Uint8Array(6 + machineId.length);
+      writeIndex(binding, 0, index);
+      new DataView(binding.buffer).setUint16(4, machineId.length);
+      binding.set(machineId, 6);
+      machineRows.push(binding);
+    }
   });
   const joinRows = [...s.closedJoins]
     .map((join) => {
@@ -216,7 +230,16 @@ function authState(s: InternalState): CborValue {
     commitments.set(row.commitment.toBytes(), epoch * COMMITMENT_ROW);
     if (epoch > 0) packets.set(row.packet, (epoch - 1) * PACKET_ROW);
   }
-  return [memberships, devices, joins, commitments, packets, s.epoch.rotationRequired];
+  return [
+    memberships,
+    devices,
+    joins,
+    commitments,
+    packets,
+    s.epoch.rotationRequired,
+    concat(machineRows),
+    [...s.capabilities].sort((a, b) => a - b),
+  ];
 }
 function eligible(s: InternalState, signer: Bytes.SigningPublicKey) {
   const device = stateGet(s.devices, id(signer));
@@ -381,7 +404,18 @@ function decodeAuthState(
     v instanceof Uint8Array && v.length % row === 0 ? Result.succeed(v) : fail('canonical');
   return Result.gen(function* () {
     const fields = yield* array(value);
-    if (fields.length !== 6) return yield* fail('canonical');
+    if (fields.length !== 8) return yield* fail('canonical');
+    const capabilities = yield* array(fields[7]);
+    if (capabilities.length > 16) return yield* fail('canonical');
+    let previousCapability = 0;
+    const declared: number[] = [];
+    for (const capability of capabilities) {
+      const code = yield* uint(capability);
+      if (code <= previousCapability || code > 0xffff_ffff) return yield* fail('canonical');
+      if (!SUPPORTED_CAPABILITIES.has(code)) return yield* fail('upgrade-required');
+      previousCapability = code;
+      declared.push(code);
+    }
     const membershipBytes = yield* table(fields[0], MEMBERSHIP_ROW),
       deviceBytes = yield* table(fields[1], DEVICE_ROW),
       joinBytes = yield* table(fields[2], JOIN_ROW),
@@ -419,6 +453,30 @@ function decodeAuthState(
     if (!owner) return yield* fail('canonical');
 
     const deviceCount = deviceBytes.length / DEVICE_ROW;
+    const machineBytes = fields[6];
+    if (!(machineBytes instanceof Uint8Array)) return yield* fail('canonical');
+    const bindings = new Map<number, string>();
+    let previousMachine = -1;
+    for (let offset = 0; offset < machineBytes.length;) {
+      if (offset + 6 > machineBytes.length) return yield* fail('canonical');
+      const device = readIndex(machineBytes, offset);
+      const length = new DataView(machineBytes.buffer, machineBytes.byteOffset).getUint16(
+        offset + 4
+      );
+      if (
+        device <= previousMachine ||
+        device >= deviceCount ||
+        offset + 6 + length > machineBytes.length
+      )
+        return yield* fail('canonical');
+      bindings.set(
+        device,
+        yield* decodeMachineId(machineBytes.subarray(offset + 6, offset + 6 + length))
+      );
+      previousMachine = device;
+      offset += 6 + length;
+    }
+    const machineDevices = new Map<string, string>();
     const deviceKeys: Bytes.SigningPublicKey[] = [];
     const deviceHistory = new Map<string, DeviceRecord>();
     const devices = new Map<string, Device>();
@@ -433,22 +491,33 @@ function decodeAuthState(
       if (encryptionKeys.has(id(encryptionPublicKey))) return yield* fail('replay');
       encryptionKeys.add(id(encryptionPublicKey));
       const membership = readIndex(row, 64);
-      const status = row[68]!;
-      if (membership >= membershipCount || status > kinds.length) return yield* fail('canonical');
-      founded.add(membership);
+      const kind = kinds[row[68]!];
+      const status = row[69]!;
+      if (membership >= membershipCount || !kind || status > 1) return yield* fail('canonical');
+      const machineId = bindings.get(index);
+      if ((kind === 'machine') !== (machineId !== undefined)) return yield* fail('canonical');
+      const binding = kind === 'machine' ? { machineId } : {};
+      if (kind === 'personal') founded.add(membership);
       const membershipId = membershipIds[membership]!;
       deviceKeys.push(key);
       deviceHistory.set(
         id(key),
-        Object.freeze({ signingPublicKey: key, encryptionPublicKey, membershipId })
+        Object.freeze({
+          signingPublicKey: key,
+          encryptionPublicKey,
+          membershipId,
+          kind,
+          ...binding,
+        })
       );
       if (status === 0) continue;
       // A current device belongs to a current member.
       if (!members.has(id(membershipId))) return yield* fail('canonical');
-      devices.set(
-        id(key),
-        Object.freeze({ membershipId, kind: kinds[status - 1]!, encryptionPublicKey })
-      );
+      if (kind === 'machine' && machineId !== undefined) {
+        if (machineDevices.has(machineId)) return yield* fail('canonical');
+        machineDevices.set(machineId, id(key));
+      }
+      devices.set(id(key), Object.freeze({ membershipId, kind, encryptionPublicKey, ...binding }));
     }
     // Every membership was admitted with a device.
     if (founded.size !== membershipCount) return yield* fail('canonical');
@@ -468,7 +537,9 @@ function decodeAuthState(
       if (device <= lastDevice || device >= deviceCount) return yield* fail('canonical');
       lastDevice = device;
       const key = deviceKeys[device]!;
-      const membership = id(deviceHistory.get(id(key))!.membershipId);
+      const founding = deviceHistory.get(id(key))!;
+      if (founding.kind !== 'personal') return yield* fail('canonical');
+      const membership = id(founding.membershipId);
       if (joinedMemberships.has(membership)) return yield* fail('canonical');
       joinedMemberships.add(membership);
       closedJoins.add(`${id(key)}:${keyId(row.subarray(4, 20))}`);
@@ -512,14 +583,17 @@ function decodeAuthState(
       (membershipCount !== 1 ||
         deviceCount !== 1 ||
         [...devices.values()][0]?.kind !== 'personal' ||
-        rotationRequired)
+        rotationRequired ||
+        declared.length !== 0)
     )
       return yield* fail('canonical');
     return {
       genesis: at.genesis,
       owner,
+      capabilities: HashSet.fromIterable(declared),
       members: HashMap.fromIterable(members),
       devices: HashMap.fromIterable(devices),
+      machineDevices: HashMap.fromIterable(machineDevices),
       epoch: Object.freeze({ number, keyCommitment, rotationRequired }),
       membershipUsers: HashMap.fromIterable(membershipUsers),
       deviceHistory: HashMap.fromIterable(deviceHistory),

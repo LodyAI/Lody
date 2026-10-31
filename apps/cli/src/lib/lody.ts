@@ -1,3 +1,5 @@
+import { daemonLossObserver } from './e2ee/client-loss-observer';
+import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
 import { LoroDocumentManager } from '@/lib/loro/doc';
@@ -5,6 +7,8 @@ import { MachineRuntime } from '@/lib/machine-runtime';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
+  getScheduleRoomId,
+  type ScheduleAuthorizationRequest,
   getManagedBuiltinRuntimeByAgentType,
   type LocalProjectId,
   MachineId,
@@ -50,6 +54,7 @@ interface LodyOptions {
   supportRegistryAgentTypes?: string[];
   workspaceId: WorkspaceId;
   contentMode?: string;
+  authorizeEncryptedExecution?: AuthorizeEncryptedExecution;
   genesisHash?: string;
   workspaceSlug?: string;
   token: string;
@@ -65,6 +70,10 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  onInboxAvailabilityChange?: (message: string | undefined) => void;
+  /** Drain this owner on confirmed member removal or device revocation.
+   * The workspace host alone owns receipt-verified member-data erasure. */
+  onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -82,6 +91,10 @@ export class Lody {
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
+  private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
+  private startReceipt?: Promise<void>;
+  private clientLossReceipt?: ReturnType<typeof daemonLossObserver.register>;
+  private clientLossRpcStopped = false;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
@@ -100,6 +113,10 @@ export class Lody {
       throw new Error('workspace_mode_unsupported');
     const encrypted = options.contentMode === 'e2ee';
     let e2ee: CliE2eeWorkspaceLegacy | undefined;
+    let resolveRemovalOwner: (value: Lody | null) => void = () => {};
+    const removalOwner = new Promise<Lody | null>((resolve) => {
+      resolveRemovalOwner = resolve;
+    });
     if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
       if (!options.genesisHash || !options.cloudPort.e2ee)
         throw new Error('e2ee_workspace_unavailable');
@@ -110,6 +127,23 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onRemoved: async (reason) => {
+          const owner = await removalOwner;
+          if (!owner) return;
+          owner.encryptedRevocation =
+            reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
+          owner.clientLossReceipt?.loss(owner.encryptedRevocation);
+          try {
+            await owner.startReceipt?.catch(() => undefined);
+            if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+            else await owner.cleanup();
+            if (!owner.startReceipt) await owner.documentManager.cleanUp();
+            owner.clientLossReceipt?.retired();
+          } catch (cause) {
+            owner.clientLossReceipt?.failed();
+            throw cause;
+          }
+        },
       });
       // Unimplemented channels cannot inherit their ordinary plaintext sinks.
       options = {
@@ -128,6 +162,57 @@ export class Lody {
       };
     }
     let manager: LoroDocumentManager | undefined;
+    let encryptedExecution: EncryptedAgentExecution | undefined;
+    if (e2ee) {
+      if (!options.genesisHash) throw new Error('e2ee_workspace_unavailable');
+      const { join } = await import('node:path');
+      const { Effect } = await import('effect');
+      const { makeEncryptedAgentExecution, lazyExecutionJournal } =
+        await import('./e2ee/agent-execution');
+      encryptedExecution = makeEncryptedAgentExecution({
+        genesis: options.genesisHash,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.machineId,
+        journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
+        authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
+        isExecutionOpen: e2ee.isExecutionOpen,
+        authorizeSchedule: (request, localProjectId) =>
+          Effect.gen(function* () {
+            const owner = manager;
+            if (!owner || !e2ee) return { _tag: 'Denied' as const, reason: 'unavailable' };
+            const handle = yield* Effect.tryPromise({
+              try: () => owner.repo.openPersistedDoc(getScheduleRoomId(request.scheduleId)),
+              catch: (cause) => cause,
+            });
+            const synced = yield* Effect.result(
+              Effect.tryPromise({
+                try: () =>
+                  owner.syncDocOrThrow(getScheduleRoomId(request.scheduleId), {
+                    reason: 'schedule:execution-source',
+                    timeoutMs: 8_000,
+                  }),
+                catch: (cause) => cause,
+              })
+            );
+            if (synced._tag === 'Failure')
+              return { _tag: 'Denied' as const, reason: 'e2ee_schedule_evidence_pending' };
+            return yield* e2ee.authorizeScheduleExecution(request, handle.doc, { localProjectId });
+          }),
+        onClaim: (userTurnId) =>
+          options.logger.debug('[e2ee-rpc-timing]', {
+            stage: 'journal',
+            journal: 'agent-start',
+            userTurnId,
+            at: Date.now(),
+          }),
+        resolveVerifiedOriginal: (intent) => {
+          const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          return e2ee && typeof e2ee.resolveVerifiedExecutionOriginal === 'function'
+            ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
+            : Effect.succeed(undefined);
+        },
+      });
+    }
     // Commands the daemon executes may touch Sessions owned by other machines; their
     // Roost history lives with that owner, never in this machine's database.
     const ownerHistoryRouter =
@@ -168,17 +253,35 @@ export class Lody {
           onStorageWriteFailure: options.onStorageWriteFailure,
         })
     ).catch(async (error) => {
+      resolveRemovalOwner(null);
       await e2ee?.close();
       throw error;
     });
-    const lody = new Lody(options, manager);
+    const lody = new Lody(options, manager, encryptedExecution);
     lody.encryptedWorkspace = e2ee;
+    if (e2ee)
+      lody.clientLossReceipt = daemonLossObserver.register(
+        {
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+        },
+        () => {
+          const work = lody.runtime.inspectClientLoss();
+          return work
+            ? { ...work, intakeClosed: work.intakeClosed && lody.clientLossRpcStopped }
+            : null;
+        },
+        e2ee.inspectClientLossAuthority
+      );
+    resolveRemovalOwner(lody);
     return lody;
   }
 
   constructor(
     public readonly options: LodyOptions,
-    public readonly documentManager: LoroDocumentManager
+    public readonly documentManager: LoroDocumentManager,
+    encryptedExecution?: EncryptedAgentExecution
   ) {
     this.logger = options.logger;
 
@@ -204,6 +307,7 @@ export class Lody {
       handlerConfig: {
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
+        encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
         workspaceId: this.workspaceId,
         workspaceSlug: this.workspaceSlug,
         userId: this.userId,
@@ -218,6 +322,7 @@ export class Lody {
         closeSessionTerminals: options.closeSessionTerminals,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
+        onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
@@ -230,6 +335,11 @@ export class Lody {
   }
 
   async start(): Promise<void> {
+    if (this.encryptedRevocation) throw new Error(this.encryptedRevocation);
+    return (this.startReceipt = this.startRuntime());
+  }
+
+  private async startRuntime(): Promise<void> {
     // Warm the login-shell env probe (~100-300ms) concurrently with startup so
     // synchronous terminal environment callbacks usually read a populated PATH.
     // ACP startup awaits the same cached probe before spawning. The Legacy cache
@@ -240,6 +350,12 @@ export class Lody {
       'startup.machine_runtime',
       { workspaceId: this.workspaceId },
       async () => await this.runtime.initialize()
+    );
+    await this.encryptedWorkspace?.startRpc(
+      this.machineId,
+      (input) => this.runtime.offerEncryptedRpcTurn(input),
+      (event) => this.logger.debug('[e2ee-rpc-timing]', event),
+      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
@@ -298,7 +414,12 @@ export class Lody {
     if (this.cleanedUp) {
       return;
     }
-    const completed = await this.ensureBuiltinAgentConfigs(cliTypes);
+    let completed = false;
+    try {
+      completed = await this.ensureBuiltinAgentConfigs(cliTypes);
+    } catch (error) {
+      this.logger.debug(`[agent-config] Builtin registration failed: ${formatErrorMessage(error)}`);
+    }
     if (!completed) {
       this.scheduleBuiltinAgentConfigRetry(cliTypes);
       return;
@@ -325,37 +446,45 @@ export class Lody {
     // every startup.
     const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
 
+    let completed = true;
     for (const cliType of cliTypes) {
-      const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
-      if (!builtinRuntime) {
-        continue;
-      }
-      if (optedOut.has(cliType)) {
+      try {
+        const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
+        if (!builtinRuntime) {
+          continue;
+        }
+        if (optedOut.has(cliType)) {
+          this.logger.debug(
+            `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
+          );
+          continue;
+        }
+        // Keep the legacy row as the sole Pi provider until its owner confirms
+        // migration. Check legacy first so a completed migration is then caught
+        // by the builtin lookup below, rather than creating a second provider.
+        if (
+          cliType === 'pi' &&
+          (await this.documentManager.hasAgentConfig('registry', 'pi-acp', this.machineId))
+        ) {
+          continue;
+        }
+        const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);
+        if (!has) {
+          await this.documentManager.createAgentConfig(
+            'builtin',
+            cliType,
+            this.machineId,
+            builtinRuntime.displayName
+          );
+        }
+      } catch (error) {
+        completed = false;
         this.logger.debug(
-          `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
-        );
-        continue;
-      }
-      // Keep the legacy row as the sole Pi provider until its owner confirms
-      // migration. Check legacy first so a completed migration is then caught
-      // by the builtin lookup below, rather than creating a second provider.
-      if (
-        cliType === 'pi' &&
-        (await this.documentManager.hasAgentConfig('registry', 'pi-acp', this.machineId))
-      ) {
-        continue;
-      }
-      const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);
-      if (!has) {
-        await this.documentManager.createAgentConfig(
-          'builtin',
-          cliType,
-          this.machineId,
-          builtinRuntime.displayName
+          `[agent-config] Builtin ${cliType} registration failed: ${formatErrorMessage(error)}`
         );
       }
     }
-    return true;
+    return completed;
   }
 
   private scheduleBuiltinAgentConfigRetry(cliTypes: CliType[]): void {
@@ -384,7 +513,8 @@ export class Lody {
 
       const retryCliTypes = [...this.pendingBuiltinAgentConfigRetryCliTypes];
       this.pendingBuiltinAgentConfigRetryCliTypes.clear();
-      void this.ensureBuiltinAgentConfigsOrRetry(retryCliTypes).catch((error: unknown) => {
+      void this.registerAgent(retryCliTypes).catch((error: unknown) => {
+        this.scheduleBuiltinAgentConfigRetry(retryCliTypes);
         this.logger.debug(
           `[agent-config] Retried builtin agent registration failed: ${formatErrorMessage(error)}`
         );
@@ -402,6 +532,8 @@ export class Lody {
     );
   }
 
+  prepareForShutdown = () => this.runtime.prepareForShutdown();
+
   cleanup = async () => {
     this.cleanedUp = true;
     if (this.builtinAgentConfigRetryTimer) {
@@ -410,7 +542,12 @@ export class Lody {
     }
     this.pendingBuiltinAgentConfigRetryCliTypes.clear();
     this.builtinAgentConfigRetryAttempt = 0;
-    await this.runtime.cleanup();
+    try {
+      await this.encryptedWorkspace?.stopRpc();
+      this.clientLossRpcStopped = true;
+    } finally {
+      await this.runtime.cleanup();
+    }
   };
 
   async dispatchLocalControl(
@@ -448,6 +585,19 @@ export class Lody {
     return this.runtime.getActiveSessionCount();
   }
 
+  async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
+    if (this.options.contentMode !== 'e2ee') return true;
+    if (!this.encryptedWorkspace || this.cleanedUp) return false;
+    const handle = await this.documentManager.repo.openPersistedDoc(
+      getScheduleRoomId(request.scheduleId)
+    );
+    const result = await this.encryptedWorkspace.authorizeScheduleExecutionLegacy(
+      request,
+      handle.doc
+    );
+    return result._tag === 'Authorized';
+  }
+
   hasAutomationSessionWork(sessionId: SessionId): boolean {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
   }
@@ -456,6 +606,10 @@ export class Lody {
     const handler = this.runtime.getMessageHandler();
     if (!handler) throw new Error('AUTOMATION_SESSION_OWNER_UNAVAILABLE');
     return handler.getAutomationSessionAuthority();
+  }
+
+  hasAutomationTurnWork(sessionId: SessionId): boolean {
+    return this.runtime.getMessageHandler()?.hasAutomationTurnWork(sessionId) ?? true;
   }
 
   /** Local pairing completion wakes ledger verification and key installation, never trusts a remote admission hint. */
@@ -499,6 +653,8 @@ export class Lody {
       { workspaceId: this.workspaceId },
       async () => await this.registerAgent(this.options.builtinAgentConfigCliTypes ?? [])
     ).catch((error: unknown) => {
+      this.builtinAgentRegistrationStarted = false;
+      this.scheduleBuiltinAgentConfigRetry(this.options.builtinAgentConfigCliTypes ?? []);
       this.logger.debug(
         `[agent-config] Background builtin agent registration failed for workspace ${this.workspaceId}: ${formatErrorMessage(
           error

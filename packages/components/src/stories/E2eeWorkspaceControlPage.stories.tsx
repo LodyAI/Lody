@@ -1,3 +1,4 @@
+import removalVector from '../../../e2ee-core/test/ledger-v1-vector.json';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
@@ -40,6 +41,10 @@ export const Loading: Story = { args: { loading: true } };
 export const Failed: Story = {
   args: { failure: { kind: 'server', code: 'bad-signature', position: 1 } },
 };
+export const DesktopApprovalRequired: Story = {
+  args: { failure: { kind: 'approval-required', code: 'approval-required' } },
+};
+export const ApprovedDevice: Story = { args: { onOpen: fn() } };
 export const ProgressConflict: Story = {
   args: { failure: { kind: 'progress-conflict', code: 'rolled-back' } },
 };
@@ -121,12 +126,62 @@ export const TeamHistory: Story = {
     }),
   },
 };
-// Record ten declares a capability this client cannot verify past.
+// The final vector record declares unsupported capability 2.
 export const UpgradeRequired: Story = {
   args: {
     workspaceId: vectorPage.workspaceId,
     genesisHash: vectorGenesis,
     ...teamProfiles,
-    history: vectorHistory(vectorPage),
+    history: appendLedgerHistory(
+      null,
+      {
+        ...vectorPage,
+        genesisHash: removalVector.anchor,
+        checkpoint: {
+          headHash: removalVector.records.at(-1)!.hash,
+          length: removalVector.records.length,
+        },
+        recordsHex: removalVector.records.map((record) => record.hex),
+      },
+      {
+        workspaceId: vectorPage.workspaceId,
+        genesisHash: removalVector.anchor,
+        localPin: removalVector.anchor,
+      }
+    ),
   },
+};
+
+// Real signed fixture before removals; the native callbacks are synthetic in this preview.
+const memberPage = {
+  workspaceId: 'synthetic-workspace',
+  genesisHash: removalVector.anchor,
+  checkpoint: { headHash: removalVector.records[1]!.hash, length: 2 },
+  startIndex: 0,
+  position: 'p1:synthetic-workspace:2:offset:0',
+  nextCursor: null,
+  recordsHex: removalVector.records.slice(0, 2).map((record) => record.hex),
+};
+export const OwnerMemberControls: Story = {
+  args: {
+    workspaceId: memberPage.workspaceId,
+    genesisHash: memberPage.genesisHash,
+    history: appendLedgerHistory(null, memberPage, {
+      workspaceId: memberPage.workspaceId,
+      genesisHash: memberPage.genesisHash,
+      localPin: memberPage.genesisHash,
+    }),
+    memberProfiles: new Map([
+      ['0a'.repeat(32), { name: 'Alex Chen' }],
+      ['02'.repeat(32), { name: 'Jordan Lee' }],
+    ]),
+    memberManagement: { actorRole: 'owner', remove: fn(), setRole: fn() },
+  },
+};
+
+export const CustodyLocked: Story = {
+  args: { failure: { kind: 'custody-locked', code: 'locked' } },
+};
+export const CustodyIndeterminate: Story = {
+  args: { failure: { kind: 'custody-indeterminate', code: 'indeterminate' } },
 };

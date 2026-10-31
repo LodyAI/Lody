@@ -17,6 +17,8 @@ export {
 export type EpochStagingWorkspaceRequest = E2eeDeviceAccess;
 export type StageEpochGroupRequest = EpochStagingWorkspaceRequest & {
   readonly group: EpochStagedGroupDto;
+  /** Persisted accounting round, outside all immutable signed bytes. */
+  readonly round?: string;
 };
 export type ReadEpochGroupRequest = EpochStagingWorkspaceRequest & {
   readonly key: EpochStagedGroupKeyDto;

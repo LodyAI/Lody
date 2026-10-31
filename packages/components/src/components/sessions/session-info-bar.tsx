@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
 import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -79,8 +78,6 @@ export type SessionInfoBarProps = {
    *  cluster action with its own popover; never staged. Pass it only when a
    *  relation exists, so an otherwise empty bar still hides. */
   relations?: ReactNode;
-  /** Scheduled composer draft: icon-only action, never staged. */
-  scheduledMessage?: ReactNode;
   /** Repositories of a multi-repository conversation: a plain cluster action
    *  with its own popover, placed before Related sessions; never staged. */
   projectMembers?: ReactNode;
@@ -141,14 +138,6 @@ export type SessionInfoBarProps = {
 const QUEUE_SHEET_INSET_CLASS = 'mx-3';
 
 const styles = stylex.create({
-  machineOnly: {
-    display: 'flex',
-    alignItems: 'center',
-    minWidth: 0,
-    height: space[8],
-    paddingInline: space[1.5],
-    containerType: 'inline-size',
-  },
   compactPrivateLabel: {
     display: {
       default: 'inline',
@@ -179,7 +168,6 @@ export function SessionInfoBar({
   contextActions,
   onOpenAllChanges,
   relations,
-  scheduledMessage,
   projectMembers,
   onOpenBrowser,
   onOpenIosSimulator,
@@ -272,7 +260,6 @@ export function SessionInfoBar({
   const hasMachine = !!machine?.name.trim();
   const hasSurfaceContent = !!(
     defaultKey ||
-    scheduledMessage ||
     projectMembers ||
     relations ||
     onOpenBrowser ||
@@ -359,26 +346,23 @@ export function SessionInfoBar({
   const clusterNonEmpty =
     hasMachine ||
     clusterKeys.length > 0 ||
-    !!scheduledMessage ||
     !!projectMembers ||
     !!relations ||
     !!onOpenBrowser ||
     !!onOpenIosSimulator;
 
-  const surfaceProps = hasSurfaceContent
-    ? {
-        className: cn(
-          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 dark:border-input-border/45 dark:bg-input/70',
-          INFO_BAR_TEXT_CLASS,
-          // The machine button carries its own 8px padding (chips carry 4px):
-          // trim the leading inset so the first glyph sits where a chip's would.
-          hasMachine && 'pl-1',
-          INFO_BAR_ELEVATION_CLASS,
-          // Keep the queue sheet's top seam free of upward shadow bleed.
-          queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
-        ),
-      }
-    : stylex.props(styles.machineOnly);
+  const surfaceProps = {
+    className: cn(
+      '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 dark:border-input-border/45 dark:bg-input/70',
+      INFO_BAR_TEXT_CLASS,
+      // The machine button carries its own 8px padding (chips carry 4px):
+      // trim the leading inset so the first glyph sits where a chip's would.
+      hasMachine && 'pl-1',
+      INFO_BAR_ELEVATION_CLASS,
+      // Keep the queue sheet's top seam free of upward shadow bleed.
+      queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
+    ),
+  };
 
   return (
     // Light: same fill and lift as the session composer. Dark: recessed input.
@@ -425,7 +409,6 @@ export function SessionInfoBar({
           ) : null}
           {privateAccessStatus &&
           (clusterKeys.length > 0 ||
-            scheduledMessage ||
             projectMembers ||
             relations ||
             onOpenBrowser ||
@@ -435,7 +418,6 @@ export function SessionInfoBar({
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
           {/* Repositories, Relations and Browser are plain actions with no stage form. */}
-          {scheduledMessage}
           {projectMembers}
           {relations}
           {onOpenBrowser ? (

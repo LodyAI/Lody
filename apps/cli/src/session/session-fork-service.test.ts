@@ -137,9 +137,8 @@ function createForkHarness(
       forkOperation = operation;
     }),
     syncModelSummary: vi.fn(async () => {}),
-    applyAcpRuntimeConfigPatch: vi.fn(
-      (_turnId: string, _patch: Parameters<SessionDocument['applyAcpRuntimeConfigPatch']>[1]) =>
-        true
+    beginAcpRuntimeConfig: vi.fn(
+      (_turnId: string, _patch: Parameters<SessionDocument['beginAcpRuntimeConfig']>[1]) => true
     ),
   });
   const persistPendingChanges = vi.fn(async (reason: string) => {
@@ -222,7 +221,18 @@ function createForkHarness(
               supportsActiveTurnFork: () => options.supportsActiveTurnFork === true,
             },
           }
-        : { acpSessionId: 'acp-target', getWorkdir: () => process.cwd() }
+        : {
+            acpSessionId: 'acp-target',
+            getWorkdir: () => process.cwd(),
+            agentClient: {
+              getRuntimeConfiguration: () => ({
+                acpSessionId: 'acp-target',
+                generation: 'target-connection',
+                state: 'ready',
+                modelId: 'target-model',
+              }),
+            },
+          }
     ),
     terminateSession: vi.fn(async () => undefined),
     resolveSessionWorkdir: vi.fn(async () => '/source/workdir'),
@@ -494,8 +504,8 @@ describe('SessionForkService durability boundary', () => {
       harness.targetDoc.sessionData.snapshots.copyFrom.mockImplementation((snapshot, history) =>
         doc.sessionData.snapshots.copyFrom(snapshot, history as never)
       );
-      harness.targetDoc.applyAcpRuntimeConfigPatch.mockImplementation((...args) =>
-        doc.applyAcpRuntimeConfigPatch(...args)
+      harness.targetDoc.beginAcpRuntimeConfig.mockImplementation((...args) =>
+        doc.beginAcpRuntimeConfig(...args)
       );
       let setupRow: LoroMap | undefined;
       if (kind === 'worktree') {
@@ -565,11 +575,12 @@ describe('SessionForkService durability boundary', () => {
         expect(stored[1].items).toEqual(opaqueItems);
         expect(stored[1].futureTurn).toBe('keep');
         if (origin !== 'imported') {
-          expect(doc.mirror?.getState().acpRuntimeConfig?.modelId).toBeUndefined();
+          expect(doc.mirror?.getState().acpRuntimeConfig?.modelId).toBe('target-model');
         }
         if (origin === 'imported') {
           expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-            modelId: 'imported-model',
+            modelId: 'target-model',
+            generation: 'target-connection',
             acpSessionId: 'acp-target',
             basedOnUserTurnId: 'user-1',
           });

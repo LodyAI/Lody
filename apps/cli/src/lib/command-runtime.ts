@@ -471,6 +471,10 @@ export async function withWorkspaceManager<T>(
     },
     async () => {
       let manager: LoroDocumentManager;
+      let resolveRemovalOwner: (value: LoroDocumentManager | null) => void = () => {};
+      const removalOwner = new Promise<LoroDocumentManager | null>((resolve) => {
+        resolveRemovalOwner = resolve;
+      });
       const e2ee =
         workspace.contentMode === 'e2ee'
           ? await (
@@ -481,6 +485,9 @@ export async function withWorkspaceManager<T>(
               genesisHash: workspace.genesisHash ?? '',
               cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
               onUnavailable: () => logger.debug('e2ee_background_unavailable'),
+              onRemoved: async () => {
+                await (await removalOwner)?.cleanUp();
+              },
             })
           : undefined;
       manager = await LoroDocumentManager.create(
@@ -506,6 +513,7 @@ export async function withWorkspaceManager<T>(
           ),
         }
       ).catch(async (error: unknown) => {
+        resolveRemovalOwner(null);
         // The manager owns `e2ee.close()` only once created; otherwise close the
         // opened custody/history/refresh owner here, keeping the original error.
         await e2ee?.close().catch((cleanup: unknown) => {
@@ -513,6 +521,7 @@ export async function withWorkspaceManager<T>(
         });
         throw error;
       });
+      resolveRemovalOwner(manager);
       // E2EE local acceptance never waits for a token or network connection.
       if (e2ee)
         void manager
@@ -744,17 +753,19 @@ async function exitOneShotCommand(code: number): Promise<void> {
 export async function runOneShotCommand(
   loggerName: string,
   options: Pick<CommonCommandOptions, 'json' | 'jsonl' | 'debug'>,
-  action: () => Promise<void>
+  action: () => Promise<void>,
+  execution: { localOnly?: boolean } = {}
 ): Promise<void> {
   if (options.debug) {
     rootLogger.setDebug(true);
   }
 
-  // Start the analytics poster once per one-shot command (idempotent; no-op without a key).
-  initCliAnalytics();
+  // Local maintenance must remain usable without cloud time or analytics setup.
+  // Other commands start the analytics poster once (idempotent; no-op without a key).
+  if (execution.localOnly !== true) initCliAnalytics();
 
   try {
-    await syncCommandTime(loggerName);
+    if (execution.localOnly !== true) await syncCommandTime(loggerName);
     await action();
     await exitOneShotCommand(0);
   } catch (error) {

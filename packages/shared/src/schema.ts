@@ -10,6 +10,7 @@ import {
   AgentRoleId,
   AgentType,
   AcpCapabilityCacheEntry,
+  AcpCommandSummary,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
@@ -588,6 +589,7 @@ const acpSessionConfigSchema = schema
       resume: schema.String({ required: false }),
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
+      configRevision: schema.Number({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
       memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
@@ -699,6 +701,8 @@ export const sessionHistorySchema = schema.LoroMap({
       scheduleId: schema.String(),
       turnId: schema.String(),
       title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
     },
     { required: false }
   ),
@@ -1312,18 +1316,22 @@ const sessionForkOperationDocSchema = schema.LoroMap(
 );
 
 /**
- * ACP-reported runtime configuration after a Turn has started. This is shared
- * control state, not transcript content: `basedOnUserTurnId` supplies the
- * causal fence that prevents a late update from changing a newer Turn's
- * composer baseline.
+ * Execution-owned configuration. The connection generation fences observations;
+ * basedOnUserTurnId records provenance only and does not depend on history loading.
  */
 export type SessionAcpRuntimeConfigSnapshot = {
   acpSessionId: ACPSessionId;
   basedOnUserTurnId: string;
   revision: number;
+  /** Absent on pre-ownership snapshots, which are last-known data only. */
+  generation?: string;
+  state?: 'ready' | 'applying' | 'failed' | 'unknown';
+  error?: { code: string; message: string };
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Actual commands for this ACP session; an empty list clears the menu. */
+  availableCommands?: AcpCommandSummary[];
 };
 
 export type SessionAcpRuntimeConfigPatch = Omit<
@@ -1336,9 +1344,20 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     acpSessionId: schema.String<ACPSessionId>(),
     basedOnUserTurnId: schema.String(),
     revision: schema.Number(),
+    generation: schema.String({ required: false }),
+    state: schema.String<'ready' | 'applying' | 'failed' | 'unknown'>({ required: false }),
+    error: schema.LoroMap({ code: schema.String(), message: schema.String() }, { required: false }),
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),
+    availableCommands: schema.LoroList(
+      schema.LoroMap({
+        name: schema.String(),
+        description: schema.String({ required: false }),
+      }),
+      undefined,
+      { required: false }
+    ),
   },
   { required: false }
 );
@@ -1359,6 +1378,8 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
+  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1463,7 +1484,9 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+  /** Omitted by control-only readers; execution reads the selected original from the document. */
+  rpcDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

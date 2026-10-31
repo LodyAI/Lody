@@ -53,10 +53,29 @@ export interface CloudSessionSharingPort {
  */
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
+  readonly machineSharing?: import('./e2ee-machine-sharing').E2eeMachineSharingTransport;
+
+  /** Raw retained update messages, never a snapshot or an attribution verdict. */
+  readExecutionOriginPage?(
+    input: {
+      workspaceId: string;
+      credential: string;
+      docId: string;
+      before?: string;
+    },
+    signal: AbortSignal
+  ): Promise<{ messages: readonly Uint8Array[]; before: string; atStart: boolean }>;
+
+  completeMachinePairing?(input: {
+    workspaceId: string;
+    credential: string;
+    pairingSessionId: string;
+  }): Promise<void>;
   /** CLI-only native kernel assembled by its optional cloud composition. */
   createContentTokenProvider?(input: {
     workspaceId: string;
     credential: string;
+    rpcOnly?: true;
   }): Effect.Effect<
     LoroStreamsTokenProvider & { getBucketId(): string | undefined },
     never,
@@ -67,6 +86,10 @@ export interface CloudE2eePort {
     input: Omit<E2eeWorkspaceHistoryRequest, 'cliToken'> & { credential: string }
   ): Promise<E2eeWorkspaceHistoryPage>;
   getContentToken(input: Omit<E2eeContentTokenRequest, 'cliToken'>): Promise<E2eeContentToken>;
+  /** Untrusted current publication originals; the native host verifies ledger binding and HPKE. */
+  readEpochGroup?(
+    input: Omit<import('@lody/cloud-api').ReadEpochGroupRequest, 'cliToken'>
+  ): Promise<import('@lody/cloud-api').EpochStagedGroupDto | null>;
   mailboxCall<K extends keyof E2eeMailboxRequests>(
     method: K,
     input: Omit<E2eeMailboxRequests[K], 'cliToken'>
@@ -82,6 +105,8 @@ export interface CloudPort {
   };
   /** Absent in ordinary/local composition; does not own local key material. */
   e2ee?: CloudE2eePort | null;
+  /** Explicit one-workspace machine service composition; never permits a legacy bridge. */
+  readonly e2eeMachineScope?: { workspaceId: string; genesisHash: string };
   readonly kind: PlatformKind;
   /** The identity every durable write is authored under. */
   identity: CloudPortIdentity;

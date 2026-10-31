@@ -26,7 +26,7 @@ of automatic quota continuation.
   deleted or migrated.
 - `recoverCapacity` owns automatic quota continuation. It is per-Session, default
   off, and remains capability-gated by the Host.
-- [The old Claude shortcut note](../../proposed/feature/2026-10-27-quota-continue.md)
+- [The old Claude shortcut note](2026-10-27-quota-continue.md)
   stays as history; this note supersedes its UI entry point. The backend policy
   remains owned by
   [the continuation coordinator note](../../proposed/architecture/2026-10-25-session-automation-coordinator.md).

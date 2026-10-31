@@ -280,11 +280,14 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
+import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
 import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
 } from './operation-completion-visibility';
+import { openExternalUrl } from '@/lib/native-browser';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
@@ -2003,15 +2006,6 @@ export const SessionChatStreamView = forwardRef<
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
-     * The gap between the viewport's scroll space and Virtua's item-offset
-     * space — the viewport's top padding (`--conversation-top-inset` plus
-     * `py-6`), which Virtua does not account for. Measured from the DOM rather
-     * than assumed, and only on mount / viewport resize; see
-     * `measureItemOffsetDelta`.
-     */
-    const itemOffsetDeltaRef = useRef(0);
-
-    /**
      * Put a row's top at the viewport's top edge.
      *
      * THE one place that turns a row index into a scroll, so every jump in this
@@ -2025,7 +2019,7 @@ export const SessionChatStreamView = forwardRef<
       (rowIndex: number, smooth = false) => {
         listRef.current?.scrollRowToTop(rowIndex + leadingRowCount, {
           smooth,
-          offset: itemOffsetDeltaRef.current,
+          offset: listRef.current?.contentOffset ?? 0,
         });
       },
       [leadingRowCount]
@@ -2241,18 +2235,6 @@ export const SessionChatStreamView = forwardRef<
     }, [outlineEntries, virtualRows]);
     const [activeOutlineIndex, setActiveOutlineIndex] = useState(-1);
 
-    // Measured, not assumed: the rect difference also absorbs any border or
-    // start spacer, which a `padding-top` read would miss. Never on a scroll
-    // path — `getBoundingClientRect` forces layout.
-    const measureItemOffsetDelta = useCallback(() => {
-      const content = scrollViewportElement?.firstElementChild;
-      if (!scrollViewportElement || !(content instanceof HTMLElement)) return;
-      itemOffsetDeltaRef.current =
-        content.getBoundingClientRect().top -
-        scrollViewportElement.getBoundingClientRect().top +
-        scrollViewportElement.scrollTop;
-    }, [scrollViewportElement]);
-
     const syncActiveOutlineIndex = useCallback(() => {
       const vlist = listRef.current;
       if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
@@ -2268,32 +2250,23 @@ export const SessionChatStreamView = forwardRef<
       const next = resolveActiveOutlineIndex(
         outlineAnchors,
         (rowIndex) => vlist.getItemOffset(rowIndex + leadingRowCount),
-        vlist.scrollOffset - itemOffsetDeltaRef.current,
+        vlist.scrollOffset - vlist.contentOffset,
         isAtEnd
       );
       setActiveOutlineIndex(next);
     }, [initialScrollRestored, leadingRowCount, outlineAnchors]);
 
-    // Read the sync through refs so this effect only re-runs when the viewport
-    // is bound or its one-time initial position restore completes. Depending on
-    // the callback would re-run it on every streamed delta, which is exactly the
-    // forced layout the measurement comment above rules out.
+    // The handle owns the unshifted content origin. Observe viewport resizes
+    // through a stable callback instead of sampling shifted DOM rectangles.
     const syncActiveOutlineIndexRef = useLatestRef(syncActiveOutlineIndex);
-    const measureItemOffsetDeltaRef = useLatestRef(measureItemOffsetDelta);
     useEffect(() => {
       if (!scrollViewportElement) return undefined;
       const remeasure = () => {
-        measureItemOffsetDeltaRef.current();
         syncActiveOutlineIndexRef.current();
       };
       remeasure();
       return observeResizeOnAnimationFrame(scrollViewportElement, remeasure);
-    }, [
-      initialScrollRestored,
-      measureItemOffsetDeltaRef,
-      scrollViewportElement,
-      syncActiveOutlineIndexRef,
-    ]);
+    }, [initialScrollRestored, scrollViewportElement, syncActiveOutlineIndexRef]);
 
     /**
      * Jump to a round. The engine holds the round's row at the top as the rows
@@ -2316,7 +2289,7 @@ export const SessionChatStreamView = forwardRef<
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
 
-    // Which turns are in the viewport, from Virtua's own index math; the only
+    // Which turns are in the viewport, from the engine's item-space offsets; the only
     // input the hydration window has. Read through refs so a report never
     // re-creates the scroll handler, and deduplicated so a settled viewport
     // stops producing updates.
@@ -2330,9 +2303,10 @@ export const SessionChatStreamView = forwardRef<
       const rows = virtualRowsRef.current;
       if (rows.length === 0) return;
       const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
-      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const itemOffset = vlist.scrollOffset - vlist.contentOffset;
+      const startRow = clampRow(vlist.findItemIndex(itemOffset) - leadingRowCount);
       const endRow = clampRow(
-        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+        vlist.findItemIndex(itemOffset + vlist.viewportSize) - leadingRowCount
       );
       // Local rows have no history index. They must not request a bogus
       // hydration range when the viewport contains only accepted inputs.
@@ -2899,6 +2873,7 @@ const SystemMessageRowView = ({
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
+            entryId={message.id}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
             capacityRetry={capacityRetry}
@@ -2981,13 +2956,29 @@ const OperationCompletionView = ({
 }) => {
   const { t } = useTranslation();
   if (!hasVisibleOperationContent(completion)) return null;
-  const failedCompletion = completion.completion.type === 'error';
-  const cancelledCompletion = completion.completion.type === 'cancelled';
-  const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
+  const targetCards = getOperationCompletionItems(completion);
+  // Progress suppresses duplicate cards, but the summary still counts every result.
+  const results =
+    completion.completion.type === 'result'
+      ? completion.completion.value.items
+      : completion.completion.type === 'cancelled'
+        ? (completion.completion.partial?.items ?? [])
+        : [];
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const cancelled = results.filter((item) => item.status === 'cancelled').length;
+  const succeeded = results.filter((item) => item.status === 'succeeded').length;
+  const failedCompletion =
+    completion.completion.type === 'error' ||
+    (completion.completion.type === 'result' && failed > 0 && failed === results.length);
+  const cancelledCompletion =
+    completion.completion.type === 'cancelled' ||
+    (completion.completion.type === 'result' && cancelled > 0 && cancelled === results.length);
+  const partialCompletion = !failedCompletion && !cancelledCompletion && failed + cancelled > 0;
+  const StatusIcon =
+    failedCompletion || failed > 0 ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createsSessions =
     completion.operationKind === 'session_create' ||
     completion.operationKind === 'session_create_many';
-  const targetCards = getOperationCompletionItems(completion);
   const cards = targetCards.flatMap((item) =>
     item.target
       ? [
@@ -3023,8 +3014,9 @@ const OperationCompletionView = ({
       : []
   );
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, or targetless problems.
-  const showStatusCard = failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+  // failure, cancellation or mixed outcomes, or targetless problems.
+  const showStatusCard =
+    failedCompletion || cancelledCompletion || partialCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
@@ -3059,7 +3051,7 @@ const OperationCompletionView = ({
           <StatusIcon
             className={cn(
               'mt-0.5 h-4 w-4 shrink-0',
-              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
+              failedCompletion || failed > 0 ? 'text-destructive' : 'text-muted-foreground'
             )}
             aria-hidden="true"
           />
@@ -3070,7 +3062,10 @@ const OperationCompletionView = ({
                   ? 'orchestration.operationFailed'
                   : cancelledCompletion
                     ? 'orchestration.operationCancelled'
-                    : 'orchestration.operationCompleted'
+                    : partialCompletion
+                      ? 'orchestration.operationPartialResult'
+                      : 'orchestration.operationCompleted',
+                { succeeded, failed, cancelled }
               )}
             </div>
             {completion.completion.type === 'error' ? (
@@ -3112,15 +3107,18 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  // Copy shares the title row unless retry already occupies its trailing edge.
-  row: {
+  // One header row: glyph, label, and at most one trailing owner (retry or
+  // copy). `alignItems: center` keeps the 14px glyph on the label's optical
+  // line instead of relying on a hand-tuned top margin.
+  header: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
     columnGap: space[2],
-    rowGap: space[1.5],
     paddingInline: space[3],
     paddingTop: space[2],
+    paddingBottom: space[1],
+  },
+  headerOnly: {
     paddingBottom: space[3],
   },
   label: {
@@ -3128,72 +3126,79 @@ const noticeStyles = stylex.create({
     flexShrink: 1,
     flexBasis: 0,
     minWidth: 0,
-    fontSize: textScale.footnoteSize,
-    lineHeight: textScale.footnoteLeading,
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
     fontWeight: 500,
   },
-  action: { flexShrink: 0 },
-  detail: {
-    order: 4,
-    width: '100%',
-    minWidth: 0,
+  trailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
   },
-  /** Applied only when copy is the sole trailing control. */
-  detailAfterFooter: {
-    order: 5,
+  detail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
+  },
+  // The follow-up row brings its own hairline and top padding, so the detail
+  // above it closes with the same space[2] the row opens with.
+  detailBeforeAfterDetail: {
+    paddingBottom: space[2],
   },
   detailText: {
     display: 'block',
     minWidth: 0,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
-    fontSize: textScale.footnoteSize,
+    fontSize: textScale.subheadlineSize,
     lineHeight: textScale.bodyLeading,
     color: 'hsl(var(--muted-foreground))',
   },
   footer: {
-    order: 5,
-    width: '100%',
-    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
-  /** Applied only when copy is the sole trailing control. */
-  footerInHeader: {
-    order: 4,
-    width: 'auto',
-    maxWidth: '100%',
+  // Its own block under the detail, not a header flex child: inside the header
+  // it took the full row width and squeezed the label into a one-glyph column.
+  afterDetail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
 });
 
 /**
- * Renders a single system notice as a divider with tooltip
- */
-/**
  * The one banner an agent notice takes, whatever its tone.
  *
- * Shaped like a fenced code block — the conversation already embeds those, so a
- * filled, hairline-ringed block reads as part of the prose rather than as chrome
- * dropped on top of it.
+ * A soft well, not an outlined alert: every other surface in the conversation
+ * is a fill without a border, and a hairline ring made the notice read as
+ * chrome dropped on top of the prose. The body starts at the well's leading
+ * edge, under the glyph, so agent text is not pushed into a narrower column.
  *
  * Always open and the full width of the column. A notice is a short aside, so
  * hiding it behind a disclosure asked for a click to read two lines, and a
  * fit-content card left a ragged right edge against the column's otherwise
  * straight rail.
  *
- * Tone is carried by the glyph and the leading sentence: amber is warning and
- * red is failure, by convention, over a ~6% fill that stays out of the way.
+ * Tone is carried by the glyph and the label: amber is warning and red is
+ * failure, by convention, over a ~4.5% fill that stays out of the way.
  */
-const AgentNoticeBanner = ({
+export const AgentNoticeBanner = ({
   tone,
   label,
   detail,
   action,
   footer,
+  afterDetail,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
   footer?: ReactNode;
+  /** A full-width row under the detail, for a follow-up action the detail explains. */
+  afterDetail?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -3209,65 +3214,59 @@ const AgentNoticeBanner = ({
         ? 'text-amber-600 dark:text-amber-400'
         : 'text-muted-foreground';
 
-  // The surface keeps the tone but at a fraction of its saturation: the colour
-  // is mixed toward the neutral border rather than merely faded, so the card
-  // still reads as "warning" or "failure" at a glance without a vivid slab
-  // competing with the answer it comments on.
+  // The tone only tints the well. There is no ring: a notice sits in the
+  // conversation as a block of the same material as a user bubble or code
+  // block, not as a bordered component.
   const toneColor =
     tone === 'error'
       ? 'hsl(var(--destructive))'
       : tone === 'warning'
         ? 'rgb(245 158 11)'
         : 'hsl(var(--muted-foreground))';
-  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
-  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus.
-  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
-  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 4.5%, transparent)`;
   // Only lift copy into the header when it would be the sole trailing control.
   // A capacity retry action already owns that edge, and moving copy beside it
   // wraps a short title into a tall column on phones.
   const copyRidesHeader = !action;
+  const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
+  const bodyFooter = copyRidesHeader ? null : footer;
+  const hasBody = Boolean(detail || afterDetail || bodyFooter);
 
   return (
-    <div
-      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-full overflow-hidden rounded-lg"
-    >
-      <div {...stylex.props(noticeStyles.row)}>
+    <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
+      <div {...stylex.props(noticeStyles.header, !hasBody && noticeStyles.headerOnly)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
-        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
-        {detail ? (
-          <div
-            {...stylex.props(
-              noticeStyles.detail,
-              copyRidesHeader && noticeStyles.detailAfterFooter
-            )}
-          >
-            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
-          </div>
-        ) : null}
-        {footer ? (
-          <div
-            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
-          >
-            {footer}
-          </div>
+        {headerTrailing ? (
+          <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
       </div>
+      {detail ? (
+        <div
+          {...stylex.props(
+            noticeStyles.detail,
+            afterDetail ? noticeStyles.detailBeforeAfterDetail : null
+          )}
+        >
+          <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+        </div>
+      ) : null}
+      {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
+      {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );
 };
 
 const SystemNoticeView = ({
   notice,
+  entryId,
   sessionId,
   onNavigateSession,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
@@ -3285,6 +3284,7 @@ const SystemNoticeView = ({
       return (
         <ChatFailedNoticeView
           notice={notice}
+          entryId={entryId}
           sessionId={sessionId}
           capacityRetry={capacityRetry}
           inTurn={inTurn}
@@ -3371,11 +3371,13 @@ const SystemNoticeView = ({
  */
 const ChatFailedNoticeView = ({
   notice,
+  entryId,
   sessionId,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
   inTurn?: boolean;
@@ -3406,7 +3408,7 @@ const ChatFailedNoticeView = ({
       }
     | undefined;
 
-  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code);
+  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code, meta?.message);
 
   // Map reason codes to user-friendly messages
   const getReasonMessage = (reason?: string): string => {
@@ -3513,11 +3515,20 @@ const ChatFailedNoticeView = ({
   };
 
   const reasonMessage = getReasonMessage(meta?.reason);
+  const installUrl = diagnosticCopy?.installUrl;
   const actionMessage = diagnosticCopy
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
+  // Mount the quota leaf only for a message that can carry the shortcut. The
+  // leaf still proves the terminal failure and exhausted 5h reset from history
+  // and provider quota before rendering; this gate only avoids a subscription
+  // for every unrelated chat_failed banner.
+  const quotaContinue =
+    sessionMeta && isClaudeSessionLimitMessage(rawMessage) ? (
+      <SessionLimitContinueAction session={sessionMeta} entryId={entryId} />
+    ) : null;
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
   const isRetryCountdown = retryInSeconds !== null;
@@ -3601,11 +3612,19 @@ const ChatFailedNoticeView = ({
         message: rawMessage,
       })}
       action={retryAction}
+      afterDetail={quotaContinue}
       footer={
-        <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
-          <Copy size={14} aria-hidden="true" />
-          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
-        </Button>
+        <>
+          {installUrl ? (
+            <Button variant="ghost" size="small" onClick={() => void openExternalUrl(installUrl)}>
+              {t('sessions.systemNotices.chatFailed.installNode', 'Download Node.js')}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
+            <Copy size={14} aria-hidden="true" />
+            {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+          </Button>
+        </>
       }
     />
   );
@@ -3645,7 +3664,7 @@ const AgentWarningNoticeView = ({
     return null;
   }
 
-  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+  return <AgentWarningNoticeBody message={meta.message} source={meta.source} inTurn={inTurn} />;
 };
 
 /**
@@ -3660,18 +3679,48 @@ const AgentWarningNoticeView = ({
  */
 const AgentWarningNoticeBody = ({
   message,
+  source,
   inTurn = false,
 }: {
   message: string;
+  source?: string;
   inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
+  const label =
+    source === 'sessionCancelFailed'
+      ? t('sessions.systemNotices.agentWarning.stopRequestFailed', 'Stop request failed')
+      : source === 'sessionStopTimedOut'
+        ? t('sessions.systemNotices.agentWarning.stopTimedOut', 'Stopping took too long')
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailed',
+              'Could not stop the task'
+            )
+          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+  const guidance =
+    source === 'sessionCancelFailed'
+      ? t(
+          'sessions.systemNotices.agentWarning.stopRequestFailedGuidance',
+          'The agent could not process the Stop request. Lody will keep trying to end the task.'
+        )
+      : source === 'sessionStopTimedOut'
+        ? t(
+            'sessions.systemNotices.agentWarning.stopTimedOutGuidance',
+            'The task has not stopped yet. Lody is trying to force it to end.'
+          )
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
+              'The task may still be running. Try restarting Lody’s background service on this machine.'
+            )
+          : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner
         tone="warning"
-        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-        detail={message}
+        label={label}
+        detail={guidance ? `${guidance}\n\n${message}` : message}
       />
     </div>
   );
@@ -4971,16 +5020,19 @@ function ActivityProcessStep({
   icon,
   children,
   className,
+  flush = false,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  flush?: boolean;
 }) {
   return (
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        stylex.props(conversationSurface.processStep).className,
+        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep)
+          .className,
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -5224,22 +5276,23 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer typography,
+  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
      preserving thought search identity and the separate disclosure label.
      The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep>
+    <ActivityProcessStep flush>
       <span className="sr-only">
         {isThinking
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
       </span>
-      <MarkdownBlock
+      <MarkdownRenderer
         text={text}
         size={fontSize}
         isStreaming={isStreaming}
+        muted
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />
     </ActivityProcessStep>
@@ -6334,7 +6387,7 @@ const renderAssistantContent = (
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
     case 'system_notice':
-      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
+      return <SystemNoticeView notice={content} entryId={messageId} sessionId={sessionId} inTurn />;
     default:
       return null;
   }
@@ -6368,6 +6421,7 @@ function useImageBlobUrls(
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [blobUrls, setBlobUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -6398,6 +6452,11 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
+        encryption: entry.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -6420,7 +6479,7 @@ function useImageBlobUrls(
     return () => {
       active = false;
     };
-  }, [activeIndex, authToken, entries, open, workspaceId]);
+  }, [activeIndex, authToken, entries, open, workspaceId, attachmentRuntime]);
 
   return blobUrls;
 }
@@ -6507,6 +6566,7 @@ export const WorkspaceUserImageBlock = ({
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailLoadingError, setThumbnailLoadingError] = useState<string | null>(null);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
@@ -6571,6 +6631,11 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
+      encryption: entry.encryption,
+      attachmentToken:
+        attachmentRuntime?.workspaceId === workspaceId
+          ? attachmentRuntime.attachmentToken
+          : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6598,6 +6663,8 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.encryption,
+    attachmentRuntime,
     entry.sessionId,
     imageLoadFailedLabel,
     imageLoadUnavailableLabel,
@@ -6811,7 +6878,7 @@ export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGr
   );
 };
 
-const WorkspaceSessionFileGroup = ({
+export const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6823,6 +6890,7 @@ const WorkspaceSessionFileGroup = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
@@ -6842,6 +6910,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6851,7 +6924,7 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, postHog, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   const handlePreview = useCallback(
@@ -6879,6 +6952,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })
@@ -6899,7 +6977,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -7404,6 +7482,7 @@ const ThoughtCard = ({
           text={text}
           size={fontSize}
           isStreaming={isStreaming}
+          muted
           searchBlockId={searchBlockId}
         />
       </div>

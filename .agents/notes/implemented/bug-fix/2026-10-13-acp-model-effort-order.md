@@ -36,15 +36,15 @@ model's catalog. The [ACP reference](https://dev.opencode.ai/v2/docs/cli/acp/#co
 also documents effort as model-dependent. These upstream references are moving
 branches/documentation, not evidence of the affected installation's version.
 
-Resolve mode/model by the advertised category ids (with the existing fallback
-ids), retain top-level precedence, apply mode then model, and skip their dictionary
+Resolve mode/model by the advertised category ids, retain top-level precedence, apply mode then model, and skip their dictionary
 entries during the remaining option pass. This also handles a mode switch that
-changes the model. Keep rejection diagnostics, model warnings, confirmed runtime
-state and abort fences. Mode selections from either representation now share the
-existing top-level mode rejection policy. Do not sort the stored Role or teach
-only the editor an ordering rule: stored/transported dictionary order is not an
-execution contract. Both speculative preparation and foreground/recovery callers
-use this applier. This complements the
+changes the model. Required selections fail explicitly under the
+[configuration ownership contract](../architecture/2026-10-31-session-config-ownership.md),
+preserving partial confirmed state and cancellation fences. Do not sort stored Roles
+or teach only the editor an ordering rule: dictionary order is not an execution
+contract. Initial and recovery execution use this applier; matched steer never mutates
+configuration.
+This complements the
 [startup-model decision](2026-10-09-codex-resume-model.md): live application remains
 necessary for agents that ignore startup metadata.
 
@@ -62,16 +62,9 @@ and before subsequent mutations; this patch does not claim to cancel raw ACP I/O
 
 ## Verification and limits
 
-The owning suite checks reordered option dictionaries, mixed top-level/option
-selections, target-model-only effort, precedence, rejection and cancellation.
-Tests assert resulting agent state and the confirmed runtime patch, not just call
-counts. Before the fix, the initial three ordering cases failed; after the fix,
-all 42 tests in the configuration, AgentClient preparation and runtime-config suites pass.
-Validation reused the existing checkout's installed dependencies without changing
-the lockfile. Full CLI type checking is blocked by uninitialized ACP submodules
-and mismatched shared dependency declarations in that installation. Documentation
-checking reports existing links into uninitialized submodules. No live inference
-request, deployment, or change to a saved Role was performed. Before committing,
-root `pnpm check` and `pnpm format` were attempted but stopped because this
-worktree lacks installed `tsgo`/`oxfmt` executables. Targeted Oxfmt checking passes
-using the existing installation.
+The [owning suite](../../../../apps/cli/src/session/acp-session-config-applier.test.ts)
+checks reordered option dictionaries, mixed top-level/option selections,
+target-model-only effort, precedence, rejection and cancellation. Tests assert
+resulting agent state and the confirmed runtime patch, not just call counts.
+This evidence does not establish behavior for the reported live Worker or prove
+cancellation of raw ACP requests. PR #1543 records the original validation limits.

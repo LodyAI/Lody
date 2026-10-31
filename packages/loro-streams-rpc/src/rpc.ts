@@ -1,3 +1,5 @@
+import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   SessionFileRootIdSchema,
   FileDownloadResponseSchema,
@@ -848,31 +850,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroLocalProjectControlRpcRequestSchema,
 ]);
 
-const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
-
-export const LoroSessionLiveStatusRpcResponseSchema = z.discriminatedUnion('success', [
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(true),
-      state: SessionLiveStateSchema,
-      observedAtMs: z.number().finite().nonnegative(),
-      reason: z.string().trim().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(false),
-      state: z.literal('unknown'),
-      error: z.string().trim().min(1),
-    })
-    .strict(),
-]);
+export { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
 
 export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
   z
@@ -2682,6 +2660,11 @@ export class LoroStreamsRpcResponseDispatcher {
     }
   }
 
+  /** Receive one already target-authenticated response from the encrypted channel. */
+  async acceptAuthenticatedResponse(raw: unknown): Promise<void> {
+    await this.handleRawResponse(raw);
+  }
+
   private async handleRawResponse(raw: unknown): Promise<void> {
     const parsed = LoroStreamsRpcResponseSchema.safeParse(raw);
     if (!parsed.success) {
@@ -2849,7 +2832,13 @@ export class LoroStreamsMachineRpcClient {
     private readonly options: {
       workspaceId: string;
       machineId: string;
-      streamClient: LoroStreamsJsonStreamClient;
+      streamClient?: LoroStreamsJsonStreamClient;
+      /** Native-authorized encrypted read transport; ordinary Streams are never opened. */
+      encryptedQuery?: (
+        method: string,
+        params: unknown,
+        timeoutMs: number
+      ) => Promise<E2eeQueryResult | null>;
       responseDispatcher?: LoroStreamsRpcResponseDispatcher;
       logger?: LoggerLike;
       now?: () => number;
@@ -2863,7 +2852,17 @@ export class LoroStreamsMachineRpcClient {
       options.responseDispatcher ??
       new LoroStreamsRpcResponseDispatcher({
         workspaceId: options.workspaceId,
-        streamClient: options.streamClient,
+        streamClient: options.streamClient ?? {
+          ensureJsonStream: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+          appendJson: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+          readJsonLive: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+        },
         responseStreamId: `${getLoroMachineRpcResponseStreamId(
           options.workspaceId,
           options.machineId
@@ -2877,7 +2876,7 @@ export class LoroStreamsMachineRpcClient {
   }
 
   async start(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.options.encryptedQuery) return;
     await this.responseDispatcher.start();
   }
 
@@ -3763,6 +3762,7 @@ export class LoroStreamsMachineRpcClient {
       expiresAt: now + 30_000,
       params: { requestId },
     };
+    if (!this.options.streamClient) throw new Error('RPC transport unavailable');
     await this.options.streamClient.appendJson(this.requestStreamId, request);
   }
 
@@ -4095,6 +4095,8 @@ export class LoroStreamsMachineRpcClient {
         }
   ): Promise<LoroMachineRpcResult | null> {
     if (this.stopped) return null;
+    if (this.options.encryptedQuery && !isE2eeReadQuery(args.method, args.params))
+      throw new Error('e2ee_rpc_unavailable');
     await this.start();
     if (this.stopped) return null;
 
@@ -4449,7 +4451,25 @@ export class LoroStreamsMachineRpcClient {
         responseStreamId: this.responseDispatcher.getResponseStreamId(),
       });
       const appendPromise = (async () => {
-        await this.options.streamClient.appendJson(this.requestStreamId, request);
+        if (this.options.encryptedQuery) {
+          const outcome = await this.options.encryptedQuery(
+            request.method,
+            request.params,
+            timeoutMs
+          );
+          if (outcome && !this.stopped)
+            await this.responseDispatcher.acceptAuthenticatedResponse({
+              jsonrpc: JSON_RPC_VERSION,
+              id: requestId,
+              rpcVersion: request.rpcVersion,
+              machineId: request.machineId,
+              method: request.method,
+              ...outcome,
+            });
+        } else {
+          if (!this.options.streamClient) throw new Error('RPC transport unavailable');
+          await this.options.streamClient?.appendJson(this.requestStreamId, request);
+        }
         requestAppended = true;
         this.responseDispatcher.markAppendFinished(requestId);
         if (cancellationRequested) {

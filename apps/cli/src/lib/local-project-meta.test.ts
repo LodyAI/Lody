@@ -16,6 +16,7 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import {
   readMachineLocalProjects,
@@ -428,6 +429,43 @@ describe('resolveWorkspaceLocalProjectWithSyncOnMiss', () => {
 });
 
 describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
+  it('ignores an encrypted registry row whose path no longer hashes to its project ID', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'lody-project-identity-')));
+    try {
+      const shared = join(root, 'shared');
+      const privateRoot = join(root, 'private');
+      mkdirSync(shared);
+      mkdirSync(privateRoot);
+      const sharedId = localProjectsLegacy.createLocalProjectId(shared);
+      const flock = new FakeMachineFlock();
+      const write = (rootPath: string) =>
+        writeMachineFlockRowToFlock(
+          flock,
+          {
+            key: machineFlockKeys.localProject(sharedId),
+            value: { id: sharedId, name: 'Shared', rootPath, createdAtMs: 1 },
+          },
+          1
+        );
+      const { repo } = createRepo(flock);
+      const resolve = (verifyProjectIdentity: boolean) =>
+        resolveWorkspaceLocalProjectRootPathWithRetry(repo, workspaceId, machineId, sharedId, {
+          verifyProjectIdentity,
+          sleep: instantSleep(),
+          maxAttempts: 1,
+        });
+      write(shared);
+      expect(await resolve(true)).toBe(shared);
+      // Another member rewrites the synced row to point at a private directory.
+      write(privateRoot);
+      expect(await resolve(true)).toBeNull();
+      // Ordinary workspaces keep their existing behavior.
+      expect(await resolve(false)).toBe(privateRoot);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('resolves on the first read without syncing or sleeping', async () => {
     const flock = new FakeMachineFlock();
     seedLocalProject(flock);

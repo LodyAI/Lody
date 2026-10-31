@@ -2,12 +2,22 @@ import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
-import { z } from 'zod'
 import {
-  verifyWorkspaceInvitationSnapshot,
-  type WorkspaceInvitation,
-  type WorkspaceInvitationSnapshot
-} from '@lody/e2ee-core'
+  PersonalPairingOfferSchema,
+  decodePersonalRequest as decodeRequest,
+  encodePersonalInvitation,
+  decodePersonalInvitation,
+  personalInvitationPin as invitationPin,
+  type PersonalPairingOffer,
+  type PersonalPairingRequest
+} from '@lody/e2ee-client/pairing'
+export {
+  PersonalPairingOfferSchema,
+  encodePersonalInvitation,
+  decodePersonalInvitation
+} from '@lody/e2ee-client/pairing'
+export type { PersonalPairingOffer, PersonalPairingRequest } from '@lody/e2ee-client/pairing'
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core'
 import {
   Bytes,
   hashRecordBytes,
@@ -25,38 +35,11 @@ import {
   type LedgerView
 } from '@lody/e2ee-core/protocol'
 import type { DesktopE2eeCustody } from '../e2ee-custody.mjs'
+import type { E2eeWorkspaceHistoryPage } from '@lody/cloud-api'
+import { verifyMemberHistory } from './e2ee-member-join.mjs'
 
 const hex = (value: Uint8Array): string => Buffer.from(value).toString('hex')
 const raw = (value: string): Uint8Array => new Uint8Array(Buffer.from(value, 'hex'))
-const hash = z.string().regex(/^[0-9a-f]{64}$/)
-const session = z.string().regex(/^[0-9a-f]{32}$/)
-const signature = z.string().regex(/^[0-9a-f]{128}$/)
-const workspace = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
-export const PersonalPairingOfferSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    genesisHash: hash,
-    genesisRecordHex: z
-      .string()
-      .regex(/^(?:[0-9a-f]{2})+$/)
-      .max(16384),
-    endorser: hash,
-    membershipId: session,
-    pairingSessionId: session
-  })
-  .strict()
-/** Independently transferred by the approving desktop; mailbox data never chooses these pins. */
-export type PersonalPairingOffer = z.infer<typeof PersonalPairingOfferSchema>
-const requestSchema = PersonalPairingOfferSchema.extend({
-  signingPublicKey: hash,
-  encryptionPublicKey: hash,
-  credentialHash: hash,
-  possessionSignature: signature,
-  bindingSignature: signature,
-  protection: z.literal('os-keystore')
-}).strict()
-export type PersonalPairingRequest = z.infer<typeof requestSchema>
 const fail = (code: string): Error & { code: string } =>
   Object.assign(new Error(`e2ee_${code}`), { code })
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
@@ -67,76 +50,6 @@ function sql<A>(work: () => A): Effect.Effect<A, unknown> {
       return error instanceof Error && 'code' in error ? error : fail('storage')
     }
   })
-}
-function decodeRequest(value: string): PersonalPairingRequest {
-  if (typeof value !== 'string' || value.length > 16384 || !/^(?:[0-9a-f]{2})+$/.test(value))
-    throw fail('invalid-input')
-  const parsed = requestSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  return parsed.data
-}
-/** Versioned public transport bundle; signatures cover the original core bytes. */
-export function encodePersonalInvitation(
-  receipt: Parameters<typeof verifyWorkspaceInvitationSnapshot>[1]
-): string {
-  return hex(
-    new TextEncoder().encode(
-      JSON.stringify({
-        version: 1,
-        workspaceId: receipt.workspaceId,
-        snapshot: Buffer.from(receipt.snapshot).toString('base64'),
-        head: hex(receipt.head.toBytes()),
-        length: receipt.length,
-        headSignature: hex(receipt.headSignature.toBytes()),
-        offset: receipt.offset
-      })
-    )
-  )
-}
-const invitationSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    snapshot: z
-      .string()
-      .min(4)
-      .max(2796204)
-      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
-    head: hash,
-    length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    headSignature: signature,
-    offset: z.string().min(1).max(1024)
-  })
-  .strict()
-export function decodePersonalInvitation(value: string): WorkspaceInvitationSnapshot {
-  if (
-    typeof value !== 'string' ||
-    value.length > 6 * 1024 * 1024 ||
-    value.length % 2 !== 0 ||
-    !/^[0-9a-f]+$/.test(value)
-  )
-    throw fail('invalid-input')
-  const parsed = invitationSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  const data = parsed.data,
-    snapshot = Buffer.from(data.snapshot, 'base64')
-  if (snapshot.length > 2 * 1024 * 1024 || snapshot.toString('base64') !== data.snapshot)
-    throw fail('invalid-input')
-  return {
-    workspaceId: data.workspaceId,
-    snapshot: new Uint8Array(snapshot),
-    head: Result.getOrThrow(Bytes.recordHash(raw(data.head))),
-    length: data.length,
-    headSignature: Result.getOrThrow(Bytes.signature(raw(data.headSignature))),
-    offset: data.offset
-  }
-}
-function invitationPin(pin: PersonalPairingOffer): WorkspaceInvitation {
-  return {
-    workspaceId: pin.workspaceId,
-    genesis: Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash))),
-    endorser: Result.getOrThrow(Bytes.signingPublicKey(raw(pin.endorser)))
-  }
 }
 
 interface PersonalJoinPrepared {
@@ -150,8 +63,9 @@ interface PersonalJoinOrigin {
   genesisHash: string
   record: Uint8Array
   epochBlob: null
-  invitation: Result.Result.Success<ReturnType<typeof verifyWorkspaceInvitationSnapshot>>
-  invitationHex: string
+  invitation?: Result.Result.Success<ReturnType<typeof verifyWorkspaceInvitationSnapshot>>
+  invitationHex?: string
+  historyPages?: E2eeWorkspaceHistoryPage[]
 }
 interface PersonalJoins {
   pending(workspaceId: string): Effect.Effect<
@@ -167,6 +81,10 @@ interface PersonalJoins {
   prepare(offer: PersonalPairingOffer): Effect.Effect<PersonalJoinPrepared, unknown>
   retire(workspaceId: string, pairingSessionId: string): Effect.Effect<void, unknown>
   accept(workspaceId: string, invitationHex: string): Effect.Effect<void, unknown>
+  acceptHistory(
+    workspaceId: string,
+    pages: readonly E2eeWorkspaceHistoryPage[]
+  ): Effect.Effect<void, unknown>
   origin(workspaceId: string, supplied?: string): Effect.Effect<PersonalJoinOrigin, unknown>
 }
 interface PersonalPairing {
@@ -177,7 +95,7 @@ interface PersonalPairing {
       signingPublicKey: string
       encryptionPublicKey: string
       credentialHash: string
-      protection: 'os-keystore'
+      protection: 'os-keystore' | 'web-crypto'
     },
     unknown
   >
@@ -191,7 +109,7 @@ interface PersonalPairing {
     },
     unknown
   >
-  invitation(session: string): Effect.Effect<{ invitationHex: string }, unknown>
+  invitation(session: string): Effect.Effect<{ invitationHex: string } | null, unknown>
   retire(session: string): Effect.Effect<void, unknown>
   /** Only after the main process reconciles the service's terminal non-reservation response. */
   cancel(session: string): Effect.Effect<void, unknown>
@@ -206,6 +124,9 @@ export function makeDesktopPersonalJoins(input: {
   const { db, custody } = input
   db.exec(
     'CREATE TABLE IF NOT EXISTS personal_joins(workspace_id TEXT PRIMARY KEY, pin TEXT NOT NULL, request_hex TEXT, invitation_hex TEXT); CREATE TABLE IF NOT EXISTS retired_personal_joins(workspace_id TEXT NOT NULL, pin TEXT NOT NULL, request_hex TEXT, PRIMARY KEY(workspace_id,pin))'
+  )
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS personal_join_histories(workspace_id TEXT PRIMARY KEY,history TEXT NOT NULL)'
   )
   const rowFor = (workspaceId: string): PersonalJoinRow | undefined =>
     db.prepare('SELECT * FROM personal_joins WHERE workspace_id=?').get(workspaceId) as
@@ -338,6 +259,46 @@ export function makeDesktopPersonalJoins(input: {
   })
   const origin = Effect.fnUntraced(function* (workspaceId: string, supplied?: string) {
     const row = yield* sql(() => rowFor(workspaceId))
+    const retainedHistory = yield* sql(() =>
+      db
+        .prepare('SELECT history FROM personal_join_histories WHERE workspace_id=?')
+        .get(workspaceId)
+    )
+    if (row?.request_hex && !row.invitation_hex && supplied === undefined && retainedHistory) {
+      const pin = yield* sql(() => PersonalPairingOfferSchema.parse(JSON.parse(row.pin)))
+      const request = yield* sql(() => decodeRequest(row.request_hex!))
+      const historyPages = yield* sql(
+        () => JSON.parse(String(retainedHistory.history)) as E2eeWorkspaceHistoryPage[]
+      )
+      const view = yield* verifyMemberHistory(pin, historyPages)
+      const device = yield* custody.openDevice(
+        Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash)))
+      )
+      const own = view.inspectState().devices.get(request.signingPublicKey)
+      if (
+        !own ||
+        own.kind !== 'personal' ||
+        hex(own.membershipId.toBytes()) !== pin.membershipId ||
+        !device.publicKey.equals(
+          Result.getOrThrow(Bytes.signingPublicKey(raw(request.signingPublicKey)))
+        ) ||
+        !own.encryptionPublicKey.equals(device.enc)
+      )
+        return yield* Effect.fail(fail('invalid-ledger'))
+      const credential = yield* custody.deviceCredential(
+        Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash))),
+        device.publicKey
+      )
+      if (createHash('sha256').update(raw(credential)).digest('hex') !== request.credentialHash)
+        return yield* Effect.fail(fail('corrupt'))
+      return {
+        genesisHash: pin.genesisHash,
+        record: raw(pin.genesisRecordHex),
+        epochBlob: null,
+        invitation: undefined,
+        historyPages
+      }
+    }
     if (!row || !row.request_hex || (!row.invitation_hex && supplied === undefined))
       return yield* Effect.fail(fail('missing-binding'))
     const pin = yield* sql(() => PersonalPairingOfferSchema.parse(JSON.parse(row.pin)))
@@ -375,7 +336,12 @@ export function makeDesktopPersonalJoins(input: {
     pending: (workspaceId: string) =>
       sql(() => {
         const row = rowFor(workspaceId)
-        if (!row || row.invitation_hex) return null
+        if (
+          !row ||
+          row.invitation_hex ||
+          db.prepare('SELECT 1 FROM personal_join_histories WHERE workspace_id=?').get(workspaceId)
+        )
+          return null
         const offer = PersonalPairingOfferSchema.parse(JSON.parse(row.pin))
         if (offer.workspaceId !== workspaceId) throw fail('corrupt')
         const request = row.request_hex ? decodeRequest(row.request_hex) : undefined
@@ -406,7 +372,12 @@ export function makeDesktopPersonalJoins(input: {
         const row = rowFor(workspaceId)
         if (!row) return
         const pin = PersonalPairingOfferSchema.parse(JSON.parse(row.pin))
-        if (pin.pairingSessionId !== pairingSessionId || row.invitation_hex) throw fail('conflict')
+        if (
+          pin.pairingSessionId !== pairingSessionId ||
+          row.invitation_hex ||
+          db.prepare('SELECT 1 FROM personal_join_histories WHERE workspace_id=?').get(workspaceId)
+        )
+          throw fail('conflict')
         db.exec('BEGIN IMMEDIATE')
         try {
           db.prepare(
@@ -436,6 +407,33 @@ export function makeDesktopPersonalJoins(input: {
         ).run(invitationHex, workspaceId)
         if (rowFor(workspaceId)?.invitation_hex !== invitationHex) throw fail('conflict')
       })
+    }),
+    acceptHistory: Effect.fnUntraced(function* (
+      workspaceId: string,
+      pages: readonly E2eeWorkspaceHistoryPage[]
+    ) {
+      const row = yield* sql(() => rowFor(workspaceId))
+      if (!row?.request_hex) return yield* Effect.fail(fail('missing-binding'))
+      const pin = yield* sql(() => PersonalPairingOfferSchema.parse(JSON.parse(row.pin)))
+      const request = yield* sql(() => decodeRequest(row.request_hex!))
+      const view = yield* verifyMemberHistory(pin, pages)
+      const device = view.inspectState().devices.get(request.signingPublicKey)
+      if (
+        !device ||
+        device.kind !== 'personal' ||
+        hex(device.membershipId.toBytes()) !== pin.membershipId ||
+        hex(device.encryptionPublicKey.toBytes()) !== request.encryptionPublicKey
+      )
+        return yield* Effect.fail(fail('invalid-ledger'))
+      yield* sql(() =>
+        db
+          .prepare(
+            'INSERT OR IGNORE INTO personal_join_histories(workspace_id,history) VALUES(?,?)'
+          )
+          .run(workspaceId, JSON.stringify(pages))
+      )
+      yield* origin(workspaceId)
+      return undefined
     }),
     origin
   }
@@ -469,8 +467,7 @@ export function makeDesktopPersonalPairing(input: {
     const state = view.inspectState(),
       own = state.devices.get(hex(input.signer.publicKey.toBytes()))
     const member = own && state.members.get(hex(own.membershipId.toBytes()))
-    if (!own || own.kind !== 'personal' || !member || !['owner', 'admin'].includes(member.role))
-      throw fail('invalid-input')
+    if (!own || own.kind !== 'personal' || !member) throw fail('invalid-input')
     return own.membershipId
   }
   // Only original records below the verified endpoint can settle a signed CAS.
@@ -703,6 +700,11 @@ export function makeDesktopPersonalPairing(input: {
       )
         throw fail('local-evidence-conflict')
     })
+    const own = view.inspectState().devices.get(hex(input.signer.publicKey.toBytes()))
+    const role = own && view.inspectState().members.get(hex(own.membershipId.toBytes()))?.role
+    // A Member can admit its own additional personal device, but cannot endorse
+    // a manager snapshot. The receiver verifies full history from the saved pin.
+    if (role !== 'owner' && role !== 'admin') return null
     if (!row.invitation_hex) {
       const signed = yield* signLedgerSnapshot({ signer: input.signer, ledger: input.current })
       const receipt = {

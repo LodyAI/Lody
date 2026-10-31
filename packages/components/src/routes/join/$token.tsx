@@ -1,3 +1,4 @@
+import { readMemberOffer, memberJoinPath } from '@/lib/e2ee-member-offer';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { WorkspaceJoinRequestSurface } from '@/components/pages/workspace-join-request-surface';
 import { signOutWithoutRedirect } from '../../lib/auth';
@@ -13,7 +14,15 @@ export function WorkspaceJoinRequestRoute() {
   const authClient = useAuthClient();
 
   const goToLogin = () => {
-    void navigate({ to: '/login', search: { redirect: `/join/${token}`, view: 'email' } });
+    void navigate({
+      to: '/login',
+      search: {
+        redirect: readMemberOffer(token)
+          ? memberJoinPath(readMemberOffer(token)!)
+          : `/join/${token}`,
+        view: 'email',
+      },
+    });
   };
 
   return (
@@ -26,12 +35,16 @@ export function WorkspaceJoinRequestRoute() {
           goToLogin();
         })();
       }}
-      onWorkspaceRequested={(workspaceSlug) => {
+      onWorkspaceRequested={(workspaceSlug, workspaceId) => {
         if (workspaceSlug) {
           void navigate({
             to: '/$workspaceName/chat',
             params: { workspaceName: workspaceSlug },
           });
+          return;
+        }
+        if (workspaceId) {
+          void navigate({ to: '/workspace/e2ee/$workspaceId', params: { workspaceId } });
           return;
         }
         void navigate({ to: '/' });

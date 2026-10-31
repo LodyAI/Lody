@@ -429,7 +429,13 @@ void test('device credentials reopen exactly, stay encrypted, and missing origin
     assert.equal(bytes.includes(Buffer.from(credential, 'hex')), false)
     assert.equal(bytes.includes(Buffer.from(credential)), false)
   }
-  await unlink(join(directory, 'custody', `device-credential-${prepared.genesisHashHex}.sealed`))
+  await unlink(
+    join(
+      directory,
+      'custody',
+      `device-credential-${prepared.genesisHashHex}-${Buffer.from(Result.getOrThrow(decodeRecord(Buffer.from(prepared.genesisRecordHex, 'hex'))).body.signer.toBytes()).toString('hex')}.sealed`
+    )
+  )
   await assert.rejects(() =>
     execute(
       Effect.gen(function* () {
@@ -942,4 +948,69 @@ void test('an unreserved old identity refusal removes only renderer intent and r
   assert.equal(readPendingE2eeWorkspace(storage, intent.accountId), null)
   assert.deepEqual(stored(directory), saved)
   assert.deepEqual(await prepare(directory), original)
+})
+
+for (const image of ['not a SQLite database', 'corrupt SQLite header'])
+  void test(`definite bootstrap SQLite damage is recoverable corruption: ${image}`, async (t) => {
+    const directory = await fixture(t)
+    await prepare(directory)
+    const path = join(directory, 'creations.sqlite')
+    const bytes = await readFile(path)
+    const damaged =
+      image === 'not a SQLite database'
+        ? Buffer.from('damaged original SQLite image')
+        : Buffer.from(bytes)
+    if (image === 'corrupt SQLite header') damaged[100] = 0xff
+    await writeFile(path, damaged)
+    const result = await execute(Effect.result(openOwner(directory)))
+    assert.equal(result._tag, 'Failure')
+    assert.equal(result.failure.code, 'corrupt')
+    assert.deepEqual(await readFile(path), damaged)
+  })
+void test('authenticated member removal erases only the exact local incarnation and survives reopen', async (t) => {
+  const directory = await fixture(t)
+  const workspaceId = 'removed-workspace'
+  let original
+  await execute(
+    Effect.gen(function* () {
+      const { custody, bootstrap } = yield* openOwner(directory)
+      const prepared = yield* bootstrap.prepareCreation(intent)
+      yield* bootstrap.recordCreated({ workspaceId, genesisHash: prepared.genesisHashHex })
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+      )
+      const device = yield* custody.openDevice(genesis)
+      original = {
+        workspaceId,
+        genesisHash: prepared.genesisHashHex,
+        signingPublicKey: Buffer.from(device.publicKey.toBytes()).toString('hex'),
+        credential: yield* bootstrap.deviceCredential(workspaceId)
+      }
+      // A late result for another signing identity or credential cannot erase this one.
+      assert.equal(
+        yield* bootstrap.forgetRemovedWorkspace({ ...original, signingPublicKey: '00'.repeat(32) }),
+        false
+      )
+      assert.equal(
+        yield* bootstrap.forgetRemovedWorkspace({ ...original, credential: '00'.repeat(32) }),
+        false
+      )
+      assert.ok((yield* custody.openDevice(genesis)).publicKey.equals(device.publicKey))
+      assert.equal(yield* bootstrap.forgetRemovedWorkspace(original), true)
+      assert.equal((yield* Effect.result(custody.openDevice(genesis)))._tag, 'Failure')
+      assert.equal(yield* bootstrap.resumeRemovedWorkspace(workspaceId), true)
+      // A fresh identity is distinct. An old terminal marker must spare it.
+      const next = yield* custody.createDevice(genesis)
+      assert.equal(next.publicKey.equals(device.publicKey), false)
+      assert.equal(yield* bootstrap.resumeRemovedWorkspace(workspaceId), false)
+      assert.ok((yield* custody.openDevice(genesis)).publicKey.equals(next.publicKey))
+    })
+  )
+  assert.equal(stored(directory), undefined)
+  const files = await readdir(join(directory, 'custody'))
+  assert.equal(
+    files.some((name) => name.includes(original.signingPublicKey)),
+    false
+  )
+  assert.ok(files.includes('kek.safe-storage'))
 })

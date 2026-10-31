@@ -35,7 +35,12 @@ import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
-import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
+import {
+  shutdownLocalAcpAgent,
+  spawnAcpProcess,
+  prepareAcpProcessEnvironmentLegacy,
+  terminateAcpProcessTree,
+} from './acp-runner';
 import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -777,12 +782,17 @@ export class AcpAuthenticationManager {
       options.onProgress?.({ status: 'error', error: message });
       return { success: false, disposition: 'error', error: message };
     } finally {
-      await releaseProfile?.();
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      if (this.runningByAgentType.get(options.agentType) === running) {
-        this.runningByAgentType.delete(options.agentType);
+      try {
+        await releaseProfile?.();
+      } catch {
+        this.logger.warn(
+          'Codex authentication process record cleanup failed; retained for recovery'
+        );
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (this.runningByAgentType.get(options.agentType) === running) {
+          this.runningByAgentType.delete(options.agentType);
+        }
       }
     }
   }
@@ -947,12 +957,16 @@ export class AcpAuthenticationManager {
       magpieGatewayUrl: options.magpieGatewayUrl,
       signal: running.abortController.signal,
     });
-    const env = await buildAuthenticationProcessEnv({
+    const env = await prepareAcpProcessEnvironmentLegacy(
       launch,
-      agentType: options.agentType,
-      env: options.env,
-      resolveLoginShellEnv: this.resolveLoginShellEnv,
-    });
+      await buildAuthenticationProcessEnv({
+        launch,
+        agentType: options.agentType,
+        env: options.env,
+        resolveLoginShellEnv: this.resolveLoginShellEnv,
+      }),
+      { logger: this.logger, signal: running.abortController.signal, cwd: process.cwd() }
+    );
     // The process stdout is the ACP JSON-RPC channel. In a headless shell,
     // TERM can make browser launchers fall back to w3m/lynx and render HTML
     // onto stdout, corrupting that channel.

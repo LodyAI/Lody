@@ -3,7 +3,7 @@
 Document content (exported through `@lody/e2ee-core/protocol`; the Streams binding through `@lody/e2ee-core/adapters/loro-streams`, host admission through `@lody/e2ee-core/host`) implements the settled Loro/Flock update/snapshot workflow.
 It preserves content v0 wire bytes, purpose domains, scoped document HKDF and
 XChaCha20-Poly1305. The four document purposes share a leaf but have distinct
-signature/AAD contexts. 
+signature/AAD contexts.
 
 `deriveDocumentKey(scope, epochKey)`, `importDocumentKey(scope, bytes)` and
 `exportDocumentKey(key)` are synchronous Result functions. A document leaf is
@@ -23,8 +23,9 @@ The caller supplies a borrowed DeviceSigner and a synchronized verified-view
 lookup. Each view must be genuine full replay or explicitly qualified endorsed
 state, with its provenance preserved. Later lookups must extend the first verified
 prefix; known rollback/forks fail. Sealing binds
-the caller's genesis, resource, purpose and current epoch; active non-Guest
-personal/machine devices may seal only when rotation is not required. It checks
+the caller's genesis, resource, purpose and a verified published epoch no later
+than the current one. Active non-Guest personal/machine devices may keep sealing
+with retained keys while manual rotation or current-key reception is pending. It checks
 before encryption and after asynchronous signing, and always verifies signer
 output with the fixed strict verifier. No injected verifier/authority can accept
 unsigned content. Each run is a new encryption; a transport retry must retain the
@@ -65,7 +66,7 @@ are released on every exit, and borrowed epoch/signer capabilities stay with the
 owner. Open verifies the exact expected signer and context before deriving a key
 or decrypting. A successful open returns caller-owned plaintext, not permission.
 The caller must still check body semantics, target binding, request correlation,
-TTL/freshness, membership, epoch/rotation pause and journal requirements.
+TTL/freshness, membership, epoch selection and journal requirements.
 
 Run package `typecheck` and `test`. The owning crypto suite uses fixed synthetic
 Node/native WebCrypto signatures, real HKDF/AEAD and explicit Deferred/native
@@ -81,10 +82,17 @@ admission, awaits active operations and rejects late output. The independently
 selected Org/resource/model and fixed signer are captured once. A numeric
 `writeEpoch` remains fixed; explicit `writeEpoch: 'current'` selects the genuine
 current epoch for each seal, then binds that operation through its final authority
-check. A change during signing fails instead of silently re-encrypting. Each
+check. An epoch advance during signing retains that operation's selected published epoch; current device/member revocation still fails. Each
 key read must transfer a fresh owned opaque epoch key; the codec verifies its real
 ledger commitment before deriving a scoped leaf and clears both after use.
 Historical signatures are checked before untrusted frame epochs can request keys.
+Content snapshots also require a current non-Guest personal/machine writer before
+key lookup and after decryption. Snapshot opens reuse their owned authenticated
+frame for AEAD and recheck current permission against a genuine extending ledger;
+they do not repeat signature verification on unchanged bytes. Historical update
+reads retain their previous verification path. The product's native-snapshot MVP
+and replay/trim recovery policy are recorded in the
+[PR-17 note](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-native-content-snapshots.md).
 It contains no Promise runner, production protector or SDK transport. Lab owns the
 actual SDK bridge, plaintext disposal after use and transport/native lifetime.
 The sole snapshot provider header is `[4]`. Snapshot content v0 inserts a u16be
@@ -104,8 +112,8 @@ current view must grant `mayWriteDocument` to the externally authenticated signi
 device, and the frame epoch must have a verified history packet and be no later
 than that view's current epoch. A required rotation or a later tag7/tag8 publication
 does not invalidate an active writer's earlier sealed bytes. New `sealDocument`
-and streams-binding seals instead require `maySealNewContent` and the exact
-current epoch, before encryption and again after asynchronous signing. Revoked,
+and streams-binding seals require current `mayWriteDocument` and a verified
+published epoch no later than current, before encryption and after asynchronous signing. Revoked,
 removed, Guest or Recovery writers still cannot upload; historical
 `authenticateDocument` remains separate and grants no upload permission.
 `admitStreamsUpdateBatch` checks released streams-crdt at the current catalog version framing and header3,
@@ -134,7 +142,7 @@ an explicit host recovery capability, not transparent SDK re-encryption/retry.
 
 The one resource/model gateway must own serialized native writes through actual
 settlement before another owner opens the same journal. It does not provide
-multi-host fencing or a transaction across Riverrun and SQLite. Historical
+multi-host fencing or a transaction across Riverrun and the local journal. Historical
 signature verification still authenticates an exact Accepted retry; new writes
 need current permission and the first persisted credential window. A fresh token
 cannot extend an unconfirmed attempt. Exact native bytes can be confirmed later
@@ -146,3 +154,9 @@ opaque offset exists at a native record boundary no later than head; neither str
 ordering nor an SDK HEAD echo proves this. The Lab's read-only Riverrun adapter
 checks actual row boundaries. Boundary validation is additional to signature/current
 permission; it never establishes independent snapshot trust.
+
+The platform-neutral `SnapshotPublicationJournal` port now exposes the same local
+reserve/readback/accept contract. `indexedDbSnapshotPublication` supplies the opt-in
+browser implementation; the SQLite reference retains its previous public API.
+Neither implementation performs native PUT, verifies approval or provides a
+cross-network transaction. The host owns actual publication and writer admission.

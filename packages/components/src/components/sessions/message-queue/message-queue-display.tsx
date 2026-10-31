@@ -24,10 +24,10 @@ import {
 } from '@dnd-kit/sortable';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { duration, ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
@@ -38,8 +38,10 @@ import {
   scrollEdgeOverflowEquals,
 } from '@/lib/scroll-edge-fade';
 import { MessageQueueRow } from './message-queue-row';
+import { ScheduledQueueRow, type ScheduledQueueItem } from './scheduled-queue-row';
 import { PendingQueueRow } from './pending-queue-row';
 import { useMessageQueueEditing } from './use-message-queue-editing';
+import { queueSurface } from './surface';
 import { usePendingQueueActions, usePendingQueueRecords } from './use-pending-queue-records';
 
 export type MessageQueueDisplayProps = {
@@ -54,8 +56,12 @@ export type MessageQueueDisplayProps = {
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
-  getItemScheduledAt?: (item: MessageQueueItem) => number | null;
   renderItemFooter?: (item: MessageQueueItem) => ReactNode;
+  /** Dedicated reservations, kept out of the executable mq list. */
+  scheduledItems?: readonly ScheduledQueueItem[];
+  onOpenScheduled?: (item: ScheduledQueueItem) => void;
+  onEditScheduledTime?: (item: ScheduledQueueItem) => void;
+  onCancelScheduled?: (item: ScheduledQueueItem) => void;
   footerPosition?: 'below' | 'start' | 'end' | 'inline';
   roomy?: boolean | 'airy';
   title?: string;
@@ -63,37 +69,47 @@ export type MessageQueueDisplayProps = {
 };
 
 const FADE_PX = 20;
+/** Below this sheet width, row actions fold into one More button. */
+const INLINE_ACTIONS_MIN_WIDTH = 520;
+const TOUCH = '@media (pointer: coarse), (max-width: 600px)';
 const styles = stylex.create({
   joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
+  // The header's chevron sits in the rows' 16 px gutter, so the disclosure,
+  // the indices and the Scheduled label share one left edge.
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[1.5],
+    gap: space[2],
     width: '100%',
-    minHeight: { default: 24, '@media (pointer: coarse), (max-width: 600px)': 44 },
-    paddingBlock: space[1],
-    paddingInline: space[2],
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    minHeight: { default: 30, [TOUCH]: 32 },
+    paddingInline: `calc(${space[1]} + ${space[1.5]})`,
+    backgroundColor: 'transparent',
     color: colors.secondaryLabel,
-    fontSize: text.captionSize,
+    fontSize: text.footnoteSize,
     textAlign: 'start',
     cursor: 'pointer',
     boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
   },
-  roomyHeader: {
-    minHeight: 36,
-    paddingInline: { default: space[4], '@media (max-width: 600px)': space[2] },
-    fontSize: text.footnoteSize,
+  chevron: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 16, // the rows' gutter
+    transitionProperty: 'transform',
+    transitionDuration: duration.regular,
+    transitionTimingFunction: ease.standard,
+    transform: 'rotate(-90deg)',
   },
-  title: { fontWeight: 500 },
-  count: { marginInlineStart: space[1.5] },
+  chevronOpen: { transform: 'none' },
+  title: { fontWeight: 500, color: colors.label, opacity: 0.86 },
+  count: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
   status: {
     display: 'flex',
     flexWrap: 'wrap',
     gap: space[2],
-    paddingInline: space[2],
-    paddingBottom: space[1],
-    fontSize: text.captionSize,
+    marginInlineStart: 'auto',
+    fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
@@ -111,7 +127,10 @@ export function MessageQueueDisplay({
   showSteerAction = false,
   nativeSteerAvailable = false,
   renderItemFooter,
-  getItemScheduledAt,
+  scheduledItems: dedicatedScheduledItems = [],
+  onOpenScheduled,
+  onEditScheduledTime,
+  onCancelScheduled,
   footerPosition = 'below',
   roomy = false,
   title,
@@ -121,30 +140,21 @@ export function MessageQueueDisplay({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(true);
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
+  const [compact, setCompact] = useState(false);
 
-  const { items, ordinaryItems, scheduledItems, scheduledIds } = useMemo(() => {
-    const ordinary: MessageQueueItem[] = [];
-    const scheduled: Array<{ item: MessageQueueItem; at: number }> = [];
-    for (const item of sourceItems) {
-      const at = getItemScheduledAt?.(item);
-      if (at == null) ordinary.push(item);
-      else scheduled.push({ item, at });
-    }
-    scheduled.sort((a, b) => a.at - b.at);
-    const timed = scheduled.map(({ item }) => item);
-    return {
-      items: [...ordinary, ...timed],
-      ordinaryItems: ordinary,
-      scheduledItems: timed,
-      scheduledIds: new Set(timed.map((item) => item.$cid)),
-    };
-  }, [sourceItems, getItemScheduledAt]);
-
+  const items = sourceItems;
+  const ordinaryItems = sourceItems;
+  const dedicatedScheduled = useMemo(
+    () => [...dedicatedScheduledItems].sort((a, b) => a.at - b.at),
+    [dedicatedScheduledItems]
+  );
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
   const pending = usePendingQueueRecords(sessionId, items);
   const pendingActions = usePendingQueueActions();
-  const rowCount = items.length + pending.length;
+  const rowCount = items.length + pending.length + dedicatedScheduled.length;
   const failedCount = pending.filter((record) => Boolean(record.error)).length;
+  const onlyScheduled = items.length + pending.length === 0 && dedicatedScheduled.length > 0;
+  const scheduledFailedCount = dedicatedScheduled.filter((item) => item.state === 'failed').length;
   const preparingCount = pending.length - failedCount;
 
   const itemIds = useMemo(() => ordinaryItems.map((item) => item.$cid), [ordinaryItems]);
@@ -160,11 +170,19 @@ export function MessageQueueDisplay({
     if (!el) return;
     const next = readScrollEdgeOverflow(el);
     setOverflow((current) => (scrollEdgeOverflowEquals(current, next) ? current : next));
+    setCompact(el.clientWidth > 0 && el.clientWidth < INLINE_ACTIONS_MIN_WIDTH);
   }, []);
 
   useLayoutEffect(() => {
     updateOverflow();
-  }, [editing.editingCid, expanded, items, pending.length, updateOverflow]);
+  }, [
+    dedicatedScheduled.length,
+    editing.editingCid,
+    expanded,
+    items,
+    pending.length,
+    updateOverflow,
+  ]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -205,14 +223,13 @@ export function MessageQueueDisplay({
         footer={renderItemFooter?.(item)}
         footerPosition={footerPosition}
         roomy={roomy}
-        onMoveToTop={
-          !scheduledIds.has(item.$cid) ? () => onReorder(item.$cid, items[0]!.$cid) : undefined
-        }
+        compact={compact}
+        onMoveToTop={index > 0 ? () => onReorder(item.$cid, items[0]!.$cid) : undefined}
         index={index}
         isFirst={index === 0}
-        showSteerAction={showSteerAction && !scheduledIds.has(item.$cid)}
+        showSteerAction={showSteerAction}
         nativeSteerAvailable={nativeSteerAvailable}
-        canReorder={canReorder && !scheduledIds.has(item.$cid)}
+        canReorder={canReorder}
         isEditing={isEditing}
         editValue={isEditing ? editing.editValue : ''}
         isPending={editing.pendingCid === item.$cid}
@@ -237,7 +254,6 @@ export function MessageQueueDisplay({
   // A sheet tucked onto the surface below it (the info bar, or the composer when
   // there is no bar): rounded top, square open bottom, and the composer's own
   // fill and hairline so the stack reads as one piece rather than a gray slab.
-  // Rows use divide-y so the list feels continuous rather than stacked cards.
   return (
     <Tooltip.Provider>
       <Collapsible.Root
@@ -251,47 +267,68 @@ export function MessageQueueDisplay({
         )}
       >
         <Collapsible.Trigger
-          {...stylex.props(styles.header, roomy && styles.roomyHeader)}
+          {...stylex.props(styles.header)}
           data-message-queue-toggle=""
           onPointerDown={(event) => {
             if (event.button === 0) event.currentTarget.focus();
           }}
           onClick={(event) => event.currentTarget.focus()}
         >
-          {expanded ? (
-            <ChevronDown size={12} aria-hidden="true" />
-          ) : (
-            <ChevronRight size={12} aria-hidden="true" />
-          )}
-          <span {...stylex.props(styles.title)}>
-            {title ?? t('sessions.messageQueue.upNext', 'Up next')}
-            {!title && (
-              <span {...stylex.props(styles.count)}>
-                {t('sessions.messageQueue.queuedCount', {
-                  count: rowCount,
-                  defaultValue: '{{count}} queued',
-                })}
-              </span>
-            )}
+          <span {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}>
+            <ChevronDown size={14} strokeWidth={1.75} aria-hidden="true" />
           </span>
+          <span {...stylex.props(styles.title)}>
+            {title ??
+              (onlyScheduled
+                ? t('sessions.messageQueue.scheduledTitle', 'Scheduled')
+                : t('sessions.messageQueue.upNext', 'Up next'))}
+          </span>
+          {!title && !onlyScheduled && (
+            <span {...stylex.props(styles.count)}>
+              {[
+                items.length + pending.length > 0
+                  ? t('sessions.messageQueue.queuedCount', {
+                      count: items.length + pending.length,
+                      defaultValue: '{{count}} queued',
+                    })
+                  : null,
+                dedicatedScheduled.length > 0
+                  ? t('sessions.messageQueue.scheduledCount', {
+                      count: dedicatedScheduled.length,
+                      defaultValue: '{{count}} scheduled',
+                    })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          )}
+          {!expanded && (pending.length > 0 || scheduledFailedCount > 0) ? (
+            <span role="status" {...stylex.props(styles.status)}>
+              {failedCount > 0 ? (
+                <span {...stylex.props(styles.failed)}>
+                  {t('sessions.messageQueue.failedCount', { count: failedCount })}
+                </span>
+              ) : null}
+              {preparingCount > 0 ? (
+                <span>{t('sessions.messageQueue.preparingCount', { count: preparingCount })}</span>
+              ) : null}
+              {scheduledFailedCount > 0 ? (
+                <span {...stylex.props(styles.failed)}>
+                  {t('sessions.messageQueue.scheduledFailedCount', {
+                    count: scheduledFailedCount,
+                    defaultValue: '{{count}} scheduled not sent',
+                  })}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
         </Collapsible.Trigger>
-        {!expanded && pending.length > 0 ? (
-          <div role="status" {...stylex.props(styles.status)}>
-            {failedCount > 0 ? (
-              <span {...stylex.props(styles.failed)}>
-                {t('sessions.messageQueue.failedCount', { count: failedCount })}
-              </span>
-            ) : null}
-            {preparingCount > 0 ? (
-              <span>{t('sessions.messageQueue.preparingCount', { count: preparingCount })}</span>
-            ) : null}
-          </div>
-        ) : null}
 
         <Collapsible.Panel keepMounted>
           <div
             ref={scrollRef}
-            className="overflow-y-auto border-t border-border/30"
+            className={cn(stylex.props(queueSurface.list).className, 'overflow-y-auto')}
             style={{
               maxHeight: 'min(25vh, 240px)',
               maskImage: fadeMask,
@@ -313,15 +350,27 @@ export function MessageQueueDisplay({
                   key={record.id}
                   record={record}
                   index={ordinaryItems.length + index}
-                  divided={ordinaryItems.length + index > 0}
                   busy={pendingActions.busyId === record.id}
                   onRetry={() => void pendingActions.run(record, 'retry')}
                   onCancel={() => void pendingActions.run(record, 'cancel')}
                 />
               ))}
-              {scheduledItems.map((item, index) =>
-                renderRow(item, ordinaryItems.length + pending.length + index)
-              )}
+              {!onlyScheduled && dedicatedScheduled.length > 0 ? (
+                <div {...stylex.props(queueSurface.sectionLabel)}>
+                  {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
+                </div>
+              ) : null}
+              {dedicatedScheduled.map((item) => (
+                <ScheduledQueueRow
+                  key={item.scheduleId}
+                  item={item}
+                  roomy={roomy}
+                  compact={compact}
+                  onOpen={onOpenScheduled}
+                  onEditTime={onEditScheduledTime}
+                  onCancel={onCancelScheduled}
+                />
+              ))}
             </DndContext>
           </div>
         </Collapsible.Panel>

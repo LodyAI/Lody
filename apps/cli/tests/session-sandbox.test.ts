@@ -978,7 +978,7 @@ it('shares a failed cleanup receipt and retries retained resources only through 
 });
 
 it.each(['ENOENT', 'EACCES'])(
-  'keeps resource identity complete after a no-PID %s failure',
+  'a no-PID %s helper spawn failure leaves the running agent untouched',
   async (code) => {
     const table = new FakeProcessTable('darwin');
     const sandbox = await createSessionSandboxFactory({
@@ -990,117 +990,14 @@ it.each(['ENOENT', 'EACCES'])(
         configureExecutionProcess: async () => {},
       },
     })('missing-helper' as SessionId);
-    const saved: Array<{ roots: readonly number[]; complete: boolean }> = [];
-    const detach = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
     try {
       const agent = await sandbox.spawn('agent', [], {});
       const failure = Object.assign(new Error(`spawn gh ${code}`), { code });
       table.queueSpawn({ failWith: failure });
       await expect(sandbox.spawn('gh', ['pr', 'list'], {})).rejects.toBe(failure);
-      expect(saved.at(-1)).toEqual({ roots: [agent.child.pid], complete: true });
       expect(table.isAlive(agent.child.pid!)).toBe(true);
-      const detachNext = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
-      detachNext();
-      expect(saved.at(-1)).toEqual({ roots: [agent.child.pid], complete: true });
     } finally {
-      detach();
       await sandbox.cleanup();
     }
   }
 );
-
-it('starts a verified fresh generation without inheriting failed journal uncertainty', async () => {
-  const table = new FakeProcessTable('darwin');
-  const sandbox = await createSessionSandboxFactory({
-    logger: createSilentLogger(),
-    deps: {
-      platform: 'darwin',
-      spawnProcess: table.api.spawn,
-      killPid: (pid, signal) => table.api.kill(pid, signal ?? 'SIGTERM'),
-      configureExecutionProcess: async () => {},
-    },
-  })('journal-recovery-generation' as SessionId);
-  const detach = await sandbox.watchRecoveryResources!((identity) => {
-    if (!identity.complete && identity.roots.length) throw new Error('journal outage');
-  });
-  await expect(sandbox.spawn('agent', [], {})).rejects.toThrow();
-  detach();
-  const uncertain: Array<{ roots: readonly number[]; complete: boolean }> = [];
-  const detachUncertain = await sandbox.watchRecoveryResources!((identity) =>
-    uncertain.push(identity)
-  );
-  table.queueSpawn({ failWith: Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }) });
-  await expect(sandbox.spawn('gh', [], {})).rejects.toMatchObject({ code: 'ENOENT' });
-  expect(uncertain.at(-1)).toEqual({ roots: [1000], complete: false });
-  detachUncertain();
-  await sandbox.cleanup();
-  const saved: Array<{ roots: readonly number[]; complete: boolean }> = [];
-  const detachFresh = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
-  try {
-    const next = await sandbox.spawn('replacement', [], {});
-    expect(saved.at(-1)).toEqual({ roots: [next.child.pid], complete: true });
-    expect(table.isAlive(1000)).toBe(false);
-  } finally {
-    detachFresh();
-    await sandbox.cleanup();
-  }
-});
-
-it('durably fences incomplete and concurrent spawns before roots can be proven complete', async () => {
-  const table = new FakeProcessTable('darwin');
-  let signalConfigured!: () => void;
-  const configured = new Promise<void>((resolve) => {
-    signalConfigured = resolve;
-  });
-  let releaseConfiguration!: () => void;
-  const configuration = new Promise<void>((resolve) => {
-    releaseConfiguration = resolve;
-  });
-  let configuredCount = 0;
-  let signalBothConfigured!: () => void;
-  const bothConfigured = new Promise<void>((resolve) => {
-    signalBothConfigured = resolve;
-  });
-  const saved: Array<{ roots: readonly number[]; complete: boolean }> = [];
-  const sandbox = await createSessionSandboxFactory({
-    logger: createSilentLogger(),
-    deps: {
-      platform: 'darwin',
-      spawnProcess: table.api.spawn,
-      killPid: (pid, signal) => table.api.kill(pid, signal ?? 'SIGTERM'),
-      configureExecutionProcess: async () => {
-        if (++configuredCount === 1) signalConfigured();
-        else signalBothConfigured();
-        await configuration;
-      },
-    },
-  })('spawn-fence' as SessionId);
-  const detach = await sandbox.watchRecoveryResources!((identity) => saved.push(identity));
-  try {
-    const spawning = sandbox.spawn('terminal', [], {});
-    await configured;
-    expect(saved.at(-1)).toEqual({ roots: [1000], complete: false });
-    const secondSpawn = sandbox.spawn('other-terminal', [], {});
-    await bothConfigured;
-    expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: false });
-    table.queueSpawn({ failWith: Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }) });
-    await expect(sandbox.spawn('gh', [], {})).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: false });
-    // Simulate reopen at the acquisition fence: even an empty process table
-    // cannot turn incomplete identity into proof of release.
-    const { provesResourcesGone } = await import('../src/orchestration/inbox/recovery');
-    expect(
-      provesResourcesGone(
-        { platform: 'darwin', ...saved.at(-1)! },
-        { sampledAtMs: 0, memoryKind: 'rss-sum', warnings: [], entries: [] }
-      )
-    ).toBe(false);
-    releaseConfiguration();
-    await Promise.all([spawning, secondSpawn]);
-    expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: true });
-  } finally {
-    releaseConfiguration();
-    detach();
-    await sandbox.cleanup();
-  }
-});

@@ -1,6 +1,4 @@
-import type {
-  RemoteCursorStore,
-} from '@loro-dev/streams-crdt';
+import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
@@ -19,8 +17,14 @@ import {
   type StreamsRoomPayloadProtectionResolver,
 } from 'loro-repo/transport/streams';
 
-import { WorkspaceStreamsConfigurationError, type WorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
-export { WorkspaceStreamsConfigurationError, type WorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
+import {
+  WorkspaceStreamsConfigurationError,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
+export {
+  WorkspaceStreamsConfigurationError,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
 
 const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 

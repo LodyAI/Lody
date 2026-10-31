@@ -1,3 +1,7 @@
+import {
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest
+} from '@lody/shared/e2ee-local-pairing'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -86,9 +90,8 @@ import { resolveLocalSessionControlTimeoutMs } from './local-session-control-bud
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
-// force-killing it. Kept short so Command+Q feels responsive; with the CLI's own
-// fast socket teardown a clean exit normally lands well under this.
-const CLI_QUIT_GRACE_MS = 3000
+// force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
+const CLI_QUIT_GRACE_MS = 10_000
 // How long a SIGKILLed embedded CLI may take to be reaped before quit reports it.
 const CLI_FORCE_KILL_WAIT_MS = 5000
 // The embedded CLI shares Electron's process group: it is not spawned detached,
@@ -810,6 +813,11 @@ export class CliService {
     }
   }
 
+  async resetLocalE2eeIdentity(message: LocalE2eeResetRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(this.localControlClient.e2eeReset(message, { timeoutMs: 30_000 }))
+  }
+
   async prepareLocalE2eeDevice(message: LocalE2eePrepareRequest) {
     if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
     return Effect.runPromise(
@@ -819,9 +827,12 @@ export class CliService {
           Effect.mapError(
             (error) =>
               new Error(
-                error._tag === 'IpcTimeoutError'
-                  ? 'e2ee_local_agent_pending'
-                  : 'e2ee_local_agent_unavailable',
+                LocalE2eeRecoveryFailureSchema.safeParse({ ok: false, error: error.message })
+                  .success
+                  ? error.message
+                  : error._tag === 'IpcTimeoutError'
+                    ? 'e2ee_local_agent_pending'
+                    : 'e2ee_local_agent_unavailable',
                 { cause: error }
               )
           )

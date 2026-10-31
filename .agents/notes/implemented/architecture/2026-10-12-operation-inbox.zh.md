@@ -25,11 +25,11 @@ Translation: current
 
 ## 所有权、恢复与兼容
 
-Effect 保持锁定 4.0.2。`inbox/service.ts`拥有存储、信号和 scoped fiber；`operationInboxLegacy` 桥接 Session 输入；`operation-coordinator.ts` 与 `workspace-cleanup-legacy.ts` 是登记的应用入口，platform 资源观察器同步桥接创建前的登记回调。整个 Session／ACP／历史迁移尚未完成，边界见 [Effect 台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账)。
+Effect 保持锁定 4.0.2。`inbox/service.ts`拥有存储、信号和 scoped fiber；`operationInboxLegacy` 桥接 Session 输入；`operation-coordinator.ts` 与 `workspace-cleanup-legacy.ts` 是登记的应用入口。整个 Session／ACP／历史迁移尚未完成，边界见 [Effect 台账](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.zh.md#单元台账)。
 
 `40ef5c29cbe496f28f17ab10297cf37c3c48030f` 的审核发现三个 adapter 缺口，修订落实以下契约：
 
-1. 每次资源创建前持久登记“不完整”，持续合入后来的终端／进程 roots，保留全部 Session 所有者和发起 host PID。重开必须证明资源集合完整且全部消失。身份缺失、Windows 或释放无法确认时保持阻塞，不能向可能被复用的 PID 发信号。
+1. 保留每个已挂接 Session 所有者的终止句柄，供后台清理使用。[可用性决定](../bug-fix/2026-10-29-inbox-no-durable-block.zh.md) 取代了最初的资源登记和释放证明准入：重启退役未知输入且不重放，释放失败移除旧 Agent、不阻塞后继，进程身份不再持久登记。不能向可能被复用的 PID 发信号。
 2. 可信 renderer／非委派 CLI 在激活或入队前持久保存 `humanInputReceipts`。RPC 丢失或输入过大时，历史兜底恢复匹配授权；普通历史、用户不符的回执、已取消／已结束输入不能解除暂停。
 3. 协调器 `recoverStop()` 调用独立的 `recoverClose()`，只补写结算／释放／暂停回执。保留原失败回执和恢复所有者，不重发 transport，也不把再次关闭 Scope 当成恢复。
 
@@ -59,7 +59,8 @@ Agent 发起的 turn 结束后不发送用户完成通知。收尾读取本轮�
 
 合并 base `0b46cc2d8e33c6feafd08c00f51089456ab1e732`，不改写 PR 历史。冲突解决同时保留主分支可复用 Effect 函数转换及 lint 安装／检查脚本，以及 Inbox 准入与不重发、准确输入通知归属、sandbox 恢复 roots。解决后执行、sandbox、Coordinator 与 Inbox 六个 suite 共 391 项通过。全仓类型、lint（含 Effect lint）、format、quick 边界及文档检查通过；完整 CLI 测试 4137 通过、4 跳过，仍有合并前已观察到的同一 Git transport 失败，全仓检查未完整通过。
 
-在 `ea9fb9b0f` 上通过磁盘 SQLite 重开复现了阻塞缺口：缺资源行无法进入自动恢复枚举，不完整日志即使面对空进程表也不能证明释放。修复保留自动恢复的保守规则，增加本机离线 `session recover-inbox`。scoped platform adapter 先独占 Host 再打开 SQLite，所有外部 I/O 留在平台；原生 workflow 检查明确确认与准确执行身份。已知 roots 存活、探针失败或平台不符时拒绝恢复，操作者还必须独立确认未登记资源已经释放。暂停、退役旧输入、确认释放和审计在同一事务中，失败全部回滚。未知批次仍未知，不产生自动意图，只有新的可信用户输入恢复工作。不新增 MCP 恢复工具或远程 RPC；现有 Promise Host lease 属于登记的平台 adapter，不扩大原生迁移声明。
+[可用性决定](../bug-fix/2026-10-29-inbox-no-durable-block.zh.md) 取代启动 PID 证明、持久阻塞与离线人工恢复。
+旧理由保留在[归档记录](../../archived/bug-fix/2026-10-21-manual-inbox-recovery.zh.md)。未知提交仍不重放，排队输入和结果保留。
 
 准入锁同时计数等待者与持有者，仅在引用为零时移除；投影缓存跟随 SQLite 保留的回执清理。reconcile 使用具名 tracing，删除五处非空断言，明确 50 成员预览上限，release 重试使用自己的回执，不修改调用方事件。Scope 失败恢复保持原行为；注释明确底层延迟成功不会替换首次失败回执，没有证据支持重复 Scope.close 或改变 coordinator dispose。
 
@@ -134,22 +135,18 @@ main 的额度刷新合并在运行时 pin 回滚后重新带入升级过的 ACP
 
 ## 确定性的操作员恢复验证（2026-10-17）
 
-[Roost PR #1626](https://github.com/LodyAI/Lody/pull/1626) 验证时的两个 Inbox 失败，
-在未修改的主分支基线 `fb4d565fa235fc56f626aef50bf4721ad6e5ea42` 源码归档中，
-通过同样受控的内存探测失败复现。进程采样器、操作员适配器、恢复探测与恢复判断
-在该基线和最初的 Roost 提交 `b625473e3` 中具有相同 Git blob。
-这是既有警告行为的复现证据，不是仅凭文件未改动就推断与本轮无关。
+## 已取代的人工恢复
 
-原成功用例依赖真实机器的进程与 macOS 可选内存采样，因此要求整机快照没有警告。
-现在操作员套件在进程 I/O 边界提供确定的命令输出，保留真实 Host 租约、SQLite 重开、
-作用域平台适配器及原生工作流。断言覆盖暂停恢复且不重放、已知根存在或消失、
-探测不可用及原有 macOS 内存警告拒绝。失败仍保留被阻塞的执行并阻止后继；
-Scope 结束仍释放操作员租约。
+[可用性决定](../bug-fix/2026-10-29-inbox-no-durable-block.zh.md) 删除人工恢复工作流及其进程探测测试。
+保守的释放证明可能让对话无限期不可用；进程清理现在与准入分开。
 
-本次修正测试确定性，不放宽生产释放检查，也不改变它原有的内存警告处理。
-单独的 PID 探测需要另行限定行为变更范围并审核。Effect 4.0.2、原生所有权边界
-及迁移台账事实均未改变。
+## 数据库启动降级
 
-本次夹具修正的最终验证：63 项 Inbox 用例及根目录 `pnpm check` 通过，
-包括 CLI 4287 项和组件 5402 项。格式化与文档检查通过；缺失的隔离 Kimi/Pi 工作树
-按已有固定版本初始化，没有改变依赖图或其受跟踪源码。
+SQLite 打开／激活失败归可选的 coordinator 处理，不能阻断工作区启动。普通人类
+输入沿用无 Inbox 的路径；依赖它的工具在访问数据库前读取 daemon 当前可用性，
+包括已缓存的连接，避免接受无法调度回执的任务。应用入口持有一个启动重试定时器，
+从 30 秒倍增到最多 10 分钟；任一步同步初始化失败都立即撤下 Inbox，并沿用停止流程关闭部分初始化的资源后再重试，不取消或等待普通回合；stop／recoverStop 取消定时器。
+schema/protocol 不兼容需要兼容版本，因此不自动重试。恢复后清除本地运行时提示。
+已有未知提交和资源释放规则继续生效；降级不能证明资源已释放。启动仍由已登记的
+应用入口负责；迁移尚未完成的 Session/ACP 适配器会扩大修复，不能改善本次边界。
+coordinator、MCP 和执行测试覆盖启动失败与恢复；已安装桌面与真实磁盘满验收仍需独立完成。

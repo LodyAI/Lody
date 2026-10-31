@@ -25,17 +25,20 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Session, auth, and app shell
 
+- Native iOS layout follows observed document width during folds; other hosts use
+  window width.
 - Authenticated cloud queries share one subscription/retry budget per client,
-  session and arguments. Retry only opaque server failures; return loading instead
-  of stale access rows, then throw on exhaustion. Keep auth recovery separate and
-  crash-screen recovery user initiated. [Implementation](README.md#cloud-query-recovery).
+  session and arguments. Retry only opaque server failures; show loading, not stale
+  access rows, then throw on exhaustion. Auth recovery stays separate; crash recovery
+  is user initiated. [Implementation](README.md#cloud-query-recovery).
 
-- Cloud auth recovery has a per-session attempt budget and per-attempt deadline.
-  Loading/visibility transitions must not reset it; exhausted recovery requires
-  explicit retry or sign-in. Preserve mounted routes and local data.
+- Cloud auth recovery has a per-session budget and per-attempt deadline; loading or
+  visibility changes never reset it. Exhaustion requires explicit retry or sign-in.
+  Preserve mounted routes and local data.
   [Contract](../../../../specs/auth-recovery.md).
 
-- Session ACP catalogs use the bound Provider's runtime overrides.
+- Provider overrides govern model catalogs and command previews. Sessions own actual commands.
+
 
 - History uses SessionData commands.
 - Existing-session run-config drafts store only edited fields, scoped to account,
@@ -43,9 +46,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   generations; remote Turns never consume them. Never retain history IDs or empty
   visited-session entries. Deletion/account teardown invalidates edit callbacks;
   navigation preserves intent. [Contract](../../../../specs/session-run-config-drafts.md).
-- Held-send config is a session/runtime-scoped input to selection, never a stored
-  resolved selection. Keep its logical Turn fence across history/queue handoff;
-  next-draft edits win and attachment progress does not rebuild the catalog.
+- Existing-session run config uses confirmed execution state plus private edits. Catalog
+  refresh reports invalid choices without substitution; absent values inherit at dispatch.
+  Held sends supply only Role/MCP provenance; pending rows retain frozen input.
 - A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.
@@ -68,9 +71,19 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - `use-safe-area-insets.ts` is ONE module-level store: never add a per-instance
   `getComputedStyle`. Keep the snapshot identity stable while values hold, and the resize
   listeners for the document's life.
-- `use-keyboard-navigation.ts` issues at most one session navigation per painted frame:
-  with no frame outstanding a press navigates and re-anchors on the route; during an owed
-  frame it only advances the target. Not a time-based debounce.
+- `use-keyboard-navigation.ts`: at most one session navigation per painted frame.
+  With no frame owed, a press navigates and re-anchors on the route; during an owed
+  frame it only advances the target. No time-based debounce.
+
+Legacy cloud machine, project, inbox, GitHub and usage catalogs require the
+runtime admission atom's explicit ordinary or legacy descriptor bound to the current
+account, workspace ID and route slug. Unknown mode stays pending; local runtime
+opening, reading and input remain available. Encrypted workspaces never query
+these catalogs, even after pairing. Use the shared legacy query/mutation/action
+wrappers; imperative operations recheck live admission before sending and retained
+callbacks cannot cross accounts. The repository legacy-cloud check rejects direct
+references; its inventory owns the exact control/CLI exceptions. Preserve ordinary errors and owner-only local
+visibility; skipping a catalog grants no machine or execution authority.
 
 ## Workspace catalog
 
@@ -124,10 +137,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   is anchored to the last EMIT; one input left outside it restores starvation.
 - Nothing reaching the payload memo may carry a per-render identity: depend on the
   permission candidate's key.
-- Keep the 250ms bridge debounce.
+- Keep the bridge debounce at 250ms.
 - Pending permissions from the UNTHROTTLED list flush the window. Summaries stay
   silent and refresh all rows; ordinary Push owns alerts.
-- Compute nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the
-  native iOS shell are BOTH required and are not equivalent. Derive the activity id
-  separately from that gate so the disable and unmount paths can still end an activity
-  the payload no longer describes.
+- Compute nothing when disabled: both `iosLiveActivitiesEnabledAtom` and the native
+  iOS shell are required, not equivalent. Derive activity id separately so disable
+  and unmount can end an activity the payload no longer describes.

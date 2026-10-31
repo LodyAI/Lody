@@ -2,6 +2,12 @@
 
 `CLAUDE.md` is a symlink to this file.
 
+- Encrypted workspaces sync definitions and Registry through the existing protected
+  Repo. Generated turns use the ordinary verified-signer execution gate and shared
+  userTurnId journal claim. Both handoff and actual start require the definition's
+  verified original signer, and manual runs also require the request signer.
+  Schedule ownership fields and machine-derived turn signatures never grant that
+  authority. [Origin contract](../../../../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-schedule-origin-authorization.md).
 - Schedule definitions live in `schedule-<id>` Loro docs. The workspace `:sr`
   Flock Registry is the execution gate. A definition must match its published
   fingerprint; existence discovery must never republish or enable an orphan.
@@ -21,12 +27,11 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is host-local, per-Agent-config generic Schedule admission.
-  Complete messages never reserve or restore these slots; only their destination
-  session busy check gates admission. Keep their ledger completion tracking.
-  Restore accepted occupancy before evaluating; retain it while Session
-  dispatch, queues, Operations or deliveries still have work. Release before
-  prehandoff retry.
+- Due runs do not wait for other runs of the same Schedule or Agent configuration.
+  Session dispatch owns conversation ordering; complete messages still defer while
+  their destination chat's own Turns are busy. Delegated Operations the chat still
+  awaits block run completion, never message admission, so a manager chat waiting on
+  its children still receives the message. Preserve ledger completion and recovery tracking.
 - Configuration unavailability is recoverable without consuming an attempt.
   Infrastructure failures use bounded backoff; all prehandoff work expires after
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
@@ -86,6 +91,11 @@
   a committed dispatch wins. Busy destination chats defer handoff without interruption.
 - Skip unprepared legacy Claude quota-shortcut runs without a Turn association;
   preserve prepared or dispatched work and ordinary or changed-message schedules. [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
+- Terminal one-time messages keep their document and Registry row for seven days
+  from the terminal runtime projection, then the owner purges the document, removes
+  schedule/runtime/manual rows and leaves a tombstone. A busy doc retries next pass;
+  pending/active messages and generic Schedules are never swept. Remote/CRDT history
+  compaction is separate.
 - A complete-message Schedule ID is consumed by durable dispatch across all later
   activations. Consult the persistent ledger before planning/processing another run;
   derive cross-activation sent state from that ledger, never a cached runtime row.

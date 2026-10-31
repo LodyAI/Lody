@@ -144,7 +144,9 @@ cancellation addresses an accepted input. Policy dispatch is internal Lody code.
   work. Missing release or unresolved tool effects block continuation.
 - **Merge archive:** existing PR facts initiate group settlement, including children,
   queued input, Goals, native work and automations. Admission barriers protect rechecks;
-  the root commits last and partial progress is reconciled.
+  the root commits last and partial progress is reconciled. A child with an unconfirmed
+  release retains its parent admission until raw prompt completion or confirmed recovery;
+  transport disconnection alone does not prove completion.
 - **Idle compact:** context occupancy must reach the threshold; the original idle turn,
   finite deadline and advertised native `/compact` must still be valid. New input or
   expiry invalidates maintenance. Configured cache lifetime is an operator estimate,

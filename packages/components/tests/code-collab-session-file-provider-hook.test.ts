@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
 
 import { createElement, useEffect, type ReactNode } from 'react';
 import { act } from 'react';
@@ -27,6 +29,18 @@ import {
   createCodeCollabFileIndexCache,
   type CodeCollabFileIndexCache,
 } from '../src/lib/code-collab-file-index-cache';
+import { SessionAgentFileLinkMenuProvider } from '../src/components/sessions/session-agent-file-link-menu';
+import { useAgentFileLinkMatch } from '../src/components/ai-gui/agent-file-link-context';
+
+vi.mock('../src/hooks/use-session-file-actions', () => ({
+  useSessionFileActions: () => ({ buildMarkdownLinkMenuItems: () => [] }),
+}));
+vi.mock('../src/hooks/use-code-collab-requested-role', () => ({
+  useCodeCollabRequestedRole: () => 'read',
+}));
+vi.mock('../src/components/ai-gui/markdown-renderer', async () => ({
+  AgentFileLinkContextMenuItemsContext: (await import('react')).createContext(undefined),
+}));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -205,14 +219,110 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
 });
 
 describe('useCodeCollabSessionFileProvider', () => {
-  it.each([null, '/original/workspace'])(
-    'opens a desktop file while the daemon index is unavailable (root %s)',
-    async (workspaceRoot) => {
+  it('releases a failed conversation borrower so the next Files open can recover', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const store = createStore();
+    const sessionId = 'conversation-index-recovery' as SessionId;
+    const machineId = 'machine-remote' as MachineId;
+    const session = { id: sessionId, machineId, userId: 'user-1' } as SessionMeta;
+    const flock = new Flock('conversation-index-recovery');
+    flock.set(['README.md'], { kind: 'text' });
+    flock.commit();
+    let rejectSync!: (error: unknown) => void;
+    const firstSync = new Promise<void>((_, reject) => {
+      rejectSync = reject;
+    });
+    let firstJoin = true;
+    const originalError = new Error('file-index catchup failed');
+    store.set(
+      runtimeAtom,
+      createRuntime({
+        repo: {
+          openFlockDoc: async () => ({
+            flock,
+            joinRoom: async () => {
+              const pending = firstJoin;
+              firstJoin = false;
+              return makeSyncedFlockRoom(pending ? firstSync : Promise.resolve());
+            },
+          }),
+        },
+      })
+    );
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: session });
+    const updates: UseCodeCollabSessionFileProviderResult[] = [];
+    const onUpdate = (result: UseCodeCollabSessionFileProviderResult) => updates.push(result);
+    function Candidate() {
+      const { matched } = useAgentFileLinkMatch('README.md');
+      return createElement('span', { 'data-matched': matched }, 'README.md');
+    }
+    const surface = (filesOpen: boolean, visible = true) =>
+      createElement(
+        Provider,
+        { store },
+        createElement(
+          SessionAgentFileLinkMenuProvider,
+          { session, workspaceId: 'workspace-1', isVisible: visible },
+          createElement(Candidate)
+        ),
+        filesOpen ? createElement(ProviderHarness, { sessionId, machineId, onUpdate }) : null
+      );
+    render(surface(false));
+    await flushMicrotasks(8);
+    // A pending catchup does not discard an already-confirmed cached snapshot.
+    expect(container?.querySelector('span')?.dataset.matched).toBe('true');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      rejectSync(originalError);
+      await flushMicrotasks(8);
+      expect(container?.querySelector('span')?.dataset.matched).toBe('false');
+      // Leave the conversation visible: its optional borrower must no longer pin the error.
+      act(() => root?.render(surface(true)));
+      await flushMicrotasks(8);
+      expect(updates.at(-1)?.status).toBe('ready');
+      await expect(updates.at(-1)?.provider?.listFiles()).resolves.toEqual([
+        expect.objectContaining({ path: 'README.md' }),
+      ]);
+      expect(warning.mock.calls).toContainEqual([
+        '[Code Collab] conversation file-link index unavailable',
+        expect.objectContaining({ error: expect.objectContaining({ message: originalError.message }) }),
+      ]);
+      expect(container?.querySelector('span')?.dataset.matched).toBe('false');
+
+      // Re-entering the conversation resumes confirmation against the recovered index.
+      act(() => root?.render(surface(true, false)));
+      await flushMicrotasks(8);
+      act(() => root?.render(surface(true)));
+      await flushMicrotasks(8);
+      expect(container?.querySelector('span')?.dataset.matched).toBe('true');
+      expect(updates.at(-1)?.status).toBe('ready');
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it.each([
+    [null, false],
+    ['/original/workspace', false],
+    [null, true],
+    ['/original/workspace', true],
+  ] as const)(
+    'opens a desktop file while the daemon index is unavailable (root %s, encrypted %s)',
+    async (workspaceRoot, encrypted) => {
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
       vi.stubGlobal('window', Object.assign(window, { __LODY_ELECTRON__: true }));
       const store = createStore();
       const sessionId = 'offline-session' as SessionId;
       const machineId = 'offline-machine' as MachineId;
+      if (encrypted) {
+        store.set(localProbeResultAtom, { ok: true, machineId });
+        store.set(workspaceContentModeAtom, {
+          accountId: 'user',
+          workspaceSlug: 'encrypted',
+          workspaceId: 'workspace-1',
+          descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+        } as never);
+      }
       const ownerSessionId = 'offline-parent' as SessionId;
       store.set(
         runtimeAtom,

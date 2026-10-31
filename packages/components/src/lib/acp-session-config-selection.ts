@@ -14,27 +14,10 @@ import {
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 
 /**
- * ACP run-config selection is a PURE DERIVATION, not reconciled state.
- *
- * The composer's effective mode/model/config values are a function of four
- * inputs: the user's unsent edits, the latest turn's preferences, the shared
- * runtime baseline the agent reported, and the capability catalog. The
- * previous design stored the RESULT in a reducer and pushed the inputs into it
- * with two layout-effect dispatches (`reconcile` + `apply-runtime`). Those two
- * writers disagreed about a preference key missing from a full runtime
- * snapshot — one re-seeded it, the other deleted it — so the state never
- * reached a fixed point, and because the selector options are themselves
- * rebuilt from the selection, the effect's deps changed every commit: a
- * synchronous nested-update loop that crashed the renderer with React #185
- * the moment such a session opened (0.89.x, session `51e236e0…`).
- *
- * Deriving instead of reconciling makes that loop unrepresentable: the only
- * state left is the user's unsent edits (creation drafts use
- * `fenceAcpSessionUserEdits`; existing sessions use local admission acknowledgments), and every disagreement between inputs is
- * settled by ONE priority rule inside `resolveAcpSessionConfigSelection` —
- * user edit > runtime baseline > turn preference > capability default, with a
- * full runtime snapshot owning the whole non-user config table. Resolved values
- * never feed back into stored state, so there is nothing to oscillate.
+ * Selection is pure: unsent user edits override the execution owner's snapshot.
+ * Only creation drafts seed defaults. Existing sessions inherit unreported
+ * values at dispatch. Capability validation reports errors without rewriting
+ * a concrete choice; history and queued inputs never establish current state.
  */
 
 export type AcpSessionConfigPreferences = {
@@ -131,6 +114,8 @@ export type AcpSessionConfigSelectionInputs = {
   edits: AcpSessionUserConfigEdits;
   preferences: AcpSessionConfigPreferences;
   runtimePreferences?: AcpSessionConfigPreferences | null;
+  /** Existing sessions inherit unreported values from the agent at dispatch. */
+  inheritDefaults?: boolean;
 };
 
 export type AcpSessionConfigCandidates = {
@@ -171,6 +156,9 @@ export type AcpSessionSelectorOptionsInput = {
   defaultModeId: string | null;
   defaultModelId: string | null;
   configOptionSelectors: AcpConfigOptionSelector[];
+  allConfigOptionSelectors?: AcpConfigOptionSelector[];
+  /** Generic agents retain the probed controls so model validation can restore hidden selectors. */
+  unnormalizedConfigOptionSelectors?: AcpConfigOptionSelector[];
   /** Per-model reasoning-effort ladders when the capability source publishes them. */
   modelReasoningEfforts: Record<string, string[]> | undefined;
   /** Per-model effort and Fast support the adapter declared, when stored. */
@@ -181,6 +169,7 @@ export type ResolvedAcpSessionConfigSelection = {
   selectedModeId: string | null;
   selectedModelId: string | null;
   configOptionValues: Record<string, AcpConfigOptionValue>;
+  validationErrors: string[];
   /** Selectors re-normalized for the RESOLVED model; dispatch filtering must use these, not the candidate-model input ones. */
   configOptionSelectors: AcpConfigOptionSelector[];
 };
@@ -194,46 +183,25 @@ const resolveSelectField = (
   edit: { value: string | null } | undefined,
   runtimeValue: string | null | undefined,
   preferredValue: string | null | undefined,
-  options: AcpSessionSelectOption[],
-  defaultValue: string | null,
-  authority: AcpCapabilityAuthority
-): string | null => {
-  if (authority !== 'authoritative') {
-    // Non-authoritative capabilities take stored values at their word — an
-    // edit wins even when it is an explicit null ("cleared").
-    if (edit) return edit.value;
-    return runtimeValue ?? preferredValue ?? defaultValue;
-  }
-  if (options.length === 0) {
-    return null;
-  }
-  for (const candidate of [edit?.value, runtimeValue, preferredValue]) {
-    if (isSelectValueValid(options, candidate)) {
-      return candidate;
+  defaultValue: string | null
+): string | null => edit ? edit.value : runtimeValue ?? preferredValue ?? defaultValue;
+
+const resolveConfigOptionValues = (
+  inputs: AcpSessionConfigSelectionInputs,
+  selectors: AcpConfigOptionSelector[],
+  _capabilityAuthority: AcpCapabilityAuthority
+): Record<string, AcpConfigOptionValue> => {
+  const table = inputs.runtimePreferences?.configOptionValues;
+  const values = { ...(table ?? inputs.preferences.configOptionValues ?? {}) };
+  if (table === undefined && !inputs.inheritDefaults) {
+    for (const selector of selectors) {
+      if (!(selector.configId in values)) values[selector.configId] = selector.currentValue;
     }
   }
-  return isSelectValueValid(options, defaultValue) ? defaultValue : (options[0]?.value ?? null);
+  return { ...values, ...inputs.edits.configOptions };
 };
 
-/**
- * Stage 2 — resolve the effective selection against the capability catalog.
- *
- * Priority per field: user edit > runtime baseline > turn preference >
- * capability default. A present `runtimePreferences.configOptionValues` is a
- * FULL snapshot and owns the whole non-user config table — a key it omits is
- * gone, whether it came from a preference or a selector fallback (the exact
- * disagreement that used to oscillate). Authoritative capabilities validate
- * every value; non-authoritative ones keep stored values verbatim, unknown
- * keys included. Selector fallbacks seed only the no-runtime path.
- *
- * The MODEL resolves before the config table because model-dependent selectors
- * (Codex reasoning tiers) arrive normalized for the UNVALIDATED candidate
- * model. When authoritative validation moves the model — a capability refresh
- * removed the persisted/runtime one — that stale normalization would leave
- * extended reasoning values valid and dispatchable for a model that does not
- * support them, so `target` re-normalizes the selectors against the RESOLVED
- * model (the normalizer converges under repeated application).
- */
+/** Resolve candidates and report invalid concrete values without substitution. */
 export const resolveAcpSessionConfigSelection = (
   inputs: AcpSessionConfigSelectionInputs,
   selectorOptions: AcpSessionSelectorOptionsInput,
@@ -251,77 +219,68 @@ export const resolveAcpSessionConfigSelection = (
     declaredModelControls,
   } = selectorOptions;
 
-  const selectedModeId = resolveSelectField(
+  const selectedModeId = modeOptions.length === 0 && configOptionSelectors.some((option) => option.category === 'mode') ? null : resolveSelectField(
     edits.mode,
     runtimePreferences?.modeId,
     preferences.modeId,
-    modeOptions,
-    defaultModeId,
-    capabilityAuthority
+    inputs.inheritDefaults || modeOptions.length === 0 ? null : defaultModeId
   );
-  const selectedModelId = resolveSelectField(
+  const selectedModelId = modelOptions.length === 0 && configOptionSelectors.some((option) => option.category === 'model') ? null : resolveSelectField(
     edits.model,
     runtimePreferences?.modelId,
     preferences.modelId,
-    modelOptions,
-    defaultModelId,
-    capabilityAuthority
+    inputs.inheritDefaults || modelOptions.length === 0 ? null : defaultModelId
   );
+  // Generic agents send the model through its category-bound config id, never
+  // the dedicated modelId field. Validate it with the same table rules first;
+  // a full runtime snapshot must not resurrect preference keys it omitted.
+  const genericModel =
+    modelOptions.length === 0
+      ? configOptionSelectors.find(
+          (selector) => selector.category === 'model' && selector.type === 'select'
+        )
+      : undefined;
+  const modelValues = genericModel
+    ? resolveConfigOptionValues(inputs, [genericModel], capabilityAuthority)
+    : undefined;
+  const modelValue = genericModel && modelValues?.[genericModel.configId];
+  const effectiveModelId = genericModel
+    ? typeof modelValue === 'string'
+      ? modelValue
+      : typeof genericModel.currentValue === 'string'
+        ? genericModel.currentValue
+        : null
+    : selectedModelId;
   let selectors = configOptionSelectors;
   if (target) {
-    selectors = normalizePerModelSelectors(selectors, {
-      cliType: target.cliType,
-      agentType: target.agentType,
-      modelReasoningEfforts,
-      declaredModelControls,
-      selectedModelId,
-    });
+    selectors = normalizePerModelSelectors(
+      selectorOptions.unnormalizedConfigOptionSelectors ?? selectors,
+      {
+        cliType: target.cliType,
+        agentType: target.agentType,
+        modelReasoningEfforts,
+        declaredModelControls,
+        selectedModelId: effectiveModelId,
+      }
+    );
   }
 
-  const runtimeTable = runtimePreferences?.configOptionValues;
-  const baseTable = runtimeTable ?? preferences.configOptionValues ?? {};
+  const configOptionValues = resolveConfigOptionValues(inputs, selectors, capabilityAuthority);
 
-  /* A present runtime table owns the whole non-user KEY SET, not just the
-     values: a selector key it omits stays omitted (the agent did not report a
-     value for it) rather than being back-filled from the selector's fallback.
-     Selector fallbacks seed only the no-runtime path, preserving the old
-     reconcile behavior for a conversation the agent has not reported on yet. */
-  const configOptionValues: Record<string, AcpConfigOptionValue> = {};
-  if (capabilityAuthority !== 'authoritative') {
-    Object.assign(configOptionValues, baseTable);
-    if (!runtimeTable) {
-      for (const selector of selectors) {
-        if (!(selector.configId in configOptionValues)) {
-          configOptionValues[selector.configId] = selector.currentValue;
-        }
-      }
-    }
-    Object.assign(configOptionValues, edits.configOptions);
-  } else {
-    // Authoritative: only cataloged selectors exist and invalid stored values
-    // fall through the chain.
-    for (const selector of selectors) {
-      const configId = selector.configId;
-      const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
-      if (isConfigOptionValueValid(selector, editValue)) {
-        configOptionValues[configId] = editValue;
-        continue;
-      }
-      if (runtimeTable) {
-        const runtimeValue = runtimeTable[configId];
-        if (isConfigOptionValueValid(selector, runtimeValue)) {
-          configOptionValues[configId] = runtimeValue;
-        }
-        continue;
-      }
-      const preferredValue = preferences.configOptionValues?.[configId];
-      configOptionValues[configId] = isConfigOptionValueValid(selector, preferredValue)
-        ? preferredValue
-        : selector.currentValue;
+  const validationErrors: string[] = [];
+  if (capabilityAuthority === 'authoritative') {
+    if (selectedModeId !== null && !isSelectValueValid(modeOptions, selectedModeId)) validationErrors.push('mode');
+    if (selectedModelId !== null && !isSelectValueValid(modelOptions, selectedModelId)) validationErrors.push('model');
+    for (const [id, value] of Object.entries(configOptionValues)) {
+      const selector = selectors.find((entry) => entry.configId === id)
+        ?? selectorOptions.allConfigOptionSelectors?.find((entry) => entry.configId === id && (entry.category === 'mode' || entry.category === 'model'));
+      if (selector?.category === 'mode' && selectedModeId !== null) continue;
+      if (selector?.category === 'model' && selectedModelId !== null) continue;
+      if (!selector || !isConfigOptionValueValid(selector, value)) validationErrors.push(id);
     }
   }
-
   return {
+    validationErrors,
     selectedModeId,
     selectedModelId,
     configOptionValues,

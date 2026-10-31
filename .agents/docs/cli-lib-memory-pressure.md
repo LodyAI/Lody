@@ -67,3 +67,7 @@ because reclaim returns cache within milliseconds. Eviction is bounded per call
 
 The threshold is a safety MARGIN, never "what a turn needs"; do not phrase it that way
 to users.
+
+Eligibility read failures retain the affected session and are retried by later collections.
+Foreground reclamation waits at most ten seconds; the manager retains one shared operation
+until completion. A timed-out caller re-samples pressure before deciding whether to refuse a turn.

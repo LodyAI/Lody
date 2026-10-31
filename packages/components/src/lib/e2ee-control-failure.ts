@@ -16,6 +16,11 @@ import {
  *   verified (rollback or fork). Resettable only after support confirms the server.
  * - `local-corrupt`: an unreadable optional cache; deleting it is safe. */
 export type E2eeControlFailureKind =
+  | 'approval-required'
+  | 'local-identity'
+  | 'custody-locked'
+  | 'custody-indeterminate'
+  | 'custody-unavailable'
   | 'network'
   | 'auth'
   | 'server'
@@ -25,6 +30,25 @@ export type E2eeControlFailureKind =
   | 'progress-conflict'
   | 'local-corrupt';
 
+/** Content-free custody guidance shared by opening and pairing surfaces. */
+export const custodyFailureMessages = {
+  'custody-locked': 'e2ee.custody.locked.help',
+  'custody-indeterminate': 'e2ee.custody.indeterminate.help',
+  'custody-unavailable': 'e2ee.custody.unavailable.help',
+} as const;
+export function custodyFailureMessage(kind: E2eeControlFailureKind): string | undefined {
+  return kind in custodyFailureMessages
+    ? custodyFailureMessages[kind as keyof typeof custodyFailureMessages]
+    : undefined;
+}
+
+/** Project only the portable host's single typed failure, never a mixed cleanup cause. */
+export function personalHostFailureCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if (!('_tag' in error) || error._tag !== 'PersonalHostError') return undefined;
+  return 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
+
 export interface E2eeControlFailure {
   kind: E2eeControlFailureKind;
   code: string;
@@ -33,6 +57,7 @@ export interface E2eeControlFailure {
 
 const identityConflicts = new Set([
   'Genesis pin changed',
+  'Workspace identity must be checked again',
   'Workspace mode conflicts with encrypted evidence',
   'Immutable workspace mode changed',
   'Legacy workspace cannot become encrypted',
@@ -53,9 +78,38 @@ function serverCode(error: unknown): string | null {
 
 /** Classify a control-page failure. Unknown errors are treated as transport failures. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
+  // Inspect only a direct typed custody failure. A mixed close/operation Cause
+  // retains its owner and cannot be flattened into a recoverable display hint.
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'ClientCustodyError' &&
+    'reason' in error
+  ) {
+    const reason = error.reason;
+    if (reason === 'identity-lost') return { kind: 'approval-required', code: reason };
+    if (reason === 'corrupt') return { kind: 'custody-indeterminate', code: reason };
+    if (reason === 'locked' || reason === 'indeterminate' || reason === 'unavailable')
+      return { kind: `custody-${reason}`, code: reason };
+  }
+  const portable = personalHostFailureCode(error);
+  if (portable === 'identity-lost' || portable === 'approval-required')
+    return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';
-  if (message.includes('e2ee_local-evidence-conflict')) return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
-  if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict')) return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  // Main erased only this device's identity; the member pairs a new device key.
+  if (/\be2ee_device_revoked$/.test(message))
+    return { kind: 'approval-required', code: 'device-revoked' };
+  if (message.includes('e2ee_local-evidence-conflict'))
+    return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
+  if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
+    return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  const local =
+    /\be2ee_(permissions|identity-lost|corrupt|missing-binding|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
+      message
+    );
+  if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };
+
   if (error instanceof E2eeHistoryError) {
     if (error.kind === 'local-conflict')
       return {

@@ -35,6 +35,13 @@ product-window dispatch, preserving the explicit workspace. Provider import link
 the chosen installation and only stage user confirmation; never dispatch cloud auth or write
 Provider settings from a URL. Contract: [Magpie import](../../../../specs/magpie-provider-import.md). See [deep links](../../../../specs/deep-links.md).
 
+On a cross-channel desktop-lease conflict, hand a channel-neutral `session`,
+`chat/new` or `provider/import` destination to the running owner over the bounded
+lease before quitting. The owner acknowledges only after its launch handler is
+bound; a refused startup rejects the handoff instead of acknowledging an unconsumed
+buffer. Never hand off auth/cloud callbacks, and keep credentials and business
+modules unloaded.
+
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
 credentials (redaction is only a backstop), and trace CLI spawns without their
@@ -64,10 +71,14 @@ XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
 starts from application bootstrap. The explicit E2EE IPC methods create
 or reopen an account-bound local pending request and workspace runtime; they expose public state and room-bound content seal/open; device access credentials stay in main, with no arbitrary signing or content-key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
-The encrypted adapter enables only Meta, Loro session documents and the owning workspace/machine Flocks; unsupported rooms and plaintext side channels stay closed.
+The encrypted adapter enables Meta, Loro documents and the owning workspace/machine/Code Collab index and signal Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
+
+New content seals prefer installed current keys inside core, never renderer hints.
+Only genuine absence permits retained published keys within the durable fifteen-minute
+observation budget; exhaustion fails for retry. Keep sealed old frames and history. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 
 All installed/candidate binding fields are authenticated AAD and encrypted in the
 core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
@@ -94,3 +105,20 @@ activation belongs in this host workflow.
 The owning test uses synthetic authenticated safeStorage plus real crypto,
 filesystem and another OS process. It does not prove an OS keychain or all-platform
 packaging result; native safeStorage assurance needs an isolated platform run.
+
+`e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
+It grants no renderer reader/status/content capability. Preserve existing readers;
+release a cold temporary host before replying. `status` still requires a window reader.
+
+Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
+and every signed admission before I/O. Unknown outcomes cannot replace them;
+verify competing ledger bytes or a terminal server reservation before retirement.
+New accounts replay genuine history from their independently retained genesis;
+server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).
+
+Removal erases `member_joins` and `personal_join_histories`. All three join installs
+clear the removed marker only after verifying a different retained signing key.
+Only the exact server code `e2ee_device_revoked` (`E2eeDeviceRevokedError`) is a
+device revocation. It reuses the same device-bound receipt and cleanup, records its
+reason, and reports `e2ee_device_revoked` until a re-pair replaces the key.
+[Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).

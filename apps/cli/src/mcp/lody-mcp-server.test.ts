@@ -885,6 +885,75 @@ describe('session MCP input schemas', () => {
     expect(composeAgentRolePrompt('  ', 'Implement this.')).toBe('Implement this.');
   });
 
+  it('runs a remote Role in the Local Project linked GitHub repository only when the workspace enables it', () => {
+    const frozenInputConfig = {} as SessionTurnInputConfig;
+    const input = {
+      operationId: 'role-review-linked-1',
+      prompt: 'Review this.',
+      agentRoleId: 'reviewer',
+    } as const;
+    const requester = {
+      machineId: 'current-machine',
+      project: {
+        kind: 'local',
+        localProjectId: 'project-id',
+        branch: 'feature/unpushed',
+        githubRepoFullName: 'loro-dev/lody-oss',
+        useWorktree: true,
+      },
+    } as const;
+
+    const linked = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    // The local branch may exist only on the requester's Machine, so the
+    // clone starts from the repository's default branch.
+    expect(linked).toMatchObject({
+      machineId: 'remote-machine',
+      workContext: { kind: 'github', repo: 'loro-dev/lody-oss' },
+    });
+    expect(linked.workContext).not.toHaveProperty('branch');
+    expect(linked).not.toHaveProperty('useCurrentSessionAsParent');
+    expect(
+      buildMcpCreateOptions(linked, {
+        sessionId: 'current-session',
+        machineId: 'current-machine',
+      })
+    ).toMatchObject({ repo: 'loro-dev/lody-oss', machine: 'remote-machine' });
+
+    // An unlisted repository keeps the plain-chat placement.
+    const unlisted = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole()
+    ).input;
+    expect(unlisted).not.toHaveProperty('workContext');
+
+    // An explicit work context or a same-Machine Role is unaffected.
+    const explicit = resolveMcpSessionCreate(
+      { ...input, workContext: { kind: 'chat' } },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(explicit.workContext).toEqual({ kind: 'chat' });
+    const sameMachine = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      { ...requester, machineId: 'remote-machine' },
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(sameMachine.useCurrentSessionAsParent).toBe(true);
+    expect(sameMachine).not.toHaveProperty('workContext');
+  });
+
   it('requires only that the Role id exists in the workspace catalog', () => {
     expect(() =>
       resolveMcpSessionCreate(

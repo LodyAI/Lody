@@ -2,6 +2,10 @@ import type { Effect } from 'effect';
 import type { InboxScope } from './model';
 
 export interface InboxQueries {
+  activeExecution(
+    workspaceId: string,
+    sessionId: string
+  ): Effect.Effect<(InboxScope & { inputId: string; executionId: string }) | undefined, unknown>;
   preferredHumanInput(
     workspaceId: string,
     sessionId: string

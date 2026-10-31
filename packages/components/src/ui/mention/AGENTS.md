@@ -100,6 +100,7 @@ Shared mention primitive used by composer autocomplete surfaces.
   It docks above `[data-mention-frame]` (else the input) and caps to visible
   room without covering the frame or top inset.
   The docked strip is the only scroller: menus pass `docked` and drop their own.
+- Full-height composers use `mobilePanelPlacement="bottom"` (dock above footer).
 - Desktop content, the mobile strip and rows share `mention-surface.ts`: the
   `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
   StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row

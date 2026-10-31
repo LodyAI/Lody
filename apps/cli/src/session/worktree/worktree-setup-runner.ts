@@ -19,6 +19,37 @@ import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 
 const OUTPUT_TAIL_MAX_CHARS = 16_000;
+const HISTORY_EVENT_TIMEOUT_MS = 1_000;
+
+async function recordScriptEvent<T>(
+  options: {
+    sessionId: SessionId;
+    phase: WorktreeScriptPhase;
+    logger: Logger;
+    events?: WorktreeScriptEvents;
+  },
+  record: ((event: T) => Promise<void> | void) | undefined,
+  event: T
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => record?.call(options.events, event)),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('History recording timed out')),
+          HISTORY_EVENT_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch (error) {
+    options.logger.warn(
+      `[${options.sessionId}] Failed to record worktree ${options.phase}: ${formatErrorMessage(error)}`
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 /**
  * How a failed or timed-out script is ended: SIGTERM to the shell's whole
  * process group (every command the script started), then SIGKILL.
@@ -220,7 +251,7 @@ async function runWorktreeScript(options: {
   options.logger.info(
     `[${options.sessionId}] Running worktree ${options.phase} (${shell}) in ${options.workdir}`
   );
-  await options.events?.onStart?.({
+  await recordScriptEvent(options, options.events?.onStart, {
     phase: options.phase,
     shell,
     displayCommand: script,
@@ -391,7 +422,7 @@ async function runWorktreeScript(options: {
       };
 
       activeStep = step;
-      await options.events?.onStepStart?.({
+      await recordScriptEvent(options, options.events?.onStepStart, {
         phase: options.phase,
         shell,
         stepIndex,
@@ -409,7 +440,7 @@ async function runWorktreeScript(options: {
 
       lastStepExitStatus = exitStatus;
       const status = exitStatus.exitCode === 0 ? 'completed' : 'failed';
-      await options.events?.onStepEnd?.({
+      await recordScriptEvent(options, options.events?.onStepEnd, {
         phase: options.phase,
         stepIndex,
         status,
@@ -442,7 +473,7 @@ async function runWorktreeScript(options: {
         : Promise.resolve();
       void terminated
         .then(() =>
-          options.events?.onEnd?.({
+          recordScriptEvent(options, options.events?.onEnd, {
             phase: options.phase,
             status,
             exitStatus,
@@ -456,32 +487,19 @@ async function runWorktreeScript(options: {
           }
           resolve();
         })
-        .catch((historyError: unknown) => {
-          const normalizedError =
-            historyError instanceof Error ? historyError : new Error(String(historyError));
-          if (error) {
-            options.logger.warn(
-              `[${options.sessionId}] Failed to record worktree ${options.phase} completion: ${normalizedError.message}`
-            );
-            reject(error);
-            return;
-          }
-          reject(normalizedError);
-        });
+        .catch(reject);
     };
 
     const timeout = setTimeout(() => {
       const error = new Error(`Worktree ${options.phase} timed out after ${timeoutMs}ms.`);
       if (activeStep) {
         flushStepBuffers(activeStep);
-        void Promise.resolve(
-          options.events?.onStepEnd?.({
-            phase: options.phase,
-            stepIndex: activeStep.index,
-            status: 'failed',
-            exitStatus: { signal: 'SIGTERM' },
-          })
-        ).catch(() => {});
+        void recordScriptEvent(options, options.events?.onStepEnd, {
+          phase: options.phase,
+          stepIndex: activeStep.index,
+          status: 'failed',
+          exitStatus: { signal: 'SIGTERM' },
+        }).catch(() => {});
         activeStep.reject(error);
       }
       settle('failed', error, { signal: 'SIGTERM' });
@@ -517,14 +535,12 @@ async function runWorktreeScript(options: {
         const error = new Error(
           `Worktree ${options.phase} shell exited before command completed: ${activeStep.command}`
         );
-        void Promise.resolve(
-          options.events?.onStepEnd?.({
-            phase: options.phase,
-            stepIndex: activeStep.index,
-            status: 'failed',
-            exitStatus: childExitStatus,
-          })
-        ).catch(() => {});
+        void recordScriptEvent(options, options.events?.onStepEnd, {
+          phase: options.phase,
+          stepIndex: activeStep.index,
+          status: 'failed',
+          exitStatus: childExitStatus,
+        }).catch(() => {});
         activeStep.reject(error);
         activeStep = null;
       }

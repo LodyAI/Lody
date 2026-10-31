@@ -54,6 +54,15 @@ export const getAcpRuntimeConfigPatch = (
   notification: AcpSessionNotification
 ): SessionAcpRuntimeConfigPatch | null => {
   const update = notification.update;
+  if (update.sessionUpdate === 'available_commands_update') {
+    return {
+      acpSessionId: notification.sessionId as ACPSessionId,
+      availableCommands: update.availableCommands.map(({ name, description }) => ({
+        name,
+        description: description ?? undefined,
+      })),
+    };
+  }
   if (update.sessionUpdate === 'current_mode_update') {
     return {
       acpSessionId: notification.sessionId as ACPSessionId,

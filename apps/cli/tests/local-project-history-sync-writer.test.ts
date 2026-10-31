@@ -234,7 +234,7 @@ describe('history import through the real SessionDocument writer', () => {
     expect(meta.agentConfigId).toBe(config.id);
     expect(meta.acpSessionId).toBeUndefined();
     expect(resolveSessionAcpTargetId(meta)).toBe(acpSessionId);
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'source-model' });
+    expect(resolveSessionAcpRuntimeConfig(doc.mirror?.getState().acpRuntimeConfig)).toBeNull();
     expect((await h.importTurns(2, 'next-model', selected)).summary.refreshed).toBe(1);
     expect(h.docs.size).toBe(1);
     expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual(config.env);
@@ -250,7 +250,7 @@ describe('history import through the real SessionDocument writer', () => {
     ).toBe(1);
     expect(h.docs.size).toBe(2);
     expect((await h.getMeta(sessionId)).agentConfigId).toBe(config.id);
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'next-model' });
+    expect(resolveSessionAcpRuntimeConfig(doc.mirror?.getState().acpRuntimeConfig)).toBeNull();
   });
 
   it('repairs an unbound legacy import without duplicating or rewriting its history', async () => {
@@ -306,20 +306,16 @@ describe('history import through the real SessionDocument writer', () => {
     }
   );
 
-  it("keeps the source session's model as the composer baseline across import and refresh", async () => {
+  it("does not publish imported model history as confirmed live configuration", async () => {
     const h = await createHarness();
     await h.importTurns(1, 'model-a');
     const { doc } = h.getOnlyDoc();
     const baselineModel = () =>
-      resolveSessionAcpRuntimeConfig(
-        readSessionHistory(doc.sessionData.history),
-        [],
-        doc.mirror?.getState().acpRuntimeConfig
-      )?.modelId;
-    expect(baselineModel()).toBe('model-a');
+      resolveSessionAcpRuntimeConfig(doc.mirror?.getState().acpRuntimeConfig)?.modelId;
+    expect(baselineModel()).toBeUndefined();
 
     expect((await h.importTurns(2, 'model-b')).summary.refreshed).toBe(1);
-    expect(baselineModel()).toBe('model-b');
+    expect(baselineModel()).toBeUndefined();
   });
 
   it('refreshes a bound session through its own Provider after the sole one changes', async () => {

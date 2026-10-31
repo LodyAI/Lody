@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { createStore, Provider } from 'jotai';
-import type { ScheduleRegistryRow } from '@lody/shared';
+import type { ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
 import en from '../../../locales/en.json';
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
 import { navigationSidebarVisibleAtom } from '../src/atoms/layout-state';
@@ -74,7 +73,8 @@ describe('schedule list rows', () => {
     onToggle: vi.fn(),
     onRun: vi.fn(),
     onDelete: vi.fn(),
-    onColumnWidthsChange: vi.fn(),
+    onClearEnded: vi.fn(),
+    onOpenSession: vi.fn(),
   };
   beforeAll(async () => {
     if (!i18next.isInitialized)
@@ -112,6 +112,59 @@ describe('schedule list rows', () => {
     )!;
   const buttonIn = (row: Element, label: string) =>
     row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+  it.each([false, true])(
+    'keeps saved rows visible with a retry action (retrying=%s)',
+    (retrying) => {
+      const retry = vi.fn();
+      act(() =>
+        root.render(
+          <ScheduleListView
+            rows={[timed]}
+            runtimes={[]}
+            ready
+            error="REGISTRY_UNAVAILABLE"
+            retrying={retrying}
+            onRetry={retry}
+            {...handlers}
+          />
+        )
+      );
+      expect(rowOf('Nightly review')).toBeTruthy();
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'Showing saved tasks'
+      );
+      const button = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === (retrying ? 'Retrying…' : 'Retry')
+      )!;
+      expect(button.disabled).toBe(retrying);
+      act(() => button.click());
+      expect(retry).toHaveBeenCalledTimes(retrying ? 0 : 1);
+    }
+  );
+
+  it('offers retry instead of claiming an unavailable registry is empty', () => {
+    const retry = vi.fn();
+    act(() =>
+      root.render(
+        <ScheduleListView
+          rows={[]}
+          runtimes={[]}
+          ready
+          error="REGISTRY_UNAVAILABLE"
+          onRetry={retry}
+          {...handlers}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Schedules could not be loaded.');
+    expect(container.textContent).not.toContain('No schedules yet');
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Retry'
+    )!;
+    act(() => button.click());
+    expect(retry).toHaveBeenCalledOnce();
+  });
 
   it.each([
     ['America/Los_Angeles', '2:21 AM'],
@@ -175,66 +228,142 @@ describe('schedule list rows', () => {
     expect(handlers.onDelete).toHaveBeenCalledWith(timed);
   });
 
-  it('resizes a column from the header with the keyboard, within bounds', () => {
-    const handle = container.querySelector<HTMLElement>(
-      `[role="separator"][aria-label="Resize ${en['schedules.column.name']}"]`
-    )!;
-    act(() => {
-      handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    });
-    expect(handlers.onColumnWidthsChange).toHaveBeenLastCalledWith({
-      name: 316,
-      frequency: 150,
-      next: 140,
-    });
-    for (let i = 0; i < 40; i += 1)
-      act(() => {
-        handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-      });
-    expect(handle.getAttribute('aria-valuenow')).toBe('72');
+  const runtime = (row: ScheduleRegistryRow, extra: Partial<ScheduleRuntimeRow> = {}) => ({
+    scheduleId: row.scheduleId,
+    machineId: row.machineId,
+    activationId: row.activationId,
+    observedDefinitionFingerprint: row.definitionFingerprint,
+    updatedAt: 0,
+    ...extra,
   });
-
-  it('closes the open schedule on a blank click, but not from a row, a control or a popup', () => {
-    const onBlankClick = vi.fn();
-    const portal = document.createElement('div');
-    document.body.append(portal);
+  const message = (scheduleId: string, title: string): ScheduleRegistryRow =>
+    ({
+      ...base,
+      scheduleId,
+      title,
+      scheduledMessage: true,
+      trigger: { kind: 'once', at: '2026-09-06T10:00:00.000Z' },
+      destination: { kind: 'existing_session', sessionId: 'chat-1' },
+    }) as ScheduleRegistryRow;
+  const sent = message('sent', 'Ask for the CI summary');
+  const pending = message('pending', 'Remind me to ship');
+  const paused = {
+    ...timed,
+    scheduleId: 'p',
+    title: 'Weekly report',
+    enabled: false,
+  } as ScheduleRegistryRow;
+  const blocked = {
+    ...timed,
+    scheduleId: 'b',
+    title: 'Release notes',
+    projectKey: 'loro-dev/lody',
+  } as ScheduleRegistryRow;
+  const renderList = (props: Partial<Parameters<typeof ScheduleListView>[0]> = {}) =>
     act(() =>
       root.render(
         <ScheduleListView
-          rows={[manual, timed]}
-          runtimes={[]}
+          // Filters are initial state: a new key starts a fresh list.
+          key={JSON.stringify(props.initialFilters ?? null)}
+          rows={[manual, timed, paused, blocked, sent, pending]}
+          runtimes={[
+            runtime(timed, { nextScheduledAt: Date.parse('2026-09-06T13:00:00Z') }),
+            runtime(blocked, { queueState: 'blocked', blockedCode: 'PERMISSION_UNAVAILABLE' }),
+            runtime(sent, {
+              messageState: 'sent',
+              lastDispatch: {
+                scheduledFor: 0,
+                dispatchedAt: Date.parse('2026-09-06T00:00:00Z'),
+                sessionId: 'chat-1',
+              },
+            }),
+            runtime(pending, { messageState: 'pending' }),
+          ]}
           ready
           now={NOW}
-          contextForRow={context}
+          contextForRow={(row) => ({
+            ...context(),
+            project: row.projectKey ?? null,
+            chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+          })}
           {...handlers}
-          selectedId="t"
-          onBlankClick={onBlankClick}
-          renderBody={(table) => (
-            <div data-testid="split">
-              {table}
-              <div data-schedule-detail="">
-                <span data-testid="detail-text">Editor</span>
-              </div>
-              {/* A menu or select popup: portalled out, yet its clicks bubble here. */}
-              {createPortal(<span data-testid="popup">Option</span>, portal)}
-            </div>
-          )}
+          {...props}
         />
       )
     );
-    const click = (element: Element) =>
-      act(() => {
-        element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-    click(rowOf('Nightly review').querySelector('span')!);
-    click(container.querySelector('input')!);
-    click(container.querySelector('[data-testid="detail-text"]')!);
-    click(portal.querySelector('[data-testid="popup"]')!);
-    expect(onBlankClick).not.toHaveBeenCalled();
-    click(container.querySelector('header')!);
-    click(container.querySelector('[data-testid="split"]')!);
-    expect(onBlankClick).toHaveBeenCalledTimes(2);
-    portal.remove();
+  const titles = () =>
+    [...container.querySelectorAll('[data-schedule-row]')].map(
+      (row) => row.querySelector('button span:nth-child(2)')?.textContent
+    );
+
+  it('states each row’s status in words, separating tasks from scheduled messages', () => {
+    renderList();
+    expect(rowOf('Weekly report').textContent).toContain(en['schedules.paused']);
+    expect(rowOf('Release notes').textContent).toContain(en['schedules.state.blocked']);
+    expect(rowOf('Ask for the CI summary').textContent).toContain(en['schedules.status.sent']);
+    expect(rowOf('Nightly review').textContent).toContain('Runs ');
+    const headings = [...container.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings).toEqual([en['schedules.section.tasks'], en['schedules.section.messages']]);
+    // Only scheduled messages explain themselves: they send once.
+    const infos = [...container.querySelectorAll('button[aria-label^="What are"]')].map((b) =>
+      b.getAttribute('aria-label')
+    );
+    expect(infos).toEqual([`What are ${en['schedules.section.messages']}?`]);
+  });
+
+  it('filters by status and project, and sorts by name', () => {
+    renderList({ initialFilters: { status: 'paused' } });
+    expect(titles()).toEqual(['Weekly report']);
+    renderList({ initialFilters: { project: { kind: 'project', name: 'loro-dev/lody' } } });
+    expect(titles()).toEqual(['Release notes']);
+    renderList({ initialFilters: { sort: 'name', project: { kind: 'none' }, status: 'running' } });
+    expect(titles()).toEqual(['Deploy checklist', 'Nightly review', 'Remind me to ship']);
+  });
+
+  it('clears only finished scheduled messages, and opens a message’s chat from its row', () => {
+    renderList();
+    const clear = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.startsWith('Clear finished')
+    )!;
+    act(() => clear.click());
+    expect(handlers.onClearEnded).toHaveBeenCalledWith([sent]);
+    const chat = rowOf('Remind me to ship').querySelector<HTMLButtonElement>(
+      'button[title="Open chat “CI triage”"]'
+    )!;
+    act(() => chat.click());
+    expect(handlers.onOpenSession).toHaveBeenCalledWith('chat-1');
+    expect(handlers.onOpen).not.toHaveBeenCalled();
+  });
+
+  it('deletes a finished message from its row without opening it', () => {
+    renderList();
+    act(() => buttonIn(rowOf('Ask for the CI summary'), en['schedules.delete'])!.click());
+    expect(handlers.onDelete).toHaveBeenCalledWith(sent);
+    expect(buttonIn(rowOf('Remind me to ship'), en['schedules.delete'])).toBeNull();
+  });
+
+  it('shows a scheduled message’s text instead of its stored title', () => {
+    renderList({
+      contentForRow: (row) =>
+        row.scheduleId === 'pending' ? 'Actually review the release notes' : undefined,
+    });
+    const row = rowOf('Actually review the release notes');
+    expect(row.textContent).not.toContain('Remind me to ship');
+    expect(row.querySelector('[title="Actually review the release notes"]')).not.toBeNull();
+  });
+
+  it('shows a scheduled message at the viewer’s clock, not the machine clock', () => {
+    renderList({
+      viewerTimeZone: 'Asia/Shanghai',
+      contextForRow: (row) => ({
+        ...context(),
+        project: row.projectKey ?? null,
+        timeZone: 'UTC',
+        chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+      }),
+    });
+    expect(rowOf('Remind me to ship').textContent).toContain('6:00 PM');
+    expect(rowOf('Nightly review').textContent).toContain('Runs ');
   });
 
   it('clears the status bar on the edge-to-edge list and stays flush when embedded', () => {
@@ -278,6 +407,9 @@ describe('schedule list rows', () => {
     expect(container.querySelector('header')).toBeNull();
     expect(container.textContent).toContain('Nightly review');
     expect(container.textContent).not.toContain('Deploy checklist');
+    expect(container.querySelector('[data-schedule-row]')?.textContent).toContain('MacBook Pro');
+    expect(buttonIn(rowOf('Nightly review'), 'Pause')).not.toBeNull();
+    expect(container.querySelector('[role=separator]')).toBeNull();
   });
 });
 
@@ -374,5 +506,29 @@ describe('schedule list sidebar chrome', () => {
     expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
       false
     );
+  });
+});
+
+describe('run history of a schedule that posts into one chat', () => {
+  it('lists the chat’s turns stamped with this schedule, newest first, with their reply state', async () => {
+    const { pickScheduleChatRuns } =
+      await import('../src/components/schedules/use-schedule-chat-runs');
+    const turn = (id: string, role: 'user' | 'assistant', extra: Record<string, unknown> = {}) =>
+      ({ id, role, timestamp: `2026-09-0${id.slice(-1)}T00:00:00Z`, ...extra }) as never;
+    const runs = pickScheduleChatRuns(
+      [
+        turn('u1', 'user', { scheduleRun: { scheduleId: 'journal', turnId: 'u1', title: 'J' } }),
+        turn('a1', 'assistant', { userTurnId: 'u1', endedAt: 1 }),
+        turn('u2', 'user'),
+        turn('u3', 'user', { scheduleRun: { scheduleId: 'other', turnId: 'u3', title: 'O' } }),
+        turn('u4', 'user', { scheduleRun: { scheduleId: 'journal', turnId: 'u4', title: 'J' } }),
+        turn('a4', 'assistant', { userTurnId: 'u4' }),
+      ],
+      'journal'
+    );
+    expect(runs.map((run) => [run.turnId, run.state])).toEqual([
+      ['u4', 'running'],
+      ['u1', 'done'],
+    ]);
   });
 });

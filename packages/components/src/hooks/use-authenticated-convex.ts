@@ -13,8 +13,12 @@ export const AuthenticatedConvexContext = createContext<AuthenticatedConvexConte
   null
 );
 
+export function useOptionalAuthenticatedConvex(): AuthenticatedConvexContextValue | null {
+  return useContext(AuthenticatedConvexContext);
+}
+
 export function useAuthenticatedConvex(): AuthenticatedConvexContextValue {
-  const context = useContext(AuthenticatedConvexContext);
+  const context = useOptionalAuthenticatedConvex();
   if (!context) {
     throw new Error('useAuthenticatedConvex must be used within an AuthenticatedConvexProvider');
   }

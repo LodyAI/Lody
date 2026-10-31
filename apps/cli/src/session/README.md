@@ -131,6 +131,8 @@ A notification failure cannot replay Agent execution.
   worktree tree against Session state: archived or deleted root Sessions lose their
   directory (after a backup commit, branch kept); contract in
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
+  It also cleans `<data>/chats/<rootSessionId>`: deleted roots remove recursively,
+  archived roots remove only empty directories, with no scripts or Git operations.
 
 ## Background
 
@@ -226,6 +228,18 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
+Workspace-reading diff/gap-fill, Git flags, branch/PR statistics and Code Collab scans finish before release under one 20-second budget shared by normal, error, cancellation and yielded finalization; Stop cannot restart it. Generated-image waits use this deadline and shutdown signal too; uploads continue as owned work and write only to their captured turn. Shutdown also skips error-path diff/usage. After six seconds, shutdown alone directly writes failed Inbox receipts for remaining owners and clears live IDs, without waiting for finalization or replaying input. Timeout or shutdown cancels the attempt and skips remaining steps; late results cannot publish into a successor.
+Presentation, batch-history projection, completion analytics and owned image uploads may follow release; yielded bookkeeping retains its 30-second upper wait. Failed release detaches the old Agent and admits fresh input without replay.
+The [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md) owns the current policy; the [original release fix](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md) explains unconditional release after failure classification.
+
+Stop reports a rejected provider cancellation, expiration of that five-second drain, and
+failed process termination through durable `agent_warning` notices. The execution runtime
+deduplicates each phase for its assistant turn and ignores a cancellation rejection from
+an already-released runtime. MessageHandler assigns a turn/phase notice identity rather
+than deduplicating by error text across the whole conversation. Notice persistence never
+delays escalation or raw-request release; the warning does not finalize history or change
+dispatch ownership. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-stop-failure-notices.md).
+
 Cancellation separately selects the pre-prompt process lifetime. Stop and access revocation
 discard it; Edit & Resend keeps it because preparation has already created the replacement
 inside that same ACP process. Creation/restoration retain their cancellation fences until
@@ -286,7 +300,7 @@ turn under the rewrite lease), the entry is dead:
 
 - Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
   the entry. Stop still does not run the queue.
-- A dispatch that settles its input before the prompt (Inbox blocked, input already ended)
+- A dispatch that settles its input before the prompt (interrupted Inbox input already ended)
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
@@ -876,14 +890,9 @@ payload. The watcher waits for matching control data and checks control arrivals
 its separate cancellation chain. RPC uses the same ID, so a late fallback cannot
 pause fresh input again; a second click gets a new ID even for the same target turn.
 
-The Session sandbox persists incomplete identity before spawn and continuously adds
-ACP/terminal process roots. Execution retains every attached Session owner until release,
-including replacements within one turn. Restart probes require explicit completeness and
-absence of every root/group; an initial snapshot alone is insufficient.
-A child error with no PID proves that spawn created no process: it still rejects
-the command, but does not make resource identity permanently incomplete. This
-exception matches the actual child error; journal, setup and cleanup failures
-remain uncertain, as do other acquisitions already marked uncertain.
+Execution retains a terminate handle for every attached Session owner, including
+replacements within one turn, so bounded background cleanup can reach the old process
+trees. Process identities are not journaled; cleanup never gates the next input.
 
 Native commit observation has one acknowledged callback in flight per pooled client;
 stream identities and changed index keys coalesce with bounded memory. The owner watches
@@ -929,14 +938,22 @@ milestones, not periodic keepalives. Up to four independent checkouts run togeth
 selected submodules wait for their parent, and siblings sharing parent Git config
 are serialized. Branch receipts publish serially, and failures drain started work
 before releasing the Project owner. Selected members initialize non-recursively
-with their own credentials; remaining submodules initialize afterward with four Git
-fetch jobs per command. Complete standalone local copies lend objects via `--reference`
-and `--dissociate`, so source GC cannot invalidate a checkout. Partial clones, shallow
-copies and linked worktrees use ordinary cloning instead; preparation never hydrates
-the source. Remaining submodule initialization follows gitlinks in the current index,
-ignoring residual `.gitmodules` entries. Archive skips unmaterialized empty selected
+with their own credentials. Remaining submodules borrow objects from the corresponding
+checkout inside a local parent's original tree when its remote identity matches and
+its object store is complete. References are per repository and use `--dissociate`;
+parent and child clones never share one reference argument. Unsupported or absent
+sources use ordinary recursive initialization with four Git fetch jobs per command.
+Partial clones, shallow copies and linked worktrees cannot lend objects; unselected
+sources with alternates or symlinked paths are also skipped. Preparation never
+hydrates or changes the source. Existing checkouts keep their HEAD and local edits;
+missing descendants are revisited after an interrupted preparation. Selected Members
+are excluded from their parent's traversal and initialize under their own owner.
+Remaining initialization follows current index gitlinks, ignoring residual
+`.gitmodules` entries. Archive skips unmaterialized empty selected
 submodules and verifies that populated members are independent checkouts before backup;
 unknown local content is retained. Setup retains the prior serial traversal order,
 including parents before children.
 The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
 records the source-layout and incomplete-startup recovery boundaries.
+
+Failed release detaches the old Agent and returns its slot; see the [Inbox availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).

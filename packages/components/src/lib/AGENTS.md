@@ -1,10 +1,10 @@
 # Shared UI helpers and file surfaces
 
-Rules bind callers too.
-Background: [components](../../../../.agents/docs/components-package.md),
-[files](../../../../.agents/docs/components-file-paths.md).
+Rules bind callers too. [Background](../../../../.agents/docs/components-package.md).
 
+- Direct ordinary attachment uploads require trusted mode admission for the current account and workspace before sending source bytes; a provisional runtime is not that proof. Protected attachment failures never enable ordinary HTTP or plaintext local fallback.
 - Send/RPC await local commits, never Repo flush. Save `humanInputReceipts` before activation; RPC is redundant.
+- Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
 
@@ -22,6 +22,9 @@ Background: [components](../../../../.agents/docs/components-package.md),
 
 ## Crash recovery and diagnostics
 
+- E2EE repair archives originals and uses account-bound native reads; keep conflicts.
+  Readable evidence skips native work. Isolate bad intents.
+
 - `ErrorBoundary`'s fallback shows the real error and one-click full-report copy on every
   build, details visible (`showErrorDetails` opts out); `error-boundary-report.ts` builds it.
 - Error/not-found screens use `components/status-page.tsx`; pre-React `boot-failure.ts`
@@ -34,6 +37,11 @@ Background: [components](../../../../.agents/docs/components-package.md),
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous
   storage BEFORE the flag. Record a clear's result; never re-run it unasked.
+- Ordinary IndexedDB cache clearing deletes only the known rebuildable cache names
+  and replica/cursor families in `clear-local-cache.ts`. Apply that policy to
+  enumerated and caller-supplied names alike. Preserve unknown databases, custody,
+  installation receipts and unresolved originals; new caches need an explicit entry.
+  Reserve disposable replica/cursor name families for caches, never durable host stores.
 - Cache clearing uses a localStorage DELETE list, never a keep-allowlist. Include
   connection caches (Streams JWT/gateway, cursor-bypass, workspace-info) and new
   `lody:*` cache keys; retain auth tokens and preferences.
@@ -60,6 +68,10 @@ Background: [components](../../../../.agents/docs/components-package.md),
   or Flock publish. Electron verifies disk machine identity and reads via local IPC,
   independent of daemon/index readiness. Unknown targets never fall back to Streams;
   confirmed remote targets retain restricted, bounded `file/preview`.
+- Encrypted remote file roles come from the verified ledger status, never the organization
+  listing. Refuse methods outside the closed read list for non-writers, and every remote file
+  method without host feature RPC, before signing, with non-retryable copy; the receiving
+  machine still authorizes. [Decision](../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md#browser-and-mobile-consumers).
 - Small local text may enter the full-document editor/cache. `paged-text` is a separate
   readonly snapshot with bounded random reads; never seed the save cache, executable
   HTML, rendered Markdown/SVG, or full-document copy/download from it. Hidden paged
@@ -81,14 +93,16 @@ Background: [components](../../../../.agents/docs/components-package.md),
 - Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
   transfer limits; stage isolated cache files and clean up after handoff, failure, or
   cancellation. Report cancellation separately; retain the preview and selection.
+- Before changing conversation Markdown/PNG exports, read the
+  [conversation export rules](../AGENTS.md#conversation-exports).
 
 ## File identity, caching, and errors
 
 - `session-file-open-target.ts` owns normalization: canonical paths travel verbatim;
   Markdown hrefs decode URL/line suffixes and host roots; local Electron preserves
-  other worktrees. Relative links negotiate `markdownFileLinks` candidates; multiple
-  matches require a choice, unsupported daemons open as before. Pin the selected
-  canonical path; no short-link cache. Anchors remain fields.
+  other worktrees. Conversation links use `resolveDirectMarkdownFileOpenTarget`
+  to retain explicit absolute or index-confirmed paths without discovery. Copy
+  preserves the authored path independently of resolution. Anchors remain fields.
 - Cache resolved opens under BOTH `response.path` (the save identity) and the requested
   path (viewer/change-check identity). After save, refresh EVERY `cacheKeys` alias.
   Preview reads are case-tolerant; `save-text` writes are case-exact.

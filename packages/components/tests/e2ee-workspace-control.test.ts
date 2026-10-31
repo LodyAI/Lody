@@ -1,6 +1,8 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
+import { ClientCustodyError } from '@lody/e2ee-core/services';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
   hashRecordBytes,
@@ -93,7 +95,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -383,6 +385,55 @@ const failureOf = (run: () => unknown) => {
   throw new Error('expected a failure');
 };
 
+it.each(['identity-lost', 'approval-required'] as const)(
+  'projects the portable %s outcome into desktop approval guidance',
+  (code) => {
+    expect(classifyE2eeControlFailure(new PersonalHostError({ code }))).toEqual({
+      kind: 'approval-required',
+      code,
+    });
+  }
+);
+
+it('routes an authenticated revocation of this device to re-pairing guidance', () => {
+  expect(
+    classifyE2eeControlFailure(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked")
+    )
+  ).toEqual({ kind: 'approval-required', code: 'device-revoked' });
+});
+
+it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+  'keeps the typed custody %s outcome distinct from a network failure',
+  (reason) => {
+    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
+      kind: `custody-${reason}`,
+      code: reason,
+    });
+  }
+);
+it.each(['identity-lost', 'corrupt'] as const)(
+  'preserves explicit recovery guidance for custody %s',
+  (reason) => {
+    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
+      kind: reason === 'identity-lost' ? 'approval-required' : 'custody-indeterminate',
+      code: reason,
+    });
+  }
+);
+it('does not infer custody recovery from an error message or unwrap a mixed runtime failure', () => {
+  expect(classifyE2eeControlFailure(new Error('LOCKED indeterminate'))).toMatchObject({
+    kind: 'network',
+  });
+  expect(
+    classifyE2eeControlFailure({
+      _tag: 'PersonalRuntimeFailure',
+      code: 'runtime-failed',
+      cause: { reasons: [new ClientCustodyError({ reason: 'locked' }), new Error('close failed')] },
+    })
+  ).toMatchObject({ kind: 'network' });
+});
+
 describe('encrypted workspace recovery classification', () => {
   it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {
     const fixture = historyFixture();
@@ -437,6 +488,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {

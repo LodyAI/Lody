@@ -1,5 +1,11 @@
 import {
   LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  LocalE2eeResetRequestSchema,
+  LocalE2eeResetResponseSchema,
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest,
+  type LocalE2eeResetResponse,
   LocalE2eePairingRequestSchema,
   LocalE2eePrepareReplySchema,
   LocalE2eeActivateResponseSchema,
@@ -50,6 +56,7 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
 
 export interface LocalSessionControlConfig {
   dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
+  dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
   dispatchE2eePairing?: (
     message: LocalE2eePairingRequest
   ) => Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse>;
@@ -176,7 +183,7 @@ async function handleSessionControlRequest(
     }
 
     config.logger.debug(
-      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${message.workspaceId} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
+      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${'workspaceId' in message ? message.workspaceId : '-'} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
     );
     return handlerResponse(200, { ok: true, responses });
   } catch (error) {
@@ -335,6 +342,33 @@ export class LocalControlHandler {
         }
       })();
     }
+    if (request.path === LOCAL_E2EE_RESET_PATH) {
+      return (async () => {
+        const parsed = LocalE2eeResetRequestSchema.safeParse(
+          (() => {
+            try {
+              return JSON.parse(request.rawBody);
+            } catch {
+              return null;
+            }
+          })()
+        );
+        if (!parsed.success)
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'e2ee_machine_mismatch' });
+        if (!this.config.dispatchE2eeReset)
+          return handlerResponse(501, { ok: false, error: 'e2ee_reset_unavailable' });
+        try {
+          const result = LocalE2eeResetResponseSchema.parse(
+            await this.config.dispatchE2eeReset(parsed.data)
+          );
+          return handlerResponse(200, result);
+        } catch {
+          return handlerResponse(503, { ok: false, error: 'e2ee_reset_unavailable' });
+        }
+      })();
+    }
     if (request.path === LOCAL_E2EE_PAIRING_PATH) {
       return (async () => {
         let raw: unknown;
@@ -359,8 +393,17 @@ export class LocalControlHandler {
           if (!valid.success)
             return handlerResponse(500, { ok: false, error: 'e2ee_invalid_response' });
           return handlerResponse(200, valid.data);
-        } catch {
-          return handlerResponse(503, { ok: false, error: 'e2ee_pairing_unavailable' });
+        } catch (error) {
+          const code =
+            error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+          const safe = LocalE2eeRecoveryFailureSchema.safeParse({
+            ok: false,
+            error: `e2ee_${code}`,
+          });
+          return handlerResponse(
+            503,
+            safe.success ? safe.data : { ok: false, error: 'e2ee_pairing_unavailable' }
+          );
         }
       })();
     }

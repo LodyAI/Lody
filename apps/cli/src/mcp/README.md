@@ -1,5 +1,37 @@
 # MCP transport and orchestration background
 
+## Local authorization
+
+Workspace MCP definitions remain shared. Authentication values are local to the
+executing machine and account: `authentication/service.ts` owns OAuth attempts, refresh
+serialization, and session relay scopes; `authentication/io.ts` adapts the MCP SDK, browser
+callback and HTTP streams. The deprecated Promise facade connects the existing
+SessionManager and local Machine RPC to this native Effect service. Shutdown stops
+sessions before closing the service.
+
+The system credential store uses `@napi-rs/keyring` (Keychain, Credential Manager,
+or Linux Secret Service), with no plaintext fallback. Discovery checks an actual
+Bearer challenge and validates protected-resource and issuer metadata before
+reporting OAuth support. Authorization opens only after a user action, uses PKCE,
+and discards state/code/verifier on completion, cancellation or ten-minute expiry.
+Provider consent and secure-store availability remain provider/host dependent.
+
+Selected HTTP servers receive per-runtime loopback connections. Agents get a local
+capability rather than upstream credentials; Linux also verifies socket ownership.
+Unlike the built-in Lody MCP host, this relay preserves upstream GET/SSE streaming.
+It forwards only MCP protocol headers, rejects redirects, bounds requests/queues,
+and sanitizes failures. Session retirement and sign-out close these connections.
+Stdio credentials go only to the selected local process environment. A requester
+change retires an MCP-bearing Session before another user can reuse its processes.
+
+Manual token/header/env values are split before shared writes. Exact `${VAR}`
+references may remain shared and resolve only from the executing owner's environment.
+Legacy shared values are stripped on read, without silent credential import or a
+claim to erase old CRDT history. Existing shared credentials require explicit
+reconfiguration. Sign-out forgets the local authorization; provider-side consent
+revocation is not implemented. The [decision and validation limits](../../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md)
+record synthetic coverage and unverified host/provider behavior.
+
 Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
 and lifecycle decisions behind them; it does not introduce additional requirements.
 
@@ -130,6 +162,17 @@ to select its project. See [session relations](../../../../specs/session-relatio
   and the local catalog could not validate a selection. It does not prove that an id is
   valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
   failures and explicit validation errors retain their existing non-retryable classification.
+- Daemon-hosted Session and catalog reads, including `lody_session_create_options`,
+  `lody_session_list`, and `lody_session_status_many`, use the daemon replica. They do not
+  call Streams for the request. Background catalog sync stays with the daemon. Create
+  options return local machines, agent configs, projects, and the current work context
+  when those rows are present. While the daemon baseline is not ready, an empty
+  agent-config catalog or a missing current or queried selection is retryable
+  `SYNC_UNAVAILABLE`, so absence is not reported as a definitive empty result. A ready
+  baseline may return an empty catalog. Role validation, explicit fresh-catalog discovery,
+  and Operation acceptance keep their existing freshness requirements. Authorization and
+  three-state presence are unchanged. Standalone CLI reads keep their own sync and
+  `--offline` contracts.
 - Without an active Operation handle, an Agent must wait at least 5 seconds between calls
   and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
   Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.

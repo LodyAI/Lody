@@ -18,11 +18,13 @@ PR: https://github.com/LodyAI/Lody/pull/1872
 只有用户主动打开面板后，它才可能遮住附近内容。
 
 [`AuthRecoveryEntryProvider`](../../../../packages/components/src/components/auth-recovery-entry.tsx)
-把 24px 图标投射到 `LoroSidebar` 现有工作区控件旁的 `AuthRecoveryEntrySlot`，
+把带 16px 图标的 28px 控件投射到 `LoroSidebar` 现有工作区控件旁的 `AuthRecoveryEntrySlot`，
 桌面端位于 footer，移动端位于 header。输入区和 footer 保持原有高度，健康状态没有图标。
 入口随侧栏显示与隐藏。稳定的 ref context 只负责 slot 注册，外壳不订阅恢复状态。
 常驻入口让恢复操作始终可发现；短暂 toast 会让操作消失。固定在视口角落的方案被放弃，
 因为附近控件和侧栏内容会变化。这里采用上下文状态与按需详情，不声称复制 Linear 当前的实际实现。
+
+入口沿用侧栏操作按钮的尺寸，显示时与工作区控件间隔 4px。离线、重连和警告图标在固定图标槽内交叉淡化并模糊切换；减少动态效果时只保留透明度过渡。
 
 没有挂载侧栏 slot 的界面（如工作区准入前），使用底部安全区上方的小型悬浮入口。
 它保留恢复操作，但不在下述桌面无重叠验证范围内。

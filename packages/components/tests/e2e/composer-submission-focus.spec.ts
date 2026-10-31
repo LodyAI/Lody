@@ -920,3 +920,508 @@ for (const imeSignal of [{ isComposing: true }, { keyCode: 229 }, { which: 229 }
     await expect(input).toHaveValue('保留现有接口，先修改队列编辑。');
   });
 }
+
+test.describe('mobile first-send continuity', () => {
+  for (const scenario of [
+    { theme: 'light', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 320, height: 568, keyboard: 0 },
+    { theme: 'light', width: 430, height: 932, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 300 },
+  ]) {
+    test(`${scenario.theme} ${scenario.width}px keyboard ${scenario.keyboard}px replaces in place`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(scenario);
+      await page.goto(
+        `/iframe.html?id=mobile-newchattransition--send-in-place&viewMode=story&globals=theme:${scenario.theme}`
+      );
+      const composer = page.locator('[class~="@container/composer-box"]');
+      const send = page.getByRole('button', { name: 'Send', exact: true });
+      await expect(send).toBeEnabled({ timeout: 15000 });
+      if (scenario.keyboard) {
+        await page.evaluate(
+          (height) =>
+            document.documentElement.style.setProperty('--native-keyboard-height', `${height}px`),
+          scenario.keyboard
+        );
+        await expect
+          .poll(async () => {
+            const box = await composer.boundingBox();
+            return box ? box.y + box.height : 0;
+          })
+          .toBe(scenario.height - scenario.keyboard - 8);
+      }
+      const before = await composer.boundingBox();
+      const model = page.getByRole('button', { name: 'Run configuration', exact: true });
+      const modelLabel = await model.innerText();
+      // Observe real surfaces through routing and 45 frames of the new page.
+      const samples = page.evaluate(
+        () =>
+          new Promise<Array<{ boxes: number[][]; transform: string; animations: number }>>(
+            (resolve) => {
+              const result: Array<{ boxes: number[][]; transform: string; animations: number }> =
+                [];
+              let sentFrames = 0;
+              const sample = () => {
+                const drawer = document.querySelector('[data-vaul-drawer]');
+                result.push({
+                  boxes: Array.from(
+                    document.querySelectorAll('[class~="@container/composer-box"]'),
+                    (element) => {
+                      const box = element.getBoundingClientRect();
+                      return [box.x, box.y, box.width, box.height];
+                    }
+                  ),
+                  transform: drawer ? getComputedStyle(drawer).transform : 'none',
+                  animations: drawer
+                    ? drawer
+                        .getAnimations()
+                        .filter((animation) => animation.playState === 'running').length
+                    : 0,
+                });
+                if (drawer && ++sentFrames >= 45) resolve(result);
+                else requestAnimationFrame(sample);
+              };
+              requestAnimationFrame(sample);
+            }
+          )
+      );
+      await send.click();
+      await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+      await expect(composer).toHaveCount(1);
+      expect(await composer.boundingBox()).toEqual(before);
+      expect(await model.innerText()).toBe(modelLabel);
+      await expect(model).toHaveCSS('font-weight', '400');
+      for (const frame of await samples) {
+        expect(frame.boxes).toEqual([[before!.x, before!.y, before!.width, before!.height]]);
+        expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frame.transform);
+        expect(frame.animations).toBe(0);
+      }
+    });
+  }
+});
+
+test('wide native landing applies the keyboard offset once', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/iframe.html?id=chat-homedashboard--landing-native-keyboard&viewMode=story');
+  const draft = page.getByRole('textbox', { name: 'Draft' });
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  const before = (await draft.boundingBox())!;
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    for (const animation of document.getAnimations()) animation.finish();
+  });
+  await expect.poll(async () => Math.round(before.y - (await draft.boundingBox())!.y)).toBe(300);
+});
+
+test('ordinary native iPhone PR drawer keeps an unsent comment above repeated keyboard changes', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 852 });
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __LODY_NATIVE__: true,
+      Capacitor: { getPlatform: () => 'ios', isNativePlatform: () => true },
+    });
+  });
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.goto(
+    '/iframe.html?id=sessions-prtabview--mobile-native-keyboard-drawer&viewMode=story'
+  );
+  const drawer = page.locator('[data-slot="drawer-content"]');
+  const draft = drawer.locator('[data-pr-comment-composer] textarea');
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  await draft.fill('Unsent ordinary-phone PR draft');
+  await expect(draft).toBeFocused();
+  expect(await page.evaluate(() => window.__LODY_HORIZONTAL_DIVISION__ ?? null)).toBeNull();
+
+  for (const height of [300, 0, 300, 0]) {
+    await page.evaluate((keyboardHeight) => {
+      document.documentElement.style.setProperty('--native-keyboard-height', `${keyboardHeight}px`);
+      Object.defineProperty(window.visualViewport, 'height', {
+        configurable: true,
+        value: 852 - keyboardHeight,
+      });
+      window.visualViewport?.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(
+        new CustomEvent('lody:keyboard-resize', { detail: { height: keyboardHeight } })
+      );
+    }, height);
+    await expect
+      .poll(async () => {
+        const box = (await drawer.boundingBox())!;
+        return Math.round(box.y + box.height);
+      })
+      .toBe(852 - height);
+    const box = (await draft.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(852 - height);
+    await expect(draft).toHaveValue('Unsent ordinary-phone PR draft');
+    await expect(draft).toBeFocused();
+  }
+});
+
+test('mobile new-chat composer stays below a fold and retains its draft', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-long-draft&viewMode=story'
+  );
+  const lower = page.locator('[data-new-chat-fold-lower]');
+  const draft = lower.getByRole('combobox', { name: 'Message' });
+  await expect(draft).toBeVisible({ timeout: 30_000 });
+  const text = await draft.inputValue();
+  await page.evaluate(() => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 422, height: 30, viewportHeight: 844 };
+    window.dispatchEvent(new Event('lody:division-change'));
+  });
+  await expect.poll(async () => (await lower.boundingBox())?.y).toBe(452);
+  const draftBox = await draft.boundingBox();
+  expect(draftBox!.y).toBeGreaterThanOrEqual(452);
+  expect(draftBox!.y + draftBox!.height).toBeLessThanOrEqual(844);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    window.dispatchEvent(new Event('lody:keyboard-resize'));
+  });
+  await expect(lower).toHaveCSS('display', 'contents');
+  await expect(draft).toHaveValue(text);
+});
+
+test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Project', exact: true }).click();
+  const list = page.getByRole('listbox', { name: 'Project', exact: true });
+  await expect(list).toBeVisible();
+  const names = async () =>
+    (await list.getByRole('option').allInnerTexts()).map((text) => text.split('\n')[0]);
+  await expect
+    .poll(names)
+    .toEqual([
+      'No project selected',
+      'blog',
+      'loro-dev/lody',
+      'Loro stack',
+      'lody',
+      'loro-dev/loro',
+      'docs',
+      'loro-dev/lody-web',
+    ]);
+  for (const option of await list.getByRole('option').all())
+    await expect(option.locator('button > span').first().locator('svg')).toHaveCount(1);
+  await expect(list.getByText('High-performance CRDT framework', { exact: true })).toHaveCount(0);
+  await expect(
+    list.getByRole('option').filter({ hasText: 'loro-dev/loro' }).locator('svg.lucide-github')
+  ).toHaveCount(1);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('loro');
+  await expect
+    .poll(names)
+    .toEqual(['loro-dev/lody', 'Loro stack', 'loro-dev/loro', 'loro-dev/lody-web']);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('');
+  await list.getByRole('button', { name: 'No project selected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(
+    'No project selected'
+  );
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`mobile GitHub project avatars remain centered while loading and after loading in ${theme}`, async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+      await ready;
+      await route.fulfill({
+        contentType: 'image/svg+xml',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+      });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story&globals=theme:${theme}`
+    );
+    const project = page.getByRole('button', { name: 'Project', exact: true });
+    const expectCentered = async (row: typeof project, name: string, icon: string) => {
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element, { name: labelName, icon: iconSelector }) => {
+              const image = element.querySelector(iconSelector);
+              const label = Array.from(element.querySelectorAll('span')).find(
+                (span) => span.childElementCount === 0 && span.textContent === labelName
+              );
+              if (!image || !label) return Number.POSITIVE_INFINITY;
+              const imageBox = image.getBoundingClientRect();
+              const labelBox = label.getBoundingClientRect();
+              return Math.abs(
+                imageBox.top + imageBox.height / 2 - labelBox.top - labelBox.height / 2
+              );
+            },
+            { name, icon }
+          )
+        )
+        .toBeLessThanOrEqual(0.5);
+    };
+    await expect(project.locator('svg.lucide-github')).toBeVisible();
+    await expectCentered(project, 'loro-dev/loro', 'svg.lucide-github');
+    release();
+    await expect(project.locator('img')).toBeVisible();
+    await expect(project.locator('img')).toHaveCSS('opacity', '1');
+    await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(project, 'loro-dev/loro', 'img');
+    await project.click();
+    const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+    await expect(repo.locator('img')).toHaveAttribute(
+      'src',
+      /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+    );
+    await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+    await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(repo, 'loro-dev/loro', 'img');
+  });
+}
+
+test('mobile send retains its page through delayed presentation and later URL corrections', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story&globals=theme:dark'
+  );
+  const composer = page.locator('[class~="@container/composer-box"]');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  // Opening new chat now slides the page in. Measure sending from its settled
+  // position so the entrance is not mistaken for first-send layout movement.
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => {
+        for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+          if (parent.getAnimations().some((animation) => animation.playState === 'running')) {
+            return false;
+          }
+        }
+        return true;
+      })
+    )
+    .toBe(true);
+  const before = await composer.boundingBox();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // Let Vaul's first-frame shortcut expire before the real surface can mount.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toBeVisible();
+  await expect(page.locator('[data-vaul-drawer]')).toHaveCount(0);
+  expect(await composer.boundingBox()).toEqual(before);
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveCount(0);
+  const drawer = page.locator('[data-vaul-drawer]');
+  await expect(drawer).toHaveCSS('animation-name', 'none');
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:normalize-session-url')));
+  for (let frame = 0; frame < 45; frame++) {
+    const geometry = await drawer.evaluate((element) => ({
+      transform: getComputedStyle(element).transform,
+      animations: element.getAnimations().filter((animation) => animation.playState === 'running')
+        .length,
+    }));
+    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(geometry.transform);
+    expect(geometry.animations).toBe(0);
+    expect(await composer.boundingBox()).toEqual(before);
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    );
+  }
+});
+
+for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
+  test(`mobile first send dismisses the keyboard after presentation without reopening it (dismiss=${dismiss})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__LODY_NATIVE__', { value: true, configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'iPhone Mobile', configurable: true });
+    });
+    await page.goto(
+      '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+    );
+    const source = page.locator('#chat-prompt-mobile-sheet');
+    await source.focus();
+    // Model the native keyboard signal from focus ownership rather than holding
+    // a constant height through a blur (which hid the original regression).
+    await page.evaluate(() => {
+      const sync = () =>
+        document.documentElement.style.setProperty(
+          '--native-keyboard-height',
+          document.activeElement?.matches('textarea[data-lody-composer-input]') ? '300px' : '0px'
+        );
+      document.addEventListener('focusin', sync);
+      document.addEventListener('focusout', () => queueMicrotask(sync));
+      sync();
+    });
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(source).toBeFocused();
+    await expect(source).not.toHaveAttribute('disabled');
+    await expect(source).toHaveValue('');
+    await page.keyboard.type('must not replace the submitted draft');
+    await expect(source).toHaveValue('');
+    if (dismiss === 'blur') await source.evaluate((node: HTMLTextAreaElement) => node.blur());
+    if (dismiss === 'native-hide') {
+      await page.evaluate(() =>
+        document.documentElement.style.setProperty('--native-keyboard-height', '0px')
+      );
+      await expect(source).toBeFocused();
+    }
+    await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+    const destination = page.locator('textarea[data-lody-composer-input]');
+    await expect(destination).toHaveCount(1);
+    await expect(destination).not.toBeFocused();
+    await expect(page.locator('html')).toHaveCSS('--native-keyboard-height', '0px');
+  });
+}
+
+test('mobile composer animates keyboard inset and safe-area padding together', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Send', exact: true }).waitFor();
+  const samples = await page.evaluate(() => {
+    const input = document.querySelector('textarea')!;
+    let shell: HTMLElement | null = input.parentElement;
+    while (shell && !getComputedStyle(shell).transitionProperty.includes('margin-bottom'))
+      shell = shell.parentElement;
+    if (!shell) throw new Error('Missing keyboard-aware composer shell');
+    document.documentElement.style.setProperty('--safe-area-bottom', '34px');
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    shell.getBoundingClientRect();
+    for (const animation of shell.getAnimations()) animation.finish();
+    shell.getBoundingClientRect();
+    document.documentElement.style.setProperty('--native-keyboard-height', '0px');
+    shell.getBoundingClientRect();
+    const animations = shell.getAnimations();
+    for (const animation of animations) animation.pause();
+    const box = input.closest('[class~="@container/composer-box"]')!;
+    return [0, 0.5, 1].map((progress) => {
+      for (const animation of animations)
+        animation.currentTime = Number(animation.effect!.getTiming().duration) * progress;
+      return {
+        y: box.getBoundingClientRect().y,
+        padding: parseFloat(getComputedStyle(shell!).paddingBottom),
+      };
+    });
+  });
+  expect(samples[0].padding).toBeCloseTo(8);
+  expect(samples[1].padding).toBeGreaterThan(8);
+  expect(samples[1].padding).toBeLessThan(42);
+  expect(samples[2].padding).toBeCloseTo(42);
+  expect(samples[1].y).toBeGreaterThan(samples[0].y);
+  expect(samples[1].y).toBeLessThan(samples[2].y);
+});
+
+test('mobile first send keeps the keyboard if the user starts the next draft before dismissal', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+  );
+  const source = page.locator('#chat-prompt-mobile-sheet');
+  await source.focus();
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    document.addEventListener('focusin', (event) => {
+      const input = event.target;
+      if (input instanceof HTMLTextAreaElement && input.id !== 'chat-prompt-mobile-sheet')
+        queueMicrotask(() =>
+          input.dispatchEvent(
+            new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: 'a' })
+          )
+        );
+    });
+  });
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  const destination = page.locator('textarea[data-lody-composer-input]');
+  await expect(destination).toHaveCount(1);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(destination).toBeFocused();
+  await page.keyboard.type('A new draft');
+  await expect(destination).toHaveValue('A new draft');
+});
+
+for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project selected']) {
+  test(`mobile new conversation restores last sent project ${project} after reopening and reload`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/iframe.html?id=mobile-mobilenewchatsheet--remembered-project&viewMode=story');
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    await page
+      .getByRole('listbox', { name: 'Project', exact: true })
+      .getByRole('option')
+      .filter({ has: page.getByText(project, { exact: true }) })
+      .getByRole('button')
+      .click();
+    await page
+      .locator('textarea[data-lody-composer-input]')
+      .fill('Synthetic project restoration test');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+    await page.reload();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+  });
+}
+
+test('mobile local branch shows a readable ref across worktree toggles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-many-branches&viewMode=story'
+  );
+  const branch = page.getByRole('button', { name: 'Branch', exact: true });
+  const worktree = page.getByRole('checkbox');
+  await expect(branch).toHaveText('main (local)');
+  await expect(worktree).toBeChecked();
+  await branch.click();
+  await page
+    .getByRole('listbox', { name: 'Branch', exact: true })
+    .getByRole('option')
+    .filter({ hasText: 'feat/audit-mobile-coupling (local)' })
+    .getByRole('button')
+    .click();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+  await worktree.click();
+  await expect(branch).toBeDisabled();
+  await expect(branch).toHaveText('main (local)');
+  await worktree.click();
+  await expect(branch).toBeEnabled();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+});

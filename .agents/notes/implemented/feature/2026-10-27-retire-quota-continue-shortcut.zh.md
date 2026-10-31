@@ -23,7 +23,7 @@ Translation: current
 - 保留定时消息能力和所有已存预约。不删除、不迁移任何 schedule。
 - `recoverCapacity` 拥有自动额度继续。它是 per-session、默认关闭，并继续由 Host
   做能力门控。
-- [旧的 Claude 快捷方式笔记](../../proposed/feature/2026-10-27-quota-continue.md)
+- [旧的 Claude 快捷方式笔记](2026-10-27-quota-continue.md)
   保留为历史；这篇笔记取代它的 UI 入口。后端策略仍由
   [continuation coordinator 笔记](../../proposed/architecture/2026-10-25-session-automation-coordinator.md)拥有。
 
