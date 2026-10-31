@@ -146,6 +146,12 @@ this page is the full text of the rules summarised there.
     states stay hidden. Single-member workspaces do not resolve or pass sharing state.
     Its popover's team action enters the existing parent-owned confirmation flow. Keep the full
     status/action in `SessionHeaderMenu` as the mobile/compact fallback.
+    The "…" menu's `Copy URL` copies the ACTIVE tab's link. The toolbar is rendered
+    by the ROOT conversation's `SessionChatInterface`, so its own `session.id` is the
+    root even while a child tab is active; `desktopToolbar.actions.onCopyUrl` therefore
+    passes the page's active-tab-aware `handleCopyUrl` (the same handler behind the
+    command palette "Copy Current URL" and the mobile menu). Without that override the
+    menu copied the root id for every tab.
     The "…" menu's `Change owner` submenu writes `SessionMeta.userId` — the OWNER
     field, which drives the sidebar My/Team split, the row author avatar, CLI
     Code Collab owner checks, and usage attribution. It is not sharing/visibility
