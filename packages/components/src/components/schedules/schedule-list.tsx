@@ -818,6 +818,7 @@ export function ScheduleListView({
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
     insideWorkspaceFrame: true,
+    includeDesktopWeb: !isMobile,
   });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const hasMacOSTitlebarInset =

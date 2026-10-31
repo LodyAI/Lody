@@ -1053,10 +1053,12 @@ const SessionDetail = ({
   });
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
     bottomBorder: true,
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
