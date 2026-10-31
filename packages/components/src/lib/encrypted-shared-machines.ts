@@ -49,6 +49,9 @@ export function createEncryptedSharedMachineStore(options: {
   };
   let snapshot: EncryptedSharedMachines = EMPTY;
   let candidates = new Set<MachineId>();
+  // Each lease contributes its own candidates; the store reads their union, so one
+  // consumer disabling or unmounting can withdraw only its own contribution.
+  const contributions = new Map<symbol, ReadonlySet<MachineId>>();
   let disposed = false;
   const listeners = new Set<() => void>();
   // Latest read sequence per machine: a slower, older result never overrides a newer one.
@@ -118,10 +121,13 @@ export function createEncryptedSharedMachineStore(options: {
         listeners.delete(listener);
       };
     },
-    /** Machines owned by other members; newly seen ones are read, dropped ones removed. */
-    setCandidates(machineIds: Iterable<MachineId>) {
+    /** One lease's machines owned by other members; the union of live leases is read. */
+    setCandidates(lease: symbol, machineIds: Iterable<MachineId> | null) {
       if (disposed) return;
-      const next = new Set(machineIds);
+      if (machineIds === null) contributions.delete(lease);
+      else contributions.set(lease, new Set(machineIds));
+      const next = new Set<MachineId>();
+      for (const ids of contributions.values()) for (const machineId of ids) next.add(machineId);
       const added = [...next].filter((machineId) => !candidates.has(machineId));
       const removed = [...candidates].filter((machineId) => !next.has(machineId));
       candidates = next;
@@ -160,12 +166,18 @@ export function acquireEncryptedSharedMachineStore(
   if (!entry) stores.set(id, (entry = { store: create(), refs: 0 }));
   entry.refs += 1;
   const owned = entry;
+  const lease = Symbol('encrypted-shared-machine-lease');
   let released = false;
   return {
     store: owned.store,
+    /** No-op once released: a stale consumer can never rewrite live candidates. */
+    setCandidates(machineIds: Iterable<MachineId>) {
+      if (!released) owned.store.setCandidates(lease, machineIds);
+    },
     release() {
       if (released) return;
       released = true;
+      owned.store.setCandidates(lease, null);
       owned.refs -= 1;
       if (owned.refs === 0 && stores.get(id) === owned) {
         stores.delete(id);

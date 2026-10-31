@@ -37,7 +37,10 @@ export function useEncryptedSharedMachines(input: {
       ? runtime.accountId
       : null;
   const workspaceId = accountId ? input.workspaceId : null;
-  const [store, setStore] = useState<EncryptedSharedMachineStore | null>(null);
+  const [lease, setLease] = useState<ReturnType<typeof acquireEncryptedSharedMachineStore> | null>(
+    null
+  );
+  const store: EncryptedSharedMachineStore | null = lease?.store ?? null;
   const hasPort = Boolean(readMachineSharing);
   useEffect(() => {
     if (!accountId || !workspaceId || !readMachineSharing) return undefined;
@@ -47,7 +50,7 @@ export function useEncryptedSharedMachines(input: {
         port: { readMachineSharing },
       })
     );
-    setStore(lease.store);
+    setLease(lease);
     const refresh = () => lease.store.refresh();
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
@@ -59,7 +62,7 @@ export function useEncryptedSharedMachines(input: {
       unsubscribeLedger();
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', onVisible);
-      setStore(null);
+      setLease(null);
       lease.release();
     };
     // The port is stable per platform; only account/workspace scope the store.
@@ -74,8 +77,9 @@ export function useEncryptedSharedMachines(input: {
     return ids.sort().join('\0');
   }, [accountId, input.rawMachines, store]);
   useEffect(() => {
-    store?.setCandidates(candidateKey ? (candidateKey.split('\0') as MachineId[]) : []);
-  }, [candidateKey, store]);
+    // Through this consumer's own lease: a released lease ignores the update.
+    lease?.setCandidates(candidateKey ? (candidateKey.split('\0') as MachineId[]) : []);
+  }, [candidateKey, lease]);
 
   const subscribe = useCallback(
     (listener: () => void) => store?.subscribe(listener) ?? noop(),

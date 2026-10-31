@@ -1,7 +1,10 @@
 import { expect, it } from 'vitest';
 import type { MachineId } from '@lody/shared';
 import type { E2eeMachineSharingView } from '@lody/platform';
-import { createEncryptedSharedMachineStore } from '../src/lib/encrypted-shared-machines';
+import {
+  acquireEncryptedSharedMachineStore,
+  createEncryptedSharedMachineStore,
+} from '../src/lib/encrypted-shared-machines';
 
 const view = (machineId: string, projects: string[] = []): E2eeMachineSharingView => ({
   machineId,
@@ -51,7 +54,8 @@ it('bounds concurrent reads, fences stale results, drops removed candidates and 
   const flush = async () => {
     for (let turn = 0; turn < 8; turn++) await Promise.resolve();
   };
-  store.setCandidates(['a', 'b', 'c'] as MachineId[]);
+  const lease = Symbol('lease');
+  store.setCandidates(lease, ['a', 'b', 'c'] as MachineId[]);
   expect(pending.map((read) => read.machineId)).toEqual(['a', 'b']);
   pending.shift()!.settle(view('a', ['p']));
   await flush();
@@ -68,8 +72,42 @@ it('bounds concurrent reads, fences stale results, drops removed candidates and 
   for (const read of pending.splice(0)) read.settle(view(read.machineId));
   await flush();
   // Dropping a candidate removes it immediately.
-  store.setCandidates(['c'] as MachineId[]);
+  store.setCandidates(lease, ['c'] as MachineId[]);
   expect([...store.getSnapshot().keys()]).toEqual(['c']);
   store.dispose();
   expect(intervals[0]!.cleared).toBe(true);
+});
+
+it('reads the union of live leases, and a released lease cannot rewrite it', async () => {
+  const intervals: unknown[] = [];
+  const create = () =>
+    createEncryptedSharedMachineStore({
+      workspaceId: 'workspace',
+      port: { readMachineSharing: async (_workspaceId, machineId) => view(machineId) },
+      timers: {
+        setInterval: (callback) => {
+          intervals.push(callback);
+          return callback;
+        },
+        clearInterval: (handle) => {
+          intervals.splice(intervals.indexOf(handle), 1);
+        },
+      },
+    });
+  const flush = async () => {
+    for (let turn = 0; turn < 8; turn++) await Promise.resolve();
+  };
+  const key = { accountId: 'account', workspaceId: 'workspace' };
+  const first = acquireEncryptedSharedMachineStore(key, create);
+  const second = acquireEncryptedSharedMachineStore(key, create);
+  expect(second.store).toBe(first.store);
+  first.setCandidates(['a'] as MachineId[]);
+  second.setCandidates(['b'] as MachineId[]);
+  await flush();
+  expect([...first.store.getSnapshot().keys()].sort()).toEqual(['a', 'b']);
+  second.release();
+  second.setCandidates([]);
+  expect([...first.store.getSnapshot().keys()]).toEqual(['a']);
+  first.release();
+  expect(intervals).toEqual([]);
 });

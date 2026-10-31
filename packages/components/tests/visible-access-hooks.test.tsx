@@ -754,6 +754,15 @@ describe('encrypted shared machine visibility', () => {
   let reads: string[];
   let snapshot: { machines: string[]; projects: string[]; managed?: string[] } | undefined;
 
+  let renderTree: (node: ReactNode) => Promise<void>;
+  const consumer: Record<string, string[]> = {};
+  function Consumer({ name, enabled }: { name: string; enabled: boolean }) {
+    const index = useVisibleMachineMetas({ includeMachineFlock: false, enabled });
+    useEffect(() => {
+      consumer[name] = [...index.machines.keys()].sort();
+    }, [index, name]);
+    return null;
+  }
   function Probe() {
     const machines = useVisibleMachineMetas({ includeMachineFlock: false });
     const projects = useVisibleLocalProjectsFromMachineIndex(machines);
@@ -808,9 +817,9 @@ describe('encrypted shared machine visibility', () => {
         ...TEST_CLOUD_PLATFORM.e2eeWorkspaces,
         runtime: {
           readMachineSharing: async (id: string, machineId: string) => {
-            expect(id).toBe(workspaceId);
-            reads.push(machineId);
-            const value = views.get(machineId);
+            // Reads for another workspace are recorded apart and never share its views.
+            reads.push(id === workspaceId ? machineId : `${id}/${machineId}`);
+            const value = views.get(id === workspaceId ? machineId : `${id}/${machineId}`);
             if (!value || value instanceof Error) throw value ?? new Error('missing');
             return value;
           },
@@ -820,15 +829,15 @@ describe('encrypted shared machine visibility', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={store}>
-            <Probe />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
+    renderTree = (node) =>
+      act(async () => {
+        root.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>{node}</Provider>
+          </PlatformContext.Provider>
+        );
+      });
+    await renderTree(<Probe />);
   });
   afterEach(async () => {
     await act(async () => root.unmount());
@@ -882,5 +891,64 @@ describe('encrypted shared machine visibility', () => {
       machines: ['own-machine'],
       projects: ['own-machine:private-project', 'own-machine:shared-project'],
     });
+  });
+
+  it("keeps a consumer's shared machines when another consumer of the same store is disabled", async () => {
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled={false} />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    // The remaining consumer still refreshes: withdrawal is observed on the interval.
+    views.set(
+      'shared-machine',
+      view('shared-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(consumer.a).toEqual(['own-machine']);
+  });
+
+  it('stops reading once every consumer is disabled', async () => {
+    await renderTree(<Consumer name="a" enabled={false} />);
+    reads.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS * 2);
+    });
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(reads).toEqual([]);
+    expect(consumer.a).toEqual([]);
+  });
+
+  it('does not carry shared machines across a workspace switch', async () => {
+    const other = 'encrypted-other' as WorkspaceId;
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, other);
+      store.set(currentWorkspaceIdAtom, other);
+      store.set(workspaceContentModeAtom, {
+        accountId: member,
+        workspaceId: other,
+        workspaceSlug: other,
+        descriptor: { workspaceId: other, contentMode: 'e2ee', contentModeVersion: 1 },
+      } as never);
+      store.set(runtimeAtom, {
+        workspaceId: other,
+        workspaceSlug: other,
+        contentMode: 'e2ee',
+        accountId: member,
+      } as WorkspaceRuntime);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine']);
+    expect(reads).toContain(`${other}/shared-machine`);
   });
 });
