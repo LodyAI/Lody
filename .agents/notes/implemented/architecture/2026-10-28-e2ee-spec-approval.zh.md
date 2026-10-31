@@ -38,3 +38,7 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 该 revision 之后新增的批准元数据及链接不改变其技术正文。[当前 Spec](../../../../specs/e2ee/client-custody.zh.md)记录此批准；实际原生 Keychain/Keystore、首次解锁、最低 OS 与真机验收仍须分别提供证据。
 
 2026-10-29，Owner Zixuan Chen 经 E2EE 总调度批准以 480 秒 E2EE 内容 token 作为上线缓解：480 秒有效期 + 60 秒 JWT 宽限 + 一段 300 秒 SSE，常规预算为 840 秒。其余 60 秒仅为余量，不保证覆盖缓冲、上游等待/重试、时钟误差或存储提交。严格 gateway 期限执行列为后续项，不阻塞上线。本文记录决定，不证明私有后端已部署或真实 gateway 已验收；独立移除与稍后手动换钥维持已批准的 tag 10 语义。
+
+## 设备撤销保留例外
+
+2026-10-31，owner Zixuan Chen（zxch3n）经 E2EE 协调者批准，把普通密钥保留规则的例外扩展到凭据确认的本设备撤销，对应修订 `c3d23191d73f17437959980fec9fee82d34d782f`。批准的文本为 [desktop custody](https://github.com/LodyAI/Lody/blob/c3d23191d73f17437959980fec9fee82d34d782f/specs/e2ee/desktop-custody.zh.md)（英文 blob `cbfc986784d7fe89a162bf0fd29f16b76124574a`，中文 `7cecb36a44e25ba814110fc68240ff3c80ec4c61`）、[client custody](https://github.com/LodyAI/Lody/blob/c3d23191d73f17437959980fec9fee82d34d782f/specs/e2ee/client-custody.zh.md)（英文 `d19dd471113d3f61ef5451a414761e21b1552898`，中文 `1ea279bfd0abd707a78c053c46cc5f416611364c`）以及[白皮书](https://github.com/LodyAI/Lody/blob/c3d23191d73f17437959980fec9fee82d34d782f/specs/e2ee/whitepaper.zh.md)中关于本人设备撤销的段落（英文 `5f9a6eb42c94e01375db59f24b980ec8e0e31580`，中文 `ab6e0ef9408348a3e0c51f6e4b3116da2ab03211`）。范围：只有精确的类型化撤销结果才算数；清理只删除本设备在该工作区的身份、内容和密钥，保留成员资格和该成员的其他设备，并允许用新身份重新配对。普通失败仍不得触发删除。这是诚实客户端清理，不是对此前副本的安全擦除。理由见[桌面设备撤销](2026-10-30-e2ee-desktop-device-revocation.zh.md)。
