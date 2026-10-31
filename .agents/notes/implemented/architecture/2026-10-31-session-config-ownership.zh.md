@@ -14,7 +14,9 @@ Supersedes: [仅警告的模型拒绝策略](../../archived/bug-fix/2026-10-09-m
 
 [Spec](../../../../specs/session-config-ownership.zh.md) 定义所有权。连接代次隔离观察事件，即使 ACP 复用 session id；revision 为发布排序，不依赖历史。Loro 首次执行端准入只拒绝低于已加载会话 revision 的用户输入。检查、机器本地 Inbox 持久接纳和回执查询共用配置发布串行队列。该回执或 Roost 不可变历史接纳回执使重试、重启跳过重复检查；renderer outbox 不等于 owner 接纳。历史请求重建与队列提升保留冻结要求。
 
-已加载 revision 与原生连接确认是两种证明。Loro 崩溃重开或文档尚无 revision 时，只等待已有的初始房间同步，受 30 秒配置预算限制，再读取已加载 revision，不把旧代次当作新连接确认；正常派发随后加载或建立原生连接，并在 prompt 前确认、持久化所需配置。加载失败、超时或仍缺 revision 时走既有可见的执行前失败与输入终态，不让输入永久 pending；晚到同步不会复活该输入。关闭时取消本地等待，保留原输入供下次启动处理，不写入晚到失败；底层同步仍由既有文档所有者保管。加密准入只读 native 已验证的受保护会话文档，不用 RPC 或元数据的当前 revision hint。Roost 的连接确认准入和原生 steer 确认规则保持不变。
+不带 `configRevision` 的历史输入（包括整份 `inputConfig` 缺失的记录）保留既有准入行为，不往历史中补造缺失字段；加密执行来源仍与已验证的历史输入精确比较。
+
+已加载 revision 与原生连接确认是两种证明。对携带 revision 的输入，Loro 崩溃重开或文档尚无 revision 时，只等待已有的初始房间同步，受 30 秒配置预算限制，再读取已加载 revision，不把旧代次当作新连接确认；正常派发随后加载或建立原生连接，并在 prompt 前确认、持久化所需配置。加载失败、超时或仍缺 revision 时走既有可见的执行前失败与输入终态，不让输入永久 pending；晚到同步不会复活该输入。关闭时取消本地等待，保留原输入供下次启动处理，不写入晚到失败；底层同步仍由既有文档所有者保管。加密准入只读 native 已验证的受保护会话文档，不用 RPC 或元数据的当前 revision hint。Roost 的连接确认准入和原生 steer 确认规则保持不变。
 
 新续跑与 compact 输入在准备时读取 native 会话当前 revision；当前 revision 缺失时省略，不继承源输入的旧值。准备阶段在既有回执中冻结一次，重试和队列提升不会在会话再次前进后重新标记已准备输入。可信派生输入仍需动作、来源 authority 和接纳前守卫批准，随后进入 Inbox。它不是用户新配置选择；既有 prepared 或已签名输入中的旧 revision 与正文保持原样。仅提供 `_lodyAutomation` 字段不能取得权限，加密工作区的 Automations 产品策略仍保持禁用。
 
