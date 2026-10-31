@@ -239,8 +239,8 @@ export function createRoostRpcSessionServices(
       throw new Error('Owner history checkpoint is unavailable');
     return { revision: response.historyRevision, count, checkpoint: value.checkpoint };
   };
-  // The opaque checkpoint also binds generation changes whose revision/count
-  // can be equal. Older owners supply it through their existing one-row page.
+  // Opaque checkpoints distinguish generations with equal revision/count.
+  // Legacy owners return them with a one-row page.
   const observe = async <T>(
     work: (revision: number | undefined, count: number, checkpoint: string) => Promise<T>
   ): Promise<T> => {

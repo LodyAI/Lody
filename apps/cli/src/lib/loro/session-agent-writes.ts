@@ -22,12 +22,10 @@ import type {
 import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/shared';
 
 /**
- * One bound batch of agent output. The target assistant turn is part of the
- * input, never re-selected at flush time. `entryBound` means the caller has
- * already proved every message belongs to `targetAssistantEntryId` (text/thought
- * chunks). Independently, notification batches (text, plans, tools and subagents
- * matched by their stored ownership) write through `HistoryWriter.updateTail`. The remaining updates select their owners through
- * a shallow directory before the shared reducer runs.
+ * Agent output for the assistant bound to the accepted input.
+ * `entryBound` identifies text/thought chunks assigned to that assistant.
+ * Tool, plan and subagent batches use stored ownership with `updateTail`;
+ * other updates select owners before running the reducer.
  */
 export type ApplyAgentBatchInput = {
   readonly notifications?: readonly AcpSessionNotification[];

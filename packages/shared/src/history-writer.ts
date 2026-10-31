@@ -358,8 +358,7 @@ export interface HistoryWriter {
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     options?: { transcriptVisibility?: boolean }
   ): SessionHistoryInput[];
-  /** All matching bodies are selected before planning; untouched metadata is
-   * guarded against replacement before the first CRDT operation. */
+  /** Plan selected bodies; changes to metadata-only rows are rejected. */
   updateSelected(
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
