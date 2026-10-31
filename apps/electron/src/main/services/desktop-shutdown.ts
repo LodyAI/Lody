@@ -1,3 +1,49 @@
+import { access, rename, unlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const quitWarningPath = (directory: string) => join(directory, 'quit-unconfirmed')
+
+/** Presence only: never persist workspace identities, content or failure causes. */
+export function recordUnconfirmedDesktopQuit(directory: string): Promise<void> {
+  return writeFile(quitWarningPath(directory), '', { mode: 0o600 })
+}
+
+/** Claim last launch's marker so delivery cannot erase a new quit's warning.
+ * Unsupported/failed notifications retain the marker for a later launch. */
+export async function reportPreviousUnconfirmedDesktopQuit(
+  directory: string,
+  notify: () => Promise<{ shown: boolean }>
+): Promise<void> {
+  const previous = `${quitWarningPath(directory)}.previous`
+  try {
+    await rename(quitWarningPath(directory), previous)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  try {
+    await access(previous)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  if ((await notify()).shown) await unlink(previous)
+}
+
+/** No UI is admitted here: parentless native dialogs can block JS timers on macOS.
+ * Even marker I/O cannot delay termination beyond this additional budget. */
+export async function finishUnconfirmedDesktopQuit(options: {
+  record: () => Promise<void>
+  exit: (code: 1) => void
+}): Promise<void> {
+  try {
+    await waitForQuitRecovery(Promise.resolve().then(options.record), 1_000)
+  } catch {
+    // The caller has already logged unconfirmed persistence; marker I/O is best effort.
+  } finally {
+    options.exit(1)
+  }
+}
+
 /** Prevent quit (and OS lease release) until owned execution has confirmed exit. */
 export function createDesktopQuitBarrier(options: {
   prepare?: () => Promise<boolean>

@@ -71,8 +71,10 @@ withdraws any reset request it armed, so a later ordinary quit neither relaunche
 resets. Relaunching quits the embedded CLI: never make it a default recovery step.
 
 Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
-Unconfirmed work keeps its original owner until main exits, with a warning bounded
-to five seconds and a nonzero exit. Never replace custody or clear pending writes
+Unconfirmed work keeps its original owner until main exits. Log it, give a
+presence-only warning marker at most one second to persist, then exit nonzero
+without shutdown UI. Next launch delivers a nonmodal native notification; failed
+delivery retains the marker. Never replace custody or clear pending writes
 on a waiter deadline. CLI and shell process owners must still confirm release
 before main can terminate. Quit diagnostics name phases, never credentials or causes.
 

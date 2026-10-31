@@ -62,8 +62,15 @@ Same-document navigation keeps its lease. Quit cleanup attempts E2EE and other i
 Terminal quit gives each renderer close and the parallel main-owned resource drain
 fifteen seconds. A pending native call retains its Scope, custody and original
 write receipts; a timeout never clears them or authorizes replacement. Once CLI
-and shell execution owners confirm release, unconfirmed main work gets a localized
-warning for at most five seconds, then main terminates with exit code 1. Process
+and shell execution owners confirm release, unconfirmed main work is logged and
+main gives a presence-only warning marker at most one second to persist, then
+terminates with exit code 1. No UI runs on this exit path, including updates and
+OS shutdown/logout. Next launch attempts a nonmodal native notification; unavailable
+or failed delivery retains the marker. Startup claims the marker by rename before
+notification delivery, so delayed delivery cannot erase a subsequent quit's marker.
+A parentless `showMessageBox` was rejected: Electron 44.9.3 on macOS runs that
+branch through `NSAlert.runModal`, which blocks the JS deadline despite returning
+a Promise. No modal API or human acknowledgement owns terminal reporting. Process
 termination ends late native work; ordinary Electron quit is reserved for confirmed
 drain. This avoids an endless wait without pretending cancellation released a writer.
 The native custody test creates a link offer, stalls an actual unprotect, crosses
@@ -71,6 +78,8 @@ the quit barrier with a fake clock, then joins the retained close and verifies
 identical committed ledger originals and keys after reopen. It proves neither the
 historical E2E hang's exact resource nor a real OS keychain or packaged close.
 Quit phase/resource diagnostics supply that missing distinction on a later run.
+Fake-clock terminal tests also cover stalled/failed marker I/O, while real filesystem
+tests cover notification failure and a new quit during delayed startup delivery.
 Generic account/runtime failures retain one private main-only cause in the existing
 diagnostic slot; public errors and logs still omit it.
 The bounded terminal drain and its evidence are in [PR #2162](https://github.com/LodyAI/Lody/pull/2162).
