@@ -59,6 +59,22 @@ The real-bundler startup tests locate the application by module ownership rather
 
 Same-document navigation keeps its lease. Quit cleanup attempts E2EE and other independent resources together; sign-out proceeds after a failed E2EE close. A failed account Scope stays fenced even though subsequent Scope.close is idempotently successful; cancelled quit resumes admission only for healthy owners.
 
+Terminal quit gives each renderer close and the parallel main-owned resource drain
+fifteen seconds. A pending native call retains its Scope, custody and original
+write receipts; a timeout never clears them or authorizes replacement. Once CLI
+and shell execution owners confirm release, unconfirmed main work gets a localized
+warning for at most five seconds, then main terminates with exit code 1. Process
+termination ends late native work; ordinary Electron quit is reserved for confirmed
+drain. This avoids an endless wait without pretending cancellation released a writer.
+The native custody test creates a link offer, stalls an actual unprotect, crosses
+the quit barrier with a fake clock, then joins the retained close and verifies
+identical committed ledger originals and keys after reopen. It proves neither the
+historical E2E hang's exact resource nor a real OS keychain or packaged close.
+Quit phase/resource diagnostics supply that missing distinction on a later run.
+Generic account/runtime failures retain one private main-only cause in the existing
+diagnostic slot; public errors and logs still omit it.
+The bounded terminal drain and its evidence are in [PR #2162](https://github.com/LodyAI/Lody/pull/2162).
+
 Retained origins compact after 64 added records across reopen. Successful, verified rebuilding closes the replaced feed scope and removes only its SQLite file/sidecars; originals, pins and conflicting evidence are preserved. IPC publishes the full ledger at initial local display and at the final page or an upgrade stop, rather than each page.
 
 Machine keyring operations run in a process-owned helper with a 10-second timeout and credentials on stdin. Timeout fallback requires confirmed process termination; mixed failure/release causes retain the recovery owner and prohibit fallback. Existing OS custody never downgrades. Windows validates the directory in one ACL process; initialization lock contention yields and retries for at most 60 seconds instead of blocking the JS owner.

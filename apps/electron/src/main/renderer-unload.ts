@@ -43,7 +43,9 @@ export function installRendererUnloadConfirmation(window: BrowserWindow): void {
  * quit and leaves the app running; windows closed before it stay closed, as in
  * Electron's own quit. The main window closes last.
  */
-export async function closeProductWindowsForQuit(): Promise<boolean> {
+export async function closeProductWindowsForQuit(
+  reportUnconfirmed: () => void = () => {}
+): Promise<boolean> {
   const main = getMainWindow()
   const windows = [...productWindows].sort(
     (left, right) => Number(left === main) - Number(right === main)
@@ -54,14 +56,22 @@ export async function closeProductWindowsForQuit(): Promise<boolean> {
     if (window.isDestroyed()) continue
     // A destroyed BrowserWindow throws on `webContents`; read it while it is live.
     const contents = window.webContents
+    const windowId = window.id
+    console.info('[Electron] Quit renderer closing', { windowId })
     const closed = await new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       const onClosed = (): void => settle(true)
       // A hung or dead renderer never answers `beforeunload`; without this the
       // quit would wait forever. Its in-memory sends are lost either way.
       const onStuck = (): void => {
-        if (!window.isDestroyed()) window.destroy()
+        if (!window.isDestroyed()) {
+          reportUnconfirmed()
+          console.warn('[Electron] Quit renderer persistence unconfirmed', { windowId })
+          window.destroy()
+        }
       }
       const settle = (value: boolean): void => {
+        clearTimeout(timer)
         quitCloses.delete(window)
         window.removeListener('closed', onClosed)
         window.removeListener('unresponsive', onStuck)
@@ -72,8 +82,12 @@ export async function closeProductWindowsForQuit(): Promise<boolean> {
       window.once('unresponsive', onStuck)
       contents.once('render-process-gone', onStuck)
       quitCloses.set(window, settle)
+      // Electron does not guarantee an unresponsive event for a pending close.
+      // A native Stay/Leave prompt is synchronous, so its answer still wins.
+      timer = setTimeout(onStuck, 15_000)
       window.close()
     })
+    console.info('[Electron] Quit renderer settled', { windowId, closed })
     if (!closed) {
       setAppQuitting(false)
       return false

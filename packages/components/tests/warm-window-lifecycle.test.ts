@@ -511,4 +511,24 @@ describe('renderer unload confirmation', () => {
       expect(main.destroyed).toBe(true);
     }
   });
+
+  it('bounds a quit close even when Electron never emits an unresponsive event', async () => {
+    vi.useFakeTimers();
+    const main = productWindow({ main: true });
+    main.hung = true;
+    let completed = false;
+    const quit = closeProductWindowsForQuit().then((result) => {
+      completed = result;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(completed).toBe(true);
+      expect(main.destroyed).toBe(true);
+    } finally {
+      main.destroy();
+      await quit;
+    }
+    expect(main.listenerCount('unresponsive')).toBe(0);
+    expect(main.contents.listenerCount('render-process-gone')).toBe(0);
+  });
 });

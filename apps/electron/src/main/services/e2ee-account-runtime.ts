@@ -15,6 +15,7 @@ import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 
 // Lazy application boundary. Plain workspaces never create a Scope or touch custody.
 const serial = Semaphore.makeUnsafe(1)
@@ -228,6 +229,7 @@ export function withDesktopE2eeAccount<A>(
       )
     )
   ).catch((error: unknown) => {
+    rememberDesktopE2eeFailure('account-operation', error)
     throw publicE2eeFailure(error)
   })
 }
@@ -706,6 +708,7 @@ export async function runDesktopE2eeOperation<A>(
   }
   assertAccount()
   const result = await Effect.runPromise(work).catch((error) => {
+    rememberDesktopE2eeFailure('runtime-operation', error)
     throw publicE2eeFailure(error)
   })
   assertAccount()

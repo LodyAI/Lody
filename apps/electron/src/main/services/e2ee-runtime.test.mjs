@@ -48,6 +48,7 @@ import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
 import { decodeMemberKeyPackage } from './e2ee-member-join.mts'
+import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
 // Authenticated synthetic OS storage; this suite does not exercise a user's keychain.
 const wrapping = Buffer.alloc(32, 86)
 const safeStorage = {
@@ -1031,6 +1032,134 @@ void test('closing waits for admitted native unprotect before releasing the runt
     )
   } finally {
     release.resolve()
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+  }
+})
+
+void test('quit after a link invitation bounds native drain while retaining custody and committed history', async (t) => {
+  const directory = await fixture(t)
+  const scope = await Effect.runPromise(Scope.make())
+  const entered = Promise.withResolvers(),
+    release = Promise.withResolvers()
+  let hold = false,
+    released = false,
+    drained = false,
+    terminated = false
+  let reading, closing, rawClosing
+  try {
+    const owner = await Effect.runPromise(
+      Effect.gen(function* () {
+        const base = yield* openOwner(directory)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            released = true
+          })
+        )
+        const custody = {
+          ...base.custody,
+          installed: {
+            ...base.custody.installed,
+            unprotect: async (blob) => {
+              if (hold) {
+                entered.resolve()
+                await release.promise
+              }
+              return base.custody.installed.unprotect(blob)
+            }
+          }
+        }
+        const host = yield* makeDesktopE2eeRuntimeHost({
+          directory,
+          bootstrap: base.bootstrap,
+          custody
+        })
+        return { ...base, host }
+      }).pipe(Scope.provide(scope))
+    )
+    const prepared = await Effect.runPromise(bind(owner))
+    const records = await Effect.runPromise(makeRecords(owner.custody, prepared, 2))
+    await Effect.runPromise(owner.host.open(workspaceId))
+    await Effect.runPromise(
+      owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+    )
+    const before = await Effect.runPromise(owner.host.status(workspaceId))
+    const offer = await Effect.runPromise(
+      owner.host.memberOffer(workspaceId, 'link', 9_999_999_999_999)
+    )
+    assert.equal(offer.mode, 'link')
+    hold = true
+    reading = Effect.runPromise(owner.host.status(workspaceId))
+    await entered.promise
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const closingEntered = Promise.withResolvers()
+    const events = []
+    let unconfirmed
+    const barrier = createDesktopQuitBarrier({
+      stop: async () => {
+        unconfirmed = await drainMainProcessQuitResources(
+          [
+            {
+              name: 'e2ee',
+              close: () => {
+                closingEntered.resolve()
+                rawClosing = Effect.runPromise(Scope.close(scope, Exit.void))
+                return rawClosing
+              }
+            },
+            { name: 'independent', close: async () => {} }
+          ],
+          15_000,
+          (name, state) => events.push([name, state])
+        )
+      },
+      quit: () => {
+        terminated = true
+      },
+      reportFailure: (error) => {
+        throw error
+      }
+    })
+    closing = Promise.resolve(barrier({ preventDefault() {} })).then(() => {
+      drained = true
+    })
+    await closingEntered.promise
+    t.mock.timers.tick(15_000)
+    // Drain Promise continuations without advancing real time or releasing native work.
+    await new Promise(setImmediate)
+    assert.equal(drained, true, 'terminal drain must finish without native completion')
+    await closing
+    assert.deepEqual(unconfirmed, ['e2ee'])
+    assert.equal(terminated, true)
+    assert.equal(released, false, 'waiter timeout must retain the native custody owner')
+    assert.ok(events.some(([name, state]) => name === 'independent' && state === 'closed'))
+    hold = false
+    release.resolve()
+    await reading
+    await rawClosing
+    assert.equal(released, true)
+    await execute(
+      Effect.gen(function* () {
+        const reopened = yield* ownerWithHost(directory)
+        const status = yield* reopened.host.open(workspaceId)
+        assert.equal(status.length, before.length)
+        assert.equal(status.epoch, before.epoch)
+        assert.equal(status.hasCurrentKey, true)
+        assert.deepEqual(
+          historyDb(directory, (db) =>
+            db
+              .prepare('SELECT record FROM records ORDER BY position')
+              .all()
+              .map((row) => hex(row.record))
+          ),
+          records.map(hex)
+        )
+      })
+    )
+  } finally {
+    hold = false
+    release.resolve()
+    await reading
+    await rawClosing
     await Effect.runPromise(Scope.close(scope, Exit.void))
   }
 })

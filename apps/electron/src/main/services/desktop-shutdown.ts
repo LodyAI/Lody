@@ -62,3 +62,39 @@ export async function waitForQuitRecovery<T>(
     clearTimeout(timer)
   }
 }
+
+/** Only resources whose execution ends with Electron main may use this budget.
+ * A deadline ends the wait, never releases custody or permits a replacement.
+ * The caller must terminate main if any resource remains unconfirmed. */
+export async function drainMainProcessQuitResources(
+  resources: ReadonlyArray<{ name: string; close: () => Promise<void> }>,
+  timeoutMs = 15_000,
+  observe: (name: string, state: 'closing' | 'closed' | 'failed' | 'timeout') => void = () => {}
+): Promise<string[]> {
+  const notify: typeof observe = (name, state) => {
+    try {
+      observe(name, state)
+    } catch {
+      // A diagnostic sink cannot own termination.
+    }
+  }
+  const unconfirmed = new Set(resources.map((resource) => resource.name))
+  const pending = new Set(unconfirmed)
+  const cleanup = Promise.all(
+    resources.map(async ({ name, close }) => {
+      notify(name, 'closing')
+      try {
+        await close()
+        unconfirmed.delete(name)
+        notify(name, 'closed')
+      } catch {
+        notify(name, 'failed')
+      } finally {
+        pending.delete(name)
+      }
+    })
+  )
+  await waitForQuitRecovery(cleanup, timeoutMs)
+  for (const name of pending) notify(name, 'timeout')
+  return [...unconfirmed]
+}
