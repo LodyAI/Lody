@@ -13,3 +13,7 @@ access and the pinned scrcpy connection. The shared device-preview core owns vie
   upstream addresses or arbitrary file paths. EOF/close releases touches.
 - Own every ADB socket and join its close on cancellation. Never release a device
   lease while its capture/input connection remains live.
+
+- Appearance uses only fixed `cmd uimode night yes/no` commands on the capture’s
+  bound ADB connection. Check exit status and confirmed mode; cancellation shares
+  native connection revocation with other preview controls.

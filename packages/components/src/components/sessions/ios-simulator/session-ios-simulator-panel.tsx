@@ -624,7 +624,7 @@ function SessionIosSimulatorPanelController({
                 'volume-down': false,
                 action: false,
                 text: true,
-                appearance: false,
+                appearance: true,
                 'open-url': false,
               }
             : getIosSimulatorControlAvailability(hardware),

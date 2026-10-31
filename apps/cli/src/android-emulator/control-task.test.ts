@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { runAndroidControl } from './control-task';
+import { runAndroidControl, setAndroidAppearance } from './control-task';
 it('revokes native ownership and joins the command when shutdown interrupts an ACK wait', async () => {
   let reject!: (reason: Error) => void;
   const native = new Promise<void>((_, r) => {
@@ -37,4 +37,32 @@ it('bounds a missing native ACK by ending the owner, not abandoning the pending 
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('changes the device night mode in both directions and confirms the result', async () => {
+  let night = 'no';
+  const shell = {
+    async spawnWaitText(command: readonly string[]) {
+      expect(command.slice(0, 3)).toEqual(['cmd', 'uimode', 'night']);
+      expect(['yes', 'no']).toContain(command[3]);
+      night = command[3]!;
+      return { exitCode: 0, stdout: `Night mode: ${night}\n` };
+    },
+  };
+  await setAndroidAppearance(shell, 'dark');
+  expect(night).toBe('yes');
+  await setAndroidAppearance(shell, 'light');
+  expect(night).toBe('no');
+});
+it('rejects unavailable shell control, failed commands and an unapplied mode', async () => {
+  await expect(setAndroidAppearance(undefined, 'dark')).rejects.toThrow('unavailable');
+  await expect(
+    setAndroidAppearance({ spawnWaitText: async () => ({ exitCode: 1, stdout: '' }) }, 'dark')
+  ).rejects.toThrow();
+  await expect(
+    setAndroidAppearance(
+      { spawnWaitText: async () => ({ exitCode: 0, stdout: 'Night mode: no' }) },
+      'dark'
+    )
+  ).rejects.toThrow();
 });

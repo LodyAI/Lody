@@ -11,7 +11,9 @@ writes on abort/error/close. Every capture has an isolated scrcpy connection ID;
 control cancellation closes its native connections before joining pending work.
 Clipboard input is explicit Unicode paste, with a bounded ACK wait. Touch supports
 one or two pointers. Navigation is Back/Home/Recents. Rotate uses scrcpy's native
-rotation toggle; iOS-only controls are unavailable. Audio and clipboard autosync
+rotation toggle. Light/Dark changes Android system night mode through a fixed
+ADB `cmd uimode night` command; apps with their own theme overrides may not follow it.
+iOS-only controls are unavailable. Audio and clipboard autosync
 are disabled. APK installation and arbitrary shell commands are not exposed.
 
 The encoder is fixed to H.264, 1 Mbps, 30 FPS maximum and a 1280-pixel maximum

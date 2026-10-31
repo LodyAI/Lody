@@ -1,4 +1,4 @@
-import { runAndroidControl } from './control-task';
+import { runAndroidControl, setAndroidAppearance } from './control-task';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { AdbServerClient } from '@yume-chan/adb';
@@ -182,6 +182,10 @@ export async function openAndroidConnection(
     })();
     void pump.catch(abort);
     const execute = async (control: DevicePreviewControl) => {
+      if (control.kind === 'appearance') {
+        await setAndroidAppearance(adb.subprocess.shellProtocol, control.appearance);
+        return;
+      }
       if (control.kind === 'text') {
         await controller.setClipboard({
           sequence: clipboardSequence++,
