@@ -101,3 +101,13 @@ width. Long unbroken paths wrap within the detail instead of overflowing the wel
 - A visible countdown keeps consent reversible without a second control —
   reveal stop-auto-retry on hover or keyboard focus, and show it directly on
   touch devices.
+
+## Rejected configuration recovery
+
+A first-input revision rejection appears as `session_config_changed` in the existing
+`chat_failed` banner. Failed user rows expose the ordinary resend confirmation,
+including a warning about repeating any completed work. The handler sends only the
+original content through the current composer configuration as a new input. After
+successful local admission it marks the old row canceled; failed admission retains
+that row and its recovery action. Neither a transport ACK nor a delivery overlay
+may hide a failed row behind the Delivered indicator.

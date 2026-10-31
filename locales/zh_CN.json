@@ -5998,5 +5998,8 @@
   "e2ee.machineSharing.state.pending": "等待确认",
   "e2ee.machineSharing.lastVersion": "上次验证版本",
   "Lody could not fully quit. Please restart Lody.": "Lody 未能完全退出，请重新启动。",
-  "Retry quit": "重试退出"
+  "Retry quit": "重试退出",
+  "sessions.systemNotices.chatFailed.sessionConfigChanged": "配置已在别处更新，请用当前配置重新发送。",
+  "sessions.messageStatus.failedResend": "发送失败，重新发送",
+  "sessions.resendUndelivered.failedDescription": "使用当前配置将相同内容作为新消息发送？已完成的工作可能会重复执行。"
 }

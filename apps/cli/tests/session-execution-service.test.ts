@@ -1,3 +1,4 @@
+import { TURN_BUDGETS } from '../src/session/turn-budgets';
 import { AutomationLedger } from '../src/automations/storage/ledger';
 import { dispatchQuotaSchedule } from '../src/automations/compat/quota-schedule';
 import {
@@ -2989,7 +2990,11 @@ describe('SessionExecutionService', () => {
       | 'backfill-member-removed'
       | 'backfill-device-revoked'
       | 'backfill-network'
+      | 'stale-config'
+      | 'reopened-config'
+      | 'derived-config'
   ) => {
+    const configCase = ['stale-config', 'reopened-config', 'derived-config'].includes(mode);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -3156,7 +3161,23 @@ describe('SessionExecutionService', () => {
             ledger: () => Effect.succeed(view),
             readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
           });
-          const inputConfig = { prompt: 'hi', cliType: 'builtin', agentType: 'codex' };
+          const inputConfig = {
+            prompt: 'hi',
+            cliType: 'builtin',
+            agentType: 'codex',
+            ...(configCase ? { configRevision: 1, modeId: 'plan', modelId: 'old-model' } : {}),
+          };
+          if (mode === 'derived-config')
+            Object.assign(inputConfig, {
+              _lodyAutomation: {
+                invocationId: 'derived-action',
+                ruleId: 'approved-rule',
+                ruleRevision: 1,
+                eventRef: 'source-event',
+                authorizationUserId: user,
+                nativeSessionId: 'acp-config',
+              },
+            });
           const row = source.getList('history').insertContainer(0, new LoroMap());
           row.set('id', 'turn-user-1');
           row.set('role', 'user');
@@ -3234,6 +3255,34 @@ describe('SessionExecutionService', () => {
             plaintext: source.export({ mode: 'snapshot' }),
             additionalData: () => snapshotAAD,
           });
+          let resend: { sealed: typeof sealed; update: Uint8Array } | undefined;
+          if (mode === 'stale-config') {
+            const next = source.getList('history').insertContainer(1, new LoroMap());
+            for (const [key, value] of Object.entries({
+              id: 'config-resend',
+              role: 'user',
+              userId: user,
+              timestamp: new Date().toISOString(),
+              status: 'pending',
+              inputConfig: {
+                ...inputConfig,
+                configRevision: 2,
+                modeId: 'default',
+                modelId: 'new-model',
+              },
+              items: [{ type: 'text', text: 'hi' }],
+            }))
+              next.set(key, value);
+            source.commit();
+            const resendUpdate = source.export({ mode: 'update' });
+            const body = new Uint8Array(resendUpdate.length + 4);
+            new DataView(body.buffer).setUint32(0, resendUpdate.length, false);
+            body.set(resendUpdate, 4);
+            resend = {
+              sealed: yield* binding.seal({ context, plaintext: body, additionalData: () => aad }),
+              update: resendUpdate,
+            };
+          }
           if (mode === 'revoked-device')
             yield* append({ _tag: 'RevokeDevice', target: originalSigner.publicKey });
           if (mode === 'guest')
@@ -3297,6 +3346,8 @@ describe('SessionExecutionService', () => {
           };
           return {
             sharingVersion,
+            initialUpdate: update,
+            resend,
             genesis,
             snapshot,
             snapshotAAD,
@@ -3420,7 +3471,7 @@ describe('SessionExecutionService', () => {
       };
       const host = composed.encryptedWorkspace;
       await host.refresh();
-      const sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+      let sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
       const protection = host.content.resolve({
         kind: 'doc',
         docId: 'session-production-session',
@@ -3435,7 +3486,7 @@ describe('SessionExecutionService', () => {
         });
       // First connection/restart can reconstruct the state from a snapshot
       // without ever opening the author's signed creation update locally.
-      if (!snapshotOnly) sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
+      if (!snapshotOnly) sessionDoc.handle.doc.import(fixture.initialUpdate);
       else {
         const snapshot = await protection.config.provider.open({
           ...fixture.snapshot,
@@ -3444,6 +3495,226 @@ describe('SessionExecutionService', () => {
         });
         sessionDoc.handle.doc.import(snapshot);
         snapshot.fill(0);
+      }
+      if (configCase) {
+        // This owner reads only the session imported through the real protected provider above.
+        const read = await sessionDoc.sessionData.history.readTurn('turn-user-1');
+        if (read.state !== 'ready' || !read.turn.inputConfig)
+          throw new Error('Missing verified turn');
+        await sessionDoc.beginAcpRuntimeConfig('', {
+          acpSessionId: 'acp-config',
+          generation: 'verified-owner',
+          state: 'ready',
+          modeId: 'plan',
+          modelId: 'old-model',
+        });
+        await sessionDoc.flushLocalWrites();
+        if (mode !== 'reopened-config')
+          await sessionDoc.applyAcpRuntimeConfigPatch('', {
+            acpSessionId: 'acp-config',
+            generation: 'verified-owner',
+            state: 'ready',
+            modeId: 'default',
+            modelId: 'new-model',
+          });
+        await sessionDoc.flushLocalWrites();
+        if (mode === 'reopened-config') {
+          await lody.documentManager.cleanSessionDoc(sessionId);
+          sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+          expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toMatchObject({
+            revision: 1,
+            state: 'ready',
+          });
+          expect(sessionDoc.isAcpConfigurationConfirmed('verified-owner')).toBe(false);
+        }
+        const store = new LodyOperationStore(path.join(directory, 'config-inputs.sqlite'), () =>
+          Date.now()
+        );
+        store.inbox.activate(workspaceId, 'config-owner');
+        const bridge = operationInboxLegacy({
+          workspaceId,
+          owner: 'config-owner',
+          sql: store.inbox,
+          ready: () => false,
+          admit: () => true,
+          launch: async () => {},
+          report: () => {},
+        });
+        const service = new SessionExecutionService(
+          createBaseDeps({
+            workspaceId,
+            sessionManager: {
+              getSession: () => ({
+                sessionId,
+                acpSessionId: 'acp-config',
+                agentClient: {
+                  isCreated: () => true,
+                  currentModel: undefined,
+                  cancel: async () => {},
+                  prompt: async () => {
+                    submitted.push('prompt');
+                    return { stopReason: 'end_turn' };
+                  },
+                },
+                terminalManager: {},
+                getWorkdir: () => '/tmp',
+                getHostWorkdir: () => '/tmp',
+                getParentSessionId: () => undefined,
+                exec: async () => '',
+                terminate: async () => {},
+                updateGitIdentity: () => false,
+                createAgent: async () => 'acp-config',
+                applyExecutionPlaneLimits: async () => {},
+              }),
+              getPendingSession: () => null,
+              validateSessionCredentials: async () => {},
+            } as never,
+            createAssistantEntryForTurn: async (_sid, doc, turnId, _model, parentId) => {
+              await doc.sessionData.commands.applyHistoryAction({
+                kind: 'upsert-turn',
+                turn: {
+                  id: turnId,
+                  role: 'assistant',
+                  userTurnId: parentId,
+                  timestamp: new Date().toISOString(),
+                  items: [{ type: 'text', text: 'Synthetic response' }],
+                  finished: false,
+                },
+              });
+            },
+            encryptedWorkspace: true,
+            encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
+            recordChatFailure: async (doc, reason, message) => {
+              await doc.sessionData.commands.applyHistoryAction({
+                kind: 'upsert-turn',
+                turn: {
+                  id: 'config-rejection',
+                  role: 'system',
+                  timestamp: new Date().toISOString(),
+                  items: [
+                    { type: 'system_notice', name: 'chat_failed', meta: { reason, message } },
+                  ],
+                },
+              });
+            },
+            workspaceDocument: {
+              repo: lody.documentManager.repo,
+              getOrCreateSessionDoc: async () => sessionDoc,
+              updateAcpCapabilities: async () => {},
+            } as never,
+            applyAcpModeAndModel: () =>
+              Effect.promise(async () => {
+                if (mode === 'reopened-config') {
+                  await sessionDoc.beginAcpRuntimeConfig('', {
+                    acpSessionId: 'acp-config',
+                    generation: 'reopened-native',
+                    state: 'ready',
+                    modeId: 'plan',
+                    modelId: 'old-model',
+                  });
+                  await sessionDoc.flushLocalWrites();
+                }
+                submitted.push('configuration-applied');
+              }),
+          })
+        );
+        service.setOperationInbox(bridge);
+        try {
+          const request = {
+            type: 'session/chat',
+            sessionId,
+            machineId: 'machine-1',
+            workspaceId,
+            userId: user,
+            userName: 'Synthetic',
+            userEmail: 'synthetic@example.test',
+            userTurnId: 'turn-user-1',
+            acpSessionConfig: read.turn.inputConfig,
+          } as const;
+          if (mode !== 'stale-config') {
+            if (mode === 'derived-config') {
+              // Internal owner admission is synthetic; encrypted Automations policy is not enabled.
+              service.setAutomationAdmission(
+                async (args) =>
+                  args.turnId === 'turn-user-1' && args.origin.invocationId === 'derived-action',
+                () => true
+              );
+              expect(
+                await service.acceptAutomationInput({
+                  sessionId,
+                  turnId: 'turn-user-1',
+                  userId: user,
+                  config: read.turn.inputConfig,
+                })
+              ).toBe(true);
+            }
+            await service.continueSession(request);
+            expect(submitted).toEqual(['configuration-applied', 'prompt']);
+            expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+              state: 'ready',
+              turn: { status: 'handled', inputConfig: read.turn.inputConfig },
+            });
+            expect(
+              (await sessionDoc.sessionData.history.readAll())
+                .flatMap((turn) => turn.items ?? [])
+                .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+            ).toEqual([]);
+            if (mode === 'reopened-config')
+              expect(sessionDoc.isAcpConfigurationConfirmed('reopened-native')).toBe(true);
+            return;
+          }
+          for (let attempt = 0; attempt < 2; attempt++) {
+            await service.continueSession(request);
+            expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+              state: 'ready',
+              turn: { status: 'failed', inputConfig: read.turn.inputConfig },
+            });
+            expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+          }
+          expect(
+            (await sessionDoc.sessionData.history.readAll())
+              .flatMap((turn) => turn.items ?? [])
+              .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+          ).toMatchObject([{ meta: { reason: 'session_config_changed' } }]);
+          expect(submitted).toEqual([]);
+          expect((await sessionDoc.getDocState())?.acpRuntimeConfig).toMatchObject({
+            revision: 2,
+            modeId: 'default',
+            modelId: 'new-model',
+          });
+          expect(
+            store.inbox.inputKind({ workspaceId, sessionId, userId: user }, 'turn-user-1')
+          ).toBeUndefined();
+          if (!fixture.resend || !sessionDoc.handle) throw new Error('Missing signed resend');
+          await protection.config.provider.open({
+            ...fixture.resend.sealed,
+            context: fixture.context,
+            additionalData: fixture.aad,
+          });
+          sessionDoc.handle.doc.import(fixture.resend.update);
+          const resend = await sessionDoc.sessionData.history.readTurn('config-resend');
+          if (resend.state !== 'ready' || !resend.turn.inputConfig)
+            throw new Error('Missing verified resend');
+          await service.continueSession({
+            ...request,
+            userTurnId: 'config-resend',
+            acpSessionConfig: resend.turn.inputConfig,
+          });
+          expect(submitted).toEqual(['configuration-applied', 'prompt']);
+          expect(await sessionDoc.sessionData.history.readTurn('config-resend')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'handled' },
+          });
+          expect(await sessionDoc.sessionData.history.readTurn('turn-user-1')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'failed' },
+          });
+        } finally {
+          await service.drainInboxExecutions();
+          await bridge.close();
+          store.close();
+        }
+        return;
       }
       const dispatch = (userTurnId = 'turn-user-1') =>
         runSilentPromptTurn({
@@ -3550,6 +3821,13 @@ describe('SessionExecutionService', () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   };
+
+  it('rejects stale configuration using the production verified encrypted Loro session', () =>
+    runProductionSignedTurn('stale-config'));
+  it('bootstraps a fresh input from the production encrypted Loro persisted revision after reopen', () =>
+    runProductionSignedTurn('reopened-config'));
+  it('accepts approved derived work with its inherited revision through production encrypted Loro', () =>
+    runProductionSignedTurn('derived-config'));
 
   it('executes the real UI account ID through production Lody construction without injected authorization', () =>
     runProductionSignedTurn('account'));
@@ -12632,8 +12910,404 @@ describe('Operation Inbox execution boundary', () => {
       wake: () => bridge.wake(),
       now,
       storePath: path.join(root, 'operations.sqlite3'),
+      bridge,
     };
   }
+
+  async function revisionInput(f: ReturnType<typeof inboxExecutionFixture>) {
+    const connection = {
+      acpSessionId: 'acp-inbox' as ACPSessionId,
+      generation: 'config-owner',
+      state: 'ready' as const,
+    };
+    const active = { modeId: 'plan', modelId: 'old-model' };
+    await f.doc.beginAcpRuntimeConfig('', { ...connection, ...active });
+    await f.doc.flushLocalWrites();
+    const client = new SessionDocument(
+      f.deps.workspaceDocument.repo,
+      f.message.sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    const clientDoc = composeTestSessionDoc(client);
+    const ownerDoc = f.doc.handle?.doc;
+    if (!ownerDoc) throw new Error('Missing owner document');
+    clientDoc.import(ownerDoc.export({ mode: 'snapshot' }));
+    const baseline = (await client.getDocState())?.acpRuntimeConfig;
+    if (!baseline) throw new Error('Missing client baseline');
+    const config = {
+      ...f.message.acpSessionConfig,
+      modeId: baseline.modeId,
+      modelId: baseline.modelId,
+      configRevision: baseline.revision,
+    };
+    client.recordHumanInputReceipt('config-input', 'user-1');
+    await client.appendUserTurn({
+      id: 'config-input',
+      role: 'user',
+      userId: 'user-1',
+      status: 'pending',
+      timestamp: '2026-10-31T00:00:00Z',
+      items: [{ type: 'text', text: config.prompt }],
+      inputConfig: config,
+    });
+    ownerDoc.import(clientDoc.export({ mode: 'update' }));
+    f.deps.applyAcpModeAndModel = (_session, input) =>
+      applyAcpSessionRunConfig(input).pipe(
+        Effect.provideService(AcpConfiguration, {
+          options: [],
+          read: Effect.sync(() => ({ ...connection, ...active })),
+          setMode: (modeId) =>
+            Effect.sync(() => {
+              active.modeId = modeId;
+            }),
+          setModel: (modelId) =>
+            Effect.sync(() => {
+              active.modelId = modelId;
+            }),
+          setOption: () => Effect.void,
+        }),
+        Effect.asVoid
+      );
+    const advanceOwner = async () => {
+      active.modeId = 'default';
+      active.modelId = 'new-model';
+      await f.doc.applyAcpRuntimeConfigPatch('', { ...connection, ...active });
+      await f.doc.flushLocalWrites();
+    };
+    return {
+      config,
+      active,
+      advanceOwner,
+      clientDoc,
+      request: { ...f.message, userTurnId: 'config-input', acpSessionConfig: config },
+    };
+  }
+
+  it.each([true, false])(
+    'fails a stale first Loro input visibly once and resends with current configuration (Inbox=%s)',
+    async (withInbox) => {
+      const prompts: string[] = [];
+      const f = inboxExecutionFixture(async () => {
+        prompts.push('submitted');
+        return { stopReason: 'end_turn' };
+      });
+      const peer = await revisionInput(f);
+      if (!withInbox) f.service.setOperationInbox(undefined);
+      try {
+        await peer.advanceOwner();
+        expect((await f.doc.getDocState())?.humanInputReceipts?.['config-input']).toEqual({
+          userId: 'user-1',
+        });
+        await f.doc.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'config-input',
+          status: 'seen',
+        });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const executor = attempt === 0 ? f.service : new SessionExecutionService(f.deps);
+          if (withInbox) executor.setOperationInbox(f.bridge);
+          await executor.continueSession(peer.request);
+          expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'failed', inputConfig: peer.config },
+          });
+          expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        }
+        const notices = (await f.doc.sessionData.history.readAll())
+          .flatMap((turn) => turn.items ?? [])
+          .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+        expect(notices).toMatchObject([{ meta: { reason: 'session_config_changed' } }]);
+        expect(peer.active).toEqual({ modeId: 'default', modelId: 'new-model' });
+        expect(prompts).toEqual([]);
+        expect(
+          f.store.inbox.inputKind(
+            { workspaceId: 'workspace-1', sessionId: f.message.sessionId, userId: 'user-1' },
+            'config-input'
+          )
+        ).toBeUndefined();
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { inputConfig: peer.config },
+        });
+        const current = {
+          ...peer.config,
+          configRevision: 2,
+          modeId: 'default',
+          modelId: 'new-model',
+        };
+        await f.doc.appendUserTurn({
+          id: 'config-resend',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          timestamp: '2026-10-31T00:01:00Z',
+          items: [{ type: 'text', text: current.prompt }],
+          inputConfig: current,
+        });
+        await f.service.continueSession({
+          ...peer.request,
+          userTurnId: 'config-resend',
+          acpSessionConfig: current,
+        });
+        expect(prompts).toEqual(['submitted']);
+        expect(await f.doc.sessionData.history.readTurn('config-resend')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'handled' },
+        });
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'failed' },
+        });
+      } finally {
+        peer.clientDoc.free();
+        await f.close();
+      }
+    }
+  );
+
+  it('bootstraps a fresh Loro input after reopening a persisted configuration without a live generation', async () => {
+    const prompts: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      prompts.push('prompt');
+      return { stopReason: 'end_turn' };
+    });
+    const peer = await revisionInput(f);
+    const reopened = new SessionDocument(
+      f.deps.workspaceDocument.repo,
+      f.message.sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    const { LoroDoc } = await import('loro-crdt');
+    const reopenedStorage = new LoroDoc();
+    reopenedStorage.import(f.doc.handle!.doc.export({ mode: 'snapshot' }));
+    composeTestSessionDoc(reopened, { doc: reopenedStorage });
+    f.deps.workspaceDocument.getOrCreateSessionDoc = async () => reopened;
+    const apply = f.deps.applyAcpModeAndModel;
+    f.deps.applyAcpModeAndModel = (session, input, context) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await reopened.beginAcpRuntimeConfig('', {
+            acpSessionId: 'acp-inbox' as ACPSessionId,
+            generation: 'reopened-native',
+            state: 'ready',
+            modeId: input.modeId,
+            modelId: input.modelId,
+          });
+          await reopened.flushLocalWrites();
+        });
+        yield* apply(session, input, context);
+      });
+    try {
+      expect(reopened.isAcpConfigurationConfirmed('config-owner')).toBe(false);
+      await f.service.continueSession(peer.request);
+      expect(prompts).toEqual(['prompt']);
+      expect(reopened.isAcpConfigurationConfirmed('reopened-native')).toBe(true);
+      expect(await reopened.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { status: 'handled', inputConfig: peer.config },
+      });
+    } finally {
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
+
+  it.each(['timeout', 'shutdown'])(
+    'bounds a missing Loro configuration wait and never dispatches after late sync (%s)',
+    async (end) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const prompts: string[] = [];
+      const f = inboxExecutionFixture(async () => {
+        prompts.push('prompt');
+        return { stopReason: 'end_turn' };
+      });
+      const peer = await revisionInput(f);
+      const entered = Promise.withResolvers<void>();
+      const synced = Promise.withResolvers<void>();
+      f.doc.handle!.doc.getMap('acpRuntimeConfig').clear();
+      f.doc.handle!.doc.commit();
+      f.doc.waitForRemoteSync = async () => {
+        entered.resolve();
+        await synced.promise;
+      };
+      try {
+        const pending = f.service.continueSession(peer.request);
+        await entered.promise;
+        if (end === 'shutdown') f.service.quiesceInboxExecutions();
+        else await vi.advanceTimersByTimeAsync(TURN_BUDGETS.configurationMs);
+        await pending;
+        expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+          state: 'ready',
+          turn: { status: end === 'shutdown' ? 'seen' : 'failed', inputConfig: peer.config },
+        });
+        expect(
+          (await f.doc.sessionData.history.readAll())
+            .flatMap((turn) => turn.items ?? [])
+            .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+        ).toMatchObject(end === 'shutdown' ? [] : [{ meta: { reason: 'turn_pre_prompt_failed' } }]);
+        synced.resolve();
+        await synced.promise;
+        expect(prompts).toEqual([]);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        synced.resolve();
+        peer.clientDoc.free();
+        await f.close();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('admits trusted Loro derived inputs with inherited revisions without exempting human input', async () => {
+    const prompts: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      prompts.push('prompt');
+      return { stopReason: 'end_turn' };
+    });
+    const peer = await revisionInput(f);
+    const origin = {
+      invocationId: 'continuation',
+      ruleId: 'approved-rule',
+      ruleRevision: 1,
+      eventRef: 'capacity-event',
+      authorizationUserId: 'user-1',
+      nativeSessionId: 'acp-inbox',
+    };
+    const config = { ...peer.config, _lodyAutomation: origin };
+    try {
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'config-input',
+        userId: 'user-1',
+        config: peer.config,
+      });
+      await f.service.continueSession(peer.request);
+      prompts.length = 0;
+      await peer.advanceOwner();
+      f.service.setAutomationAdmission(
+        async (args) =>
+          args.turnId === 'derived-input' && args.origin.invocationId === 'continuation',
+        () => true
+      );
+      expect(
+        await f.service.acceptAutomationInput({
+          sessionId: f.message.sessionId,
+          turnId: 'forged-input',
+          userId: 'user-1',
+          config,
+        })
+      ).toBe(false);
+      await f.doc.appendUserTurn({
+        id: 'derived-input',
+        role: 'user',
+        userId: 'user-1',
+        status: 'pending',
+        timestamp: '2026-10-31T00:01:00Z',
+        items: [{ type: 'text', text: config.prompt }],
+        inputConfig: config,
+      });
+      expect(
+        await f.service.acceptAutomationInput({
+          sessionId: f.message.sessionId,
+          turnId: 'derived-input',
+          userId: 'user-1',
+          config,
+        })
+      ).toBe(true);
+      await f.service.continueSession(
+        { ...peer.request, userTurnId: 'derived-input', acpSessionConfig: config },
+        { dispatchSource: 'queue' }
+      );
+      expect(prompts).toEqual(['prompt']);
+      expect(await f.doc.sessionData.history.readTurn('derived-input')).toMatchObject({
+        state: 'ready',
+        turn: { status: 'handled', inputConfig: config },
+      });
+    } finally {
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
+
+  it('surfaces a rejected-input failure write error without accepting or losing the input', async () => {
+    const f = inboxExecutionFixture(async () => {
+      throw new Error('must not prompt');
+    });
+    const peer = await revisionInput(f);
+    const writeFailure = f.deps.recordChatFailure;
+    try {
+      await peer.advanceOwner();
+      f.deps.recordChatFailure = async () => {
+        throw new Error('synthetic storage failure');
+      };
+      await expect(f.service.continueSession(peer.request)).rejects.toThrow(
+        'synthetic storage failure'
+      );
+      expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { inputConfig: peer.config, status: 'seen' },
+      });
+      f.deps.recordChatFailure = writeFailure;
+      await f.service.continueSession(peer.request);
+      expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { inputConfig: peer.config, status: 'failed' },
+      });
+    } finally {
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
+
+  it('keeps an owner-accepted queued revision across a newer baseline and executor restart', async () => {
+    const prompts: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      prompts.push('submitted');
+      return { stopReason: 'end_turn' };
+    });
+    const peer = await revisionInput(f);
+    let reopened: LodyOperationStore | undefined;
+    let bridge: ReturnType<typeof operationInboxLegacy> | undefined;
+    try {
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'config-input',
+        userId: 'user-1',
+        config: peer.config,
+      });
+      await peer.advanceOwner();
+      await f.bridge.close();
+      f.store.close();
+      reopened = new LodyOperationStore(f.storePath, f.now);
+      reopened.inbox.activate('workspace-1', 'replacement-owner');
+      bridge = operationInboxLegacy({
+        workspaceId: 'workspace-1',
+        owner: 'replacement-owner',
+        sql: reopened.inbox,
+        ready: () => false,
+        admit: () => true,
+        launch: async () => {},
+        report: () => {},
+      });
+      const replacement = new SessionExecutionService(f.deps);
+      replacement.setOperationInbox(bridge);
+      await replacement.continueSession(peer.request, { dispatchSource: 'queue' });
+      await replacement.drainInboxExecutions();
+      expect(peer.active).toEqual({ modeId: 'plan', modelId: 'old-model' });
+      expect(prompts).toEqual(['submitted']);
+      expect(await f.doc.sessionData.history.readTurn('config-input')).toMatchObject({
+        state: 'ready',
+        turn: { inputConfig: peer.config },
+      });
+    } finally {
+      await bridge?.close();
+      reopened?.close();
+      peer.clientDoc.free();
+      await f.close();
+    }
+  });
 
   it.each([
     'automation-first',
