@@ -177,6 +177,74 @@ describe('useSessionConversationDiffData', () => {
     expect(state?.base).toBe('head');
     expect(state?.normalizedPaths).toEqual(['worktree.ts']);
   });
+  it('does not read All Changes from an offline owner and reloads when it returns', async () => {
+    const paths = ['worktree.ts'];
+    let reads = 0;
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'new' },
+    }));
+    provider.getAllChangesDiff = async () => {
+      reads += 1;
+      return {
+        status: 'ready',
+        base: 'head',
+        truncated: false,
+        entries: [
+          {
+            path: 'worktree.ts',
+            diff: {
+              status: 'ready',
+              path: 'worktree.ts',
+              oldSnapshot: { kind: 'text', text: 'old' },
+              newSnapshot: { kind: 'text', text: `read ${reads}` },
+            },
+          },
+        ],
+      };
+    };
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness({ ownerOffline }: { ownerOffline: boolean }) {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'all-changes-owner-offline-test' as SessionId,
+        filePaths: paths,
+        fileProvider: provider,
+        scope: 'uncommitted',
+        ownerOffline,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+
+    render(<Harness ownerOffline />);
+    await flushMicrotasks();
+    expect(state).toMatchObject({ ownerOffline: true, isPanelLoading: false, batchReady: false });
+    expect(state?.resolvedByPath).toEqual({});
+
+    rerender(<Harness ownerOffline={false} />);
+    await flushMicrotasks();
+    expect(state?.ownerOffline).toBe(false);
+    expect(state?.resolvedByPath['worktree.ts']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'read 1' },
+    });
+
+    // A batch read before the owner went offline is not presented as current state.
+    rerender(<Harness ownerOffline />);
+    await flushMicrotasks();
+    expect(state).toMatchObject({ ownerOffline: true, base: null, isPanelLoading: false });
+    expect(state?.resolvedByPath).toEqual({});
+
+    rerender(<Harness ownerOffline={false} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['worktree.ts']).toMatchObject({
+      newSnapshot: { text: 'read 2' },
+    });
+  });
   it('accepts started reads across viewport changes and loads the newly visible file after settlement', async () => {
     type DiffResult = Awaited<ReturnType<SessionFileProvider['getDiff']>>;
     const pending = new Map<string, ReturnType<typeof createDeferred<DiffResult>>>();
