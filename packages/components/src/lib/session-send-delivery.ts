@@ -13,6 +13,7 @@ import debug from 'debug';
 import i18next from 'i18next';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
 import { SessionInputNotSentError } from './session-accepted-inputs';
+import { EncryptedPrepareTimeout, isKnownMachineWithdrawal } from './encrypted-dispatch-outcome';
 import { throwIfSendAborted } from './session-send-resources';
 
 const log = debug('lody:session-send');
@@ -115,14 +116,44 @@ export async function writeUserTurn(
   send: UserTurnSend,
   signal?: AbortSignal
 ): Promise<void> {
-  await refuseKnownWithdrawnTarget(runtime, send);
+  const late = (await refuseKnownWithdrawnTarget(runtime, send))?.late;
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
   if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
+  if (late && !send.queue) settleOnLateWithdrawal(runtime, send, late);
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/**
+ * A withdrawal verified after the deadline cancels the written turn while every copy
+ * still awaits a start; a machine that already claimed it keeps its own decision.
+ */
+function settleOnLateWithdrawal(
+  runtime: SessionSendRuntime,
+  send: UserTurnSend,
+  late: Promise<unknown>
+) {
+  void late.then(
+    () => undefined,
+    async (error: unknown) => {
+      if (!isKnownMachineWithdrawal(error)) return;
+      try {
+        await runtime.sendResources.withSessionStore(send.sessionId, (store) =>
+          store.sessionData.commands.applyHistoryAction({
+            kind: 'user-status',
+            turnId: send.entry.id,
+            status: 'canceled',
+            onlyAwaitingStart: true,
+          })
+        );
+      } catch (cause) {
+        log('late withdrawal could not settle %s/%s: %o', send.sessionId, send.entry.id, cause);
+      }
+    }
+  );
 }
 
 /**
@@ -131,14 +162,17 @@ export async function writeUserTurn(
  * is written. Every other preparation outcome is unknown here: the input is written
  * and the receiving machine still authorizes it.
  */
-async function refuseKnownWithdrawnTarget(runtime: SessionSendRuntime, send: UserTurnSend) {
-  if (runtime.contentMode !== 'e2ee' || !runtime.prepareEncryptedDispatch) return;
+async function refuseKnownWithdrawnTarget(
+  runtime: SessionSendRuntime,
+  send: UserTurnSend
+): Promise<{ late: Promise<unknown> } | undefined> {
+  if (runtime.contentMode !== 'e2ee' || !runtime.prepareEncryptedDispatch) return undefined;
   const inputConfig = normalizeSessionTurnInputConfig(send.entry.inputConfig);
   const userId = send.entry.userId?.trim();
   const machineId =
     (send.creation?.machineId as MachineId | undefined) ??
     (await readMachineId(runtime, send.sessionId));
-  if (!machineId || !inputConfig || !userId || !send.entry.timestamp) return;
+  if (!machineId || !inputConfig || !userId || !send.entry.timestamp) return undefined;
   try {
     await runtime.prepareEncryptedDispatch(machineId, {
       sessionId: send.sessionId,
@@ -148,9 +182,12 @@ async function refuseKnownWithdrawnTarget(runtime: SessionSendRuntime, send: Use
       inputConfig,
     });
   } catch (error) {
-    if (error instanceof Error && error.message === 'e2ee_machine_not_shared')
+    if (isKnownMachineWithdrawal(error))
       throw new SessionInputNotSentError(i18next.t('e2ee.machineSharing.issue.notShared'));
+    // Wrapped: an async function would otherwise wait for the late answer.
+    if (error instanceof EncryptedPrepareTimeout) return { late: error.late };
   }
+  return undefined;
 }
 
 /** Only local control metadata; this does not write history or start execution. */

@@ -312,6 +312,100 @@ it.each(['history', 'dispatch'] as const)(
   }
 );
 
+/** The real renderer boundary over a scripted host: each prepare takes the next reply. */
+function encryptedHost(f: ReturnType<typeof fixture>) {
+  f.runtime.contentMode = 'e2ee';
+  const replies: Array<() => Promise<never>> = [];
+  const pending: Array<(error: Error) => void> = [];
+  let entered: () => void = () => {};
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: () => (replies.shift() ?? (() => new Promise<never>(() => {})))(),
+    accept: async () => {
+      throw new Error('no dispatch may be accepted');
+    },
+    client: async () => {
+      throw new Error('no transport may open');
+    },
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+  const ipc = (code: string) =>
+    new Error(`Error invoking remote method 'e2ee:prepareDispatch': Error: ${code}`);
+  return {
+    reject: (code: string) => replies.push(() => Promise.reject(ipc(code))),
+    // A slow host whose answer the test releases explicitly; resolves once it is asked.
+    hold: () =>
+      new Promise<void>((resolve) => {
+        entered = resolve;
+        replies.push(
+          () =>
+            new Promise<never>((_resolve, reject) => {
+              pending.push(reject);
+              entered();
+            })
+        );
+      }),
+    release: (code: string) => pending.shift()?.(ipc(code)),
+  };
+}
+const send = (f: ReturnType<typeof fixture>, input: SessionHistory) =>
+  writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind: 'dispatch' } });
+const turnStatus = (f: ReturnType<typeof fixture>, id: string) =>
+  f.turns().find((turn) => turn.id === id)?.status;
+
+it('keeps a verified withdrawal after a later unverifiable prepare', async () => {
+  const f = fixture();
+  const host = encryptedHost(f);
+  host.reject('e2ee_machine_not_shared');
+  await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  // The host's policy refresh then fails; that unknown cannot release the withdrawal.
+  host.reject('e2ee_host_operation_failed');
+  await expect(send(f, entry('retry'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  expect(f.turns()).toEqual([]);
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+});
+
+it('keeps a verified withdrawal when a later prepare outlasts its deadline', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    host.reject('e2ee_machine_not_shared');
+    await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+    const asked = host.hold();
+    const retry = send(f, entry('retry'));
+    const refused = expect(retry).rejects.toBeInstanceOf(SessionInputNotSentError);
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    await refused;
+    expect(f.turns()).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('settles timed-out input that a late verified withdrawal reaches before any machine claims it', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    const asked = host.hold();
+    const written = send(f, entry('late'));
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    // No withdrawal was known: the unknown outcome keeps the durable write.
+    await written;
+    expect(turnStatus(f, 'late')).toBe('pending');
+    vi.useRealTimers();
+    host.release('e2ee_machine_not_shared');
+    await vi.waitFor(() => expect(turnStatus(f, 'late')).toBe('canceled'));
+    expect(f.turns().find((turn) => turn.id === 'late')?.items).toEqual(entry('late').items);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('does not create the database when it is absent', async () => {
   const f = fixture();
   await f.migrate();

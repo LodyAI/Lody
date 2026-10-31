@@ -1777,6 +1777,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               ? (machineId) =>
                   Effect.gen(function* () {
                     const status = yield* entry.status()
+                    // A retained verified withdrawal answers locally; only a newer
+                    // verified read (machine-sharing views) can release it.
+                    if (
+                      yield* entry.sharing.knownDenial(
+                        machineId,
+                        status.signingPublicKey ?? '',
+                        undefined
+                      )
+                    )
+                      return false
                     const decision = yield* entry.sharing.authorize(
                       machineId,
                       status.signingPublicKey ?? '',

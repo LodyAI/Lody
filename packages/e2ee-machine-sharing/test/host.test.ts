@@ -270,13 +270,66 @@ describe('native machine-sharing control and execution', () => {
         expect(yield* allow()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
         f.setHead(old);
         machine.invalidate();
-        expect(Result.isFailure(yield* Effect.result(allow()))).toBe(true);
+        // The rollback is rejected and the retained verified withdrawal still decides.
+        expect(yield* allow()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
         yield* Scope.close(lifetime, Exit.void);
         const reopened = yield* f.make('retained-machine', f.f.phone.signer);
         // The same durable resource remembers revision two after its owner has closed.
         expect(
           Result.isFailure(yield* Effect.result(f.run(reopened.read('fixture-machine', f.remote))))
         ).toBe(true);
+      })
+    ));
+  it('keeps a verified withdrawal known through refresh failure and restart until a newer grant', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        const lifetime = yield* Scope.make();
+        const member = yield* f.make('member', f.bob.signer).pipe(Scope.provide(lifetime));
+        const bob = hex(f.bob.publicKey);
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(2),
+            { kind: 'machine', sharedWithTeam: false },
+            f.remote
+          )
+        );
+        yield* f.run(member.read('fixture-machine', f.remote));
+        const decide = (host: typeof member) =>
+          f.run(host.authorize('fixture-machine', bob, undefined, f.remote));
+        const withdrawn = { allowed: false, reason: 'machine-not-shared' };
+        expect(yield* decide(member)).toMatchObject(withdrawn);
+        // The cached read expires and every refresh fails: the withdrawal stays known.
+        f.io.offline = true;
+        f.io.wall += 900_000;
+        f.io.mono += 900_000;
+        member.invalidate();
+        expect(yield* decide(member)).toMatchObject(withdrawn);
+        expect(yield* f.run(member.knownDenial('fixture-machine', bob, undefined))).toMatchObject(
+          withdrawn
+        );
+        yield* Scope.close(lifetime, Exit.void);
+        const reopened = yield* f.make('member', f.bob.signer);
+        expect(yield* decide(reopened)).toMatchObject(withdrawn);
+        // Only a newer verified grant releases it.
+        f.io.offline = false;
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(3),
+            { kind: 'machine', sharedWithTeam: true },
+            f.remote
+          )
+        );
+        expect(yield* decide(reopened)).toMatchObject({ allowed: true, reason: 'team' });
+        expect(
+          yield* f.run(reopened.knownDenial('fixture-machine', bob, undefined))
+        ).toBeUndefined();
       })
     ));
   it('uses strict read-start wall and monotonic freshness, and restart never renews it', () =>

@@ -13,6 +13,12 @@ import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { callEncryptedReadFeature } from '@lody/loro-streams-rpc';
 import { makeEncryptedStreamsChannel } from '@lody/loro-streams-rpc/e2ee-streams';
 import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
+import {
+  E2EE_MACHINE_NOT_SHARED,
+  EncryptedPrepareTimeout,
+} from '../lib/encrypted-dispatch-outcome';
+
+const PREPARE_DEADLINE_MS = 200;
 
 type Call =
   | { kind: 'dispatch'; input: E2eeDispatchInput }
@@ -51,6 +57,9 @@ export function createEncryptedDispatchLegacy(options: {
   // E2E-only: count a turn dispatch when the stream client appended its frame.
   const effects = clientLossEffects(options.workspaceId);
   const dispatches = new Set<string>();
+  // Machines whose withdrawal this runtime saw the host verify. Only a later successful
+  // preparation clears one; timeouts and unverifiable answers keep it known.
+  const withdrawn = new Set<string>();
   const observeAppends = (client: LoroStreamsJsonStreamClient): LoroStreamsJsonStreamClient => {
     if (!effects) return client;
     return new Proxy(client, {
@@ -132,18 +141,38 @@ export function createEncryptedDispatchLegacy(options: {
     prepare: async (machineId: string, input: E2eeDispatchInput) => {
       if (closed) throw new Error('e2ee_rpc_closed');
       const started = Date.now();
-      const original = await Effect.runPromise(
-        Effect.tryPromise({
-          try: () => options.prepare(machineId, input),
-          // Keep the host's verified withdrawal distinct: senders refuse to write that input.
-          catch: (cause) =>
-            new Error(
-              cause instanceof Error && /(?:^|: )e2ee_machine_not_shared$/.test(cause.message)
-                ? 'e2ee_machine_not_shared'
-                : 'e2ee_rpc_prepare'
-            ),
-        }).pipe(Effect.timeout('200 millis'))
-      );
+      const native = Promise.resolve()
+        .then(() => options.prepare(machineId, input))
+        .then(
+          (prepared) => {
+            withdrawn.delete(machineId);
+            return prepared;
+          },
+          (cause: unknown) => {
+            // Keep the host's verified withdrawal distinct: senders refuse to write that input.
+            if (cause instanceof Error && /(?:^|: )e2ee_machine_not_shared$/.test(cause.message))
+              withdrawn.add(machineId);
+            throw new Error(
+              withdrawn.has(machineId) ? E2EE_MACHINE_NOT_SHARED : 'e2ee_rpc_prepare'
+            );
+          }
+        );
+      native.catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const original = await Promise.race([
+        native,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                withdrawn.has(machineId)
+                  ? new Error(E2EE_MACHINE_NOT_SHARED)
+                  : new EncryptedPrepareTimeout(native)
+              ),
+            PREPARE_DEADLINE_MS
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
       if (closed) throw new Error('e2ee_rpc_closed');
       console.debug('[e2ee-rpc-timing]', {
         stage: 'send',
