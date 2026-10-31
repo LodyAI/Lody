@@ -47,6 +47,7 @@ export type SessionTurn = {
   readonly modelInfo?: ModelInfo;
   readonly tokenUsage?: SessionTurnTokenUsage;
   readonly scheduleRun?: unknown;
+  readonly derivedFrom?: unknown;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
   readonly cancellationReason?: 'user_stop';

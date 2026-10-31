@@ -7,6 +7,7 @@ import {
   RealtimeJournalError,
   type RealtimeStartPermit,
 } from './realtime-journal';
+import { DERIVED_START_GRACE_MS, MAX_DERIVED_TURNS_PER_ORIGIN } from './derivation-limits';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 
@@ -34,6 +35,9 @@ export type ExecutionAuthorization =
       readonly principal?: 'owner' | 'member';
     }
   | { readonly _tag: 'Denied'; readonly reason: string };
+/** Machine-authored inputs derived from one shared member's active Turn: one level,
+ * created while the origin is active, bounded by `derivation-limits.ts`. */
+export type DerivationOrigin = { readonly sessionId: string; readonly userTurnId: string };
 export type AuthorizeEncryptedExecution = (
   workspaceId: string,
   requesterDevice: string,
@@ -45,10 +49,13 @@ export type VerifiedExecutionOriginal = {
   requesterCryptoUserId: string;
   expiresAt: number;
   schedule?: ScheduleAuthorizationRequest;
+  /** Present only on a machine-authored input derived from a shared member's Turn. */
+  derivedFrom?: DerivationOrigin;
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
-  intent: EncryptedExecutionIntent
+  intent: EncryptedExecutionIntent,
+  lookup?: { readonly origin?: boolean }
 ) => Effect.Effect<VerifiedExecutionOriginal | PendingExecutionOriginal | undefined, unknown>;
 
 export type EncryptedExecutionClaim =
@@ -56,8 +63,11 @@ export type EncryptedExecutionClaim =
       state: 'claimed';
       permit: RealtimeStartPermit;
       /** `owner` only when the verified signer belongs to this machine owner's
-       * membership; anything else, including an unstated principal, is `member`. */
-      principal: 'owner' | 'member';
+       * membership; anything else, including an unstated principal, is `member`.
+       * `derived` is a shared member's derived input: it can derive nothing further. */
+      principal: 'owner' | 'member' | 'derived';
+      /** The member's verified device, for derivation and agent control. */
+      origin?: { readonly requesterDevice: string };
     }
   | { state: 'denied'; reason?: 'e2ee_machine_not_shared' }
   | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
@@ -76,9 +86,79 @@ export function makeEncryptedAgentExecution(options: {
   ) => Effect.Effect<ExecutionAuthorization, unknown>;
   isExecutionOpen?: () => boolean;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
+  /** This machine's own signing key (hex): the only author of derived inputs. */
+  selfDevice?: string;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
+  const derivedClaims = new Map<string, number>();
+  const hex64 = /^[0-9a-f]{64}$/;
+  // A derivation origin is a shared member's own signed, non-derived, non-scheduled Turn.
+  const verifiedOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
+    const origin = yield* options.resolveVerifiedOriginal(
+      { workspaceId: options.workspaceId, sessionId: ref.sessionId, userTurnId: ref.userTurnId },
+      { origin: true }
+    );
+    if (
+      !origin ||
+      'state' in origin ||
+      !hex64.test(origin.requesterDevice) ||
+      !Number.isSafeInteger(origin.expiresAt)
+    )
+      return undefined;
+    return origin;
+  });
+  const authorizeAll = Effect.fnUntraced(function* (
+    authorize: AuthorizeEncryptedExecution,
+    workspaceId: string,
+    device: string,
+    localProjectIds: readonly string[] | undefined
+  ): Effect.fn.Return<ExecutionAuthorization, unknown> {
+    const targets: readonly (string | undefined)[] = localProjectIds?.length
+      ? [...new Set(localProjectIds)]
+      : [undefined];
+    const fences: (() => boolean)[] = [];
+    // Owner identity survives only if every grant names the owner principal.
+    let owner = true;
+    for (const target of targets) {
+      const result = yield* authorize(workspaceId, device, target);
+      if (result._tag !== 'Authorized') return result;
+      if (result.isCurrent) fences.push(result.isCurrent);
+      if (result.principal !== 'owner') owner = false;
+    }
+    return {
+      _tag: 'Authorized',
+      ...(fences.length ? { isCurrent: () => fences.every((current) => current()) } : {}),
+      ...(owner ? { principal: 'owner' as const } : {}),
+    };
+  });
+  /** Write-time classification of an Agent-delegated input's driving Turn. `owner`
+   * keeps today's behavior; `member` must be recorded as `derivedFrom`; anything
+   * unverifiable, derived, or no longer authorized is `denied`. */
+  const classifyOrigin = Effect.fnUntraced(function* (
+    ref: DerivationOrigin
+  ): Effect.fn.Return<'owner' | 'member' | 'denied', unknown> {
+    const origin = yield* verifiedOrigin(ref);
+    if (!origin || origin.derivedFrom || !options.authorizeExecution) return 'denied';
+    // This machine's own, non-derived input (for example a Schedule run) is owner work.
+    if (origin.requesterDevice === options.selfDevice) return 'owner';
+    const result = yield* options.authorizeExecution(options.workspaceId, origin.requesterDevice);
+    if (result._tag === 'Authorized') return result.principal === 'owner' ? 'owner' : 'member';
+    return result.reason === 'e2ee_machine_not_shared' ? 'member' : 'denied';
+  });
+  /** Agent control on behalf of a shared member: that member's own rights for every
+   * project the running turn reaches, under the same freshness gate as execution. */
+  const authorizeAgentControl = (requesterDevice: string, localProjectIds?: readonly string[]) =>
+    options.authorizeExecution && hex64.test(requesterDevice)
+      ? authorizeAll(
+          options.authorizeExecution,
+          options.workspaceId,
+          requesterDevice,
+          localProjectIds
+        ).pipe(
+          Effect.map((result) => result._tag === 'Authorized' && result.isCurrent?.() !== false)
+        )
+      : Effect.succeed(false);
   const claim = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
   ): Effect.fn.Return<EncryptedExecutionClaim, unknown> {
@@ -129,28 +209,35 @@ export function makeEncryptedAgentExecution(options: {
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    const targets: readonly (string | undefined)[] = intent.localProjectIds?.length
-      ? [...new Set(intent.localProjectIds)]
-      : [undefined];
+    // A derived input executes with its origin member's own rights, never as the
+    // machine that authored it; only this machine may author one, one level deep.
+    let authorityDevice = verified.requesterDevice;
+    let originKey: string | undefined;
+    if (verified.derivedFrom) {
+      if (
+        !options.selfDevice ||
+        verified.requesterDevice !== options.selfDevice ||
+        verified.schedule
+      )
+        return { state: 'denied' };
+      const origin = yield* verifiedOrigin(verified.derivedFrom);
+      if (
+        !origin ||
+        origin.derivedFrom ||
+        origin.schedule ||
+        origin.requesterDevice === options.selfDevice
+      )
+        return { state: 'denied' };
+      if ((yield* Clock.currentTimeMillis) > origin.expiresAt + DERIVED_START_GRACE_MS)
+        return { state: 'expired' };
+      originKey = JSON.stringify([verified.derivedFrom.sessionId, verified.derivedFrom.userTurnId]);
+      if ((derivedClaims.get(originKey) ?? 0) >= MAX_DERIVED_TURNS_PER_ORIGIN)
+        return { state: 'denied' };
+      authorityDevice = origin.requesterDevice;
+    }
     // Each touched project needs its own switch; every grant's fence must still hold.
-    const authorizeTargets = Effect.fnUntraced(function* (
-      authorize: AuthorizeEncryptedExecution
-    ): Effect.fn.Return<ExecutionAuthorization, unknown> {
-      const fences: (() => boolean)[] = [];
-      // Owner identity survives only if every grant names the owner principal.
-      let owner = true;
-      for (const target of targets) {
-        const result = yield* authorize(intent.workspaceId, verified.requesterDevice, target);
-        if (result._tag !== 'Authorized') return result;
-        if (result.isCurrent) fences.push(result.isCurrent);
-        if (result.principal !== 'owner') owner = false;
-      }
-      return {
-        _tag: 'Authorized',
-        ...(fences.length ? { isCurrent: () => fences.every((current) => current()) } : {}),
-        ...(owner ? { principal: 'owner' as const } : {}),
-      };
-    });
+    const authorizeTargets = (authorize: AuthorizeEncryptedExecution) =>
+      authorizeAll(authorize, intent.workspaceId, authorityDevice, intent.localProjectIds);
     let authorization = yield* authorizeTargets(authorizeExecution);
     if (authorization._tag !== 'Authorized')
       return authorization.reason === 'e2ee_machine_not_shared'
@@ -201,8 +288,11 @@ export function makeEncryptedAgentExecution(options: {
       frame,
     };
     const executionCurrent = authorization.isCurrent;
-    const principal =
-      authorization.principal === 'owner' ? ('owner' as const) : ('member' as const);
+    const principal = originKey
+      ? ('derived' as const)
+      : authorization.principal === 'owner'
+        ? ('owner' as const)
+        : ('member' as const);
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
       if (
@@ -214,6 +304,7 @@ export function makeEncryptedAgentExecution(options: {
       journal.receive(request);
       const result = journal.claim(request);
       if (result.state === 'claimed') {
+        if (originKey) derivedClaims.set(originKey, (derivedClaims.get(originKey) ?? 0) + 1);
         try {
           options.onClaim?.(intent.userTurnId);
         } catch {
@@ -225,14 +316,18 @@ export function makeEncryptedAgentExecution(options: {
             state:
               result.record.state === 'completed' ? ('completed' as const) : ('uncertain' as const),
           }
-        : { ...result, principal };
+        : {
+            ...result,
+            principal,
+            ...(principal === 'member' ? { origin: { requesterDevice: authorityDevice } } : {}),
+          };
     });
   });
   const complete = (permit: RealtimeStartPermit) =>
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
-  return { claim, complete };
+  return { claim, complete, classifyOrigin, authorizeAgentControl };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;
 
