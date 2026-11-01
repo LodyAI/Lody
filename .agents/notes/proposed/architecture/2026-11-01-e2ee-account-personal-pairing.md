@@ -19,7 +19,7 @@ devices, which verifies the request before showing its details. One approval cov
 encrypted workspace of the account.
 
 The protocol statement is in the [foundations increment](../../../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)
-and was approved by the owner on 2026-11-01. Nothing is implemented or measured yet.
+and was approved by the owner on 2026-11-01. Only the core primitives are implemented.
 
 ## Problem
 
@@ -170,5 +170,7 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 
 ## Verification limits
 
-- The string format has no test vectors yet.
+- The string format, key derivation, canonical request and approval bytes and both tags
+  are pinned by `packages/e2ee-core/test/pairing-vector.json`. An independent
+  standard-library Python generator (`test/generate-pairing-vector.py`) produces it.
 - No device, notification or backend work exists yet.

@@ -14,7 +14,7 @@ Translation: current
 从不发给服务端。用户在自己任意一台个人设备上扫码或粘贴字符串，该设备先校验请求，再显示请求详情。一次批准覆盖账号下的
 所有加密工作区。
 
-协议条文见[基础规范增量](../../../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)，已于 2026-11-01 获 owner 批准。目前尚未实现或测量。
+协议条文见[基础规范增量](../../../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)，已于 2026-11-01 获 owner 批准。目前只实现了核心原语。
 
 ## 问题
 
@@ -111,5 +111,5 @@ Translation: current
 
 ## 验证局限
 
-- 字符串格式还没有测试向量。
+- 字符串格式、密钥派生、规范的请求与批准字节以及两个标签都由 `packages/e2ee-core/test/pairing-vector.json` 固定。该向量由一个只用标准库的独立 Python 生成器（`test/generate-pairing-vector.py`）产生。
 - 设备、通知和后端工作都尚未开始。
