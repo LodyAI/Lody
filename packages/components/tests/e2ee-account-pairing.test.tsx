@@ -397,3 +397,49 @@ describe('approving device', () => {
     expect(container.innerHTML).toBe('');
   });
 });
+
+describe('account pairing relay operations', () => {
+  it('reach the relay only on a platform with workspace cloud access, never on local', async () => {
+    const { cloudOperations } = await import('../src/lib/cloud-api-operations');
+    const { PlatformContext, useCloudMutation } = await import('@lody/platform/react');
+    const { createLocalPlatformProvider, CloudCapabilityUnavailableError } =
+      await import('@lody/platform');
+    let submit: ((args: never) => Promise<unknown>) | undefined;
+    function Probe() {
+      submit = useCloudMutation(cloudOperations.e2eeAccountPairing.submit) as never;
+      return null;
+    }
+    const local = createLocalPlatformProvider({
+      session: { status: 'unauthenticated' },
+      workspaces: { status: 'ready', workspaces: [], activeWorkspaceId: null },
+    } as never);
+    await act(async () =>
+      root.render(
+        <PlatformContext.Provider value={local}>
+          <Probe />
+        </PlatformContext.Provider>
+      )
+    );
+    await expect(submit!({} as never)).rejects.toBeInstanceOf(CloudCapabilityUnavailableError);
+    // Every relay and join-mailbox operation is assigned to the same capability.
+    const names = [
+      ...Object.values(cloudOperations.e2eeAccountPairing),
+      ...Object.values(cloudOperations.e2eeJoinMailbox),
+    ].map((operation) => [operation.name, operation.capability]);
+    expect(names.every(([, capability]) => capability === 'multiWorkspace')).toBe(true);
+    expect(names.map(([name]) => name)).toEqual([
+      'e2eeAccountPairing:submit',
+      'e2eeAccountPairing:pending',
+      'e2eeAccountPairing:read',
+      'e2eeAccountPairing:decline',
+      'e2eeAccountPairing:publish',
+      'e2eeAccountPairing:claim',
+      'e2eeJoinMailbox:begin',
+      'e2eeJoinMailbox:status',
+      'e2eeJoinMailbox:readRequest',
+      'e2eeJoinMailbox:cancel',
+      'e2eeJoinMailbox:publish',
+      'e2eeJoinMailbox:claim',
+    ]);
+  });
+});
