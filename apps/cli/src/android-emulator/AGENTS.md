@@ -11,6 +11,8 @@ access and the pinned scrcpy connection. The shared device-preview core owns vie
   channel and verify size/hash before execution on the device.
 - Input is a bounded typed private channel. Never accept caller shell strings,
   upstream addresses or arbitrary file paths. EOF/close releases touches.
+- Fence failed streams before emitting synchronous error events; overload cleanup must
+  reject new input and discard queued input, while ordinary close drains touch release.
 - Own every ADB socket and join its close on cancellation. Never release a device
   lease while its capture/input connection remains live.
 

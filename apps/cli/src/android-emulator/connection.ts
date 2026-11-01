@@ -1,3 +1,4 @@
+import { AndroidStream } from './input-stream';
 import { androidEncoderOptions, createAndroidViewerIdleTimeout } from './preview-policy';
 import { runAndroidControl, setAndroidAppearance } from './control-task';
 import { readFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { AdbScrcpyClient, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
 import type { AndroidKeyCode } from '@yume-chan/scrcpy';
 import { ReadableStream } from '@yume-chan/stream-extra';
 import type { AndroidEmulatorQuality, DevicePreviewControl } from '@lody/shared';
-import { DeviceStream, type DevicePreviewBackend } from '../device-preview/backend';
+import type { DevicePreviewBackend } from '../device-preview/backend';
 import { createDevicePreviewGateway } from '../device-preview/gateway';
 import type { DeviceConnection } from '../device-preview/service';
 import { annexBToAvcc, avcConfiguration } from './h264';
@@ -90,82 +91,50 @@ export async function openAndroidConnection(
       (resetting ??= controller.resetVideo().finally(() => {
         resetting = undefined;
       }));
-    class AndroidStream extends DeviceStream {
-      readyState = 0;
-      bufferedAmount = 0;
-      readonly pointer = nextPointer++ * 2n;
-      private tail = Promise.resolve();
-      private readonly leave = idle.attach();
-      constructor() {
-        super();
-        viewers.add(this);
-        queueMicrotask(() => {
-          if (this.readyState !== 0) return;
-          this.readyState = 1;
-          this.emit('open');
-          if (configuration) this.emit('message', configuration, true);
-          void reset().catch((e) => this.fail(e));
-        });
-      }
-      fail(error: unknown) {
-        if (this.readyState === 3) return;
-        this.emit('error', error instanceof Error ? error : Error('Android input failed'));
-        this.terminate();
-      }
-      send(message: string) {
-        if (this.readyState !== 1) return;
-        if (this.bufferedAmount + Buffer.byteLength(message) > 65536) {
-          this.fail(Error('Android input queue full'));
-          return;
-        }
-        this.bufferedAmount += Buffer.byteLength(message);
-        this.tail = this.tail
-          .then(async () => {
-            const m = JSON.parse(message);
-            if (m.type === 'force_idr') {
-              await reset();
-              return;
-            }
-            // One fixed encoder budget per device; per-viewer credits remain in the common gateway.
-            if (!String(m.type).startsWith('touch')) return;
-            const action = m.type.endsWith('-up') ? 1 : m.type.endsWith('-down') ? 0 : 2;
-            const points = m.type.startsWith('touch2')
-              ? [
-                  [m.x1, m.y1],
-                  [m.x2, m.y2],
-                ]
-              : [[m.x, m.y]];
-            for (let i = 0; i < points.length; i++)
-              await controller.injectTouch({
-                action,
-                pointerId: this.pointer + BigInt(i),
-                pointerX: Math.round(points[i]![0]),
-                pointerY: Math.round(points[i]![1]),
-                videoWidth: m.width,
-                videoHeight: m.height,
-                pressure: action === 1 ? 0 : 1,
-                actionButton: 0,
-                buttons: 0,
-              });
-          })
-          .catch((e) => this.fail(e))
-          .finally(() => {
-            this.bufferedAmount -= Buffer.byteLength(message);
-          });
-      }
-      close() {
-        if (this.readyState >= 2) return;
-        this.readyState = 2;
-        void this.tail.finally(() => this.terminate());
-      }
-      terminate() {
-        if (this.readyState === 3) return;
-        this.readyState = 3;
-        viewers.delete(this);
-        this.leave();
-        this.emit('close');
-      }
-    }
+    const openStream = () => {
+      const pointer = nextPointer++ * 2n;
+      const leave = idle.attach();
+      const stream = new AndroidStream({
+        open: async () => {
+          if (configuration) stream.emit('message', configuration, true);
+          await reset();
+        },
+        write: async (message) => {
+          const m = JSON.parse(message);
+          if (m.type === 'force_idr') {
+            await reset();
+            return;
+          }
+          // One fixed encoder budget per device; per-viewer credits remain in the common gateway.
+          if (!String(m.type).startsWith('touch')) return;
+          const action = m.type.endsWith('-up') ? 1 : m.type.endsWith('-down') ? 0 : 2;
+          const points = m.type.startsWith('touch2')
+            ? [
+                [m.x1, m.y1],
+                [m.x2, m.y2],
+              ]
+            : [[m.x, m.y]];
+          for (let i = 0; i < points.length; i++)
+            await controller.injectTouch({
+              action,
+              pointerId: pointer + BigInt(i),
+              pointerX: Math.round(points[i]![0]),
+              pointerY: Math.round(points[i]![1]),
+              videoWidth: m.width,
+              videoHeight: m.height,
+              pressure: action === 1 ? 0 : 1,
+              actionButton: 0,
+              buttons: 0,
+            });
+        },
+        dispose: () => {
+          viewers.delete(stream);
+          leave();
+        },
+      });
+      viewers.add(stream);
+      return stream;
+    };
     const pump = (async () => {
       try {
         for (;;) {
@@ -229,7 +198,7 @@ export async function openAndroidConnection(
       rotation: () => 0,
       execute: (control, controlSignal) =>
         runAndroidControl(controlSignal, () => execute(control), abort),
-      openStream: () => new AndroidStream(),
+      openStream,
       parseH264: () => (message) =>
         message[0] === 1
           ? [{ type: 'configuration', data: message.subarray(1) }]
