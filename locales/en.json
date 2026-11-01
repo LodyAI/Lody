@@ -228,6 +228,7 @@
   "e2ee.accountPair.error.pairing-tampered": "This request was changed after the other device created it. It was refused; do not approve it.",
   "e2ee.accountPair.error.pairing-expired": "This pairing request has ended or expired. Start a new one on the new device.",
   "e2ee.accountPair.error.pairing-used": "This code was already used. Start a new one on the new device.",
+  "e2ee.accountPair.error.pairing-elsewhere": "Pairing is already running in another tab of this browser. Continue there, or close that tab first.",
   "e2ee.accountPair.error.failed": "Pairing failed. Try again.",
   "e2ee.accountPair.request.title": "Add this device to your encrypted workspaces",
   "e2ee.accountPair.request.web": "Request access only on a browser you trust. Another of your devices that already has access will approve it.",

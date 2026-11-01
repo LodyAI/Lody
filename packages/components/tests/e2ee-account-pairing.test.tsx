@@ -216,6 +216,22 @@ describe('new device request', () => {
     expect(text()).toContain('e2ee.accountPair.request.blocked {"names":"Beta"}');
   });
 
+  it('says when another tab of this browser already owns the pairing', async () => {
+    const host = requesterHost();
+    host.runtime.requestAccountPairing = async () => {
+      throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+    };
+    await act(async () =>
+      root.render(
+        <E2eeAccountPairingRequest runtime={host.runtime} autoStart={false} onJoined={() => {}} />
+      )
+    );
+    await click('e2ee.accountPair.request.start');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'e2ee.accountPair.error.pairing-elsewhere'
+    );
+  });
+
   it('starting again abandons the old request before creating a new one', async () => {
     const host = requesterHost({
       direction: 'requester-shows',
