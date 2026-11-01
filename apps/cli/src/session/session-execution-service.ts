@@ -86,7 +86,7 @@ import {
 } from './session-start-stage';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import type { AuthMethod, ContentBlock } from '@agentclientprotocol/sdk';
 import type { ModelInfo } from '@lody/shared';
 import {
   type AcpCapabilityCacheEntry,
@@ -158,6 +158,7 @@ import {
   type SessionSteerOperationRecord,
   type SessionSteerResponse,
   type SessionTurnInputConfig,
+  usesAcpProtocolAuthentication,
   type WorkspaceId,
 } from '@lody/shared';
 import {
@@ -772,6 +773,8 @@ export type SessionExecutionServiceDeps = {
     modelReasoningEfforts?: Record<string, string[]>;
     modelCapabilities?: Record<string, AcpModelControls>;
     capabilitySourceVersion?: string;
+    /** Sign-in methods the probe read from `initialize`, when it could. */
+    authMethods?: readonly AuthMethod[];
   }>;
   /**
    * The `capabilitySourceVersion` a probe would stamp right now, resolved without
@@ -8712,6 +8715,7 @@ export class SessionExecutionService {
       runtimeOverrides: config.runtimeOverrides,
       magpieGatewayUrl: config.magpieGatewayUrl,
       env: config.env,
+      ...(message.methodId ? { methodId: message.methodId } : {}),
       onProgress,
       codexProfile,
       authenticateManagedProfile:
@@ -9085,6 +9089,7 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         modelCapabilities,
         capabilitySourceVersion,
+        authMethods,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
         message.agentType,
@@ -9106,6 +9111,15 @@ export class SessionExecutionService {
       );
 
       options.signal?.throwIfAborted();
+      // Only agent-driven providers authenticate through the ACP exchange. A
+      // built-in provider signs in with its own native command, and the
+      // adapter's advertised methods do not describe it. A probe that could not
+      // read the list reports `undefined`, which stays "never asked" rather than
+      // claiming the agent offers no way to sign in.
+      const advertisedAuthMethods =
+        authMethods && usesAcpProtocolAuthentication(message.cliType, message.agentType)
+          ? authMethods.map(summarizeAcpAuthMethod)
+          : undefined;
       const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
@@ -9128,7 +9142,13 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal, sessionTitle, rateLimits, modelCapabilities }
+        {
+          signal: options.signal,
+          sessionTitle,
+          rateLimits,
+          modelCapabilities,
+          authMethods: advertisedAuthMethods,
+        }
       );
       this.acpCapabilityLaunchInputFingerprints.set(
         message.configId,
@@ -9152,6 +9172,7 @@ export class SessionExecutionService {
         })),
         capability,
         availableCommands,
+        ...(advertisedAuthMethods ? { authMethods: advertisedAuthMethods } : {}),
       };
     } catch (error) {
       return this.buildFailedAcpRefreshResponse(message, error);
@@ -9531,6 +9552,7 @@ const buildAcpCapabilitiesRefreshResponseFromCache = (
   })),
   capability,
   availableCommands: capability.availableCommands,
+  ...(capability.authMethods ? { authMethods: capability.authMethods } : {}),
 });
 
 const findRegistryAcpAgent = (agentType: string): RegistryAcpAgent | undefined =>

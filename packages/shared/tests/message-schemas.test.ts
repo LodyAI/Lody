@@ -343,6 +343,7 @@ describe('message-schemas machine ACP capabilities refresh', () => {
           },
         ],
         modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+        authMethods: [{ type: 'agent', id: 'oauth', name: 'OAuth' }],
         sessionFork: false,
         fetchedAt: 1,
       },
@@ -458,6 +459,15 @@ describe('message-schemas machine ACP authentication', () => {
     };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
+    // A method picked from the advertised list travels on the start request.
+    expect(
+      MachineAcpAuthenticateRequestSchema.safeParse({ ...request, methodId: 'oauth' }).success
+    ).toBe(true);
+    for (const methodId of ['', '   ', 'x'.repeat(1025)]) {
+      expect(MachineAcpAuthenticateRequestSchema.safeParse({ ...request, methodId }).success).toBe(
+        false
+      );
+    }
     expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitCode).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitInput).success).toBe(true);

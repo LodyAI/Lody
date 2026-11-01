@@ -70,6 +70,7 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type AcpAuthMethodSummary,
   type AcpModelControls,
   type SessionGoalAction,
   type AcpCapabilityCacheEntry,
@@ -3739,6 +3740,13 @@ export type AcpCapabilityWriteOptions = {
    * response carried no declaration; the stored row is then left untouched.
    */
   modelCapabilities?: Record<string, AcpModelControls>;
+  /**
+   * Sign-in methods the probe read from the agent's `initialize` response.
+   * Absent means this probe did not ask (a built-in provider with its own
+   * login command); an empty array records that the agent advertises none, so
+   * the reader stops waiting for a list that will never arrive.
+   */
+  authMethods?: AcpAuthMethodSummary[];
 };
 
 const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry): string =>
@@ -3753,6 +3761,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     configOptions: entry.configOptions,
     modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
+    authMethods: entry.authMethods,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
     sessionTitle: entry.sessionTitle,
@@ -3882,6 +3891,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
       availableCommands,
+      authMethods: options.authMethods,
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
@@ -3902,6 +3912,15 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
+    // A caller that did not ask the agent — session-created capability updates —
+    // must not erase methods an earlier probe recorded for the same launch.
+    if (
+      options.authMethods === undefined &&
+      existing?.authMethods !== undefined &&
+      existing.sourceVersion === entry.sourceVersion
+    ) {
+      entry.authMethods = existing.authMethods;
+    }
     // Only probes replace the preview. Omission preserves the latest same-runtime
     // probe, read beside the write so concurrent session starts cannot roll it back.
     if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {

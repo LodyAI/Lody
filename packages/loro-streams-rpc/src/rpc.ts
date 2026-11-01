@@ -1,3 +1,12 @@
+import {
+  AndroidEmulatorRequestSchema,
+  AndroidEmulatorResponseSchema,
+  AndroidEmulatorRemoteResponseSchema,
+  type AndroidEmulatorRequest,
+  type AndroidEmulatorResponse,
+  type AndroidEmulatorRemoteResponse,
+} from '@lody/shared';
+import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
 import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
 import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
@@ -264,6 +273,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/automation-control',
   'session/automation-control',
   'ios-simulator/control',
+  'android-emulator/control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
@@ -747,6 +757,14 @@ export const LoroIosSimulatorRpcRequestSchema = BaseRpcRequestSchema.extend({
   }).strict(),
 }).strict();
 
+export const LoroAndroidEmulatorRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('android-emulator/control'),
+  params: AndroidEmulatorRequestSchema.extend({
+    proof: PreviewControlProofSchema,
+    responseKey: RpcSecretPublicKeySchema,
+  }).strict(),
+}).strict();
+
 export const LoroSessionPreviewStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/preview-status'),
   params: z
@@ -845,6 +863,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPreviewRevokeRpcRequestSchema,
   LoroSessionPreviewStatusRpcRequestSchema,
   LoroIosSimulatorRpcRequestSchema,
+  LoroAndroidEmulatorRpcRequestSchema,
   LoroProjectProbeLocalMemberRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
@@ -1694,6 +1713,7 @@ export type LoroMachineRpcResult =
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
   | IosSimulatorRemoteResponse
+  | AndroidEmulatorRemoteResponse
   | ProjectProbeLocalMemberResult
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
@@ -2032,6 +2052,15 @@ const toLegacyRpcErrorResponse = (
       message: error.message,
     };
 
+  if (method === 'android-emulator/control')
+    return {
+      type: 'android-emulator/control_response',
+      sessionId: previewContext?.sessionId ?? '',
+      success: false,
+      error: 'failed',
+      message: error.message,
+    };
+
   if (method === 'session/preview-status')
     return {
       type: 'session/preview-status_response',
@@ -2230,6 +2259,10 @@ const parseRpcSuccessResult = async (
   }
   if (response.method === 'ios-simulator/control') {
     const parsed = IosSimulatorRemoteResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
+  if (response.method === 'android-emulator/control') {
+    const parsed = AndroidEmulatorRemoteResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
   if (response.method === 'session/preview-status') {
@@ -3037,7 +3070,7 @@ export class LoroStreamsMachineRpcClient {
       onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
       timeoutMs?: number;
     } & (
-      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'start'; configId: AgentConfigId; methodId?: string }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
           action: 'submit-code';
@@ -3120,6 +3153,10 @@ export class LoroStreamsMachineRpcClient {
               requestId: options.requestId,
               action: options.action,
               configId: options.configId,
+              // Omitted unless the reader picked a method: the daemon schema is
+              // strict, so an older Machine rejects the whole start when the
+              // field is present at all.
+              ...(options.methodId ? { methodId: options.methodId } : {}),
             } as const;
           case 'cancel':
             return {
@@ -3667,6 +3704,34 @@ export class LoroStreamsMachineRpcClient {
     return IosSimulatorResponseSchema.parse({ ...result, preview: { ...preview, viewerUrl } });
   }
 
+  async requestAndroidEmulatorControl(
+    options: AndroidEmulatorRequest & {
+      proof: PreviewControlProof;
+      responseRecipient: RpcSecretRecipient;
+      timeoutMs?: number;
+    }
+  ): Promise<AndroidEmulatorResponse | null> {
+    const { timeoutMs, responseRecipient, ...params } = options;
+    const result = (await this.sendRequest({
+      method: 'android-emulator/control',
+      timeoutMs: timeoutMs ?? 15_000,
+      params: { ...params, responseKey: responseRecipient.publicKey },
+    })) as AndroidEmulatorRemoteResponse | null;
+    if (!result?.preview) return result;
+    const { viewerUrlEnvelope, ...preview } = result.preview;
+    const viewerUrl = viewerUrlEnvelope
+      ? await responseRecipient.decrypt(
+          viewerUrlEnvelope,
+          getAndroidEmulatorViewerSecretContext({
+            ...this.options,
+            sessionId: params.sessionId,
+            requestId: params.proof.requestId,
+          })
+        )
+      : undefined;
+    return AndroidEmulatorResponseSchema.parse({ ...result, preview: { ...preview, viewerUrl } });
+  }
+
   async requestSessionPreviewStatus(options: {
     sessionId: string;
     requestedByUserId: string;
@@ -4059,6 +4124,14 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'android-emulator/control';
+          timeoutMs: number;
+          params: AndroidEmulatorRequest & {
+            proof: PreviewControlProof;
+            responseKey: RpcSecretPublicKey;
+          };
+        }
+      | {
           method: 'session/preview-status';
           timeoutMs: number;
           params: {
@@ -4200,7 +4273,8 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/preview-revoke' ||
         args.method === 'session/automation-control' ||
         args.method === 'session/preview-status' ||
-        args.method === 'ios-simulator/control'
+        args.method === 'ios-simulator/control' ||
+        args.method === 'android-emulator/control'
           ? { sessionId: args.params.sessionId }
           : undefined,
       localProjectContext:
@@ -4422,6 +4496,9 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'session/preview-revoke':
         case 'session/preview-status':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'android-emulator/control':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/automation-control':

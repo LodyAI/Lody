@@ -1161,6 +1161,7 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   previewCandidate?: SessionPreviewCandidateMeta;
   /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */

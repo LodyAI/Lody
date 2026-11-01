@@ -618,6 +618,13 @@ export type WorkspaceRuntime = {
     command: import('@lody/shared').IosSimulatorCommand;
     timeoutMs?: number;
   }) => Promise<import('@lody/shared').IosSimulatorResponse>;
+  requestAndroidEmulatorControl: (request: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: import('@lody/shared').AndroidEmulatorCommand;
+    timeoutMs?: number;
+  }) => Promise<import('@lody/shared').AndroidEmulatorResponse>;
   dispose: () => Promise<void>;
 };
 

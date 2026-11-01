@@ -197,6 +197,20 @@ export const getIosSimulatorViewerSecretContext = (options: {
     options.requestId,
   ]);
 
+export const getAndroidEmulatorViewerSecretContext = (options: {
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  requestId: string;
+}): string =>
+  JSON.stringify([
+    'android-emulator/control',
+    options.workspaceId,
+    options.machineId,
+    options.sessionId,
+    options.requestId,
+  ]);
+
 export const getAutomationResponseSecretContext = (options: {
   workspaceId: string;
   machineId: string;

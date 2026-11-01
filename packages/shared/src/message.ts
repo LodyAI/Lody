@@ -20,6 +20,7 @@ import type {
   SessionHistoryChange,
   SessionTurnInputConfig,
   AcpCapabilityCacheEntry,
+  AcpAuthMethodSummary,
   SessionGoalAction,
 } from '.';
 import type {
@@ -409,14 +410,7 @@ export interface MachineAcpCapabilitiesRefreshResponse {
   error?: string;
 }
 
-export interface MachineAcpAuthMethodSummary {
-  type: 'agent' | 'env_var' | 'terminal';
-  id?: string;
-  name?: string;
-  description?: string;
-  /** Display-only. The machine resolves the trusted executable and arguments. */
-  args?: string[];
-}
+export interface MachineAcpAuthMethodSummary extends AcpAuthMethodSummary {}
 
 export type MachineAcpAuthenticationFormField =
   | {
@@ -463,6 +457,12 @@ export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
         action: 'start';
         /** Daemon-authoritative persisted Provider config. No launch fields cross RPC. */
         configId: AgentConfigId;
+        /**
+         * Sign-in method the reader picked from the agent's advertised list.
+         * The daemon still validates it against what the agent advertises now,
+         * and falls back to its own picker when the cached list is stale.
+         */
+        methodId?: string;
       }
     | {
         action: 'cancel';

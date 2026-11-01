@@ -1,3 +1,7 @@
+import {
+  registerAndroidEmulatorPreviewTool,
+  ANDROID_EMULATOR_PREVIEW_TOOL_NAME,
+} from './android-emulator-tool';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -132,4 +136,40 @@ describe('iOS Simulator MCP tool', () => {
     expect(failed.isError).toBe(true);
     expect(JSON.stringify(failed)).not.toContain('secret');
   });
+});
+
+it('keeps Android AVD identity and strips viewer capabilities at the MCP boundary', async () => {
+  const server = new McpServer({ name: 'android-test', version: '1' });
+  registerAndroidEmulatorPreviewTool(server, async (command) => ({
+    type: 'android-emulator/control_response',
+    sessionId: 's',
+    success: true,
+    preview: {
+      operationId: 'op',
+      id: command.action === 'start' ? command.id : 'Pixel_A',
+      phase: 'ready',
+      transport: 'local',
+      viewerUrl: 'http://127.0.0.1:1234/?token=synthetic-secret',
+    },
+  }));
+  const client = new Client({ name: 'test', version: '1' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(b), client.connect(a)]);
+  cleanup.push(async () => {
+    await Promise.all([client.close(), server.close()]);
+  });
+  const result = await client.callTool({
+    name: ANDROID_EMULATOR_PREVIEW_TOOL_NAME,
+    arguments: { action: 'start', id: 'Pixel_A' },
+  });
+  expect(result.isError).not.toBe(true);
+  const encoded = JSON.stringify(result);
+  expect(encoded).toContain('Pixel_A');
+  expect(encoded).not.toContain('synthetic-secret');
+  expect(encoded).not.toContain('viewerUrl');
+  const invalid = await client.callTool({
+    name: ANDROID_EMULATOR_PREVIEW_TOOL_NAME,
+    arguments: { action: 'start', id: '../../escape' },
+  });
+  expect(invalid.isError).toBe(true);
 });

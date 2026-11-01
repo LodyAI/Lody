@@ -261,6 +261,8 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # Tango Consumable needs one class identity across ADB and scrcpy streams.
+  '@yume-chan/stream-extra': 2.6.1
   # CodeMode tools and Lody must share the same Effect runtime and schema identity.
   '@opencode/codemode>effect': 4.0.2
   # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
