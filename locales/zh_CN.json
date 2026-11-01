@@ -237,6 +237,7 @@
   "e2ee.accountPair.request.answered": "已输入配对码。请在显示该码的设备上批准请求。",
   "e2ee.accountPair.request.waiting": "等待批准。这个请求将在 {{time}} 过期。",
   "e2ee.accountPair.request.joined": "这台设备已获批准。",
+  "e2ee.accountPair.request.blocked": "{{names}} 暂时无法加入：这台设备上还有一个未完成的按工作区配对。请先在该工作区的加密设置里完成或取消它，之后这个请求会继续。",
   "e2ee.accountPair.request.declined": "请求已被拒绝。如需重试，请发起新的请求。",
   "e2ee.accountPair.request.expired": "请求已过期。如需重试，请发起新的请求。",
   "e2ee.accountPair.request.restart": "发起新的请求",

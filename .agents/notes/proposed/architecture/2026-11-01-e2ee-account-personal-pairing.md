@@ -217,6 +217,14 @@ connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 po
 - **Member approvers.** A Member cannot endorse a snapshot, so its approvals stay
   awaiting delivery. A pending Spec increment proposes history delivery; it is not
   implemented.
+- **After install.** The new device opens the workspace, refreshes it and runs one key
+  round with its own credential, as the per-workspace claim does. This is best effort:
+  opening the workspace later repeats it.
+- **Runtime entries.** Every runtime entry the workflow opens is closed again unless a
+  window reads that workspace.
+- **Unfinished per-workspace pairing.** An unrelated, unfinished per-workspace pairing
+  keeps its journal row. That workspace reports `blocked` and the UI names it; finishing
+  or cancelling that pairing lets the request continue.
 - **Secret.** `S` stays in memory and never touches disk. A restart ends that request
   locally, and the device starts a new one with the same retained identities.
 - **Terminal states.** Approved, declined, expired and cancelled are recorded per lookup

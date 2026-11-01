@@ -37,7 +37,9 @@ export type E2eeAccountPairingRequestState = {
   /** The authenticated expiry this device created; never extended by a retry. */
   expiresAt: number;
   status: 'waiting' | 'joined' | 'declined' | 'expired';
-  workspaces: (E2eeAccountPairingWorkspace & { state: 'pending' | 'joined' })[];
+  /** `blocked`: an unrelated, unfinished per-workspace pairing on this device must be
+   * finished or cancelled before this workspace can be installed. */
+  workspaces: (E2eeAccountPairingWorkspace & { state: 'pending' | 'joined' | 'blocked' })[];
 };
 
 /** Shown only after the host verified the request tag and its lifetime. */

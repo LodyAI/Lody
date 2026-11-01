@@ -60,7 +60,9 @@ function localCodeError(input: string): string | null {
 function failureKey(error: unknown) {
   const code = accountPairingErrorCode(error);
   if (code) return `e2ee.accountPair.error.${code}`;
-  return custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed';
+  return (
+    custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed'
+  );
 }
 /** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used. */
 function usePoll(active: boolean, ms: number, tick: () => Promise<void>) {
@@ -217,12 +219,19 @@ export function E2eeAccountPairingRequest(props: {
           {t('e2ee.accountPair.request.waiting', { time: time(state.expiresAt) })}
         </p>
       )}
-      {state?.status === 'joined' && (
-        <p role="status">{t('e2ee.accountPair.request.joined')}</p>
+      {state?.status === 'joined' && <p role="status">{t('e2ee.accountPair.request.joined')}</p>}
+      {state && state.workspaces.some((workspace) => workspace.state === 'blocked') && (
+        <p role="status" {...stylex.props(styles.muted)}>
+          {t('e2ee.accountPair.request.blocked', {
+            names: state.workspaces
+              .filter((workspace) => workspace.state === 'blocked')
+              .map((workspace) => workspace.name)
+              .join(', '),
+          })}
+        </p>
       )}
-      {terminal && (
-        <p role="status">{t(`e2ee.accountPair.request.${state.status}`)}</p>
-      )}
+
+      {terminal && <p role="status">{t(`e2ee.accountPair.request.${state.status}`)}</p>}
       {entering && (
         <>
           <Textarea
@@ -265,10 +274,7 @@ export function E2eeAccountPairingRequest(props: {
 
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
-  | 'accountPairingCode'
-  | 'inspectAccountPairing'
-  | 'approveAccountPairing'
-  | 'declineAccountPairing'
+  'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'
 >;
 type ApprovePhase =
   | { kind: 'enter' }

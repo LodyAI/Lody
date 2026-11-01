@@ -237,6 +237,7 @@
   "e2ee.accountPair.request.answered": "Code entered. Approve the request on the device that showed it.",
   "e2ee.accountPair.request.waiting": "Waiting for approval. This request expires at {{time}}.",
   "e2ee.accountPair.request.joined": "This device was approved.",
+  "e2ee.accountPair.request.blocked": "Waiting on {{names}}: this device has an unfinished pairing for it. Finish or cancel that pairing in the workspace's encryption settings, then this request continues.",
   "e2ee.accountPair.request.declined": "The request was declined. Start a new one to try again.",
   "e2ee.accountPair.request.expired": "The request expired. Start a new one to try again.",
   "e2ee.accountPair.request.restart": "Start a new request",
