@@ -41,12 +41,14 @@ describe('Button', () => {
         width?: number;
         height?: number;
         fontSize?: number;
+        fontWeight?: number | 'initial';
         lineHeight?: number;
         labelColor?: string;
       }>({
         width: 96,
         height: 28,
         fontSize: 18,
+        fontWeight: 380,
         lineHeight: 1.25,
         labelColor: '#b41428',
       });
@@ -58,7 +60,14 @@ describe('Button', () => {
           <button
             data-zero
             onClick={() => {
-              setBox({ width: 0, height: 0, fontSize: 0, lineHeight: 0, labelColor: 'initial' });
+              setBox({
+                width: 0,
+                height: 0,
+                fontSize: 0,
+                fontWeight: 'initial',
+                lineHeight: 0,
+                labelColor: 'initial',
+              });
               setVariant('solid');
             }}
           >
@@ -82,6 +91,7 @@ describe('Button', () => {
             width={box.width}
             height={box.height}
             fontSize={box.fontSize}
+            fontWeight={box.fontWeight}
             lineHeight={box.lineHeight}
             labelColor={box.labelColor}
             disabled={disabled}
@@ -102,6 +112,7 @@ describe('Button', () => {
     const target = mounted.container.querySelector<HTMLButtonElement>('[data-target]')!;
     const glyph = target.firstElementChild;
     expect(target.style.fontSize).toBe('18px');
+    expect(target.style.fontWeight).toBe('380');
     expect(target.style.lineHeight).toBe('1.25');
     expect(target.style.color).toBe('rgb(180, 20, 40)');
     target.focus();
@@ -118,11 +129,13 @@ describe('Button', () => {
       expect(target.hasAttribute('width')).toBe(false);
       expect(target.hasAttribute('height')).toBe(false);
       expect(target.hasAttribute('fontSize')).toBe(false);
+      expect(target.hasAttribute('fontWeight')).toBe(false);
       expect(target.hasAttribute('lineHeight')).toBe(false);
       expect(target.hasAttribute('labelColor')).toBe(false);
       expect(target.style.width).toBe('');
       expect(target.style.height).toBe('');
       expect(target.style.fontSize).toBe(action === 'zero' ? '0px' : '');
+      expect(target.style.fontWeight).toBe(action === 'zero' ? 'initial' : '');
       expect(target.style.lineHeight).toBe(action === 'zero' ? '0' : '');
       expect(target.style.color).toBe(action === 'zero' ? 'initial' : '');
       await act(async () => target.click());
@@ -147,12 +160,20 @@ describe('Button', () => {
           width={96}
           height={28}
           fontSize={12}
+          fontWeight={480}
           lineHeight={1.3}
           labelColor="#112233"
           render={
             <a
               href="/x"
-              style={{ width: 105, height: 31, fontSize: 21, lineHeight: '31px', color: '#334455' }}
+              style={{
+                width: 105,
+                height: 31,
+                fontSize: 21,
+                fontWeight: 760,
+                lineHeight: '31px',
+                color: '#334455',
+              }}
             />
           }
           onClick={(event) => {
@@ -171,6 +192,7 @@ describe('Button', () => {
     expect(anchor.style.width).toBe('105px');
     expect(anchor.style.height).toBe('31px');
     expect(anchor.style.fontSize).toBe('21px');
+    expect(anchor.style.fontWeight).toBe('760');
     expect(anchor.style.lineHeight).toBe('31px');
     expect(anchor.style.color).toBe('rgb(51, 68, 85)');
     await act(async () => anchor.click());

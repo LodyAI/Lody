@@ -1850,15 +1850,15 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-自147起已接受的有界迁移移除165处源码 utility，含189六处私有间距调用。192两处opacity候选保留Tailwind。另六处重复尺寸／shrink单列清理。
-九个 native 编译试验默认值已因188恢复，信用零。helper已接受207为230／8／21，覆盖30源；相较196新增十五个私有ReviewCheck基础声明。实际671输入构建解析至已审不可变依赖，而非live Root源码。
-已接受204的全非story components源码为1,333处／145文件／720未解析，覆盖1,397源；
-其中三核心根为1,324／143／716，覆盖791源：components895／129／623、legacy UI429／14／93、
+自147起已接受的有界迁移移除173处源码 utility，含189六处私有间距调用。192两处opacity候选保留Tailwind。另六处重复尺寸／shrink单列清理。
+九个 native 编译试验默认值已因188恢复，信用零。helper已接受208为224／8／21，覆盖30源；相较196新增十五个私有ReviewCheck基础声明及六个原生状态声明。实际671输入构建解析至已审不可变依赖，而非live Root源码。
+已接受210的全非story components源码为1,331处／145文件／720未解析，覆盖1,397源；
+其中三核心根为1,322／143／716，覆盖791源：components893／129／623、legacy UI429／14／93、
 53个route文件0／0／0。额外九处为共享conversation column八类及键盘sheet important bottom一类。
 这些是源码下界，不是完成率或整branch视觉通过。
 
-精确输入见inventory-source-through204-accepted-proof.json；相较203仅改变三个已接受的认证标题owner。三个原template-class表达式退出未解析计数，不是额外删除三个utility。
-helper207单独冻结，合计静态下界为1,563处／153文件，741个未解析表达式；不是精确总量或完成百分比。helper单独使用207冻结源，源码hash及实扫见inventory-helper-source-through207-proof.json与inventory-helper-v2-after207.json。
+精确输入见inventory-source-through210-accepted-proof.json；相较204仅改变两个已接受的私有Button字重owner。此前204三个template-class退出未解析计数不是额外utility删除。
+helper208单独冻结，合计静态下界为1,555处／153文件，741个未解析表达式；不是精确总量或完成百分比。helper单独使用208冻结源，源码hash及实扫见inventory-helper-source-through208-proof.json与inventory-helper-v2-after208.json。
 185手工审计移除二十literal，但原仅七个在v2解析范围；保留的h-svh hook也未计入此下界。
 147原字典缺口仍单列。198新扫描@lody/ui的84源识别零utility，仍有131未解析表达式；零不证明
 所有动态类。库存不带来新增整套测试／renderer资格，精确位置及未解析值保留在冻结JSON；
@@ -1916,6 +1916,8 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | Login间距／图标202–203 | 一处私有提交margin及一处固定后代尺寸utility迁为本地StyleX。提交十二对、SVG十对PNG／RGBA全同；六个固定glyph保18px、原display／shrink及Lucide表现属性。生产与真实自然DEV覆盖第六Mail，provider点击／disabled和email焦点／Back行为同。融合203的working tree通过619组件文件／6,199测试；既有用户修改属于测试输入，不是纯提交renderer验收。 | 提交记录精确列24class及72规则路由变化；图标记录列84class、两个固定DEV debug-source属性、42匹配规则投影及24个CSS URL载体，其余raw无差。原误达Unverified及采集失败仍拒绝；Resend缺fixture错误code未覆盖。图标构建仅删除原important后代规则，复用既有atom。 |
 | Card标题排版204 | 两个可选物理属性保留默认600／本地semantic tracking reader，三个认证标题移除五utility且保留legacy变量writer。十五个真实浏览器consumer用例中五个反例拒绝alias／fallback方案，支持物理声明。51个实际／变量页面整viewport及四个原Gallery Card ROI的PNG／RGBA全同；471记录、1,468几何仅有102个精确标题class／inline载体变化。 | 四个新增Gallery行仅After-only。两侧collector均因相同48条既有styleq日志、四条坏头像console错误／四个abort请求exit1；页面格没有这些错误。最终正常清理成功，首个selector拒绝轮的未知清理边界保留。没有新增Token组、全局CSS保留规则或fallback补丁。 |
 | 私有review标签207 | 十五个原生label基础utility迁为本地StyleX，保原变量及medium writer。原十六对PNG／RGBA、112目标记录除精确class／CSS URL载体外同；两个受影响profile另以真实wheel／scrollend／返回操作验证，六对应stage全部字段、几何、extent、命中及原PNG同。源码逆变换及737保留CSS规则／182 at-rule逐项同。真正inline-only单文件补八个原生状态对，桌面四对PNG／RGBA同；另两个真实导航场景最终nav／滚动字段及PNG同。 | 手机单文件四对保留34原始／零阈值像素，原reader缺nav属性；新增fresh lazy／observer历史差异及相同横向滚动边界全保。原两个initial状态保留348个文档extent／后续位置差异，幅度446.5px；原8,562几何记录全保。离屏600／153.5状态符合原content-visibility intrinsic-size机制，但旧cache／fixture历史没有记录，具体原因未证。采用私有声明不代表全部初始整页状态相同，没有虚构14状态代码子集或修改lazy／content-visibility。实际主题固定Vesper dark。 |
+| 原生review状态208 | 六个hover／checked／transition源码utility迁为原生CSS谓词；hover仅在无checked后代时生效，保留原checked胜出，不用React状态或特异性补丁。二十Storybook对保140目标、10,949几何，十九PNG同；八个真实native事件保持即时checked谓词与字段。另四个真实分组导航场景的目标／nav完整字段及PNG同。 | 一张Storybook留36原始／零阈值OPEN；八单文件对中四桌面保侧栏高亮差，共112,516原始／106,504阈值，四手机同。原reader缺nav属性，新增四nav-ready仅1280，不关闭旧history／具体原因。八个无关storage key缺失→[]差异精确列出，活动key与initialComments优先reader已核。whole at-rule顺序不全同；733保留规则／context／顺序及scoped树同。 |
+| 私有Button字重210 | 一个可选物理fontWeight字段保默认500及省略时原style路径。两个源码utility、五固定读取点保原变量与private writer。68真实整viewport对、830记录、1,594几何除352精确class／inline载体外同；106份CSS完整字节同。实际callback、pending／disabled及平台字体同，十新Gallery状态仅After-only。 | CSS字面weight0无效：Chrome从550更新0仍550；合法var()解析0则继承333。原JSDOM0断言保并改成合法initial关键词，UI25／314与两包类型通过。额外原生夹具控件完整字段仍作control；首次目标分类失败及Gallery26条console诊断／两阻断请求保留。 |
 | Spinner透明度192与queued pulse | 两opacity候选拒绝：4个direct控制同，4个真实零特异性祖先使0.7→1，共721原始像素；Root源码未改。 | 旧named默认在utilities中凭特异性胜出，普通StyleX则早于caller utility层，直接替换不能保合同。另完整animation变量简写在锁定compiler模式下不产CSS；默认keyframes不能替代元素本地变量合同。未采用compiler模式、新primitive API或特异性补丁。 |
 | Native编译试验188 | 三个真实arbitrary-property调用方使strip598→16px、viewport598→840px、裁切／命中改变，默认与named控制仍同。 | 十三试集成路径全恢复，六新增文件及三临时依赖link已移除，cache包未删。九默认仍Tailwind。此前66对成功与实际App312原始OPEN只保留为证据，不作接受结论。 |
 

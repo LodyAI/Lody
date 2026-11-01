@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionMeta } from '@lody/shared';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { fn } from 'storybook/test';
 import { FileTreeView } from '@/components/sessions/components/file-tree-view';
 import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
@@ -357,9 +357,12 @@ function UnsupportedEncodingStory() {
 // bridge, so the story passes the same callbacks by hand.
 function FileErrorActionsStory({
   openTarget,
+  withShare = false,
 }: {
   readonly openTarget?: 'browser' | 'default-app';
+  readonly withShare?: boolean;
 }) {
+  const [sharing, setSharing] = useState(false);
   return (
     <div className="w-[420px] rounded-md border border-border bg-background p-4">
       <SessionFileErrorState
@@ -367,6 +370,7 @@ function FileErrorActionsStory({
         reason="text-too-large"
         fileActions={{
           onCopyPath: fn(),
+          ...(withShare ? { sharing, onShare: () => setSharing(true) } : {}),
           ...(openTarget
             ? {
                 localHost: {
@@ -379,6 +383,7 @@ function FileErrorActionsStory({
             : {}),
         }}
       />
+      {withShare ? <output data-file-share-state>{sharing ? 'Sharing' : 'Ready'}</output> : null}
     </div>
   );
 }
@@ -499,4 +504,9 @@ export const TooLargeOnAnotherMachine: StoryObj<typeof FileErrorActionsStory> = 
     },
   },
   render: () => <FileErrorActionsStory />,
+};
+
+export const TooLargeShareAction: StoryObj<typeof FileErrorActionsStory> = {
+  parameters: { layout: 'centered' },
+  render: () => <FileErrorActionsStory openTarget="default-app" withShare />,
 };

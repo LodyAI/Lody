@@ -4079,6 +4079,38 @@ function ButtonLayoutSample({ icon = false }: { icon?: boolean }) {
   );
 }
 
+function ButtonWeightSample() {
+  const [weight, setWeight] = useState<number | 'initial' | 'inherit' | undefined>(550);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [readout, setReadout] = useState('');
+  useEffect(() => {
+    if (node) setReadout(getComputedStyle(node).fontWeight);
+  }, [node, weight]);
+  return (
+    <Sample name="Label weight" measured={readout}>
+      <Cluster>
+        <span style={{ fontWeight: 333 }}>
+          <Button ref={setNode} variant="secondary" fontWeight={weight} data-button-weight-sample>
+            Custom weight
+          </Button>
+        </span>
+        <Button variant="ghost" onClick={() => setWeight(0)}>
+          Zero weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight('initial')}>
+          Initial weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight('inherit')}>
+          Inherited weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight(undefined)}>
+          Default weight
+        </Button>
+      </Cluster>
+    </Sample>
+  );
+}
+
 function FocusRingRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -4447,6 +4479,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>layout constraints</LegendKey>
               <Cluster>
                 <ButtonLayoutSample />
+                <ButtonWeightSample />
                 <ButtonLayoutSample icon />
               </Cluster>
             </Row>

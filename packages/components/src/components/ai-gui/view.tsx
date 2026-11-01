@@ -998,6 +998,7 @@ const viewStyles = stylex.create({
     gap: themeSpace[0.5],
     marginRight: '-7px',
   },
+  assistantActionWeight: { '--tw-font-weight': 'var(--font-weight-medium)' },
   actionButtons: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -6752,10 +6753,12 @@ export const AssistantTurnFooter = ({
                 variant={isAccent ? 'primary' : 'secondary'}
                 size="small"
                 height="calc(var(--spacing) * 8)"
+                fontWeight="var(--font-weight-medium)"
                 className={cn(
                   cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'gap-1.5 rounded-md px-3 font-medium transition-colors'
+                    stylex.props(activityTypography.footnote, viewStyles.assistantActionWeight)
+                      .className,
+                    'gap-1.5 rounded-md px-3 transition-colors'
                   ),
                   isAccent
                     ? 'border border-primary/40 bg-primary/[0.12] text-primary shadow-xs hover:bg-primary/[0.18] hover:text-primary disabled:opacity-60'

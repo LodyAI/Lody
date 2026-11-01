@@ -27,9 +27,10 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   /** Numbers are px; strings are CSS dimension values. Omission keeps size and variant defaults. */
   width?: string | number;
   height?: string | number;
-  /** Outer label typography. Font-size numbers are px; line-height numbers are unitless. */
+  /** Outer label typography. Font-size numbers are px; line-height and weight stay numeric. */
   fontSize?: CSSProperties['fontSize'];
   lineHeight?: CSSProperties['lineHeight'];
+  fontWeight?: CSSProperties['fontWeight'];
   /** Constant label and currentColor glyph ink, independent of the variant's fills. */
   labelColor?: CSSProperties['color'];
   className?: string;
@@ -325,6 +326,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     height,
     fontSize,
     lineHeight,
+    fontWeight,
     labelColor,
     className,
     children,
@@ -351,13 +353,14 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
   // CSS-wide keywords, including var() fallbacks, must reach the actual field:
   // routing them through a custom property changes their inheritance semantics.
   const labelStyle =
-    fontSize == null && lineHeight == null && labelColor == null
+    fontSize == null && lineHeight == null && labelColor == null && fontWeight == null
       ? sx.style
       : {
           ...sx.style,
           ...(fontSize != null && { fontSize }),
           ...(lineHeight != null && { lineHeight }),
           ...(labelColor != null && { color: labelColor }),
+          ...(fontWeight != null && { fontWeight }),
         };
   const glyph = stylex.props(styles.glyph);
   return (

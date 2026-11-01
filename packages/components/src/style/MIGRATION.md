@@ -258,6 +258,11 @@ a nested token fallback fixes that default but changes an explicit invalid
 optional `fontWeight` and `letterSpacing` props preserve the original expressions
 as physical fields while omission keeps its live default reader. Keep the legacy
 private writers local and test invalid, missing and inherited variables too.
+A literal invalid CSS assignment and a valid `var()` that becomes invalid at
+computed-value time are different contracts. Real Chrome rejects a literal
+weight0 update and retains an existing550, whereas a var() resolving to0
+inherits its parent. DOM emulators may accept the literal; use browser output
+for that contract rather than normalizing or clamping the value.
 
 A `stylex.defineVars` value that references an app CSS variable resolves that
 reference where the StyleX variable is defined. An inherited alias does not

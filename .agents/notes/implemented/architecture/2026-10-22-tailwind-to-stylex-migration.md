@@ -2608,28 +2608,29 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Accepted scoped migrations since147 remove165 source utilities, including the six private
+Accepted scoped migrations since147 remove173 source utilities, including the six private
 spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
-The helper's accepted207 cut contains230/8/21 across30 production sources.
-It adds fifteen private ReviewCheck base declarations to196; its actual671-input
+The helper's accepted208 cut contains224/8/21 across30 production sources.
+It adds fifteen private ReviewCheck base declarations and six native state
+declarations to196; its actual671-input
 build resolves audited immutable dependencies rather than the live Root tree.
-The accepted204 full non-story components cut contains1,333 occurrences in145
+The accepted210 full non-story components cut contains1,331 occurrences in145
 files and720 unresolved expressions across1,397 sources. Its three core roots
-contain1,324/143/716 across791 sources: components895/129/623, legacy UI429/14/93,
+contain1,322/143/716 across791 sources: components893/129/623, legacy UI429/14/93,
 and53 route files0/0/0. The other nine occurrences are eight shared conversation
 column classes and one keyboard-sheet important bottom override. These are
 source lower bounds, not completion rates or whole-branch visual approval.
 
-`inventory-source-through204-accepted-proof.json` freezes those inputs; relative
-to203 only three accepted authentication title owners change. The three former
-template-class expressions also leave the unresolved count; they were not three
-additional utility removals. Helper207 is frozen separately. Together these inputs
-give a static lower bound of1,563 occurrences in153 files with741 unresolved expressions; it is not an exact total or completion percentage.
-The helper remains a separate frozen207 input; its exact scan and source hashes
-are in `inventory-helper-source-through207-proof.json` and
-`inventory-helper-v2-after207.json`. Scope185
+`inventory-source-through210-accepted-proof.json` freezes those inputs; relative
+to204 only two accepted private Button-weight owners change. The earlier204
+three template-class expression removals remain a method-count change, not extra
+utility removals. Helper208 is frozen separately. Together these inputs give a
+static lower bound of1,555 occurrences in153 files with741 unresolved expressions; it is not an exact total or completion percentage.
+The helper remains a separate frozen208 input; its exact scan and source hashes
+are in `inventory-helper-source-through208-proof.json` and
+`inventory-helper-v2-after208.json`. Scope185
 removes twenty manually audited literals but only seven were in v2 resolution;
 its retained `h-svh` hook is also outside that lower bound. The earlier147 dictionary
 gap remains separate. The fresh198 `@lody/ui` scan recognizes zero utilities
@@ -2693,6 +2694,8 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Login margin/glyph202–203 | One private submit margin and one fixed descendant-size occurrence move to local StyleX. Twelve submit-state pairs and ten SVG pairs are PNG/RGBA exact; six fixed glyph calls retain18px boxes, original display/shrink and Lucide presentation attributes. Production and natural DEV cover the sixth Mail, with provider click/disabled and email focus/Back behavior verified. The integrated203 working tree passes619 component files/6,199 tests; its pre-existing user edits remain part of those test inputs, not a pristine renderer qualification. | Submit records contain24 exact class and72 rule-routing changes; glyph records contain84 class, two fixed DEV debug-source attributes,42 matched-rule projections and24 CSS URL carriers, with no other raw differences. The original misreached Unverified pair and collector failures remain rejected; Resend lacks its fixture error code and is not covered. The glyph build only removes the old important descendant rule and reuses existing atoms. |
 | Card title typography204 | Two optional physical owner props retain the default600/live semantic tracking reader; three authentication titles remove five utilities while preserving their legacy variable writers. Fifteen real-browser consumer cases reject the alias/fallback design in five cases and support the physical declaration. All51 actual/variable page viewports and four original Gallery Card ROIs are PNG/RGBA exact;471 records and1,468 geometry records differ only at102 exact title class/inline carriers. | Four new Gallery rows are After-only. Both collectors exit1 on the same48 pre-existing styleq logs plus four broken-avatar console errors/four aborted requests in Gallery; page cells have none. Normal final cleanup succeeds; the first rejected selector run retains its unknown cleanup boundary. No token group, global CSS retention rule or fallback patch is added. |
 | Private review label207 | Fifteen native label base utilities become local StyleX with the same variables and medium-weight writer. All16 original PNG/RGBA pairs and112 target records match outside exact class/CSS URL carriers. A separate real wheel/scrollend/return sequence in the two affected profiles matches all six paired stages, geometry, extents, hits and original PNGs. Source inverse and737 retained CSS rules/182 at-rule nodes match exactly. Actual inline-only standalone files add eight native-state pairs; desktop four are PNG/RGBA exact, and two extra real navigation scenes retain matching final nav/scroll fields and PNGs. | Phone standalone four retain34 raw/zero-threshold pixels and their original reader lacks nav attributes; new fresh lazy/observer histories and equal horizontal-pan boundaries remain recorded. Two original initial states retain348 document-extent/later-position differences of446.5px; all original8,562 geometry records remain available. The offscreen600/153.5 states match the existing content-visibility intrinsic-size mechanism, but old cache/fixture history was not recorded and its cause remains unproved. Adopted private declarations do not establish all initial whole-page states equivalent; no14-state code subset or lazy/content-visibility fix is claimed. Actual theme is fixed Vesper dark. |
+| Native review states208 | Six hover/checked/transition occurrences use native CSS predicates; hover applies only when no descendant is checked, preserving the original checked winner without React state or specificity repair. Twenty Storybook pairs retain140 target records and10,949 geometry records;19 PNGs match. Eight trusted native events retain immediate checked predicates and fields. Four extra real group-navigation scenes match complete target/nav fields and PNGs. | One Storybook frame retains36raw/zero-threshold OPEN. Four of eight single-file pairs retain sidebar highlight differences totalling112,516raw/106,504threshold pixels; four phone pairs match. The old reader lacks nav attributes; the new four nav-ready scenes cover1280 only and do not close the original cause/history. Eight unrelated storage-key absent→[] differences are explicit, with active key and initial-comments readers verified. Whole at-rule order differs;733 retained rules/context/order and scoped trees match. |
+| Private Button weight210 | One optional physical fontWeight field preserves default500 and the omitted style path. Two source utilities across five fixed readers retain original variable readers/private writers. All68 real viewport pairs,830 records and1,594 geometry records match outside352 exact class/inline carriers; all106 CSS resources are byte-identical. Actual callbacks, pending/disabled and platform fonts match; ten new Gallery states are After-only. | Literal CSS weight0 is invalid: updating550 to0 leaves550 in Chrome; a valid var() resolving to0 instead inherits333. The old JSDOM0 assertion is preserved and corrected to a legal initial keyword, with UI25/314 and both types passing. Original extra native controls stay full-field controls; the first target-classification failure and Gallery26 console diagnostics/two blocked requests remain visible. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 

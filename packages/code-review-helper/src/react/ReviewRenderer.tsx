@@ -2680,14 +2680,45 @@ const reviewCheckStyles = stylex.create({
     borderRadius: 'var(--radius)',
     borderStyle: 'var(--tw-border-style)',
     borderWidth: '1px',
-    borderColor: 'hsl(var(--border))',
-    backgroundColor: 'transparent',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      ':has(:checked)': {
+        default: 'hsl(var(--foreground))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--foreground)) 30%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':has(:checked)': {
+        default: 'hsl(var(--foreground))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+      },
+      '@media (hover: hover)': {
+        ':hover:not(:has(:checked))': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
     'padding-inline': 'calc(var(--spacing) * 2)',
     'padding-block': 'calc(var(--spacing) * 1)',
     fontSize: '11px',
     '--tw-font-weight': 'var(--font-weight-medium)',
     fontWeight: 'var(--font-weight-medium)',
-    color: 'hsl(var(--muted-foreground))',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':has(:checked)': 'hsl(var(--foreground))',
+      '@media (hover: hover)': {
+        ':hover:not(:has(:checked))': 'hsl(var(--foreground))',
+      },
+    },
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration,var(--default-transition-duration))',
   },
 });
 
@@ -2704,7 +2735,7 @@ function ReviewCheck({
     <label
       className={cn(
         stylex.props(reviewCheckStyles.base).className,
-        'transition-colors hover:bg-foreground/5 hover:text-foreground has-[:checked]:border-foreground/30 has-[:checked]:bg-foreground/10 has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45'
+        'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45'
       )}
     >
       <Checkbox state={state} onChange={onChange} ariaLabel={label} />
