@@ -58,6 +58,12 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 - `mention-chips.tsx` owns the kind → glyph and kind → colour tables for both chip
   surfaces; `message-text-chips.tsx` paints the transcript chip. Its paste button
   shares the prose baseline through its label, while the clipboard icon stays centered.
+- Chat quote drafts reuse external atomic range editing, with a read-only preview
+  and a dedicated `message_quote` history span. The shared formatter includes full
+  snapshots in ACP text; supported editing rehydrates only validated quote spans.
+  The [quote contract](../../../../../specs/conversation-message-quotes.md) and
+  [decision/evidence](../../../../../.agents/notes/implemented/feature/2026-11-01-conversation-selection-quote-reintroduction.md)
+  distinguish this interaction from generic editable pasted text.
 - `mention-rank.ts` and `vscode-fuzzy-score.ts` own matching for files, sessions,
   Roles, Issues, and PRs. The vendored score is taken from the pinned VS Code
   source identified in its header; AGENTS.md states what must survive an update.

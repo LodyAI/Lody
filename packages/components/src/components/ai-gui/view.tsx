@@ -47,6 +47,7 @@ import type { ConversationView } from '@/lib/conversation-view';
 import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
+  getMessageQuoteEditDraft,
   getUserTextRenderSlice,
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
@@ -3922,6 +3923,9 @@ const UserMessageRowView = ({
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
+  const [editQuoteDrafts, setEditQuoteDrafts] = useState(
+    () => getMessageQuoteEditDraft(message.items).drafts
+  );
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
     setDidCopyMessageId(message.id);
@@ -4105,6 +4109,8 @@ const UserMessageRowView = ({
                     <UserMessageEditor
                       value={editText}
                       onChange={setEditText}
+                      quoteDrafts={editQuoteDrafts}
+                      onQuoteDraftsChange={setEditQuoteDrafts}
                       onCancel={() => setIsEditing(false)}
                       onSave={(submission) => void handleSaveEdit(submission)}
                       isSaving={isSavingEdit}
@@ -4166,7 +4172,9 @@ const UserMessageRowView = ({
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
                         onClick={() => {
-                          setEditText(getTextContentFromMessageItems(message.items));
+                          const draft = getMessageQuoteEditDraft(message.items);
+                          setEditText(draft.text);
+                          setEditQuoteDrafts(draft.drafts);
                           setIsEditing(true);
                         }}
                         aria-label={t('sessions.editMessage', 'Edit message')}
@@ -6108,6 +6116,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-native-selection-allow
+          data-message-quote-text={
+            content.kind === 'content' && content.block.entry.content.type === 'text'
+              ? ''
+              : undefined
+          }
         >
           {/* Desktop footer actions rest hidden, so they may sit inside the round
               reserve. Mobile always shows the footer: the reserve goes below it
@@ -7381,6 +7394,7 @@ const UserPlainTextBlock = ({
             ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
+          data-message-quote-text=""
         >
           {/* Search wins over chips: both want to split the same string, and a
               match that lands inside a chip has nowhere to paint. Chips come

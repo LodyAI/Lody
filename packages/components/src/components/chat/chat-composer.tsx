@@ -42,6 +42,7 @@ import {
   getPastedTextCharacterCount,
   getPastedTextLineCount,
   updatePastedTextDraftContent,
+  removePastedTextDraft,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
 import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
@@ -419,9 +420,34 @@ export function ChatComposer({
   const uploadFailedLabel = t('sessions.uploadFailed', 'Upload failed');
   const uploadFailedShortLabel = t('sessions.uploadFailedShort', 'Failed');
   const imagePreviewLabel = t('sessions.imagePreview', 'Image preview');
-  const pastedTextDialogTitle = t('composer.pastedTextTitle', 'Pasted text');
-  const pastedTextEditorLabel = t('composer.pastedTextEditorLabel', 'Edit pasted text');
+  const previewIsQuote = pastedTextDrafts.some(
+    (draft) => draft.id === previewPastedTextDraftId && draft.kind === 'message_quote'
+  );
+  const pastedTextDialogTitle = previewIsQuote
+    ? t('composer.messageQuoteTitle', 'Quoted message')
+    : t('composer.pastedTextTitle', 'Pasted text');
+  const pastedTextEditorLabel = previewIsQuote
+    ? t('composer.messageQuoteOriginal', 'Original quote')
+    : t('composer.pastedTextEditorLabel', 'Edit pasted text');
   const composerBoxRef = useRef<HTMLDivElement>(null);
+  const removedQuoteCaret = useRef<{
+    key: typeof draftKey;
+    value: string;
+    position: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const removed = removedQuoteCaret.current;
+    if (!removed) return;
+    if (removed.key !== draftKey) {
+      removedQuoteCaret.current = null;
+      return;
+    }
+    if (removed.value !== promptValue) return;
+    removedQuoteCaret.current = null;
+    const input = composerBoxRef.current?.querySelector('textarea');
+    input?.focus({ preventScroll: true });
+    input?.setSelectionRange(removed.position, removed.position);
+  }, [draftKey, promptValue]);
   const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
   useLayoutEffect(() => {
     const box = composerBoxRef.current;
@@ -485,6 +511,29 @@ export function ChatComposer({
       })),
     [pastedTextDrafts]
   );
+  // Range history can restore an atom after deletion. Retain its immutable
+  // payload alongside the editor's bounded history, never in the DOM label.
+  const pastedTextArchive = useRef({ key: draftKey, drafts: new Map<string, PastedTextDraft>() });
+  if (pastedTextArchive.current.key !== draftKey)
+    pastedTextArchive.current = { key: draftKey, drafts: new Map() };
+  for (const draft of pastedTextDrafts) pastedTextArchive.current.drafts.set(draft.id, draft);
+  const quoteUndoEnabled = Array.from(pastedTextArchive.current.drafts.values()).some(
+    (draft) => draft.kind === 'message_quote'
+  );
+  const retainDraftPayloads = useCallback((values: ReadonlySet<string>) => {
+    for (const id of pastedTextArchive.current.drafts.keys()) {
+      if (!values.has(id)) pastedTextArchive.current.drafts.delete(id);
+    }
+  }, []);
+  const resolveDraftChip = useCallback<
+    NonNullable<Parameters<typeof CombinedMentionTextarea>[0]['getMentionChip']>
+  >((mention, text) => {
+    const draft = pastedTextArchive.current.drafts.get(mention.value);
+    return getComposerMentionChip(
+      draft?.kind === 'message_quote' ? { ...mention, kind: 'message_quote' } : mention,
+      text
+    );
+  }, []);
   // Live ranges for copy expansion. Send still owns its copy via the parent
   // callback; we mirror here so Cmd/Ctrl+C can expand without waiting on send.
   const [mentionRanges, setMentionRanges] = useState<MentionRange[]>([]);
@@ -513,7 +562,7 @@ export function ChatComposer({
       const nextDrafts = nextMentions
         .filter((mention) => mention.kind === 'pasted_text')
         .map((mention) => {
-          const currentDraft = pastedTextDrafts.find((draft) => draft.id === mention.value);
+          const currentDraft = pastedTextArchive.current.drafts.get(mention.value);
           if (!currentDraft) {
             return null;
           }
@@ -545,7 +594,12 @@ export function ChatComposer({
   const handlePastedTextDraftTextChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       if (promptDisabled) return;
-      if (!previewPastedTextDraft || !onPastedTextDraftsChange) return;
+      if (
+        !previewPastedTextDraft ||
+        previewPastedTextDraft.kind === 'message_quote' ||
+        !onPastedTextDraftsChange
+      )
+        return;
 
       const text = event.currentTarget.value;
       setPreviewPastedTextEditorValue(text);
@@ -1246,9 +1300,11 @@ export function ChatComposer({
                   value={promptValue}
                   {...promptInputProps}
                   externalMentions={pastedTextMentions}
+                  atomicUndoHistory={quoteUndoEnabled}
+                  onAtomicHistoryRetainValues={retainDraftPayloads}
                   onExternalMentionsChange={handlePastedTextMentionsChange}
                   onMentionClick={handleMentionClick}
-                  getMentionChip={getComposerMentionChip}
+                  getMentionChip={resolveDraftChip}
                   onMentionRangesChange={handleMentionRangesChange}
                   persistedMentions={persistedMentions}
                   draftKey={draftKey}
@@ -1400,9 +1456,11 @@ export function ChatComposer({
               value={promptValue}
               {...promptInputProps}
               externalMentions={pastedTextMentions}
+              atomicUndoHistory={quoteUndoEnabled}
+              onAtomicHistoryRetainValues={retainDraftPayloads}
               onExternalMentionsChange={handlePastedTextMentionsChange}
               onMentionClick={handleMentionClick}
-              getMentionChip={getComposerMentionChip}
+              getMentionChip={resolveDraftChip}
               onMentionRangesChange={handleMentionRangesChange}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
@@ -1476,12 +1534,44 @@ export function ChatComposer({
         // like the prompt: same face, weight, size and leading. `@lody/ui`'s
         // Textarea is a form control (medium weight, control tracking), which is
         // why this is a plain textarea, as the prompt itself is.
+        const removeQuoteButton =
+          previewIsQuote && previewPastedTextDraft && onPastedTextDraftsChange ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              onClick={() => {
+                if (promptDisabled) return;
+                const result = removePastedTextDraft(
+                  promptValue,
+                  pastedTextDrafts,
+                  previewPastedTextDraft.id
+                );
+                if (!result) return;
+                removedQuoteCaret.current = {
+                  key: draftKey,
+                  value: result.nextValue,
+                  position: previewPastedTextDraft.start,
+                };
+                onPromptChange(result.nextValue);
+                onPastedTextDraftsChange(result.nextDrafts);
+                handlePastedTextOpenChange(false);
+              }}
+            >
+              {t('composer.removeMessageQuote', 'Remove quote')}
+            </Button>
+          ) : null;
         const pastedTextEditor = (layoutClassName: string) => (
           <textarea
+            rows={
+              previewIsQuote
+                ? Math.min(18, Math.max(3, previewPastedTextEditorValue.split('\n').length))
+                : undefined
+            }
             aria-label={pastedTextEditorLabel}
             value={previewPastedTextEditorValue}
             onChange={handlePastedTextDraftTextChange}
-            readOnly={!onPastedTextDraftsChange}
+            readOnly={previewIsQuote || !onPastedTextDraftsChange}
             spellCheck={false}
             className={cn(
               'input-scrollbar block min-h-0 w-full flex-1 resize-none overflow-auto border-0 bg-transparent',
@@ -1516,6 +1606,7 @@ export function ChatComposer({
                           <ClipboardPaste className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                           {pastedTextDialogTitle}
                         </Drawer.Title>
+                        {removeQuoteButton}
                         <Drawer.Close
                           render={
                             <Button
@@ -1550,7 +1641,11 @@ export function ChatComposer({
             <Dialog.Content
               closeButton={false}
               width="48rem"
-              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
+              className={
+                previewIsQuote
+                  ? undefined
+                  : 'flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0'
+              }
             >
               {previewPastedTextDraft ? (
                 <>
@@ -1560,6 +1655,7 @@ export function ChatComposer({
                       {pastedTextDialogTitle}
                     </Dialog.Title>
                     <div className="flex items-center gap-3">
+                      {removeQuoteButton}
                       <Dialog.Description className="text-muted-foreground tabular-nums">
                         {summaryText}
                       </Dialog.Description>

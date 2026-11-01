@@ -33,6 +33,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionAutomations: 'sessionAutomations',
   remoteAutomationControl: 'remoteAutomationControl',
   preparedSessionInput: 'preparedSessionInput',
+  messageQuotes: 'messageQuotes',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
   fileDownload: 'fileDownload',
@@ -80,6 +81,7 @@ const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
 const SCHEDULED_MESSAGES_PROTOCOL_VERSION = 3;
 export const SCHEDULES_PROTOCOL_VERSION = SCHEDULED_MESSAGES_PROTOCOL_VERSION;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
+export const MESSAGE_QUOTES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
@@ -181,6 +183,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
@@ -405,6 +408,16 @@ export function machineSupportsPreparedSessionInputProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
     PREPARED_SESSION_INPUT_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsMessageQuotes(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.messageQuotes,
+    MESSAGE_QUOTES_PROTOCOL_VERSION
   );
 }
 

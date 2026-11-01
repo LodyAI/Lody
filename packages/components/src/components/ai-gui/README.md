@@ -26,6 +26,7 @@ the reasoning behind those rules.
 | Turns                   | `assistant-turn-render-blocks.ts`                                                                 | Activity groups and foldable segments.                                                  |
 | Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx)                                                  | Temporary message selection, drag rectangle, range modifiers, and edge scrolling.       |
+| Chat quotes             | [`message-quote-action.tsx`](message-quote-action.tsx)                                            | Portal action over a retained native prose selection, outside viewport layout.          |
 | Typography              | [`conversation-font-size-classes.ts`](conversation-font-size-classes.ts), `markdown-renderer.tsx` | Shared text roles; explicit preview size and compact tool prose without nested scaling. |
 | Spacing and surfaces    | [`conversation.tokens.stylex.ts`](conversation.tokens.stylex.ts), [`surface.ts`](surface.ts)      | Themeable conversation anatomy, activity rows and user bubbles.                         |
 
@@ -390,6 +391,10 @@ owns native range retention, history leases, and incomplete-copy protection.
 follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
 Session data and action controls continue updating. This is independent of
 `message-selection.tsx`, which selects messages for image sharing.
+
+The chat quote action floats above the first visible selected line, centered on
+that line. It measures its rendered size, flips below the selection when there is
+no room above, and stays inside the conversation and safe viewport bounds.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.

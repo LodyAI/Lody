@@ -13,6 +13,12 @@ import { applyNotificationOnHistory } from '../src/acp/history-apply';
 import { parseSessionNotification } from '../src/acp/schema';
 import type { LodySubagentEvent, LodySubagentSnapshot } from 'acp-extension-core';
 import type { MessageContent } from '../src/ai';
+import { formatMessageQuote, readMessageQuote } from '../src/message-quote';
+import { sanitizeMessageTextSpans } from '../src/message-text-spans';
+import {
+  historyItemsToInputBlocks,
+  resolveSessionExecutionInputBlocks,
+} from '../src/session-input';
 
 const id = 'synthetic-session' as SessionId;
 const entry = (turnId = 'turn'): SessionHistory => ({
@@ -26,6 +32,43 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('retains quoted snapshots through the writer, a restart and execution projection', () => {
+    const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
+    const quote = formatMessageQuote(snapshot);
+    const text = `${quote}\n\nExplain this passage.`;
+    const span = {
+      start: 0,
+      end: quote.length,
+      kind: 'message_quote' as const,
+      quoteVersion: 1 as const,
+      label: '[Quote]',
+      target: 'quote-1',
+    };
+    const doc = new Loro();
+    const mirror = open(doc);
+    mirror.historyWriter.append({ ...entry(), items: [{ type: 'text', text, spans: [span] }] });
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const revived = open(restarted);
+    try {
+      const item = revived.historyWriter.readStored()[0]!.items![0]!;
+      expect(item).toMatchObject({ type: 'text', text, spans: [span] });
+      if (item.type !== 'text') throw new Error('Expected authored text');
+      expect(
+        readMessageQuote(item.text.slice(span.start, span.end), item.spans![0]!.quoteVersion)
+      ).toBe(snapshot);
+      const blocks = historyItemsToInputBlocks([item]);
+      expect(resolveSessionExecutionInputBlocks({ prompt: text, inputBlocks: blocks })).toEqual([
+        { type: 'text', text },
+      ]);
+      expect(sanitizeMessageTextSpans(text, [{ ...span, end: text.length }])).toBeUndefined();
+      expect(text).toContain('Explain this passage.');
+    } finally {
+      revived.dispose();
+    }
+  });
   it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
     'drops unused tool bytes for kind %s while preserving audio and download references',
     (kind) => {

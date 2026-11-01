@@ -121,7 +121,7 @@ export function countSessionMentions(items: SessionHistoryInput['items']): Sessi
   for (const item of items ?? []) {
     if (item.type !== 'text' || typeof item.text !== 'string') continue;
     for (const span of sanitizeMessageTextSpans(item.text, item.spans) ?? []) {
-      if (span.kind === 'pasted_text') continue;
+      if (span.kind === 'pasted_text' || span.kind === 'message_quote') continue;
       counts[span.kind] += 1;
     }
   }

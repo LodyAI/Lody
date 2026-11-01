@@ -49,6 +49,13 @@ For an existing checkout, initialise the submodules:
 git submodule update --init --recursive
 ```
 
+The root lockfile includes workspace adapter manifests. The
+[submodule lockfile decision](./.agents/notes/implemented/process/2026-09-21-submodule-pointer-lockfile-regeneration.md)
+explains matching revisions and exact exceptions under the
+[seven-day release policy](./.agents/notes/implemented/process/2026-09-13-dependency-release-age.md).
+The [Codex lockfile example](./.agents/notes/implemented/bug-fix/2026-10-27-codex-root-lockfile.md)
+records why each package's first matching exception and complete platform graph matter.
+
 ## Local Development
 
 You need Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), with Node-API 10+ and the pnpm

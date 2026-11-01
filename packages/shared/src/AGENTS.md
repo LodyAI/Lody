@@ -1,5 +1,8 @@
 # Shared source contracts
 
+- New quote spans require `messageQuotes` v1 on the target machine. Execution
+  includes the full snapshot as ordinary ACP text, independently of Agent identity.
+
 Parent contracts apply. Before changing MCP catalog serialization, also read
 [the authorization decision](../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md).
 
