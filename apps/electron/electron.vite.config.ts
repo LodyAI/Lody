@@ -85,7 +85,7 @@ export default defineConfig(({ mode }) => {
     main: {
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
-      define: viteEnvDefine,
+      define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
       build: {
         lib: {
           entry: {
