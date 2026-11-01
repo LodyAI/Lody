@@ -1,3 +1,5 @@
+import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
@@ -188,7 +190,10 @@ import { SessionFileContentView, type SessionFileSaveViewState } from './session
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
-import { SessionIosSimulatorPanel } from './ios-simulator/session-ios-simulator-panel';
+import {
+  SessionDevicePreviewPanel,
+  SessionIosSimulatorPanel,
+} from './ios-simulator/session-ios-simulator-panel';
 import { getIosSimulatorPanelAvailability } from '@/lib/ios-simulator/ios-simulator-model';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
@@ -501,6 +506,7 @@ const MOBILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
 const EMPTY_LOCAL_PROJECTS: Record<LocalProjectId, LocalProjectMeta> = {};
 const MOBILE_PR_VIEWER_ID = 'mobile-viewer:pr';
 const MOBILE_BROWSER_VIEWER_ID = 'mobile-viewer:browser';
+const MOBILE_ANDROID_EMULATOR_VIEWER_ID = 'mobile-viewer:android-emulator';
 const MOBILE_IOS_SIMULATOR_VIEWER_ID = 'mobile-viewer:ios-simulator';
 const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
 
@@ -1034,6 +1040,7 @@ function SessionChatSurface({
   const openBrowser = useStableCallback(() => props.onOpenBrowser?.());
   const openExistingBrowser = useStableCallback(() => props.onOpenExistingBrowser?.());
   const openIosSimulator = useStableCallback(() => props.onOpenIosSimulator?.());
+  const openAndroidEmulator = useStableCallback(() => props.onOpenAndroidEmulator?.());
   const forkLastAssistant = useStableCallback(
     (...args: Parameters<NonNullable<SessionChatInterfaceProps['onForkLastAssistant']>>) =>
       props.onForkLastAssistant?.(...args)
@@ -1065,6 +1072,7 @@ function SessionChatSurface({
       onOpenBrowser={props.onOpenBrowser ? openBrowser : undefined}
       onOpenExistingBrowser={props.onOpenExistingBrowser ? openExistingBrowser : undefined}
       onOpenIosSimulator={props.onOpenIosSimulator ? openIosSimulator : undefined}
+      onOpenAndroidEmulator={props.onOpenAndroidEmulator ? openAndroidEmulator : undefined}
       onForkLastAssistant={props.onForkLastAssistant ? forkLastAssistant : undefined}
       onVisualAnnotationReferencesSubmitted={
         props.onVisualAnnotationReferencesSubmitted ? annotationReferencesSubmitted : undefined
@@ -1948,6 +1956,20 @@ const SessionDetail = ({
     simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
       ? simulatorOwnerSession
       : null;
+  const activeAndroidEmulatorSession =
+    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+      ? simulatorOwnerSession
+      : null;
+  const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);
+  useIosSimulatorPreviewRequest(
+    activeAndroidEmulatorSession ? `android:${activeAndroidEmulatorSession.id}` : undefined,
+    activeAndroidEmulatorSession?.androidEmulatorPreviewRequestId,
+    !isMobile,
+    () => {
+      activateSidebarTab('android-emulator');
+      revealRightSidebar();
+    }
+  );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
   const activeSessionProject = activeSession?.project;
@@ -4030,6 +4052,24 @@ const SessionDetail = ({
     [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
   );
 
+  const handleOpenAndroidEmulatorForSession = useCallback(
+    (targetSessionId: SessionId) => {
+      setIosSimulatorTarget({
+        parentId: sessionId,
+        tabId: activeBrowserSession?.id,
+        sessionId: targetSessionId,
+      });
+      if (isMobile) {
+        setAndroidEmulatorOpen(true);
+      } else {
+        revealRightSidebar();
+        activateSidebarTab('android-emulator');
+        semanticRouterRef.current?.activate('side-panel');
+      }
+    },
+    [sessionId, activeBrowserSession?.id, isMobile, revealRightSidebar, activateSidebarTab]
+  );
+
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
   }, [replaceSessionUrlSimulator]);
@@ -4472,6 +4512,13 @@ const SessionDetail = ({
         kind: 'ios-simulator',
       });
     }
+    if (activeAndroidEmulatorSession) {
+      options.push({
+        id: 'android-emulator',
+        label: t('sessions.detailTabs.androidEmulator', 'Android Emulator'),
+        kind: 'android-emulator',
+      });
+    }
     if (latestPr && repoFullName && latestPrNumber != null) {
       options.push({
         id: 'pr',
@@ -4480,7 +4527,15 @@ const SessionDetail = ({
       });
     }
     return options;
-  }, [activeBrowserSession, activeIosSimulatorSession, latestPr, latestPrNumber, repoFullName, t]);
+  }, [
+    activeBrowserSession,
+    activeIosSimulatorSession,
+    activeAndroidEmulatorSession,
+    latestPr,
+    latestPrNumber,
+    repoFullName,
+    t,
+  ]);
   const sideChatOption = useMemo<SessionSidePanelOption | null>(() => {
     const launcherState = getSideChatLauncherState({
       providerSupportsFork: Boolean(
@@ -5451,6 +5506,14 @@ const SessionDetail = ({
         active: false,
       });
     }
+    if (activeAndroidEmulatorSession) {
+      list.push({
+        id: MOBILE_ANDROID_EMULATOR_VIEWER_ID,
+        label: t('sessions.detailTabs.androidEmulator', 'Android Emulator'),
+        kind: 'android-emulator',
+        active: false,
+      });
+    }
     if (canShowGitHubActions && latestPr && latestPrNumber != null && latestPrRepoFullName) {
       list.push({
         id: MOBILE_PR_VIEWER_ID,
@@ -5478,6 +5541,7 @@ const SessionDetail = ({
     latestPrRepoFullName,
     activeBrowserSession,
     activeIosSimulatorSession,
+    activeAndroidEmulatorSession,
     viewerTabItems,
     effectiveActiveViewerTabId,
     mobileFileViewerOpen,
@@ -5535,6 +5599,10 @@ const SessionDetail = ({
         if (activeBrowserSession) handleOpenBrowser(activeBrowserSession.id);
         return;
       }
+      if (id === MOBILE_ANDROID_EMULATOR_VIEWER_ID) {
+        if (activeAndroidEmulatorSession) setAndroidEmulatorOpen(true);
+        return;
+      }
       if (id === MOBILE_IOS_SIMULATOR_VIEWER_ID) {
         if (activeIosSimulatorSession) handleOpenIosSimulator();
         return;
@@ -5558,6 +5626,7 @@ const SessionDetail = ({
       latestPrRepoFullName,
       activeBrowserSession,
       activeIosSimulatorSession,
+      activeAndroidEmulatorSession,
       handleOpenPrTab,
       handleOpenBrowser,
       handleOpenIosSimulator,
@@ -6395,6 +6464,7 @@ const SessionDetail = ({
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
                   onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
+                  onOpenAndroidEmulator={() => handleOpenAndroidEmulatorForSession(tabSession.id)}
                   onOpenBrowser={
                     previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
                   }
@@ -6811,6 +6881,50 @@ const SessionDetail = ({
             </VaulDrawerBody>
           </DrawerContent>
         </Drawer>
+        {/* Android owns its mobile drawer independently of iOS and Browser. */}
+        <Drawer
+          direction="right"
+          repositionInputs={isNativeAppShell()}
+          open={Boolean(androidEmulatorOpen && activeAndroidEmulatorSession)}
+          onOpenChange={(open) => {
+            if (!open) setAndroidEmulatorOpen(false);
+          }}
+        >
+          <DrawerContent
+            nativeKeyboardInset
+            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            data-sidebar-swipe-open-disabled
+          >
+            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+              {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
+            </DrawerTitle>
+            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+              {activeAndroidEmulatorSession && (
+                <SessionDevicePreviewPanel
+                  platform="android"
+                  session={activeAndroidEmulatorSession}
+                  active={Boolean(androidEmulatorOpen)}
+                  controlsLayout="menu"
+                  onAttachScreenshot={(file) =>
+                    handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
+                  }
+                  leadingSlot={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon
+                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      onClick={() => setAndroidEmulatorOpen(false)}
+                      aria-label={t('common.back', 'Back')}
+                    >
+                      <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                    </Button>
+                  }
+                />
+              )}
+            </VaulDrawerBody>
+          </DrawerContent>
+        </Drawer>
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
         {dirtyForkDialog}
@@ -6946,7 +7060,29 @@ const SessionDetail = ({
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' && activeSidebarTab !== 'ios-simulator' ? (
+      {activeAndroidEmulatorSession && openedSidebarTabs.includes('android-emulator') ? (
+        <div
+          className={
+            stylex.props(
+              detailStyles.absoluteFill,
+              activeSidebarTab !== 'android-emulator' && detailStyles.invisibleFill
+            ).className
+          }
+          aria-hidden={activeSidebarTab !== 'android-emulator'}
+        >
+          <SessionDevicePreviewPanel
+            platform="android"
+            session={activeAndroidEmulatorSession}
+            active={activeSidebarTab === 'android-emulator' && isSidebarVisible}
+            onAttachScreenshot={(file) =>
+              handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
+            }
+          />
+        </div>
+      ) : null}
+      {activeSidebarTab !== 'browser' &&
+      activeSidebarTab !== 'ios-simulator' &&
+      activeSidebarTab !== 'android-emulator' ? (
         <div {...stylex.props(detailStyles.absoluteFill)}>{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
@@ -7045,6 +7181,7 @@ const SessionDetail = ({
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
       onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
+      onOpenAndroidEmulator: () => handleOpenAndroidEmulatorForSession(chatSession.id),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

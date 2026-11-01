@@ -74,7 +74,7 @@ export type ArchivedConversationEntry = {
 export type ViewerTabEntry = {
   id: string;
   label: string;
-  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'files';
+  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'android-emulator' | 'files';
   active: boolean;
 };
 
@@ -126,6 +126,7 @@ const VIEWER_ICON: Record<ViewerTabEntry['kind'], typeof FileIcon> = {
   pr: GitPullRequest,
   browser: MonitorPlay,
   'ios-simulator': Smartphone,
+  'android-emulator': Smartphone,
   files: FolderOpen,
 };
 

@@ -63,7 +63,7 @@ Parent instructions apply. Background: [README.md](README.md).
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
-- `lody_ios_simulator_preview` is the native-app tool; web previews remain
+- `lody_ios_simulator_preview` and `lody_android_emulator_preview` are the native-app tools; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.

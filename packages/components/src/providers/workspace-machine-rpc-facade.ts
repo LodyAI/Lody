@@ -1,3 +1,9 @@
+import {
+  machineSupportsAndroidEmulatorProtocol,
+  AndroidEmulatorResponseSchema,
+  type AndroidEmulatorCommand,
+  type AndroidEmulatorResponse,
+} from '@lody/shared';
 import { type FileDownloadRequest, type FileDownloadResponse } from '@lody/shared';
 import {
   FilePreviewV3ResponseSchema,
@@ -1469,6 +1475,86 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const androidEmulatorFailure = (
+    sessionId: SessionId,
+    error: NonNullable<AndroidEmulatorResponse['error']>,
+    message: string
+  ): AndroidEmulatorResponse => ({
+    type: 'android-emulator/control_response',
+    sessionId,
+    success: false,
+    error,
+    message,
+  });
+
+  /**
+   * One authenticated Machine RPC for every simulator command. The local plane
+   * goes straight to this machine's daemon and never touches the cloud; the
+   * remote plane signs the exact command with the preview-control proof.
+   */
+  const requestAndroidEmulatorControl = async ({
+    machineId,
+    sessionId,
+    requestedByUserId,
+    command,
+    timeoutMs = 15_000,
+  }: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: AndroidEmulatorCommand;
+    timeoutMs?: number;
+  }): Promise<AndroidEmulatorResponse> => {
+    try {
+      await waitForMachineRoute(machineId);
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        const response = await getLocalMachineRpcSender()?.({
+          method: 'android-emulator/control',
+          machineId,
+          workspaceId,
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response) throw new Error('Local simulator control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return AndroidEmulatorResponseSchema.parse(response.result);
+      }
+      if (
+        !machineSupportsAndroidEmulatorProtocol({
+          protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+        })
+      ) {
+        return androidEmulatorFailure(
+          sessionId,
+          'unsupported',
+          'Update Lody on this machine to preview simulators.'
+        );
+      }
+      const responseRecipient = await createRpcSecretRecipient();
+      const response = await (
+        await getMachineRpcClient(machineId)
+      ).requestAndroidEmulatorControl({
+        sessionId,
+        requestedByUserId,
+        command,
+        responseRecipient,
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'android-emulator',
+          command,
+          responseKey: responseRecipient.publicKey,
+        }),
+        timeoutMs,
+      });
+      return response ?? androidEmulatorFailure(sessionId, 'failed', 'The machine did not answer.');
+    } catch (error) {
+      return androidEmulatorFailure(
+        sessionId,
+        'failed',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
+
   const requestSessionPreviewRevoke = async (
     machineId: MachineId,
     sessionId: SessionId,
@@ -1874,6 +1960,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
+    requestAndroidEmulatorControl,
     requestLocalProjectGitState,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,

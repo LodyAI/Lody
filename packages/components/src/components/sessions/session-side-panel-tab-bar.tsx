@@ -23,7 +23,16 @@ import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-
 export type SessionSidePanelTabItem = {
   id: string;
   label: string;
-  kind: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'session' | 'file' | 'diff';
+  kind:
+    | 'files'
+    | 'changes'
+    | 'pr'
+    | 'browser'
+    | 'ios-simulator'
+    | 'android-emulator'
+    | 'session'
+    | 'file'
+    | 'diff';
   filePath?: string;
   closeable?: boolean;
   dirty?: boolean;
@@ -34,8 +43,15 @@ export type SessionSidePanelTabItem = {
 };
 
 export type SessionSidePanelOption = Omit<SessionSidePanelTabItem, 'id' | 'kind'> & {
-  id: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'side-session';
-  kind: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'session';
+  id:
+    | 'files'
+    | 'changes'
+    | 'pr'
+    | 'browser'
+    | 'ios-simulator'
+    | 'android-emulator'
+    | 'side-session';
+  kind: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'android-emulator' | 'session';
 };
 
 const SIDE_SESSION_PANEL_PREFIX = 'side-session:';
@@ -465,6 +481,7 @@ function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
       return <GitPullRequest {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'browser':
       return <MonitorPlay {...stylex.props(styles.tabGlyphDimmed)} />;
+    case 'android-emulator':
     case 'ios-simulator':
       return <Smartphone {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'session':
