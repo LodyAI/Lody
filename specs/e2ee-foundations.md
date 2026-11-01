@@ -473,6 +473,24 @@ success A shows the request details. The reverse direction is also supported, fo
 example a new phone and an approving desktop: A generates S and shows the QR code, N
 scans it and submits its request under that S, and A then verifies it in the same way.
 
+**Confirmation and warning.** Before signing, A shows this warning: "Only scan or paste
+a code that is showing on another device of your own. Never enter a code someone sent
+you. Once approved, this device gets access to the selected workspaces and all their
+history." The confirmation names the specific target device and its scope:
+- the number and names of the workspaces to join, each deselectable;
+- the device name, labeled "provided by the requesting device";
+- the location, labeled "approximate, estimated by the server".
+
+After a successful approval, every approved personal device of the user and the
+account's email receive a "new device added" notice with a link to revoke it.
+
+**Threat-model limit.** Whoever holds `S` cannot tell an attacker's device, which the user
+was talked into approving, from the user's own device. An attacker who knows the
+account password can create a genuine request and persuade the user to scan or paste its
+code; every MAC then verifies and the service need not misbehave. The warning, the scope
+display and the after-the-fact notice reduce and expose this social-engineering risk but
+do not prevent it, as with Signal's linked-device warning.
+
 **Approval covers the account.** After the user confirms, A authorizes every workspace
 in which it is an active personal device of the same user's membership. All are
 selected by default and the user may deselect any. For each selected workspace, A
@@ -484,10 +502,18 @@ endorsement key. Current and historical keys use the existing mailbox and histor
 paths. Workspaces A cannot sign for stay pending for another approver.
 
 **Lifetime and refusal.**
-- S is single-use and dies with its request. The request expires after 10 minutes,
-  requests are rate-limited per account, and any approver may decline.
-- A string for an expired, declined, approved or unknown request is refused, and so is
-  an approval authenticator replayed for any other request.
+- The request's own expiry is covered by its MAC and is at most 10 minutes. A checks it
+  independently before signing, and N checks it before accepting an approval; a late
+  approval is refused.
+- A and N each persist the terminal states they know: approved, declined, expired, and
+  each `S` already used. A restart or retry can neither extend nor revive a request, and
+  N destroys its `S` after use.
+- Requests are rate-limited per account, and any approver may decline. An approval
+  authenticator replayed for any other request is refused.
+- **Limit.** If another approving device already declined or consumed the request and
+  the service hides that fact, the MACs cannot reveal it. One-time use is therefore
+  guaranteed only within each client's local state and the 10-minute expiry, which also
+  bounds the impact of a leaked string.
 
 **Progress and failure.**
 - A journals each workspace's exact signed admission before any network step. It

@@ -41,7 +41,10 @@ pairing string, the device list and per-workspace progress.
 **As an approving desktop.** The pending event raises an in-app prompt and an OS
 notification without content. A scanned or pasted string is handed to main, which
 validates it, fetches and verifies the request. The renderer receives only the
-verified details and the user's confirm, deselect or decline decisions. Signing happens
-inside main. An unfinished batch resumes after restart from its journal.
+verified details and the user's confirm, deselect or decline decisions. Before signing, the
+renderer shows the required warning and the named target-device scope; signing happens
+inside main. Main persists known terminal request states and used secrets, so a restart
+never revives or extends a request. An unfinished batch resumes after restart from its
+journal.
 
 Logout, cleanup and confirmed removal keep their existing rules.

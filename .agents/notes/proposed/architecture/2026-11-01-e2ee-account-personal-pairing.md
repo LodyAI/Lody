@@ -89,12 +89,34 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **Offline attack.** `lookupId` is an HKDF output, so it reveals nothing usable about
   `S`. Brute-forcing a 128-bit secret is infeasible, so there is no online-attempt budget
   to manage.
-- **Replay.**
-  - `S` is single-use. The service keeps the request's terminal state: approved,
-    declined or expired, with a 10-minute expiry and a per-account rate limit.
-  - A refuses a string whose request is not pending.
-  - N accepts an approval only for the digest of its own current pending request. An old
+- **Replay and expiry are client-enforced.** The service's view of the request state is
+  not trusted. A malicious service could return an old request whose MAC is valid and
+  claim it is still pending.
+  - The request's original expiry, at most 10 minutes, is covered by `requestTag`. A
+    checks it before signing, and N checks it before accepting an approval.
+  - Both persist the terminal states they know (approved, declined, expired) and every
+    used `S`. A restart or retry can neither extend nor revive a request, and N destroys
+    its `S` after use.
+  - N accepts an approval only for the digest of its own current request. An old
     `approvalTag` is bound to an old digest and is rejected.
+  - **Remaining limit.** If another approver already declined or consumed the request and
+    the service hides it, the MACs cannot reveal that. Global one-time use holds only
+    within local state plus the 10-minute expiry, and a leaked `S` is useful only inside
+    that window. No further mechanism is added.
+- **Social engineering ("ghost pairing").** An attacker who knows the account password
+  can create a genuine request on their own device and persuade the user to scan or paste
+  its code on the user's device. Every MAC then verifies and the service need not
+  misbehave. Whoever holds `S` cannot distinguish that device from the user's own.
+  - Before signing, the approver shows a fixed warning: scan or paste only a code showing
+    on your own other device, never one someone sent you, and approval grants the
+    selected workspaces and all their history.
+  - The confirmation names the target device and lists the workspaces to join, each
+    deselectable. It labels the device name "provided by the requesting device" and the
+    location "approximate, estimated by the server".
+  - After approval, every approved device and the account email receive a "new device
+    added" notice with a revoke link.
+  - These measures reduce the risk and expose it after the fact, as Signal's
+    linked-device warning does; they do not prevent it.
 - **Account binding.** The service returns a request only to the same authenticated
   account. This is defense in depth; integrity never relies on it.
 - **Exposure.** `S` is a short-lived bearer secret. Someone who sees it and also controls
