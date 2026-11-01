@@ -332,9 +332,9 @@ Owner 批准在冻结前扩展现有机器 AdmitDevice（tag4），不新增操�
 冻结前批准重新生成。本项不批准生产启用。通用提示权限规则采用已合入的
 [#1956](https://github.com/LodyAI/Lody/pull/1956)，本账本变更不增加发送门禁。
 
-## 账号级个人设备配对（待批准增量）
+## 账号级个人设备配对（owner 于 2026-11-01 批准）
 
-**增量状态：draft；不在上方已批准修订范围内。** 2026-11-01 owner 选定了配对字符串方案。本文字待 owner 审批；批准前现有的显式配对交换继续有效。字符串格式、安全论证和被否决的方案见[提案](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.zh.md)。
+**增量状态：已批准。** owner Zixuan Chen（zxch3n）于 2026-11-01 批准本增量（[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账号级个人设备配对)）。批准不代表已实现、已部署或真机验收；实现之前，现有的显式配对交换仍是已发布的路径。字符串格式、安全论证和被否决的方案见[提案](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.zh.md)。
 
 **场景。** 已登录用户在新设备 N 上打开一个加密工作区。桌面端和移动端自动开始；网页端只有在用户选择"请求访问"后才开始。N 为其账号列出的每个加密工作区各创建一个独立的受保护个人身份，然后生成一个新的 128 bit 秘密 S，并显示二维码和可复制的配对字符串，两者编码的都是 S。
 

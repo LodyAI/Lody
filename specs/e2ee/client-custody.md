@@ -153,10 +153,9 @@ and runtime composition, native first unlock/reinstall and minimum-OS device
 acceptance remain separate implementation evidence. No deployment is established.
 
 
-## Pairing start and approver (pending approval increment)
+## Pairing start and approver (owner approved 2026-11-01)
 
-**Increment status: draft; not covered by the approved revision above.** On owner
-approval, together with the [account-wide pairing increment](../e2ee-foundations.md#account-wide-personal-device-pairing-pending-approval-increment),
+**Increment status: approved** on 2026-11-01 ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing)). Together with the [account-wide pairing increment](../e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01),
 this replaces two parts of the approved text:
 - the rule that the absence of a receipt "never starts this automatically";
 - the requirement of desktop approval.

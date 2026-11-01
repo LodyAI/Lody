@@ -18,8 +18,8 @@ never reaches the service. The user scans or pastes the string on any of their p
 devices, which verifies the request before showing its details. One approval covers every
 encrypted workspace of the account.
 
-The protocol statement is in the [foundations increment](../../../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-pending-approval-increment)
-and awaits owner approval. Nothing is implemented or measured yet.
+The protocol statement is in the [foundations increment](../../../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)
+and was approved by the owner on 2026-11-01. Nothing is implemented or measured yet.
 
 ## Problem
 

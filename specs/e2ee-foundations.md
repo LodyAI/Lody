@@ -437,11 +437,12 @@ approval. This does not approve production activation. The generic advisory perm
 policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
 change adds no send guard.
 
-## Account-wide personal device pairing (pending approval increment)
+## Account-wide personal device pairing (owner approved 2026-11-01)
 
-**Increment status: draft; not covered by the approved revision above.** On
-2026-11-01 the owner chose this pairing string design. This text awaits owner approval; until then the existing explicit pairing
-exchange stays in force. The string format, the security argument and the rejected
+**Increment status: approved.** Owner Zixuan Chen (zxch3n) approved this increment on
+2026-11-01 ([approval](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing)). Approval is not implementation, deployment or
+real-device acceptance; until implemented, the existing explicit pairing exchange
+remains the shipped path. The string format, the security argument and the rejected
 alternatives are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
 
 **Scenario.** A signed-in user opens an encrypted workspace on a new device N. Desktop

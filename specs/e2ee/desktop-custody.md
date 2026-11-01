@@ -25,11 +25,11 @@ An authenticated whole-member removal result is an explicit exception to ordinar
 
 A credential-confirmed revocation of this device is the same exception, scoped to this device's identity: the same match, receipt, drain and removal apply to this device's workspace content, credential, private keys and epoch stores, while the membership and the member's other devices stay valid. The receipt records the revocation reason, and the user can pair the device again, which installs a new device identity. Only the exact typed revocation result qualifies; a generic unauthorized response, an unclassified message, a network failure or an account problem never authorizes deletion.
 
-## Account-wide personal pairing (pending approval increment)
+## Account-wide personal pairing (owner approved 2026-11-01)
 
-**Increment status: draft; not covered by the approved revision above.** This awaits
-owner approval; until then explicit pairing stays in force. The protocol is the
-[foundations increment](../e2ee-foundations.md#account-wide-personal-device-pairing-pending-approval-increment).
+**Increment status: approved** on 2026-11-01 ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing)). Until implemented,
+explicit pairing remains the shipped path. The protocol is the
+[foundations increment](../e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01).
 
 **As the new device.** Opening an encrypted workspace that has no local identity starts
 the request automatically. Main creates the protected identities and credentials
