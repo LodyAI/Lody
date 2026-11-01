@@ -1,3 +1,4 @@
+import { logoutPush } from './push-notifications';
 import { createAuthClient } from 'better-auth/react';
 import { withSessionGatedOrganizationQueries } from './organization-session-queries';
 import { organizationClient } from 'better-auth/client/plugins';
@@ -113,7 +114,13 @@ export const signOutWithoutRedirect = async (
   // Fence token requests at logout intent, before Better Auth's async sign-out
   // updates useSession(). Otherwise a token request that completes in that
   // network window can still authenticate Convex as the previous user.
+  const pushCleanup = logoutPush();
   invalidateAuthSessionIntent(authClient);
+  try {
+    await pushCleanup;
+  } catch {
+    console.warn('Push cleanup failed during sign out');
+  }
   clearLocalAuthState();
 
   try {
