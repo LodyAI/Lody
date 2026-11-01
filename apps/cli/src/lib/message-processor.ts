@@ -1,3 +1,4 @@
+import { createDaemonLossTasks } from './e2ee/client-loss-observer';
 import { type LocalSessionControlRequestValidated, SessionId } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { EventEmitter } from 'eventemitter3';
@@ -25,6 +26,15 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly historyWatches = new ConcurrentQueue<MessageQueueKey>(128);
   private historyWatchOrdinal = 0;
   private isStopped = false;
+  private readonly clientLossTasks = createDaemonLossTasks();
+  inspectClientLoss() {
+    const active = this.getActiveSessions();
+    return {
+      stopped: this.isStopped,
+      active,
+      queued: Math.max(0, this.clientLossTasks.size - active),
+    };
+  }
   private static readonly QUEUE_WAIT_WARNING_MS = 10_000;
   private static readonly PROCESSING_WARNING_MS = 30_000;
 
@@ -81,7 +91,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
           ? this.historyWatches
           : this.historyReads
         : this.queue;
-    void queue.enqueue(queueKey, async () => {
+    const queued = queue.enqueue(queueKey, async () => {
       const startTime = Date.now();
       started = true;
       clearInterval(waitWarning);
@@ -131,6 +141,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         clearInterval(processingWarning);
       }
     });
+    void this.clientLossTasks.track(queued);
   }
 
   /**

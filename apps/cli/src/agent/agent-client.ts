@@ -1,3 +1,4 @@
+import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
 import type {
   LodyClientExtensionCapabilities,
   LodyWorktreeProject,
@@ -18,7 +19,6 @@ import {
   type LodyGoalCapability,
   type LodySessionActivityUpdate,
   type LodySubagentSnapshot,
-  type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
@@ -599,7 +599,7 @@ export interface AgentClientOptions {
   ): Promise<acp.RequestPermissionResponse>;
   onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
-  onRateLimitUpdate?(limits: RateLimit): void;
+  onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
@@ -663,6 +663,11 @@ export class AgentClient implements acp.Client {
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
   private legacySessionModelState: LegacySessionModelState | null = null;
   public currentModel?: ModelInfo;
+  private latestCapacityObservation: RateLimitsSnapshot | undefined;
+  private latestContextObservation: SessionContextWindowUsage | undefined;
+  getAutomationObservations() {
+    return { capacity: this.latestCapacityObservation, context: this.latestContextObservation };
+  }
   /**
    * Tool-call IDs identified by the canonical Lody tool name. We need this so the
    * follow-up `tool_call_update` notifications — which never repeat the title —
@@ -1258,6 +1263,7 @@ export class AgentClient implements acp.Client {
       size >= 0 &&
       used >= 0
     ) {
+      this.latestContextObservation = { size, used };
       this.options.onContextWindowUsageUpdate?.({ size, used });
     }
     return true;
@@ -1636,9 +1642,8 @@ export class AgentClient implements acp.Client {
         }
         return;
       case 'rateLimits':
-        for (const rateLimit of event.snapshot.rateLimits) {
-          this.options.onRateLimitUpdate?.(rateLimit);
-        }
+        this.latestCapacityObservation = event.snapshot;
+        if (event.snapshot.rateLimits.length) this.options.onRateLimitUpdate?.(event.snapshot);
         return;
       case 'legacyProposedPlan':
         this.options.onUpdateMessage(
@@ -1856,6 +1861,8 @@ export class AgentClient implements acp.Client {
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
     this.currentModel = undefined;
+    this.latestCapacityObservation = undefined;
+    this.latestContextObservation = undefined;
     this.applyConfigOptionsState(
       sessionResponse.configOptions ?? [],
       sessionResponse.configOptions !== undefined
@@ -2684,6 +2691,16 @@ export class AgentClient implements acp.Client {
     return activity.backgroundTaskCount > 0 ? 'background' : null;
   }
 
+  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {
+    if (
+      !this.reportsSessionActivity() ||
+      !this.nativeActivity ||
+      this.nativeActivity.sessionId !== this.acpSessionId
+    )
+      return 'unknown';
+    return this.getNativeWork() ?? 'idle';
+  }
+
   /** Raw prompts and steer submissions remain owned after their local waits end. */
   get pendingPromptCompletion(): Promise<void> | null {
     return this.pendingPrompts.size > 0
@@ -2692,6 +2709,7 @@ export class AgentClient implements acp.Client {
   }
 
   private trackPendingExecution(request: Promise<unknown>): void {
+    if (this.options.workspaceId) daemonLossObserver.trackRaw(this.options.workspaceId, request);
     this.pendingPrompts.add(request);
     const release = () => {
       this.pendingPrompts.delete(request);

@@ -1,10 +1,20 @@
+import { verifyAutomationWorktreeHeads } from './automation-worktree';
+import { classifyCapacityFailure } from './acp-error-classification';
+import {
+  providerBindingFingerprint,
+  type AutomationObservationSink,
+  type SessionAutomationObservation,
+} from './automation-observations';
+import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
+import { MAX_DERIVED_TURNS_PER_ORIGIN } from '@/lib/e2ee/derivation-limits';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
+import { isLoroRepoDocDeleted, normalizeSessionTurnInputConfig } from '@lody/shared';
 import {
   isSubscriptionQuotaEligible,
   type MachineProviderRateLimitsRefreshResponse,
@@ -38,6 +48,7 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import {
+  readMachineLocalProjects,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
@@ -74,7 +85,7 @@ import {
 } from './session-start-stage';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import type { AuthMethod, ContentBlock } from '@agentclientprotocol/sdk';
 import type { ModelInfo } from '@lody/shared';
 import {
   type AcpCapabilityCacheEntry,
@@ -139,12 +150,14 @@ import {
   type SessionGoalResponse,
   SessionHistoryInput,
   type SessionId,
+  type SessionProjectRun,
   type SessionInputBlock,
   type SessionMeta,
   SessionStatusFactory,
   type SessionSteerOperationRecord,
   type SessionSteerResponse,
   type SessionTurnInputConfig,
+  usesAcpProtocolAuthentication,
   type WorkspaceId,
 } from '@lody/shared';
 import {
@@ -332,6 +345,12 @@ type TurnRuntimeState = {
   turnId: string;
   userTurnId?: string;
   invocation?: TurnInvocation;
+  /** Encrypted only: whose authority admitted the claimed turn's verified signer. */
+  encryptedPrincipal?: 'owner' | 'member' | 'derived';
+  /** Encrypted member turns only: the verified origin device and reached projects. */
+  encryptedOrigin?: { requesterDevice: string; localProjectIds: readonly string[] };
+  /** Inputs derived from this member turn so far (owner decision: bounded per origin). */
+  encryptedDerivations?: number;
   inboxNotificationWork?: { userId: string; originTurnIds: string[] };
   goalControl?: GoalPromptControl;
   session?: ISession;
@@ -343,7 +362,9 @@ type TurnRuntimeState = {
   promptFailed: boolean;
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
+  failureFinalized?: boolean;
   notificationOutcome?: TurnOutcome;
+  capacityFailure?: SessionAutomationObservation['capacityFailure'];
   /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
   workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
@@ -352,6 +373,7 @@ type TurnRuntimeState = {
   cancelRequested: boolean;
   pendingInputOnCancel: PendingInputCancellationPolicy;
   releaseFailure?: unknown;
+  releaseParentAdmission?: () => void;
   rawPromptCompletion?: Promise<void>;
   disconnectedTransport?: boolean;
   inboxOwner?: InboxExecutionHandle;
@@ -443,7 +465,13 @@ type VisibleSessionTurnContext = {
     unhandledErrorContext?: VisibleSessionTurnUnhandledErrorContext;
   }) => Effect.Effect<void, unknown, never>;
   prompt: (promptBlocks: ContentBlock[]) => Effect.Effect<void, unknown, never>;
-  claimExecution: () => Effect.Effect<void, unknown, never>;
+  /**
+   * `scope` resolves, on this machine, every local project the turn can reach. An
+   * encrypted claim returns the authorized set; the turn must not start outside it.
+   */
+  claimExecution: (
+    scope: () => Promise<readonly LocalProjectId[]>
+  ) => Effect.Effect<readonly LocalProjectId[] | undefined, unknown, never>;
 };
 
 type VisibleSessionTurnAnalytics = {
@@ -743,6 +771,8 @@ export type SessionExecutionServiceDeps = {
     modelReasoningEfforts?: Record<string, string[]>;
     modelCapabilities?: Record<string, AcpModelControls>;
     capabilitySourceVersion?: string;
+    /** Sign-in methods the probe read from `initialize`, when it could. */
+    authMethods?: readonly AuthMethod[];
   }>;
   /**
    * The `capabilitySourceVersion` a probe would stamp right now, resolved without
@@ -897,6 +927,14 @@ type TurnAnalyticsState = {
 };
 
 export class SessionExecutionService {
+  private readonly clientLossRawWork = createDaemonLossTasks();
+  inspectClientLoss() {
+    return {
+      turns: this.getActiveTurnIds().length,
+      bookkeeping: this.ownedWork.size + this.clientLossRawWork.size,
+    };
+  }
+
   private readonly completionPublicationAbort = new AbortController();
 
   stopCompletionPublication(): void {
@@ -911,7 +949,10 @@ export class SessionExecutionService {
       return undefined;
     });
     this.ownedWork.add(observed);
-    void observed.then(() => this.ownedWork.delete(observed));
+    void observed.then(() => {
+      this.ownedWork.delete(observed);
+      daemonLossObserver.changed();
+    });
     return observed;
   }
   private async runBookkeepingStage<T>(
@@ -1017,6 +1058,127 @@ export class SessionExecutionService {
       }
     | undefined;
   private operationInbox: OperationInboxLegacy | undefined;
+  private automationObservations: AutomationObservationSink | undefined;
+  setAutomationObservations(sink: AutomationObservationSink | undefined): void {
+    this.automationObservations = sink;
+  }
+  private automationAdmission:
+    | ((args: {
+        sessionId: SessionId;
+        turnId: string;
+        userId: string;
+        origin: import('@lody/shared/automations').AutomationOrigin;
+      }) => Promise<boolean>)
+    | undefined;
+  private automationSubmissionGuard:
+    | ((
+        sessionId: SessionId,
+        turnId: string,
+        origin: import('@lody/shared/automations').AutomationOrigin,
+        binding: import('./automation-observations').ProviderBinding | null
+      ) => boolean)
+    | undefined;
+  private automationBeforeAccept: SessionExecutionService['automationAdmission'];
+
+  setAutomationAdmission(
+    admit: SessionExecutionService['automationAdmission'],
+    canSubmit?: SessionExecutionService['automationSubmissionGuard'],
+    beforeAccept?: SessionExecutionService['automationAdmission']
+  ): void {
+    this.automationAdmission = admit;
+    this.automationSubmissionGuard = canSubmit;
+    this.automationBeforeAccept = beforeAccept;
+  }
+  async guardAutomationAction<A>(
+    sessionIds: readonly SessionId[],
+    userId: string,
+    body: () => Promise<A>
+  ): Promise<A> {
+    if (!this.operationInbox) throw new Error('AUTOMATION_ADMISSION_UNAVAILABLE');
+    return this.operationInbox.guard(
+      sessionIds.map((sessionId) => ({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userId,
+      })),
+      body
+    );
+  }
+  hasBlockedAutomationExecution(_sessionId: SessionId): boolean {
+    return !this.operationInbox;
+  }
+  automationExecutionRelease(sessionId: SessionId, executionId: string, userId: string) {
+    return this.operationInbox?.executionRelease(
+      { workspaceId: this.deps.workspaceId, sessionId, userId },
+      executionId
+    );
+  }
+  automationInputDisposition(
+    sessionId: SessionId,
+    turnId: string
+  ): 'unsubmitted' | 'cancelled' | 'ended' | 'unknown' {
+    const inbox = this.operationInbox;
+    if (!inbox) return 'unknown';
+    if (inbox.inputCanceled(this.deps.workspaceId, sessionId, turnId)) return 'cancelled';
+    if (inbox.inputEnded(this.deps.workspaceId, sessionId, turnId)) return 'ended';
+    if (
+      this.hasBlockedAutomationExecution(sessionId) ||
+      this.getExecutionSnapshot(sessionId).hasActiveTurn
+    )
+      return 'unknown';
+    return 'unsubmitted';
+  }
+  automationInputAccepted(sessionId: SessionId, userId: string, turnId: string): boolean {
+    return (
+      this.operationInbox?.acceptedAutomationInput(
+        { workspaceId: this.deps.workspaceId, sessionId, userId },
+        turnId
+      ) === true
+    );
+  }
+  async cancelAutomationInput(sessionId: SessionId, turnId: string): Promise<boolean> {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (runtime?.invocation?.sourceTurnId === turnId) {
+      const result = await this.cancelSession(
+        {
+          type: 'session/cancel',
+          sessionId,
+          turnId: runtime.turnId,
+          machineId: this.deps.machineId,
+          workspaceId: this.deps.workspaceId,
+        },
+        { pauseInbox: false, pendingInput: 'preserve', prePromptSession: 'discard' }
+      );
+      return result.success;
+    }
+    await this.abandonInboxInput(sessionId, turnId);
+    return true;
+  }
+
+  async acceptAutomationInput(args: {
+    sessionId: SessionId;
+    turnId: string;
+    userId: string;
+    config: SessionTurnInputConfig;
+  }): Promise<boolean> {
+    const origin = args.config._lodyAutomation;
+    const inbox = this.operationInbox;
+    const admission = this.automationAdmission;
+    const beforeAccept = this.automationBeforeAccept;
+    if (!origin || !inbox || !admission || !(await admission({ ...args, origin }))) return false;
+    if (origin.workIntentId && !beforeAccept) return false;
+    return inbox.accept(
+      {
+        workspaceId: this.deps.workspaceId,
+        sessionId: args.sessionId,
+        userId: args.userId,
+        inputId: args.turnId,
+        kind: 'automation',
+        config: args.config,
+      },
+      origin.workIntentId && beforeAccept ? () => beforeAccept({ ...args, origin }) : undefined
+    );
+  }
   private onInboxReleased: ((sessionId: SessionId) => void) | undefined;
   setOperationInbox(
     inbox: OperationInboxLegacy | undefined,
@@ -1119,7 +1281,10 @@ export class SessionExecutionService {
     })();
     this.releaseRecoveryBySession.set(sessionId, recovery);
     this.ownedWork.add(recovery);
-    void recovery.then(() => this.ownedWork.delete(recovery));
+    void recovery.then(() => {
+      this.ownedWork.delete(recovery);
+      daemonLossObserver.changed();
+    });
     return recovery;
   }
 
@@ -1150,6 +1315,7 @@ export class SessionExecutionService {
       );
     } else if (runtime.session) await runtime.session.terminate(true);
     runtime.releaseFailure = undefined;
+    this.releaseParentAdmission(runtime);
   }
 
   private readonly canceledTurnBySession = new Map<SessionId, string>();
@@ -1160,6 +1326,7 @@ export class SessionExecutionService {
   /** Start times of recent start retries, shared by every Session this service runs. */
   private readonly startRetryStartedAt: number[] = [];
   private readonly rewriteBarrierSessions = new Set<SessionId>();
+  private readonly childAdmissions = new Map<SessionId, number>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
   /** At most one goal action waits per session; a newer action replaces it. */
@@ -1188,8 +1355,18 @@ export class SessionExecutionService {
   );
   private readonly providerQuotaUpdates = new Map<AgentConfigId, number>();
 
-  noteProviderRateLimitsUpdate(configId: AgentConfigId): void {
+  noteProviderRateLimitsUpdate(
+    configId: AgentConfigId,
+    binding: import('./automation-observations').ProviderBinding | undefined,
+    snapshot: import('acp-extension-core').RateLimitsSnapshot
+  ): void {
     this.providerQuotaUpdates.set(configId, (this.providerQuotaUpdates.get(configId) ?? 0) + 1);
+    if (binding && this.automationObservations)
+      void this.automationObservations
+        .capacity(binding, snapshot, 'push')
+        .catch((cause) =>
+          this.deps.logger.warn('Automation capacity observation could not be persisted', cause)
+        );
   }
 
   async refreshProviderRateLimits(
@@ -1282,6 +1459,17 @@ export class SessionExecutionService {
           unchanged,
           config
         );
+      }
+      if (unchanged() && this.automationObservations) {
+        await this.automationObservations
+          .capacity(
+            { bindingId: configId, fingerprint: providerBindingFingerprint(config) },
+            snapshot,
+            'query'
+          )
+          .catch((cause) =>
+            this.deps.logger.warn('Automation capacity observation could not be persisted', cause)
+          );
       }
       return unchanged();
     });
@@ -1667,7 +1855,8 @@ export class SessionExecutionService {
   tryAcquireSessionRewriteBarrier(sessionId: SessionId): (() => void) | null {
     if (
       this.rewriteBarrierSessions.has(sessionId) ||
-      this.rewriteConflictLeaseSessions.has(sessionId)
+      this.rewriteConflictLeaseSessions.has(sessionId) ||
+      this.childAdmissions.has(sessionId)
     ) {
       return null;
     }
@@ -2411,6 +2600,9 @@ export class SessionExecutionService {
         // history/finalization catches up. Switch causal identity first.
         const switchInvocation = () => {
           runtime.notificationOutcome = undefined;
+          // A steered input carries no verified principal of its own here.
+          runtime.encryptedPrincipal = undefined;
+          runtime.encryptedOrigin = undefined;
           runtime.invocation = {
             sourceTurnId: options.userTurnId,
             requesterUserId: options.userId,
@@ -3051,7 +3243,24 @@ export class SessionExecutionService {
   private releaseTurnRuntime(sessionId: SessionId, turnId: string): void {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const releasedOwner = runtime?.turnId === turnId;
-    if (releasedOwner) this.turnRuntimeBySession.delete(sessionId);
+    if (releasedOwner) {
+      const rawPrompt =
+        runtime.session?.agentClient?.pendingPromptCompletion ?? runtime.rawPromptCompletion;
+      if (runtime.releaseFailure && rawPrompt) {
+        void rawPrompt.then(
+          () => {
+            if (!runtime.disconnectedTransport) this.releaseParentAdmission(runtime);
+          },
+          () => {
+            /* Recovery owns an unconfirmed release. */
+          }
+        );
+      } else {
+        this.releaseParentAdmission(runtime);
+      }
+      this.turnRuntimeBySession.delete(sessionId);
+      daemonLossObserver.changed();
+    }
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
     if (releasedOwner || this.turnAnalyticsBySession.get(sessionId)?.turnId === turnId) {
@@ -3059,6 +3268,12 @@ export class SessionExecutionService {
     }
     this.clearCurrentTurn(sessionId, turnId);
     this.resolveTurnReleaseWaiters(sessionId, turnId);
+  }
+
+  private releaseParentAdmission(runtime: TurnRuntimeState): void {
+    const release = runtime.releaseParentAdmission;
+    runtime.releaseParentAdmission = undefined;
+    release?.();
   }
 
   private isTurnOwned(sessionId: SessionId, turnId: string): boolean {
@@ -3840,6 +4055,7 @@ export class SessionExecutionService {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
     await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    options.runtime.failureFinalized = true;
     await options.onUnhandledError?.(options.error);
   }
 
@@ -3929,6 +4145,7 @@ export class SessionExecutionService {
       this.deps.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.deps.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.deps.workspaceDocument.syncMachineFlockDoc(this.deps.machineId, {
             reason: 'session-local-project-resolve',
@@ -4347,6 +4564,31 @@ export class SessionExecutionService {
     this.deps.touchSession(sessionId);
   }
 
+  private async acquireParentAdmission(
+    runtime: TurnRuntimeState,
+    doc: SessionDocument
+  ): Promise<void> {
+    if (runtime.releaseParentAdmission) return;
+    const parentId = (await doc.getMetaState())?.parentSessionId;
+    if (!parentId) return;
+    if (this.rewriteBarrierSessions.has(parentId))
+      throw new Error('Parent Session is changing; retry after it settles');
+    this.childAdmissions.set(parentId, (this.childAdmissions.get(parentId) ?? 0) + 1);
+    runtime.releaseParentAdmission = () => {
+      const remaining = (this.childAdmissions.get(parentId) ?? 1) - 1;
+      if (remaining) this.childAdmissions.set(parentId, remaining);
+      else this.childAdmissions.delete(parentId);
+    };
+    // Re-read after claiming the parent: automatic archive cannot pass its
+    // barrier until this child's actual execution owner releases the lease.
+    const parent = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(parentId));
+    if (
+      parent &&
+      (isLoroRepoDocDeleted(parent) || (parent.meta as SessionMeta).isArchived === true)
+    )
+      throw new Error('Parent Session is archived');
+  }
+
   private async runVisibleSessionTurn(
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
@@ -4357,6 +4599,7 @@ export class SessionExecutionService {
       return await owned;
     } finally {
       this.ownedWork.delete(owned);
+      daemonLossObserver.changed();
     }
   }
 
@@ -4393,8 +4636,34 @@ export class SessionExecutionService {
 
     const inbox = this.operationInbox;
     const invocation = options.invocation;
+    if (invocation?.inputConfig._lodyAutomation) {
+      try {
+        if (
+          !invocation.requesterUserId ||
+          !(await this.acceptAutomationInput({
+            sessionId,
+            turnId: invocation.sourceTurnId,
+            userId: invocation.requesterUserId,
+            config: invocation.inputConfig,
+          }))
+        ) {
+          releaseConflict();
+          span.end({ outcome: 'automation-admission-blocked' });
+          return 'automation-admission-blocked';
+        }
+      } catch (cause) {
+        releaseConflict();
+        span.end({ outcome: 'automation-admission-failed' });
+        throw cause;
+      }
+    }
     try {
-      if (inbox && invocation?.requesterUserId && !options.inboxBatch) {
+      if (
+        inbox &&
+        invocation?.requesterUserId &&
+        !options.inboxBatch &&
+        !invocation.inputConfig._lodyAutomation
+      ) {
         const control = await sessionDoc.getDocState();
         const receipt = control?.humanInputReceipts?.[invocation.sourceTurnId];
         if (receipt?.userId === invocation.requesterUserId)
@@ -4678,6 +4947,7 @@ export class SessionExecutionService {
                   typeof pendingSession === 'function' ? pendingSession() : pendingSession,
                 catch: (error) => error,
               });
+              void self.clientLossRawWork.track(pending);
               runtime.pendingSession = pending;
               if (pendingOptions?.terminateOnCancel) {
                 runtime.terminateSessionOnCancel = true;
@@ -4916,18 +5186,57 @@ export class SessionExecutionService {
                           promptBlocks: promptBlocks.length,
                         },
                         async () => {
+                          const worktreeOrigin = runtime.invocation?.inputConfig._lodyAutomation;
+                          if (worktreeOrigin?.expectedHeads?.length)
+                            await verifyAutomationWorktreeHeads(
+                              worktreeOrigin,
+                              await sessionDoc.getMetaState(),
+                              activeSession
+                            );
                           const start = () => {
+                            const currentInvocation = runtime.invocation;
+                            const origin = currentInvocation?.inputConfig._lodyAutomation;
+                            if (
+                              origin &&
+                              currentInvocation &&
+                              !self.automationSubmissionGuard?.(
+                                sessionId,
+                                currentInvocation.sourceTurnId,
+                                origin,
+                                activeSession.getProviderBinding?.() ?? null
+                              )
+                            )
+                              throw new Error('AUTOMATION_ADMISSION_CHANGED');
+                            if (origin?.nativeSessionId && acpSessionId !== origin.nativeSessionId)
+                              throw new Error('AUTOMATION_NATIVE_SESSION_CHANGED');
+                            if (origin?.maintenance) {
+                              if (origin.maintenance.expiresAt <= Date.now())
+                                throw new Error('AUTOMATION_MAINTENANCE_EXPIRED');
+                              if (
+                                !activeSession
+                                  .getAcpCapabilities?.()
+                                  ?.availableCommands?.some(
+                                    (command) => command.name.replace(/^\//, '') === 'compact'
+                                  )
+                              )
+                                throw new Error('AUTOMATION_NATIVE_COMPACT_UNAVAILABLE');
+                            }
                             runtime.promptStarted = true;
                             const raw = agentClient.prompt(acpSessionId, promptBlocks, {
                               signal,
                               ...(runtime.goalControl ? { goalControl: runtime.goalControl } : {}),
                             });
+                            if (daemonLossObserver.enabled) {
+                              const rawAcp = agentClient.pendingPromptCompletion;
+                              if (rawAcp) void self.clientLossRawWork.track(rawAcp);
+                            }
                             runtime.rawPromptCompletion = raw.then(
                               () => undefined,
                               (cause) => {
                                 runtime.disconnectedTransport = isAgentDisconnectedError(cause);
                               }
                             );
+                            void self.clientLossRawWork.track(runtime.rawPromptCompletion);
                             runtime.inboxOwner?.track(runtime.rawPromptCompletion!);
                             return raw;
                           };
@@ -4978,20 +5287,20 @@ export class SessionExecutionService {
               return undefined;
             });
 
-            const claimExecution = Effect.fnUntraced(function* (): Effect.fn.Return<void, unknown> {
+            const claimExecution = Effect.fnUntraced(function* (
+              scope: () => Promise<readonly LocalProjectId[]>
+            ): Effect.fn.Return<readonly LocalProjectId[] | undefined, unknown> {
               const gate = self.deps.encryptedExecution;
               if (!gate && !self.deps.encryptedWorkspace) return undefined;
               yield* abortIfCancelled();
+              const authorized = gate && userTurnId ? yield* self.tryPromise(scope) : [];
               const result =
                 gate && userTurnId
                   ? yield* gate.claim({
                       workspaceId: self.deps.workspaceId,
                       sessionId,
                       userTurnId,
-                      localProjectId:
-                        runtime.project?.kind === 'local'
-                          ? runtime.project.localProjectId
-                          : undefined,
+                      localProjectIds: [...authorized],
                       requesterUserId: options.invocation?.requesterUserId,
                       inputConfig: options.invocation?.inputConfig,
                     })
@@ -5002,6 +5311,14 @@ export class SessionExecutionService {
               }
               if (result.state === 'claimed') {
                 executionPermit = result.permit;
+                runtime.encryptedPrincipal = result.principal;
+                runtime.encryptedOrigin = result.origin
+                  ? {
+                      requesterDevice: result.origin.requesterDevice,
+                      localProjectIds: [...authorized],
+                    }
+                  : undefined;
+                runtime.encryptedDerivations = 0;
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
                 self.deps.logger.debug('[e2ee-rpc-timing]', {
@@ -5009,7 +5326,7 @@ export class SessionExecutionService {
                   userTurnId,
                   at: yield* Clock.currentTimeMillis,
                 });
-                return undefined;
+                return authorized;
               }
               if (result.state === 'completed' && userTurnId) {
                 const backend = yield* self.tryPromise(() =>
@@ -5178,6 +5495,7 @@ export class SessionExecutionService {
       return 'cancelled';
     }
     const parsedError = parseACPError(error);
+    runtime.capacityFailure = classifyCapacityFailure(error);
     runtime.notificationOutcome = isAgentDisconnectedError(error)
       ? { kind: 'unknown', code: 'agent_disconnected' }
       : {
@@ -5220,6 +5538,40 @@ export class SessionExecutionService {
     outcome: string;
   }): Promise<void> {
     const { sessionId, sessionDoc, runtime, inbox, inboxInput, inboxBatch, outcome } = options;
+    const invocation = runtime.invocation;
+    const client = runtime.session?.agentClient;
+    const observation: SessionAutomationObservation | undefined =
+      invocation?.requesterUserId && this.automationObservations
+        ? {
+            sessionId,
+            turnId: invocation.sourceTurnId,
+            assistantTurnId: runtime.turnId,
+            userId: invocation.requesterUserId,
+            nativeSessionId: runtime.session?.acpSessionId ?? undefined,
+            binding: runtime.session?.getProviderBinding?.(),
+            modelId: client?.currentModel?.modelId,
+            outcome: runtime.cancelRequested
+              ? 'cancelled'
+              : runtime.releaseFailure
+                ? 'unknown'
+                : outcome === 'completed' && !runtime.promptFailed
+                  ? 'completed'
+                  : 'failed',
+            capacityFailure: runtime.capacityFailure,
+            inputConfig: invocation.inputConfig,
+            released: false,
+            finalized: runtime.finalizeCompleted || runtime.failureFinalized === true,
+            observedAt: Date.now(),
+            ...client?.getAutomationObservations(),
+          }
+        : undefined;
+    if (observation) {
+      try {
+        this.automationObservations?.stage(observation);
+      } catch (cause) {
+        this.deps.logger.warn('Automation turn observation could not be staged', cause);
+      }
+    }
     try {
       const withdrawn =
         inboxInput &&
@@ -5301,6 +5653,19 @@ export class SessionExecutionService {
           }
         }
       } finally {
+        if (observation && this.automationObservations) {
+          const delivery = this.automationObservations
+            .turn({
+              ...observation,
+              released: !!inboxInput && !runtime.releaseFailure,
+              outcome: runtime.releaseFailure ? 'unknown' : observation.outcome,
+            })
+            .catch((cause) =>
+              this.deps.logger.warn('Automation turn observation could not be persisted', cause)
+            );
+          this.ownedWork.add(delivery);
+          void delivery.finally(() => this.ownedWork.delete(delivery));
+        }
         for (const run of runtime.afterRelease.splice(0))
           void this.ownBookkeeping(sessionId, Promise.resolve().then(run));
         const notify = async () => {
@@ -5324,7 +5689,10 @@ export class SessionExecutionService {
         const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
         const owned = Promise.allSettled([delivery, attention]);
         this.ownedWork.add(owned);
-        void owned.then(() => this.ownedWork.delete(owned));
+        void owned.then(() => {
+          this.ownedWork.delete(owned);
+          daemonLossObserver.changed();
+        });
       }
     }
   }
@@ -5427,6 +5795,7 @@ export class SessionExecutionService {
     const currentTurnId = this.currentTurnBySession.get(sessionId);
     if (!turnId || currentTurnId === turnId) {
       this.currentTurnBySession.delete(sessionId);
+      daemonLossObserver.changed();
       const releasedTurnId = turnId ?? currentTurnId;
       if (releasedTurnId && this.turnRuntimeBySession.get(sessionId)?.turnId !== releasedTurnId) {
         this.resolveTurnReleaseWaiters(sessionId, releasedTurnId);
@@ -5559,6 +5928,41 @@ export class SessionExecutionService {
     return this.turnRuntimeBySession.get(sessionId)?.userTurnId;
   }
 
+  /**
+   * Encrypted only: the verified principal of the active turn driving `sourceTurnId`.
+   * A member result reserves one of that origin's bounded derivations; past the
+   * bound, or for any other turn, the result is undefined and callers fail closed.
+   */
+  reserveEncryptedDerivation(
+    sessionId: SessionId,
+    sourceTurnId: string
+  ): { kind: 'owner' } | { kind: 'member' } | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
+      return undefined;
+    if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
+    if (runtime.encryptedPrincipal !== 'member' || !runtime.encryptedOrigin) return undefined;
+    const used = runtime.encryptedDerivations ?? 0;
+    if (used >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
+    runtime.encryptedDerivations = used + 1;
+    return { kind: 'member' };
+  }
+
+  /** Encrypted agent control acts as the turn's verified principal and its projects. */
+  getEncryptedControlPrincipal(
+    sessionId: SessionId
+  ):
+    | { kind: 'owner' }
+    | { kind: 'member'; requesterDevice: string; localProjectIds: readonly string[] }
+    | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime || runtime.cancelRequested) return undefined;
+    if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
+    if (runtime.encryptedPrincipal === 'member' && runtime.encryptedOrigin)
+      return { kind: 'member', ...runtime.encryptedOrigin };
+    return undefined;
+  }
+
   getActiveInvocationContext(sessionId: SessionId):
     | {
         requesterUserId: string;
@@ -5575,6 +5979,17 @@ export class SessionExecutionService {
       runtime.releaseFailure ||
       (runtime.inboxOwner?.input &&
         this.isInboxInputCanceled(sessionId, runtime.inboxOwner?.input.inputId))
+    ) {
+      return undefined;
+    }
+    // In encrypted workspaces the history row's userId is unauthenticated display
+    // data and never authority. Derived work from an owner turn keeps today's
+    // behavior; from a shared member's turn it is re-authorized as that member when
+    // written and when it starts. Derived, steered or unclaimed turns expose none.
+    if (
+      (this.deps.encryptedExecution || this.deps.encryptedWorkspace) &&
+      runtime.encryptedPrincipal !== 'owner' &&
+      runtime.encryptedPrincipal !== 'member'
     ) {
       return undefined;
     }
@@ -5905,6 +6320,87 @@ export class SessionExecutionService {
     });
   }
 
+  /** The session manager rereads Project groups and parents; each read must stay in scope. */
+  private encryptedInputGuard(
+    authorized: readonly LocalProjectId[]
+  ): NonNullable<SessionConfig['authorizeExecutionInputs']> {
+    return (input) =>
+      this.assertEncryptedScopeWithin(authorized, {
+        projects: [input.project],
+        projectRuns: [input.projectRun],
+        live: null,
+      });
+  }
+
+  /** Refuse a start whose directories were changed after authorization. */
+  private async assertEncryptedScopeWithin(
+    authorized: readonly LocalProjectId[],
+    input: Parameters<SessionExecutionService['encryptedExecutionScope']>[0]
+  ): Promise<void> {
+    const allowed = new Set(authorized);
+    if ((await this.encryptedExecutionScope(input)).some((id) => !allowed.has(id)))
+      throw new Error('e2ee_machine_not_shared: the execution scope changed after authorization');
+  }
+
+  /**
+   * Encrypted sharing authorizes the local projects a turn can reach, resolved here
+   * from machine state, never from the request alone. The live process's own config,
+   * synced metadata, the request, a parent Session and Project group members are
+   * united: an extra source can only add a project to check, never remove one the
+   * machine will use. Directories come from this machine's registry by ID; no
+   * requested path is accepted. An empty result is a projectless conversation.
+   */
+  private async encryptedExecutionScope(input: {
+    projects: readonly (ProjectRef | undefined)[];
+    projectRuns: readonly (SessionProjectRun | undefined)[];
+    parentSessionId?: SessionId;
+    live: ISession | null | undefined;
+  }): Promise<LocalProjectId[]> {
+    const projects = [...input.projects];
+    const runs = [...input.projectRuns];
+    const own = input.live?.getExecutionScope?.();
+    projects.push(own?.project);
+    runs.push(own?.projectRun);
+    const parentSessionId =
+      input.parentSessionId ?? own?.parentSessionId ?? input.live?.getParentSessionId();
+    if (parentSessionId) {
+      // A child Tab runs in its parent's directories.
+      const parent = this.deps.sessionManager.getSession(parentSessionId)?.getExecutionScope?.();
+      const parentMeta = await (
+        await this.deps.workspaceDocument.getOrCreateSessionDoc(parentSessionId)
+      ).getMetaState();
+      projects.push(parent?.project, this.resolveProjectFromMeta(parentMeta));
+      runs.push(parent?.projectRun, parentMeta?.projectRun);
+    }
+    const ids = new Set<LocalProjectId>();
+    for (const project of projects) if (project?.kind === 'local') ids.add(project.localProjectId);
+    const preferLocal = new Set<string>();
+    for (const run of runs)
+      for (const member of Object.values(run?.members ?? {})) {
+        if (member.src.kind === 'local' && member.src.machineId === this.deps.machineId)
+          ids.add(member.src.localProjectId);
+        if (
+          member.repositoryCheckout?.kind === 'local' &&
+          member.repositoryCheckout.machineId === this.deps.machineId
+        )
+          ids.add(member.repositoryCheckout.localProjectId);
+        // An unpinned repository Member may use any local copy of that repository.
+        if (member.src.kind === 'github' && member.src.preferLocal)
+          preferLocal.add(member.src.repoFullName.toLowerCase());
+      }
+    if (preferLocal.size) {
+      const local = await readMachineLocalProjects(
+        this.deps.workspaceDocument.repo,
+        this.deps.workspaceId,
+        this.deps.machineId as MachineId
+      );
+      for (const row of Object.values(local))
+        if (row.githubRepoFullName && preferLocal.has(row.githubRepoFullName.toLowerCase()))
+          ids.add(row.id);
+    }
+    return [...ids].sort();
+  }
+
   private resolveProjectFromMeta(
     meta: SessionMeta | undefined,
     preferredBranch?: string | null
@@ -6014,6 +6510,8 @@ export class SessionExecutionService {
     prepareOptions?: { sessionDoc?: SessionDocument }
   ): Promise<VisibleSessionTurnPlan> {
     const { sessionId, acpSessionConfig, userId, userName, userEmail, userTurnId } = message;
+    const requiredNativeSessionId =
+      normalizeSessionTurnInputConfig(acpSessionConfig)?._lodyAutomation?.nativeSessionId;
     // System-caused turns own an assistant entry, not a user dispatch pointer.
     const executionUserTurnId =
       dispatchOptions?.dispatchSource === 'inbox' || dispatchOptions?.dispatchSource === 'goal'
@@ -6031,6 +6529,8 @@ export class SessionExecutionService {
       message.project?.kind === 'local' ? undefined : message.project?.branch?.trim();
     let session = this.deps.sessionManager.getSession(sessionId);
     let project: ProjectRef | undefined = message.project;
+    // Encrypted turns start from the metadata they were authorized with, never a later read.
+    let authorized: { ids: readonly LocalProjectId[]; meta: SessionMeta | undefined } | undefined;
     const acpReplaySuppression = this.createAcpReplaySuppressionResource(sessionId);
 
     let replayPromptResult: ReplayPromptResult | null = null;
@@ -6054,7 +6554,17 @@ export class SessionExecutionService {
     const restoreMissingSession = Effect.fnUntraced(function* (
       ctx: VisibleSessionTurnContext
     ): Effect.fn.Return<ISession, unknown, Scope.Scope> {
-      const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+      const current = yield* self.tryPromise(() => sessionDoc.getMetaState());
+      const frozen = authorized?.meta;
+      const meta: SessionMeta | undefined =
+        authorized && current
+          ? {
+              ...current,
+              project: frozen?.project,
+              projectRun: frozen?.projectRun,
+              parentSessionId: frozen?.parentSessionId,
+            }
+          : current;
       project = project ?? self.resolveProjectFromMeta(meta, message.project?.branch);
       const localProjectId = project?.kind === 'local' ? project.localProjectId : undefined;
       const restoreWorkdir = localProjectId
@@ -6123,6 +6633,12 @@ export class SessionExecutionService {
       const requestedResumeSessionId = acpSessionConfig.resume;
       const storedResumeSessionId = resolveResumableAcpSessionId(meta);
       const resumeSessionId = requestedResumeSessionId ?? storedResumeSessionId;
+      if (
+        requiredNativeSessionId &&
+        (storedResumeSessionId !== requiredNativeSessionId ||
+          resumeSessionId !== requiredNativeSessionId)
+      )
+        return yield* Effect.fail(new Error('AUTOMATION_NATIVE_SESSION_CHANGED'));
       const resumeSource = requestedResumeSessionId
         ? 'request'
         : storedResumeSessionId
@@ -6195,6 +6711,18 @@ export class SessionExecutionService {
         },
       };
 
+      if (authorized) {
+        const allowed = authorized.ids;
+        yield* self.tryPromise(() =>
+          self.assertEncryptedScopeWithin(allowed, {
+            projects: [project],
+            projectRuns: [restoreConfig.projectRun],
+            parentSessionId: restoreConfig.parentSessionId,
+            live: null,
+          })
+        );
+        restoreConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
+      }
       const restoreAttempt = Effect.gen(function* () {
         if (resumeSessionId) {
           yield* acpReplaySuppression.acquire;
@@ -6212,6 +6740,7 @@ export class SessionExecutionService {
               () =>
                 self.deps.sessionManager.createSession(restoreConfig, {
                   resumeSessionId,
+                  requireExactResume: !!requiredNativeSessionId,
                 }),
               { terminateOnCancel: true }
             ),
@@ -6223,6 +6752,8 @@ export class SessionExecutionService {
         yield* ctx.abortIfCancelled({ terminateSession: true });
         const requested = resumeSessionId;
         const actual = restoredSession.acpSessionId ?? null;
+        if (requiredNativeSessionId && actual !== requiredNativeSessionId)
+          return yield* Effect.fail(new Error('AUTOMATION_NATIVE_RESUME_UNCONFIRMED'));
         if (requested) {
           self.deps.logger.debug(
             `[${sessionId}] Session restore result (requestedAcpSessionId=${requested} actualAcpSessionId=${actual ?? 'null'} resumed=${actual === requested ? 'yes' : 'no'})`
@@ -6261,6 +6792,7 @@ export class SessionExecutionService {
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* ctx.abortIfCancelled();
+            if (requiredNativeSessionId) return yield* Effect.fail(error);
             const errMessage = formatErrorMessage(error);
             const lowerMessage = errMessage.toLowerCase();
             const isAcpResumeError =
@@ -6404,6 +6936,8 @@ export class SessionExecutionService {
       ctx: VisibleSessionTurnContext
     ): Effect.fn.Return<void, unknown, Scope.Scope> {
       const { turnId, runtime, abortIfCancelled, openAssistantEntry, prompt } = ctx;
+      if (requiredNativeSessionId && readySession.acpSessionId !== requiredNativeSessionId)
+        yield* Effect.fail(new Error('AUTOMATION_NATIVE_SESSION_CHANGED'));
       let activeSession = readySession;
       let staleAcpPromptRecoveryAttempted = false;
       let baseCommitHash: string | null = null;
@@ -6812,7 +7346,19 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
-          yield* ctx.claimExecution();
+          let scopedMeta: SessionMeta | undefined;
+          const authorizedIds = yield* ctx.claimExecution(async () => {
+            const meta = await sessionDoc.getMetaState();
+            scopedMeta = meta;
+            return self.encryptedExecutionScope({
+              projects: [message.project, self.resolveProjectFromMeta(meta)],
+              projectRuns: [meta?.projectRun],
+              parentSessionId: meta?.parentSessionId,
+              live: self.deps.sessionManager.getSession(sessionId),
+            });
+          });
+          if (authorizedIds) authorized = { ids: authorizedIds, meta: scopedMeta };
+          yield* self.tryPromise(() => self.acquireParentAdmission(ctx.runtime, sessionDoc));
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -7178,7 +7724,19 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
-          yield* claimExecution();
+          const scopeInputs = () => ({
+            projects: [
+              project,
+              existingMeta ? self.resolveProjectFromMeta(existingMeta) : undefined,
+            ],
+            projectRuns: [sessionConfig.projectRun, existingMeta?.projectRun, message.projectRun],
+            parentSessionId: message.parentSessionId ?? existingMeta?.parentSessionId,
+            live: self.deps.sessionManager.getSession(sessionId),
+          });
+          const authorizedIds = yield* claimExecution(() =>
+            self.encryptedExecutionScope(scopeInputs())
+          );
+          yield* self.tryPromise(() => self.acquireParentAdmission(runtime, sessionDoc));
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -7312,6 +7870,12 @@ export class SessionExecutionService {
             if (self.turnRuntimeBySession.get(sessionId) === runtime) runtime.startStage = stage;
           };
           sessionConfig.worktreeScriptHistoryInsertBeforeEntryId = turnId;
+          // Parent metadata may change after authorization; recheck before any process starts.
+          if (authorizedIds) {
+            const allowed = authorizedIds;
+            yield* self.tryPromise(() => self.assertEncryptedScopeWithin(allowed, scopeInputs()));
+            sessionConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
+          }
           const session = yield* self.startWithTransientRetry({
             sessionId,
             runtime,
@@ -8077,6 +8641,7 @@ export class SessionExecutionService {
       runtimeOverrides: config.runtimeOverrides,
       magpieGatewayUrl: config.magpieGatewayUrl,
       env: config.env,
+      ...(message.methodId ? { methodId: message.methodId } : {}),
       onProgress,
       codexProfile,
       authenticateManagedProfile:
@@ -8450,6 +9015,7 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         modelCapabilities,
         capabilitySourceVersion,
+        authMethods,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
         message.agentType,
@@ -8471,6 +9037,15 @@ export class SessionExecutionService {
       );
 
       options.signal?.throwIfAborted();
+      // Only agent-driven providers authenticate through the ACP exchange. A
+      // built-in provider signs in with its own native command, and the
+      // adapter's advertised methods do not describe it. A probe that could not
+      // read the list reports `undefined`, which stays "never asked" rather than
+      // claiming the agent offers no way to sign in.
+      const advertisedAuthMethods =
+        authMethods && usesAcpProtocolAuthentication(message.cliType, message.agentType)
+          ? authMethods.map(summarizeAcpAuthMethod)
+          : undefined;
       const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
@@ -8493,7 +9068,13 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal, sessionTitle, rateLimits, modelCapabilities }
+        {
+          signal: options.signal,
+          sessionTitle,
+          rateLimits,
+          modelCapabilities,
+          authMethods: advertisedAuthMethods,
+        }
       );
       this.acpCapabilityLaunchInputFingerprints.set(
         message.configId,
@@ -8517,6 +9098,7 @@ export class SessionExecutionService {
         })),
         capability,
         availableCommands,
+        ...(advertisedAuthMethods ? { authMethods: advertisedAuthMethods } : {}),
       };
     } catch (error) {
       return this.buildFailedAcpRefreshResponse(message, error);
@@ -8896,6 +9478,7 @@ const buildAcpCapabilitiesRefreshResponseFromCache = (
   })),
   capability,
   availableCommands: capability.availableCommands,
+  ...(capability.authMethods ? { authMethods: capability.authMethods } : {}),
 });
 
 const findRegistryAcpAgent = (agentType: string): RegistryAcpAgent | undefined =>

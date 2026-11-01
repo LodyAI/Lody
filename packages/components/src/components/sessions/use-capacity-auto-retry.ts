@@ -48,13 +48,15 @@ export function useCapacityAutoRetry(options: {
   sessionId: SessionId;
   history: readonly CapacityRetryHistoryEntry[] | null | undefined;
   canRetry: boolean;
+  /** The Host owns automatic recovery when the Session tweak is enabled. */
+  hostRecoveryEnabled?: boolean;
   onRetry: () => Promise<boolean>;
   /** Analytics hook: fires once per retry dispatch the user or countdown starts. */
   onRetryAttempt?: (event: { trigger: 'manual' | 'auto'; attempt: number }) => void;
   /** Analytics hook: fires when the user cancels a running auto-retry countdown. */
   onAutoRetryCancelled?: (event: { pendingAttempt: number }) => void;
 }): CapacityRetryControl | null {
-  const { sessionId, history, canRetry, onRetry } = options;
+  const { sessionId, history, canRetry, onRetry, hostRecoveryEnabled = false } = options;
   const onRetryAttemptRef = useRef(options.onRetryAttempt);
   const onAutoRetryCancelledRef = useRef(options.onAutoRetryCancelled);
   const noticeId = useMemo(() => findLatestCapacityFailureNoticeId(history), [history]);
@@ -82,6 +84,10 @@ export function useCapacityAutoRetry(options: {
     setRetryInSeconds(null);
     setRetryRemainingRatio(null);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (hostRecoveryEnabled) setAutoRetryEnabled(false);
+  }, [hostRecoveryEnabled]);
 
   const performRetry = useCallback(async (targetNoticeId: string, automatic: boolean) => {
     if (retryInFlightRef.current || handledNoticeIdsRef.current.has(targetNoticeId)) {
@@ -122,9 +128,9 @@ export function useCapacityAutoRetry(options: {
     // The first click is explicit consent for bounded automatic retries in this
     // mounted Session. A later manual click also renews an exhausted budget.
     automaticAttemptsRef.current = 0;
-    setAutoRetryEnabled(true);
+    setAutoRetryEnabled(!hostRecoveryEnabled);
     void performRetry(noticeId, false);
-  }, [canRetry, noticeId, performRetry]);
+  }, [canRetry, hostRecoveryEnabled, noticeId, performRetry]);
 
   const stopAutoRetry = useCallback(() => {
     if (retryInSeconds !== null) {
@@ -141,6 +147,7 @@ export function useCapacityAutoRetry(options: {
     if (
       !noticeId ||
       !canRetry ||
+      hostRecoveryEnabled ||
       !autoRetryEnabled ||
       autoRetryExhausted ||
       pending ||
@@ -171,7 +178,15 @@ export function useCapacityAutoRetry(options: {
       window.clearInterval(interval);
       window.clearTimeout(timeout);
     };
-  }, [autoRetryEnabled, autoRetryExhausted, canRetry, noticeId, pending, performRetry]);
+  }, [
+    autoRetryEnabled,
+    autoRetryExhausted,
+    canRetry,
+    hostRecoveryEnabled,
+    noticeId,
+    pending,
+    performRetry,
+  ]);
 
   if (!noticeId) return null;
   return {

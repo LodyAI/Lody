@@ -221,7 +221,14 @@ it.each(['chromium', 'webkit'] as const)(
         hasCurrentKey: false,
         writeEpoch: 0,
       });
-      await good(page, 'seal');
+      expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
+      expect((await raw(page, 'graceExpired')).ok).toBe(true);
+      expect((await call(page, 'seal')).reason).toBe('key-update-required');
+      expect(await good(page, 'openBody')).toEqual([72, 105]);
+      expect((await raw(page, 'stageCurrent')).ok).toBe(true);
+      expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       await good(page, 'close');
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
@@ -246,7 +253,7 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'close');
       expect((await call(page, 'open')).reason).toBe('closed');
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime());
-      expect(await good(page, 'open')).toMatchObject({ writeEpoch: 0 });
+      expect(await good(page, 'open')).toMatchObject({ writeEpoch: 1 });
       expect((await raw(page, 'revoke')).ok).toBe(true);
       await good(page, 'refresh');
       expect((await call(page, 'seal')).ok).toBe(false);

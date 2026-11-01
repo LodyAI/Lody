@@ -15,6 +15,7 @@ const noop = () => {};
 export const desktopWindowId = () => '';
 export const readEncryptedLocalIdentity = () => null;
 export const isE2eeMemberRemoved = () => false;
+export const e2eeAccessLoss = () => null;
 export const retainEncryptedWorkspaceCleanup = noop;
 export const resumeEncryptedWorkspaceCleanup = async () => {};
 export const createFileRoute = () => (options: { component: () => ReactNode }) => ({
@@ -73,4 +74,7 @@ export const E2eeRemoteMachinePairing = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;
+// The approval guide replaces the full page only for devices that still need approval.
+export const E2eeDeviceApprovalGuide = () =>
+  createElement('output', { 'data-approval-guide': true });
 export const E2eeLedgerAudit = () => null;

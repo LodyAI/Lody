@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { type AgentConfigId, type MachineId, getAgentConfigRoomId } from '@lody/shared';
@@ -6,6 +6,7 @@ import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { getLegacyAgentConfigsAtom, writeAgentConfigToMachineFlock } from '@/atoms/agents';
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
+import { withoutEncryptedSharedMachines } from '@/lib/visible-machine-index';
 
 const MUTEX_KEY_PREFIX = 'lody-agent-config-migration:';
 const MUTEX_TTL_MS = 60_000;
@@ -30,7 +31,13 @@ export function useAgentConfigMigration(): {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const legacyConfigs = useAtomValue(getLegacyAgentConfigsAtom);
-  const { machines, isLoading } = useVisibleMachineMetas({ includeMachineFlock: false });
+  const visibleMachineIndex = useVisibleMachineMetas({ includeMachineFlock: false });
+  const { isLoading } = visibleMachineIndex;
+  // Never write automatically into another member's encrypted shared machine.
+  const machines = useMemo(
+    () => withoutEncryptedSharedMachines(visibleMachineIndex.machines, visibleMachineIndex),
+    [visibleMachineIndex]
+  );
   const [status, setStatus] = useState<MigrationStatus>('idle');
   const inFlightRef = useRef(false);
 

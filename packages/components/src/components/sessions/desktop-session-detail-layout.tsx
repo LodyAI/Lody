@@ -250,23 +250,36 @@ export function DesktopSessionDetailLayout({
 
         <ResizableHandle
           disabled={!splitSidebarOpen}
-          // Invisible at rest; hover/drag paints a 2px accent line that
-          // covers the side panel's left hairline (see desktopSecondaryPanel
-          // in session-detail.tsx).
+          // The seam is the side panel's own left hairline; the handle paints
+          // nothing at rest. Hover or keyboard focus reveals one small ink
+          // block centred on the seam — focus is taller and darker than hover,
+          // drag darkest — so the divider stays quiet until someone reaches
+          // for it. The 12px hit-area margins (not a wide element) own the
+          // pointer target, so the block never shifts panel geometry.
           hitAreaMargins={{ coarse: 15, fine: 12 }}
           onDragging={setIsResizing}
           className={cn(
-            'bg-transparent transition-opacity',
-            splitSidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-            'after:left-0 after:w-[2px] after:translate-x-0',
-            'after:inset-y-0 after:top-0 after:bottom-0',
-            'after:transition-colors after:duration-150',
-            'data-[resize-handle-state=hover]:after:bg-sidebar-ring/50',
-            'data-[resize-handle-state=hover]:after:delay-150',
-            'data-[resize-handle-state=drag]:after:bg-sidebar-ring/70'
+            'group/handle bg-transparent transition-opacity focus-visible:shadow-none',
+            splitSidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           )}
           style={{ transitionDuration }}
-        />
+        >
+          <span
+            aria-hidden
+            className={cn(
+              'pointer-events-none h-7 w-[3px] shrink-0 rounded-full bg-foreground opacity-0',
+              'transition-[background-color,opacity,scale] duration-150',
+              'group-data-[resize-handle-state=hover]/handle:bg-foreground/30',
+              'group-data-[resize-handle-state=hover]/handle:opacity-100',
+              'group-data-[resize-handle-state=drag]/handle:scale-y-125',
+              'group-data-[resize-handle-state=drag]/handle:bg-foreground/70',
+              'group-data-[resize-handle-state=drag]/handle:opacity-100',
+              'group-focus-visible/handle:scale-y-125',
+              'group-focus-visible/handle:bg-foreground/50',
+              'group-focus-visible/handle:opacity-100'
+            )}
+          />
+        </ResizableHandle>
         <ResizablePanel
           ref={sidebarPanelRef}
           id="sidebar"

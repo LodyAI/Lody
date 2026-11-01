@@ -19,6 +19,15 @@ this page is the full text of the rules summarised there.
   Tunnel readiness uses a proxy response marker independent of HTML injection; injection
   overhead that exceeds the response limit leaves the original document intact.
 
+- Encrypted remote previews reuse the signed feature RPC for create, status/renewal
+  and revoke. Missing host support and a verified non-writer are refused before
+  signing; the receiving machine still checks current authority. No ordinary
+  preview-control proof is minted for this path. The Browser shows the tunnel
+  disclosure before creation and while viewing: page bytes pass through the tunnel
+  service as plaintext, even though preview controls and comments remain protected.
+  This entry does not depend on a local Agent. Public-browser navigation retains
+  its declared host capability and cannot fall back to a preview iframe.
+
 - Complete `.html` / `.htm` viewer text may switch between Monaco source and Managed Preview without
   a Machine RPC endpoint. Build a policy-owned `srcdoc` from the current complete viewer text,
   inject the shared annotation runtime, and run it in uncached static-document mode

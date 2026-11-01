@@ -386,6 +386,24 @@ describe('trusted-host encrypted dispatch originals', () => {
     }
   );
 
+  it("separates a verified sharing denial from an unverifiable policy before signing another member's dispatch", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const prepare = (authorize: (machineId: string) => Effect.Effect<boolean, unknown>) =>
+      Effect.runPromise(
+        f.native('teammate', 'teammate', authorize).prepareDispatch(f.machineId, f.input)
+      );
+    await expect(prepare(() => Effect.succeed(false))).rejects.toThrow(/^e2ee_machine_not_shared$/);
+    await expect(prepare(() => Effect.fail(new Error('offline')))).rejects.toThrow(
+      /^e2ee_machine_sharing_unavailable$/
+    );
+    // Neither refusal retained an original, so a permitted retry signs the first one.
+    const original = await prepare(() => Effect.succeed(true));
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
+    expect(opened.requesterDevice).not.toBe(Buffer.from(f.ledger.owner.raw).toString('hex'));
+    expect(opened.args).toEqual(f.input);
+  });
+
   it('persists an original before returning it and reopens exact ID/ciphertext without re-signing', async () => {
     const f = fixture();
     const first = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));

@@ -21,7 +21,11 @@ export interface InboxQueries {
     sessionId: string,
     id: string
   ): Effect.Effect<boolean, unknown>;
-  inputKind(scope: InboxScope, id: string): Effect.Effect<'human' | 'task' | undefined, unknown>;
+  inputKind(
+    scope: InboxScope,
+    id: string
+  ): Effect.Effect<'human' | 'task' | 'automation' | undefined, unknown>;
+  acceptedAutomationInput(scope: InboxScope, id: string): Effect.Effect<boolean, unknown>;
   pauseTarget(
     workspaceId: string,
     sessionId: string,

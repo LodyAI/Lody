@@ -19,11 +19,13 @@ export type SharingIssue =
   | 'generation'
   | 'notOwned'
   | 'notShared'
-  | 'unavailable';
+  | 'unavailable'
+  | 'unsupported';
 export const sharingIssue = (cause: unknown): SharingIssue => {
   const message = cause instanceof Error ? cause.message : '';
   if (/e2ee_machine_not_owned|e2ee_machine-not-owned/.test(message)) return 'notOwned';
   if (/e2ee_machine_not_shared|e2ee_machine-not-shared/.test(message)) return 'notShared';
+  if (message === 'e2ee_machine_sharing_unsupported') return 'unsupported';
   if (/sharing_conflict/.test(message)) return 'conflict';
   return 'retry';
 };
@@ -77,6 +79,7 @@ export function MachineSharingPanel({
     !view ||
     view.unavailable ||
     issue === 'unavailable' ||
+    issue === 'unsupported' ||
     issue === 'retry' ||
     issue === 'notOwned' ||
     issue === 'notShared';
@@ -122,6 +125,7 @@ export function MachineSharingPanel({
             <Switch
               checked={effective}
               disabled={!!disabled}
+              data-testid="machine-sharing-toggle"
               aria-label={t('e2ee.machineSharing.team')}
               onCheckedChange={(checked) => onChange({ kind: 'machine', sharedWithTeam: checked })}
             />

@@ -159,3 +159,6 @@ apps/electron/resources/roost/
 /.claude/skills/apple-appstore-reviewer
 /.claude/skills/appstore-info-generator
 /skills-lock.json
+
+# Explicit local test output is outside the packaged Electron app directory.
+/.test-build/

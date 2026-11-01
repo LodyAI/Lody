@@ -42,10 +42,12 @@ export const machinePairCommand = new Command('pair')
       process.removeListener('SIGINT', abort);
       const { startCommand } = await import('./start');
       await startCommand.parseAsync(['--paired-workspace', result.reference], { from: 'user' });
-    } catch {
+    } catch (error) {
       // Never print SDK errors, the command, credentials, or public proof blobs.
       console.error(
-        'Pairing has not completed. Retry the same command to resume. If the desktop reports cancellation or expiry, create a new command there.'
+        error instanceof Error && error.message === 'e2ee_waiting_for_key'
+          ? 'This machine is approved, but no desktop has delivered the current workspace key yet. Open the encrypted workspace on an approved desktop, then retry the same command.'
+          : 'Pairing has not completed. Retry the same command to resume. If the desktop reports cancellation or expiry, create a new command there.'
       );
       process.exitCode = 1;
     } finally {

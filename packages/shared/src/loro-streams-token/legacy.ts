@@ -4,6 +4,7 @@ import {
   LoroStreamsTokenAuthError,
   LoroStreamsTokenWebLive,
   type FetchLike,
+  type MinimalStorage,
   type LoroStreamsTokenProviderEvent,
 } from '../loro-streams-auth';
 import { LoroStreamsTokens, LoroStreamsTokensLive, type LoroStreamsTokenProvider } from './service';
@@ -42,6 +43,8 @@ type OwnedLegacyOptions = {
     | undefined
     | ((signal?: AbortSignal) => Promise<string | null | undefined> | string | null | undefined);
   fetchImpl?: FetchLike;
+  /** Token cache; defaults to `localStorage`. */
+  storage?: MinimalStorage;
   refreshSkewMs?: number;
   requestTimeoutMs?: number;
   cleanupTimeoutMs?: number;
@@ -75,6 +78,7 @@ export function createLoroStreamsTokenProviderLegacy(
                 typeof owned.authToken === 'function' ? owned.authToken(signal) : owned.authToken
               ),
             fetchImpl: owned.fetchImpl,
+            storage: owned.storage,
             cleanupTimeoutMs: owned.cleanupTimeoutMs,
           })
         )

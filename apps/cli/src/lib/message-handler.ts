@@ -1,9 +1,11 @@
+import { AndroidEmulatorService } from '@/android-emulator/service';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
   type EncryptedAttachment,
 } from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { decideEncryptedDerivation } from './e2ee/derivation-limits';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
@@ -11,6 +13,7 @@ import {
   readWorkspaceFlockRowsFromFlock,
 } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -297,7 +300,7 @@ import {
   type ImageGenerationBeginEvent,
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
@@ -606,6 +609,16 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
   encryptedWorkspace?: boolean;
   encryptedExecution?: EncryptedAgentExecution;
   token: string;
@@ -797,9 +810,12 @@ export class MessageHandler {
     pressureReason: null,
   });
   private executionService: SessionExecutionService;
+  /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
+  private readonly encryptedExecution?: EncryptedAgentExecution;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
+  private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
@@ -3061,8 +3077,9 @@ export class MessageHandler {
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
+    this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
-      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedExecution: this.encryptedExecution,
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
@@ -3279,9 +3296,9 @@ export class MessageHandler {
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
       remotePreview: this.cloudPort.remotePreview,
     });
-    this.iosSimulatorService = new IosSimulatorService({
+    const devicePreviewOptions = {
       iceServers: this.cloudPort.remotePreview?.simulatorIceServers
-        ? async (sessionId) => {
+        ? async (sessionId: string) => {
             const record = await this.workspaceDocument.repo.getDocMeta(
               getSessionRoomId(sessionId as SessionId)
             );
@@ -3307,15 +3324,10 @@ export class MessageHandler {
             });
           }
         : undefined,
-      onAgentPreviewStarted: async (sessionId, operationId) => {
-        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
-          iosSimulatorPreviewRequestId: operationId,
-        } satisfies Partial<SessionMeta>);
-      },
       workspaceId: this.workspaceId,
       logger: this.logger,
       runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl ?? '',
-      authorize: async (request) => {
+      authorize: async (request: { sessionId: string; requestedByUserId: string }) => {
         const record = await this.workspaceDocument.repo.getDocMeta(
           getSessionRoomId(request.sessionId as SessionId)
         );
@@ -3328,6 +3340,22 @@ export class MessageHandler {
         ) {
           throw new Error('Simulator session access denied.');
         }
+      },
+    };
+    this.iosSimulatorService = new IosSimulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          iosSimulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
+      },
+    });
+    this.androidEmulatorService = new AndroidEmulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          androidEmulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
       },
     });
     const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
@@ -3396,6 +3424,8 @@ export class MessageHandler {
           success: true,
           runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
         }),
+        getAutomationControl: config.remoteAutomation?.handshake,
+        controlAutomation: config.remoteAutomation?.control,
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3599,6 +3629,15 @@ export class MessageHandler {
               request.sessionId as SessionId,
               request.requestedByUserId,
               { action: 'ios-simulator', command: request.command, responseKey },
+              proof
+            )
+          ),
+        controlAndroidEmulator: async ({ proof, responseKey, ...request }) =>
+          this.androidEmulatorService.control(request, true, () =>
+            this.previewService.authorizeRemoteControl(
+              request.sessionId as SessionId,
+              request.requestedByUserId,
+              { action: 'android-emulator', command: request.command, responseKey },
               proof
             )
           ),
@@ -3828,7 +3867,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
@@ -3930,10 +3972,13 @@ export class MessageHandler {
         machineId: MachineId,
         agentConfigId: AgentConfigId | undefined,
         cliType: string,
-        limits: RateLimit
+        snapshot: import('acp-extension-core').RateLimitsSnapshot,
+        binding: import('@/session/automation-observations').ProviderBinding | undefined
       ) => {
-        if (agentConfigId) this.executionService.noteProviderRateLimitsUpdate(agentConfigId);
-        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
+        if (agentConfigId)
+          this.executionService.noteProviderRateLimitsUpdate(agentConfigId, binding, snapshot);
+        for (const limits of snapshot.rateLimits)
+          void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
@@ -4173,6 +4218,7 @@ export class MessageHandler {
           if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
           // Revoke media before unrelated ACP/Browser cleanup can fail.
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionArchived(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
@@ -4182,6 +4228,7 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (sessionId) void this.iosSimulatorService.closeSession(sessionId);
+          if (sessionId) void this.androidEmulatorService.closeSession(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['userId', 'machineId'] }
       ),
@@ -4192,6 +4239,7 @@ export class MessageHandler {
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
           void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
           void this.handleSessionDeleted(sessionId);
         },
         { kinds: ['doc-existence-changed'] }
@@ -4335,7 +4383,10 @@ export class MessageHandler {
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.finalizeACPState(sessionId);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
@@ -4685,7 +4736,10 @@ export class MessageHandler {
       childSessionIds.map(async (childSessionId) => {
         this.clearSessionActivePresence(childSessionId);
         this.closeSessionTerminals?.(childSessionId);
-        await this.iosSimulatorService.closeSession(childSessionId);
+        await Promise.all([
+          this.iosSimulatorService.closeSession(childSessionId),
+          this.androidEmulatorService.closeSession(childSessionId),
+        ]);
         await this.finalizeACPState(childSessionId);
         await this.previewService.closeSessionPreviewForCleanup(childSessionId, reason);
         await this.terminateSessionForRelease(childSessionId);
@@ -6221,7 +6275,10 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: getHostMachineProtocolCapabilities(),
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
         timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
@@ -6895,6 +6952,30 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
+  private async classifyEncryptedDerivation(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'> {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_derivation_unavailable');
+    const live = this.executionService.reserveEncryptedDerivation(
+      origin.sessionId as SessionId,
+      origin.userTurnId
+    );
+    if (live?.kind === 'owner') return 'owner';
+    // The signed origin decides; a live member reservation alone is not proof.
+    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
+      () => 'denied' as const
+    );
+    return decideEncryptedDerivation({
+      live: live?.kind,
+      verified,
+      targetMachineId: target.machineId,
+      machineId: this.machineId,
+    });
+  }
+
   private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {
     const invocation = this.executionService.getActiveInvocationContext(sessionId);
     return invocation
@@ -6916,6 +6997,12 @@ export class MessageHandler {
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
+          ...(this.encryptedExecution
+            ? {
+                classifyEncryptedDerivation: (origin, target) =>
+                  this.classifyEncryptedDerivation(origin, target),
+              }
+            : {}),
         },
         run
       );
@@ -7246,7 +7333,22 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        // Encrypted: act as the turn's verified principal; a shared member controls
+        // only within that member's own rights for the turn's projects.
+        const control = this.encryptedExecution
+          ? this.executionService.getEncryptedControlPrincipal(sessionId)
+          : ({ kind: 'owner' } as const);
+        const controlAllowed =
+          control?.kind === 'owner' ||
+          (control?.kind === 'member' &&
+            this.encryptedExecution !== undefined &&
+            (await Effect.runPromise(
+              this.encryptedExecution.authorizeAgentControl(
+                control.requesterDevice,
+                control.localProjectIds
+              )
+            ).catch(() => false)));
+        if (!invocation?.requesterUserId || !controlAllowed) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -7262,6 +7364,25 @@ export class MessageHandler {
       }
       case 'ios-simulator/control':
         return this.iosSimulatorService.control(request.params, false);
+      case 'android-emulator/agent-control': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation?.requesterUserId) {
+          return {
+            type: 'android-emulator/control_response' as const,
+            sessionId,
+            success: false,
+            error: 'denied' as const,
+          };
+        }
+        return this.androidEmulatorService.controlFromAgent({
+          sessionId,
+          requestedByUserId: invocation.requesterUserId,
+          command: request.params.command,
+        });
+      }
+      case 'android-emulator/control':
+        return this.androidEmulatorService.control(request.params, false);
       case 'session/preview-endpoint-acquire':
         return await this.previewService.acquireEndpoint({
           machineId: request.machineId as MachineId,
@@ -7918,8 +8039,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
+    // An encrypted shared member's display account is not an identity to attribute.
     const invokingUserId =
-      dispatchContext.source === 'local'
+      dispatchContext.source === 'local' &&
+      (!this.encryptedExecution ||
+        this.executionService.getEncryptedControlPrincipal(message.sessionId)?.kind === 'owner')
         ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
         : undefined;
     const response = await this.previewService.reportCandidate(message, invokingUserId);
@@ -8759,11 +8883,13 @@ export class MessageHandler {
     this.remoteBackfillAbort?.abort();
     this.remoteBackfillAbort = new AbortController();
     this.iosSimulatorService.enableRemote();
+    this.androidEmulatorService.enableRemote();
     await this.scanAndBackfillLocalSessionFiles();
   }
 
   disableRemoteBackfill(): void {
     this.iosSimulatorService?.revokeRemote();
+    this.androidEmulatorService?.revokeRemote();
     // Close the window: abort in-flight uploads and supersede every started
     // task so a resumed backfill cannot commit post-revoke (S5/D10).
     this.remoteBackfillGeneration += 1;
@@ -10563,6 +10689,17 @@ export class MessageHandler {
     this.historyWatchAbort.abort();
   }
 
+  inspectClientLoss() {
+    const watcher = this.sessionDispatchWatcher.inspectClientLoss();
+    const execution = this.executionService.inspectClientLoss();
+    return {
+      watcherStopped: watcher.stopped,
+      watcherChecks: watcher.pending,
+      executionTurns: execution.turns,
+      executionBookkeeping: execution.bookkeeping,
+    };
+  }
+
   /**
    * Flush pending ACP updates and tear down session resources.
    */
@@ -10583,7 +10720,10 @@ export class MessageHandler {
     );
     this.cancelPendingHistoryWatches();
     this.historyOwnerAbort.abort();
-    await this.iosSimulatorService.closeAll();
+    await Promise.all([
+      this.iosSimulatorService.closeAll(),
+      this.androidEmulatorService.closeAll(),
+    ]);
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;
     this.sessionActivePresence.native.retire();
@@ -10976,6 +11116,26 @@ export class MessageHandler {
     );
   }
 
+  private automationSessionAuthority: SessionAutomationAuthority | undefined;
+  getAutomationSessionAuthority(): SessionAutomationAuthority {
+    return (this.automationSessionAuthority ??= new SessionAutomationAuthority({
+      manager: this.workspaceDocument,
+      execution: this.executionService,
+      machineId: this.machineId,
+      hasOtherWork: (sessionId) =>
+        this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+        this.hasSessionActivePresence(sessionId) ||
+        this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+      hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
+      nativeActivity: (sessionId) => {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        return client ? client.getNativeActivityObservation() : 'idle';
+      },
+      author: (sessionId) =>
+        this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+    }));
+  }
+
   /**
    * Check if a session has an active turn (prompting or finalizing).
    */
@@ -11018,7 +11178,10 @@ export class MessageHandler {
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
 
-    await this.iosSimulatorService.closeSession(sessionId);
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session cleaned by GC');
 
     // 2. Terminate session process first — if later steps throw, the process

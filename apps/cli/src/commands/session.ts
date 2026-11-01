@@ -186,6 +186,29 @@ export type DelegatedSessionRequester = {
 };
 
 /** Delegation without provenance must never be recorded as human input. */
+/**
+ * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
+ * work is unchanged; a shared member's derivation returns the origin to record as
+ * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
+ * daemon cannot verify is refused rather than written as machine-owned work.
+ */
+async function classifyDelegatedEncryptedInput(
+  manager: LoroDocumentManager,
+  delegatedRequester: DelegatedSessionRequester | undefined,
+  targetMachineId: string
+): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
+  const author = delegatedRequester.author;
+  const daemon = getDaemonWorkspace();
+  if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
+    throw new Error('e2ee_derivation_unavailable');
+  const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
+  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
+    'member'
+    ? origin
+    : undefined;
+}
+
 const resolveSessionInputAuthor = (
   userId: string,
   delegatedRequester?: DelegatedSessionRequester
@@ -955,7 +978,19 @@ const billingEntitlementCache = new Map<
   }
 >();
 
-async function getWorkspaceBillingEntitlementBestEffort(
+/**
+ * After a failed or timed-out read, the plan stays unknown (fail open) for this long
+ * without asking again, so a persistently offline machine does not make every
+ * command wait for the read deadline. A failure is never cached as a plan.
+ */
+const BILLING_ENTITLEMENT_RETRY_AFTER_MS = 30_000;
+const billingEntitlementRetryAfter = new Map<
+  string,
+  { port: NonNullable<LoroDocumentManager['cloudBilling']>; until: number }
+>();
+
+/** @internal Exported for the quota fail-open tests. */
+export async function getWorkspaceBillingEntitlementBestEffort(
   manager: LoroDocumentManager,
   workspace: WorkspaceSummary
 ): Promise<WorkspaceBillingEntitlement | null> {
@@ -964,6 +999,8 @@ async function getWorkspaceBillingEntitlementBestEffort(
     return null;
   }
   const now = getServerNow();
+  const retryAfter = billingEntitlementRetryAfter.get(workspace.id);
+  if (retryAfter?.port === port && retryAfter.until > now) return null;
   let entry = billingEntitlementCache.get(workspace.id);
   if (!entry || entry.port !== port || entry.expiresAt <= now) {
     entry = {
@@ -974,12 +1011,18 @@ async function getWorkspaceBillingEntitlementBestEffort(
     billingEntitlementCache.set(workspace.id, entry);
   }
   try {
-    return await entry.entitlement;
+    const entitlement = await entry.entitlement;
+    billingEntitlementRetryAfter.delete(workspace.id);
+    return entitlement;
   } catch (error) {
     // A failure must not be cached for the rest of the TTL.
     if (billingEntitlementCache.get(workspace.id) === entry) {
       billingEntitlementCache.delete(workspace.id);
     }
+    billingEntitlementRetryAfter.set(workspace.id, {
+      port,
+      until: getServerNow() + BILLING_ENTITLEMENT_RETRY_AFTER_MS,
+    });
     getLogger('session').warn(
       `Billing entitlement unavailable; allowing local operation: ${formatErrorMessage(error)}`
     );
@@ -1379,6 +1422,8 @@ export async function appendUserPromptHistory(args: {
   knownHistory?: readonly SessionHistory[];
   /** Offer the turn to a running turn: write `pending_apply` without activation. */
   steer?: boolean;
+  /** Encrypted shared-member derivation origin; part of the signed input. */
+  derivedFrom?: { sessionId: string; userTurnId: string };
 }): Promise<{
   id: string;
   timestamp: string;
@@ -1428,6 +1473,7 @@ export async function appendUserPromptHistory(args: {
     userId,
     items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
+    ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
     fileDiff: [],
     finished: true,
   };
@@ -3804,10 +3850,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    options.delegatedRequester,
+    targetMachine.id
+  );
   const userTurn: SessionHistoryInput = {
     id: options.userTurnId ?? uuidV4(),
     role: 'user',
     timestamp: meta.createdAt,
+    ...(derivedFrom ? { derivedFrom } : {}),
     // Legacy daemons only understand pending input. Host-owned automation
     // always uses the inert prepared protocol; remote creates negotiate it.
     status:
@@ -4138,11 +4190,19 @@ export async function sendSessionChatResult(
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const environment = getSessionCommandEnvironment();
-  const steerTurnId = orchestration?.steerActiveTurn
-    ? environment?.host.readActiveTurnId(sessionId)
-    : undefined;
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    delegatedRequester,
+    session.machineId
+  );
+  // A shared member's derivation never steers another principal's running turn.
+  const steerTurnId =
+    orchestration?.steerActiveTurn && !derivedFrom
+      ? environment?.host.readActiveTurnId(sessionId)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
+    ...(derivedFrom ? { derivedFrom } : {}),
     inputBlocks,
     sessionDoc,
     prompt,

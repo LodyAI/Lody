@@ -17,6 +17,8 @@ _需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。_
 
 然后推进钉；检查点不变时不写入。钉写入失败时，较新的视图仍记在内存中，旧视图继续被拒绝。`ensureCurrent(view)` 对较早获得的视图重复进程内检查。新鲜度只相对于本设备自己的历史；全局新鲜度仍依赖日志不隐藏记录。
 
+`canWriteRetainedEpoch(epoch)` 只检查可选的持久本地观察日志，不读取 source。产品内容绑定仅在当前 key 真实缺失时使用。十五分钟首次观察截止时间、保守的时钟连续性和提示规则见 [owner 取舍](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.zh.md)；该方法不授予设备或角色权限。缺少日志支持时仍要求当前 key。
+
 ## LedgerFeed
 
 _需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。_
@@ -148,7 +150,7 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 

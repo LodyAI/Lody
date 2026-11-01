@@ -112,6 +112,6 @@
   `EditorInNarrowPanel` catches regressions.
 - `AnimatePresence` children must carry their own `key` (`<Reveal key=… >`);
   a key set only inside the child reads as `""` and breaks exit animations.
-- Quota continuation is the in-banner row on a terminal session-limit failure
-  with a future exhausted 5h reset; reserve the first full minute, never parse
-  prose. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-27-quota-continue.md).
+- The terminal Claude quota-failure banner enables Session capacity recovery; it does
+  not create a Schedule. Existing reservations remain under the Schedule owner.
+  [Prior shortcut](../../../../../.agents/notes/implemented/feature/2026-10-27-quota-continue.md).

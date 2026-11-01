@@ -71,7 +71,7 @@ export function MachineTabList({
 
   return (
     <Tooltip.Provider delay={250}>
-      <FocusScope id={scopeId} {...stylex.props(styles.scope)}>
+      <FocusScope data-testid="settings-machines" id={scopeId} {...stylex.props(styles.scope)}>
         <div {...stylex.props(styles.header)}>
           <p {...stylex.props(styles.title)}>{t('workspace.machines.title', 'Machines')}</p>
           {showFilter ? (
@@ -113,7 +113,7 @@ export function MachineTabList({
             </ul>
           )}
           {items.length === 0 && (
-            <div {...stylex.props(styles.empty)}>
+            <div data-testid="settings-machines-empty" {...stylex.props(styles.empty)}>
               {totalBeforeFilter === 0
                 ? t('workspace.machines.empty', 'No machines connected')
                 : t(
@@ -200,6 +200,7 @@ function MachineTab({
         aria-current={isSelected ? 'true' : undefined}
         data-id={`machine:${item.machine.id}`}
         data-scope-item="row"
+        data-testid="settings-machine"
         data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
@@ -254,6 +255,7 @@ function DetailedMachineTab({
         aria-current={isSelected ? 'true' : undefined}
         data-id={`machine:${item.machine.id}`}
         data-scope-item="row"
+        data-testid="settings-machine"
         data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}

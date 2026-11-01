@@ -207,6 +207,8 @@ module.exports = {
       fontFamily: {
         // Same default stack as `--font-sans-default` in components' index.css.
         sans: [
+          'SF Pro Display',
+          'Inter Variable',
           'PingFang SC',
           '-apple-system',
           'BlinkMacSystemFont',

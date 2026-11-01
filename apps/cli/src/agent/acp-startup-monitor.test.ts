@@ -77,7 +77,7 @@ describe('createAcpStartupMonitor', () => {
         args: [],
         getStderrTail: () => 'npm error EBADDEVENGINES: Node v22.23.1 requires >=22.23.4',
       });
-      const disconnected = new Error('ACP connection closed');
+      const disconnected = new Error('write EPIPE');
       // Handle the monitor promise even when the transport wins the startup race.
       const processResult = monitor.abortPromise.catch((error: unknown) => error);
       if (exitObserved) fakeProcess.emitExit(1, null);

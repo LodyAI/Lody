@@ -93,9 +93,9 @@ body {
   font-family: var(--font-sans);
   font-size: var(--ui-font-size, 14px);
   line-height: 1.45;
-  /* Native-like font rendering */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Subpixel: the macOS default weight; `antialiased` thins text app-wide. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   /* Prevent iOS auto font-size adjustment */
   -webkit-text-size-adjust: 100%;
 }
@@ -1001,13 +1001,16 @@ pre,
     --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
     --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
     --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
-    /* Latin runs set in self-hosted Inter; it has no CJK glyphs, so Chinese
+    /* macOS draws Latin runs in SF Pro Display; it has no CJK glyphs, so Chinese
        falls through per glyph to PingFang SC (macOS / iOS, Apple's system font,
-       which cannot be bundled) or Microsoft YaHei on Windows. PingFang first
-       rendered Latin too, with wide hyphens in file and repo names. */
+       which cannot be bundled) or Microsoft YaHei on Windows. Where SF Pro is
+       absent (other platforms, unpatched macOS) the self-hosted Inter Variable
+       takes over, then the remaining system faces. PingFang first rendered Latin
+       too, with wide hyphens in file and repo names. */
     --font-sans-default:
-      'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB',
-      'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+      'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
+      'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji',
+      'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:

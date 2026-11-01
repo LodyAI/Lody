@@ -144,7 +144,7 @@ These facts narrow the required work: reuse generic chip placement, text expansi
 
 ## Implementation experiment
 
-The experiment is based on public main `dddbe5873444941f60623569931d2ba9413ba3e8` (October 30), isolated from the older, modified primary checkout. The transport research above remains pinned to its explicitly cited November 1 sources; no adapter source or version changes are part of this implementation. The [draft contract](../../../../specs/conversation-message-quotes.md) records the proposed durability/compatibility guarantee and remains unapproved.
+The implementation uses repository-pinned adapters without provider-specific quote formats. The transport research above remains pinned to its explicitly cited November 1 sources; live runtime acceptance is separate from that source evidence. The [draft contract](../../../../specs/conversation-message-quotes.md) records the proposed durability/compatibility guarantee and remains unapproved.
 
 `MessageQuoteAction` captures one continuous rendered prose/code region and clones its native range after pointer release. Its portal never enters the conversation layout; drag hides it, scroll/resize repositions it, and the owning surface/visibility controls its lifetime. Cross-region selections explain that excerpts can be added separately. Captures above 50,000 UTF-16 units are rejected rather than truncated. Snapshots reflect rendered selection text, not a Markdown-source export or the clipboard's separate KaTeX conversion.
 

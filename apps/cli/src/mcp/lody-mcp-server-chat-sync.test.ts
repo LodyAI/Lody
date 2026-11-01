@@ -491,7 +491,8 @@ describe('turn-scoped reverse chat rejection', () => {
             machineName: 'Local',
           } as never,
           { id: 'workspace-id', name: 'Workspace', slug: 'workspace', role: 'owner' },
-          {} as never,
+          // An ordinary workspace: recovery keeps its existing, unencrypted path.
+          { isEncryptedWorkspace: () => false } as never,
           'Recovered work',
           {
             workspaceMetaPrewriteSatisfied: true,

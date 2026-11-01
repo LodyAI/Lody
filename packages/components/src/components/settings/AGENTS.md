@@ -88,6 +88,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
   every kind fits the one `GRAPHIC_H` box so card height never depends on range. Leave the space beside the headline empty.
 
+- Provider automation binds `agent-provider-add` to the actual resolved machine
+  and `agent-config-dialog` to its captured machine through `data-machine-id`.
+  Preserve these identities when selection falls back or a dialog remains open.
+
 ## Agent Roles
 
 Roles are read and written from Settings, mentioned from the composer, and

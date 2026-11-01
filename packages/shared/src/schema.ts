@@ -597,6 +597,7 @@ const acpSessionConfigSchema = schema
       agentRoleRevision: schema.Number({ required: false }),
       agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
     },
     { required: false }
   )
@@ -702,6 +703,12 @@ export const sessionHistorySchema = schema.LoroMap({
       definitionFingerprint: schema.String({ required: false }),
       manualRunKey: schema.String({ required: false }),
     },
+    { required: false }
+  ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
     { required: false }
   ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
@@ -1153,6 +1160,7 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   previewCandidate?: SessionPreviewCandidateMeta;
   /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
@@ -1280,9 +1288,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project'
+  'project' | 'acpSessionConfig'
 > & {
   project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };
 
 const sessionForkOperationDocSchema = schema.LoroMap(

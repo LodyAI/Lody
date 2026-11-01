@@ -50,6 +50,8 @@ export function E2eeMemberActions(props: {
               size="small"
               icon
               disabled={pending}
+              data-testid="e2ee-member-manage"
+              data-membership-id={member.membershipId}
               aria-label={t('e2ee.members.manage', { name: props.name })}
             >
               <MoreHorizontal size={16} />
@@ -59,6 +61,8 @@ export function E2eeMemberActions(props: {
         <Menu.Content align="end" width="compact">
           {management.actorRole === 'owner' && (
             <Menu.Item
+              data-testid="e2ee-member-role"
+              data-membership-id={member.membershipId}
               onClick={() => {
                 void run(() => management.setRole(member.membershipId, role));
               }}
@@ -68,6 +72,7 @@ export function E2eeMemberActions(props: {
           )}
           {mayRemove && (
             <Menu.Item
+              data-testid="e2ee-member-remove"
               tone="destructive"
               onClick={() => {
                 setFailed(false);
@@ -90,7 +95,11 @@ export function E2eeMemberActions(props: {
           if (!pending) setConfirming(open);
         }}
       >
-        <Dialog.Content width={440}>
+        <Dialog.Content
+          data-testid="e2ee-member-remove-dialog"
+          data-membership-id={member.membershipId}
+          width={440}
+        >
           <Dialog.Header>
             <Dialog.Title>{t('e2ee.members.removeTitle', { name: props.name })}</Dialog.Title>
             <Dialog.Description>{t('e2ee.members.removeDescription')}</Dialog.Description>
@@ -105,6 +114,7 @@ export function E2eeMemberActions(props: {
               {t('common.cancel')}
             </Button>
             <Button
+              data-testid="e2ee-member-remove-confirm"
               tone="destructive"
               disabled={pending}
               onClick={() => {

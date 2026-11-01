@@ -6,6 +6,7 @@ import { desktopWindowId } from '@/lib/desktop-window';
 import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
+  e2eeAccessLoss,
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
@@ -20,6 +21,7 @@ import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
   E2eeWorkspaceControlPage,
@@ -68,6 +70,8 @@ function WorkspaceControlRoute() {
     clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace]);
   const [generation, setGeneration] = useState(0);
+  // The joining device starts on the approval guide; details reveal the full ledger page.
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
     const reconnect = () => setGeneration((value) => value + 1);
     window.addEventListener('online', reconnect);
@@ -96,6 +100,7 @@ function WorkspaceControlRoute() {
     let hostOpened = false;
     let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
     let readerOwner: string | undefined;
+    let readerPreallocated = false;
     let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
@@ -108,7 +113,12 @@ function WorkspaceControlRoute() {
       }),
       async () => {
         // Fence a preallocated cold open before joining its actual settlement.
-        if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+        if (hostOpened) {
+          await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!readerPreallocated) hostOpened = false;
+        }
         // Join only actual native acquisition. Public describe/history can stay
         // offline after this reader is confirmed closed; they own no host lease.
         await nativeAcquisition?.then(
@@ -177,7 +187,7 @@ function WorkspaceControlRoute() {
               if (disposed) return undefined;
               readerOwner =
                 runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-              if (readerOwner) hostOpened = true;
+              if (readerOwner) hostOpened = readerPreallocated = true;
               const opened = await runtime.open(
                 workspaceId,
                 readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
@@ -273,7 +283,7 @@ function WorkspaceControlRoute() {
                 try {
                   await runtime.refresh(workspaceId, { installKeys: false });
                 } catch (checked) {
-                  if (isE2eeMemberRemoved(checked)) throw checked;
+                  if (e2eeAccessLoss(checked)) throw checked;
                 }
               }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
@@ -321,18 +331,18 @@ function WorkspaceControlRoute() {
           custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
         });
       } catch (error) {
-        if (!disposed && isE2eeMemberRemoved(error)) {
+        if (!disposed && e2eeAccessLoss(error)) {
           try {
             if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
           try {
-            if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+            // Unmount joins this same retirement instead of releasing the reader again.
+            if (hostOpened) await closeHost();
           } catch (closeError) {
-            // Preserve the full reader owner and never erase borrowed stores
-            // before the actual host close can finish.
-            void closeHost().catch(reportClose);
+            // The retained retirement keeps the full reader owner and never erases
+            // borrowed stores before the actual host close can finish.
             setState((previous) =>
               previous.scope === scope
                 ? { ...previous, loading: false, failure: classifyE2eeControlFailure(closeError) }
@@ -341,6 +351,12 @@ function WorkspaceControlRoute() {
             return;
           }
           if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          // A revoked device keeps its membership: reopen without this identity,
+          // which lands in the existing re-pairing guidance instead of removal.
+          if (!isE2eeMemberRemoved(error)) {
+            if (!disposed) setGeneration((value) => value + 1);
+            return;
+          }
           if (!disposed)
             setState((previous) =>
               previous.scope === scope
@@ -471,6 +487,40 @@ function WorkspaceControlRoute() {
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  // A signed-in device without an approved identity here sees the next step first;
+  // the ledger, diagnostics and failures stay one click away in the full page.
+  const awaitingApproval = Boolean(
+    port?.runtime &&
+    accountId &&
+    current?.scope === scope &&
+    !current.loading &&
+    // Only "this device needs approval" (new, lost or revoked identity); every other
+    // failure keeps the full page with its repair actions.
+    (!current.failure || current.failure.kind === 'approval-required') &&
+    !current.custodyFailure &&
+    !current.history?.locallyPinned &&
+    current.nativeStatus?.deviceKind !== 'personal'
+  );
+  if (awaitingApproval && !showDetails && port?.runtime && accountId)
+    return (
+      <E2eeDeviceApprovalGuide
+        reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
+        onRefresh={refresh}
+        onShowDetails={() => setShowDetails(true)}
+        onBack={() => {
+          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
+        }}
+      >
+        <E2eePersonalPairing
+          key={identity}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          canApprove={false}
+          approved={false}
+          onJoined={refresh}
+        />
+      </E2eeDeviceApprovalGuide>
+    );
   return (
     <>
       {current?.offline && (
@@ -491,6 +541,7 @@ function WorkspaceControlRoute() {
       <E2eeWorkspaceControlPage
         memberManagement={
           current?.nativeStatus?.deviceKind === 'personal' &&
+          current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
           port?.runtime?.removeMember &&

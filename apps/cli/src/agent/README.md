@@ -209,7 +209,9 @@ URLs are normalized by the extension to the Messages `/anthropic` root before pr
 construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named. Existing sessions/query data remain under
-the daemon's previous `DSH_HOME` (or `~/.dsh`). Old settings/profiles are left untouched;
+the daemon's previous `DSH_HOME` (or `~/.dsh`). During read-only history import, missing
+Provider-home images are read from that legacy home's attachment store; new images still
+use the Provider store. Old settings/profiles are left untouched;
 move desired customizations to the YAML path shown in Provider details. See the
 [settings contract](../../../../specs/deepseek-harness-settings.md).
 
@@ -301,6 +303,17 @@ that termination raises before any child exists.
 The real-process authentication test keeps method selection, versioned secret metadata, form
 submission, URL parsing, protocol stdout integrity, and process cleanup on one spawned ACP
 connection.
+
+A protocol agent publishes its sign-in methods in the `initialize` response. The capability
+probe stores that list on the Provider's capability row (`authMethods`), so the account panel
+and the in-conversation auth notice list what the agent supports before anyone starts a
+sign-in; picking a row sends its `methodId` with the `start` request. The daemon re-reads the
+advertised list on its own connection, ignores a pick the agent no longer advertises (falling
+back to the single method or its own picker), and still runs `authenticate` itself. A machine
+that predates `acpAuthenticationMethodSelection` receives no `methodId` at all, because its
+strict request schema would reject the whole start. `authRequired` now only describes stored
+credentials; it no longer decides whether the panel appears. [Decision and rejected
+alternatives](../../../../.agents/notes/implemented/architecture/2026-10-31-acp-advertised-auth-methods.md).
 
 ### Capability cache
 

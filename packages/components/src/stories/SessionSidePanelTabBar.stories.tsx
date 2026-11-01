@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
 import {
@@ -7,8 +7,13 @@ import {
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
+  type SidePanelTabSplit,
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { Button } from '@lody/ui/button';
+import {
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from '@/components/sessions/side-panel-split-handle';
 
 const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'side-session', label: 'Side Chat', kind: 'session' },
@@ -107,6 +112,81 @@ function SidePanelTabBarStory() {
   );
 }
 
+const DEVICE_TABS: SessionSidePanelTabItem[] = [
+  { id: 'files', label: 'Files', kind: 'files', closeable: true },
+  { id: 'ios-simulator', label: 'iOS Simulator', kind: 'ios-simulator', closeable: true },
+  { id: 'browser', label: 'Browser', kind: 'browser', closeable: true },
+  { id: 'android-emulator', label: 'Android Emulator', kind: 'android-emulator', closeable: true },
+];
+
+function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | null }) {
+  const [tabs, setTabs] = useState(DEVICE_TABS);
+  const [activeTabId, setActiveTabId] = useState<string | null>('ios-simulator');
+  const [split, setSplit] = useState<SidePanelTabSplit | null>(initialSplit);
+  const [ratio, setRatio] = useState(0.5);
+  const splitShown = split?.includes(activeTabId ?? '') ?? false;
+  const shownIds = splitShown && split ? split : [activeTabId];
+
+  return (
+    <div className="min-h-screen bg-background p-8 text-foreground">
+      <div className="flex h-[520px] w-[720px] flex-col overflow-hidden border-l border-border/70 bg-background">
+        <SessionSidePanelTabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={setActiveTabId}
+          onTabClose={(tabId) => {
+            setTabs((current) => current.filter((tab) => tab.id !== tabId));
+            setSplit((current) => (current?.includes(tabId) ? null : current));
+            setActiveTabId((current) =>
+              current === tabId
+                ? getSidePanelTabCloseFallback(
+                    tabs.map((tab) => tab.id),
+                    tabId
+                  )
+                : current
+            );
+          }}
+          closeTabLabel={(label) => `Close ${label}`}
+          split={split}
+          onTabsSplit={(next, draggedTabId) => {
+            setSplit(next);
+            setActiveTabId(draggedTabId);
+          }}
+          onTabUnsplit={(tabId) => {
+            setSplit(null);
+            setActiveTabId(tabId);
+          }}
+          className="border-b border-border/60"
+        />
+        <div
+          className="relative flex flex-1 divide-x divide-border/70 text-sm text-muted-foreground"
+          style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: ratio } as CSSProperties}
+        >
+          {shownIds.map((id, index) => (
+            <div
+              key={id}
+              className="flex items-center justify-center"
+              style={{
+                flexBasis:
+                  shownIds.length > 1 ? `${(index === 0 ? ratio : 1 - ratio) * 100}%` : '100%',
+              }}
+            >
+              {tabs.find((tab) => tab.id === id)?.label}
+            </div>
+          ))}
+          {splitShown ? (
+            <SidePanelSplitHandle
+              ratio={ratio}
+              label="Resize split view"
+              onRatioChange={setRatio}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sessions/SessionSidePanelTabBar',
   component: SessionSidePanelTabBar,
@@ -128,6 +208,15 @@ type Story = StoryObj<typeof meta>;
 
 export const UnifiedTabs: Story = {
   render: () => <SidePanelTabBarStory />,
+};
+
+/** Drag one device tab onto the other to pair them; drag a member out to split them again. */
+export const DeviceTabs: Story = {
+  render: () => <DeviceSplitStory initialSplit={null} />,
+};
+
+export const DeviceSplit: Story = {
+  render: () => <DeviceSplitStory initialSplit={['ios-simulator', 'android-emulator']} />,
 };
 
 export const EmptyState: Story = {

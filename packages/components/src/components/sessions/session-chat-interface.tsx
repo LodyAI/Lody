@@ -1,6 +1,7 @@
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
@@ -9,8 +10,14 @@ import {
   useMachineRpcFeatureReason,
 } from '@/hooks/use-workspace-feature';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { useLocalSessionContinuation } from './use-local-session-continuation';
+import { SessionContinuationNote } from './session-continuation-note';
+import { SessionContinuationTweaks } from './session-continuation-tweaks';
+import { useStableNow } from '@/hooks/use-stable-now';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
@@ -24,6 +31,7 @@ import { useScheduledMessageContents } from '../schedules/use-scheduled-message-
 import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { readConversationCopySource } from '@/lib/conversation-copy-source';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
 import { SessionWindowMenuItem } from '../session-window-menu-item';
@@ -177,7 +185,7 @@ import {
   queuedMessageBehaviorAtom,
   userAtom,
 } from '@/atoms';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import {
   docMetaCacheReadyAtom,
@@ -1350,6 +1358,7 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  continuationTweaks,
   t,
 }: {
   session: SessionMeta;
@@ -1380,6 +1389,7 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  continuationTweaks?: React.ReactNode;
   /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
   openInIde?: {
     options: PathLauncherOption[];
@@ -1727,6 +1737,15 @@ export function SessionHeaderMenu({
           </Menu.Item>
 
           {openedByRelationRows}
+
+          {continuationTweaks && (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
+                {t('sessions.continuation.tweaks.title', '自动化设置')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+            </Menu.Submenu>
+          )}
 
           {openInIdeMenu}
 
@@ -2284,6 +2303,7 @@ export interface SessionChatInterfaceProps {
   /** Called when the user wants to open the Browser panel. */
   onOpenBrowser?: () => void;
   onOpenIosSimulator?: () => void;
+  onOpenAndroidEmulator?: () => void;
   /** Opens Browser without forcing a newly reported candidate navigation. */
   onOpenExistingBrowser?: () => void;
   /**
@@ -2358,7 +2378,11 @@ export type SessionChatInterfaceHandle = {
   copyConversationHistory: () => Promise<void>;
   /** Plain-text conversation snapshot for the share-as-image card; null while
    * durable history has not loaded. */
-  getShareImageData: () => Promise<{ messages: ConversationMessage[]; agentName?: string } | null>;
+  getShareImageData: () => Promise<{
+    messages: ConversationMessage[];
+    sourceRuntime: WorkspaceRuntime;
+    agentName?: string;
+  } | null>;
   startShareImageSelection: (
     messages: ConversationMessage[],
     onConfirm: (messages: ConversationMessage[]) => void
@@ -2476,6 +2500,7 @@ export const SessionChatInterface = memo(
       browserActionSession,
       onOpenBrowser,
       onOpenIosSimulator,
+      onOpenAndroidEmulator,
       onOpenExistingBrowser,
       headerVariant = 'page',
       paintSessionMentionOverlay = true,
@@ -2595,11 +2620,39 @@ export const SessionChatInterface = memo(
     );
 
     const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+    const { run: runPlaintextCopy, confirmation: plaintextCopyConfirmation } = usePlaintextCopy(
+      runtime,
+      session.id
+    );
     const localMachineId = useAtomValue(localMachineIdAtom);
     const localHomeDir = useAtomValue(localHomeDirAtom);
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
+    const automationSupported =
+      !!runtime &&
+      workspaceSupports(
+        { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'automations'
+      );
+    const continuation = useLocalSessionContinuation(
+      automationSupported &&
+        workspaceId &&
+        session.machineId &&
+        (isLocalSession ||
+          (!!localMachineId && !!getAutomationProofIssuer() && currentUser?.id === session.userId))
+        ? {
+            workspaceId,
+            machineId: session.machineId,
+            sessionId: session.id,
+            ...(!isLocalSession && runtime && currentUser?.id
+              ? { remote: { runtime, requesterUserId: currentUser.id } }
+              : {}),
+          }
+        : null,
+      isVisible
+    );
+    const continuationNow = useStableNow(10_000).getTime();
     // Session-scoped UI state below stores the session it belongs to and is read
     // only for that session: this instance can outlive a switch (the desktop
     // toolbar is not keyed), and a late async write must not reach the next one.
@@ -3008,6 +3061,11 @@ export const SessionChatInterface = memo(
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
     const shareSelection = useMessageSelection(session.id);
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
+    const handleAnnotateImage = useCallback(
+      (selection: DocumentSelection) =>
+        inputAreaRef.current?.addDocumentSelection(selection) ?? false,
+      []
+    );
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
     const [foldMessageArea, setFoldMessageArea] = useState<HTMLDivElement | null>(null);
@@ -3033,6 +3091,8 @@ export const SessionChatInterface = memo(
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
+      setTreeCollaborationStopped,
+      updateSessionMetadata,
     } = useSessionActions();
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
@@ -4138,43 +4198,50 @@ export const SessionChatInterface = memo(
 
         const turnCount = conversationView.turnCount;
         try {
-          if (!runtime) throw new Error('Workspace runtime unavailable');
-          await runtime.waitForContentAdmission?.();
-          const history = conversationCopyRange(await conversationView.readAll(), throughMessageId);
-          const last = history.at(-1);
-          const { markdown, stats } = buildConversationMarkdown({
-            workspaceId: workspaceId ?? undefined,
-            history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
-            title: session.title ?? undefined,
-            source: conversationCopySource,
-            participants: conversationCopyParticipants,
-            // Header, not a trailing line: whoever reads this next has to know the
-            // last turn is cut short before reading it. See the builder's option.
-            incompleteFinalResponse:
-              last?.role === 'assistant' && !last.finished
-                ? t(
-                    'sessions.copyContextIncomplete',
-                    'The last response was still generating when copied.'
-                  )
-                : undefined,
+          await runPlaintextCopy(async (assertCurrent, admitOutput) => {
+            if (!runtime) throw new Error('Workspace runtime unavailable');
+            const history = conversationCopyRange(
+              await readConversationCopySource(runtime, session.id, conversationView),
+              throughMessageId
+            );
+            assertCurrent();
+            const last = history.at(-1);
+            const { markdown, stats } = buildConversationMarkdown({
+              workspaceId: workspaceId ?? undefined,
+              history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+              title: session.title ?? undefined,
+              source: conversationCopySource,
+              participants: conversationCopyParticipants,
+              // Header, not a trailing line: whoever reads this next has to know the
+              // last turn is cut short before reading it. See the builder's option.
+              incompleteFinalResponse:
+                last?.role === 'assistant' && !last.finished
+                  ? t(
+                      'sessions.copyContextIncomplete',
+                      'The last response was still generating when copied.'
+                    )
+                  : undefined,
+            });
+            await admitOutput();
+            assertCurrent();
+            await navigator.clipboard.writeText(markdown);
+            assertCurrent();
+            captureSessionEvent('session/history_copy_succeeded', {
+              history_count: turnCount,
+              prompt_length: stats.chars,
+              estimated_tokens: stats.estimatedTokens,
+              over_budget: stats.overBudget,
+              thinking_truncated: stats.thinkingTruncated,
+              terminal_omitted: stats.terminalOutputOmitted,
+              tool_calls_collapsed: stats.toolCallsCollapsed,
+              tool_results_truncated: stats.toolResultsTruncated,
+            });
+            capturePostHogEvent(postHog, 'export/context_markdown_copied', {
+              scope: throughMessageId ? 'through_message' : 'full',
+              history_count: turnCount,
+            });
+            toast.success(describeCopiedConversation(stats, t));
           });
-          await runtime.waitForContentAdmission?.();
-          await navigator.clipboard.writeText(markdown);
-          captureSessionEvent('session/history_copy_succeeded', {
-            history_count: turnCount,
-            prompt_length: stats.chars,
-            estimated_tokens: stats.estimatedTokens,
-            over_budget: stats.overBudget,
-            thinking_truncated: stats.thinkingTruncated,
-            terminal_omitted: stats.terminalOutputOmitted,
-            tool_calls_collapsed: stats.toolCallsCollapsed,
-            tool_results_truncated: stats.toolResultsTruncated,
-          });
-          capturePostHogEvent(postHog, 'export/context_markdown_copied', {
-            scope: throughMessageId ? 'through_message' : 'full',
-            history_count: turnCount,
-          });
-          toast.success(describeCopiedConversation(stats, t));
         } catch (error) {
           console.error('Failed to copy conversation history', error);
           captureSessionEvent('session/history_copy_failed', {
@@ -4196,6 +4263,8 @@ export const SessionChatInterface = memo(
         session.title,
         conversationView,
         runtime,
+        session.id,
+        runPlaintextCopy,
         postHog,
         t,
       ]
@@ -5011,7 +5080,10 @@ export const SessionChatInterface = memo(
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionHistory,
+      hostRecoveryEnabled:
+        isLocalSession && continuation.supported && continuation.recoveryEnabled !== false,
       canRetry:
+        !continuation.recoveryEnabled &&
         sessionDocReady &&
         !isAgentBusy &&
         !isMachineRemoved &&
@@ -5213,16 +5285,23 @@ export const SessionChatInterface = memo(
       (goal: Extract<MessageContent, { type: 'goal' }>) => {
         if (!runtime) return;
         if (session.dismissedGoalThreadId === goal.threadId) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           dismissedGoalThreadId: goal.threadId,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent('session/goal_banner_dismissed', {
           goal_thread_id: goal.threadId,
           goal_status: goal.status,
         });
       },
-      [captureSessionEvent, runtime, session.id, session.dismissedGoalThreadId]
+      [
+        captureSessionEvent,
+        runtime,
+        session.id,
+        session.dismissedGoalThreadId,
+        updateSessionMetadata,
+      ]
     );
 
     // Allow child sessions to change agent config before first message
@@ -5264,14 +5343,15 @@ export const SessionChatInterface = memo(
         if (!runtime) return;
         const config = agentConfigs.find((c) => c.id === selection.agentId);
         if (!config) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           agentConfigId: config.id,
           cliType: config.cliType,
           agentType: config.agentType,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
       },
-      [runtime, agentConfigs, session.id]
+      [runtime, agentConfigs, session.id, updateSessionMetadata]
     );
 
     // ── Pin management ──────────────────────────────────────────────────
@@ -5284,20 +5364,28 @@ export const SessionChatInterface = memo(
           });
           return;
         }
-        const roomId = getSessionRoomId(session.id);
         const historyIndex =
           historyId && conversationView ? conversationView.indexOf(historyId) : -1;
         // Use empty string as "cleared" — undefined is skipped by upsertDocMeta merge
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           pinnedHistoryId: historyId ?? '',
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent(historyId ? 'session/message_pinned' : 'session/message_unpinned', {
           history_id: historyId ?? null,
           history_index: historyIndex >= 0 ? historyIndex : null,
           previous_pinned_history_id: session.pinnedHistoryId || null,
         });
       },
-      [captureSessionEvent, conversationView, runtime, session.id, session.pinnedHistoryId]
+      [
+        captureSessionEvent,
+        conversationView,
+        runtime,
+        session.id,
+        session.pinnedHistoryId,
+        updateSessionMetadata,
+      ]
     );
 
     const pinnedHistoryId = session.pinnedHistoryId || null;
@@ -6116,7 +6204,10 @@ export const SessionChatInterface = memo(
           if (!runtime) throw new Error('Workspace runtime unavailable');
           await runtime.waitForContentAdmission?.();
           return {
-            messages: collectConversationMessages(await conversationView.readAll()),
+            messages: collectConversationMessages(
+              await readConversationCopySource(runtime, session.id, conversationView)
+            ),
+            sourceRuntime: runtime,
             agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
           };
         },
@@ -6135,6 +6226,7 @@ export const SessionChatInterface = memo(
         lastCompletedAssistantMessageId,
         openSearch,
         session.cliType,
+        session.id,
         sessionAgentConfig?.name,
         conversationView,
         runtime,
@@ -7038,6 +7130,39 @@ export const SessionChatInterface = memo(
           publicShareWorkspaceId ? () => setPublicShareSessionId(session.id) : undefined
         }
         session={session}
+        continuationTweaks={
+          continuation.value && !continuation.error ? (
+            <SessionContinuationTweaks
+              value={continuation.value}
+              onChange={continuation.setTweak}
+              disabled={continuation.busy}
+              capabilities={{
+                recoverCapacity: {
+                  supported:
+                    continuation.value.recoverCapacity ||
+                    session.agentType === 'codex' ||
+                    Boolean(
+                      session.agentConfigId &&
+                      sessionAgentConfig &&
+                      sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits
+                        ?.query === true &&
+                      canShowSubscriptionRateLimits({
+                        cliType: session.cliType,
+                        agentType: session.agentType,
+                        config: sessionAgentConfig,
+                        capability:
+                          sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits,
+                      })
+                    ),
+                  reason: t(
+                    'sessions.continuation.quotaUnavailable',
+                    'Quota recovery support could not be confirmed for this provider.'
+                  ),
+                },
+              }}
+            />
+          ) : undefined
+        }
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
         machineName={sessionMachine?.name}
@@ -7172,6 +7297,7 @@ export const SessionChatInterface = memo(
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
+          {plaintextCopyConfirmation}
           {toolbar?.container &&
             createPortal(
               <SessionConversationPage className={toolbar.className} hideMessageArea>
@@ -7322,7 +7448,39 @@ export const SessionChatInterface = memo(
                                 leadingContent={openedByConversationStart}
                                 emptyState={chatStreamEmptyState}
                                 trailingContent={
-                                  unsentFirstMessage ? undefined : pendingMessages.trailingContent
+                                  unsentFirstMessage ? undefined : (
+                                    <>
+                                      {pendingMessages.trailingContent}
+                                      {continuation.views.map((view) => (
+                                        <SessionContinuationNote
+                                          key={view.id}
+                                          view={
+                                            continuation.error
+                                              ? { ...view, block: 'unavailable' }
+                                              : view
+                                          }
+                                          now={continuationNow}
+                                          compact={isMobile}
+                                          onCancel={continuation.cancel}
+                                          onResume={() => {
+                                            void setTreeCollaborationStopped(session.id, false)
+                                              .then(continuation.refresh)
+                                              .catch(() =>
+                                                toast.error(t('sessions.relations.controlFailed'))
+                                              );
+                                          }}
+                                        />
+                                      ))}
+                                      {continuation.error && (
+                                        <ConversationColumn>
+                                          {t(
+                                            'sessions.continuation.connectionError',
+                                            'Unable to reach the local automation service.'
+                                          )}
+                                        </ConversationColumn>
+                                      )}
+                                    </>
+                                  )
                                 }
                                 localUserMessages={pendingMessages.localUserMessages}
                                 agentActivityLabel={agentActivityLabel}
@@ -7333,6 +7491,9 @@ export const SessionChatInterface = memo(
                                 onFileDiffClick={onFileDiffClick}
                                 onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                                 onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onAnnotateImage={
+                                  isArchivedSession ? undefined : handleAnnotateImage
+                                }
                                 messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                                 assistantActions={assistantQuickActions}
                                 assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
@@ -7501,6 +7662,11 @@ export const SessionChatInterface = memo(
                         onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
                         onOpenIosSimulator={
                           session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
+                        }
+                        onOpenAndroidEmulator={
+                          session.androidEmulatorPreviewRequestId
+                            ? onOpenAndroidEmulator
+                            : undefined
                         }
                         privateAccessStatus={
                           isMobile && sharing?.visibility === 'private'

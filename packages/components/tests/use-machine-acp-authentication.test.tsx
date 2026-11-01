@@ -91,6 +91,47 @@ describe('useMachineAcpAuthentication', () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it('forwards the picked sign-in method on the start request', async () => {
+    const sendControl = vi.fn();
+    const runtime = {
+      sendControl,
+      subscribeMachineAcpAuthenticationProgress: vi.fn(() => vi.fn()),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: true,
+        disposition: 'authenticated' as const,
+      })),
+    } as unknown as WorkspaceRuntime;
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    let controller: AuthenticationController | undefined;
+
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          runtime,
+          workspaceId,
+          onResult: (value) => {
+            controller = value;
+          },
+        })
+      );
+    });
+
+    const attempt = controller!.startAuthentication({
+      machineId,
+      configId: 'config-custom' as AgentConfigId,
+      methodId: 'api-key',
+    });
+
+    await expect(attempt.promise).resolves.toMatchObject({ disposition: 'authenticated' });
+    expect(sendControl.mock.calls[0]?.[0]).toMatchObject({
+      type: 'machine/acp-authenticate',
+      action: 'start',
+      configId: 'config-custom',
+      methodId: 'api-key',
+    });
+  });
+
   it('rejects a not-running start response instead of reporting authentication success', async () => {
     const sendControl = vi.fn();
     const runtime = {

@@ -371,6 +371,7 @@ export function ChatLandingView({
         size="medium"
         shape="pill"
         icon
+        data-testid="composer-send"
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}

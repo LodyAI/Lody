@@ -1,3 +1,4 @@
+import { AndroidEmulatorCommandSchema } from './android-emulator';
 import { IosSimulatorCommandSchema } from './ios-simulator';
 import { z } from 'zod';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
@@ -10,6 +11,13 @@ export const PreviewControlOperationSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('ios-simulator'),
       command: IosSimulatorCommandSchema,
+      responseKey: RpcSecretPublicKeySchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('android-emulator'),
+      command: AndroidEmulatorCommandSchema,
       responseKey: RpcSecretPublicKeySchema,
     })
     .strict(),

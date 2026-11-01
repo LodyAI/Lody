@@ -1781,6 +1781,8 @@ export function MachineAgentSettings({
               variant="secondary"
               size="small"
               onClick={() => openCreateDialog(resolvedSelectedMachine)}
+              data-testid="agent-provider-add"
+              data-machine-id={resolvedSelectedMachine.id}
             >
               <Plus {...stylex.props(styles.addGlyph)} />
               {t('settings.agent.provider.addProvider', 'Add provider')}

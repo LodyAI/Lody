@@ -567,6 +567,132 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
+it('releases exactly one count of a legacy window-scoped control reader', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // Electron main counts acquisitions per window and workspace. The content
+  // runtime in this same window already holds one count.
+  let count = 1;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {
+      count = Math.max(0, count - 1);
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(count).toBe(2);
+  await act(async () => root.unmount());
+  expect(count).toBe(1);
+});
+
+it('joins one legacy reader close when member removal and unmount overlap', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // The content runtime in this same window holds one Electron count.
+  let count = 1;
+  let calls = 0;
+  const removalClose = Promise.withResolvers<void>();
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_member_removed');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      calls += 1;
+      count = Math.max(0, count - 1);
+      await removalClose.promise;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(calls).toBe(1);
+  await act(async () => root.unmount());
+  await act(async () => removalClose.resolve());
+  expect(calls).toBe(1);
+  expect(count).toBe(1);
+});
+
+it('turns a live device revocation into local cleanup and re-pairing guidance, not removal', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  let closes = 0;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      // Main erased this device's identity after the authenticated revocation.
+      if (opens > 1)
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked");
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      closes += 1;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(opens).toBe(2);
+  expect(closes).toBe(1);
+  expect(container.textContent).not.toContain('removed from this workspace');
+  // A revoked device lands on the approval guide, with re-pairing guidance.
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
+  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+});
+
+it('lands a device that needs approval on the guide and keeps the ledger behind Details', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      throw new PersonalHostError({ code: 'approval-required' });
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide).not.toBeNull();
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.lead');
+  // The existing explicit pairing stays available during the transition.
+  expect(guide?.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('false');
+  expect(container.querySelector('[data-control-state]')?.textContent).not.toBe(
+    'approval-required'
+  );
+  const details = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'e2ee.approvalGuide.details'
+  );
+  expect(details).toBeDefined();
+  await act(async () => details!.click());
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
+});
+
 it('fences the preallocated control reader before a cold open settles', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;

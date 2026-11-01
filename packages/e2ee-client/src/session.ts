@@ -362,11 +362,18 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               genesis: prepared.binding.genesis,
               resource,
               model,
-              writeEpoch: epoch,
+              writeEpoch: 'current',
               signer: device,
-              ledger: admitted,
+              ledger: () =>
+                admitted().pipe(
+                  Effect.flatMap((view) =>
+                    epoch !== 'current' && epoch > view.inspectState().epoch.number
+                      ? Effect.fail(fail('keys-unavailable'))
+                      : Effect.succeed(view)
+                  )
+                ),
               readEpochKey: readKey,
-            }),
+            }).pipe(Effect.provideService(VerifiedLedger, verified)),
             owner
           );
           documents.set(id, binding);
@@ -380,14 +387,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     ) {
       const original = yield* documentBinding(resource, model, epoch);
       return Object.freeze({
-        seal: (input: Parameters<typeof original.seal>[0]) =>
-          run(
-            Effect.gen(function* () {
-              const selected = epoch === 'current' ? (yield* status()).usableEpoch : epoch;
-              if (selected === null) return yield* fail('keys-unavailable');
-              return yield* (yield* documentBinding(resource, model, selected)).seal(input);
-            })
-          ),
+        seal: (input: Parameters<typeof original.seal>[0]) => run(original.seal(input)),
         open: (input: Parameters<typeof original.open>[0]) =>
           run(original.open(input), (plaintext) => plaintext.fill(0)),
         openAuthenticated: (input: Parameters<typeof original.openAuthenticated>[0]) =>

@@ -1,3 +1,4 @@
+import { createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
@@ -381,6 +382,14 @@ const isConfigOptionValueRecord = (
  * a turn-selection source after activation, not a startup activation index.
  */
 export class SessionDispatchWatcher {
+  private readonly clientLossTasks = createDaemonLossTasks();
+  inspectClientLoss() {
+    return {
+      stopped: !this.started && this.lifecycleGeneration > 0,
+      pending: this.clientLossTasks.size,
+    };
+  }
+
   /** Sessions this watcher is actively monitoring (keyed by sessionId → unsubscribe handle). */
   private readonly watchedSessions = new Map<SessionId, WatchedSession>();
 
@@ -684,6 +693,7 @@ export class SessionDispatchWatcher {
       });
     probeRecord.chain = next;
     this.sessionCheckChains.set(sessionId, next);
+    void this.clientLossTasks.track(next);
     // The maps own these promises even when an event handler intentionally
     // ignores the returned handle. Attach observers to avoid unhandled rejects;
     // callers that await either promise still receive the original rejection.
@@ -925,6 +935,7 @@ export class SessionDispatchWatcher {
         }
       });
     this.cancelCheckChains.set(sessionId, next);
+    void this.clientLossTasks.track(next);
     void next.catch(() => undefined);
     return next;
   }
@@ -996,6 +1007,7 @@ export class SessionDispatchWatcher {
         }
       });
     this.metadataReconcileChain = next;
+    void this.clientLossTasks.track(next);
   }
 
   private scheduleBootstrapDrain(): void {
@@ -1042,6 +1054,7 @@ export class SessionDispatchWatcher {
         }
       });
     this.bootstrapChain = next;
+    void this.clientLossTasks.track(next);
   }
 
   private async bootstrapOwnedSessions(reason: string, lifecycleGeneration: number): Promise<void> {
@@ -2256,13 +2269,22 @@ export class SessionDispatchWatcher {
       issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
       resume: resolveResumableAcpSessionId(meta),
     });
+    const automation = normalizeSessionTurnInputConfig(
+      queuedItem.acpSessionConfig
+    )?._lodyAutomation;
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
       inputBlocks,
       timestamp: queuedItem.timestamp,
-      inputConfig,
+      inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },
     });
-    return pendingEntry ? { ...pendingEntry, id: queuedTurnId } : null;
+    return pendingEntry
+      ? {
+          ...pendingEntry,
+          id: queuedTurnId,
+          ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+        }
+      : null;
   }
 
   /**
@@ -2529,7 +2551,12 @@ export class SessionDispatchWatcher {
         operationId,
         existingEntry: existing,
       });
-      return promoted.entry;
+      // Match the history dispatch projection: Loro omits undefined fields,
+      // while the in-memory queue builder can still own those properties.
+      return {
+        ...promoted.entry,
+        inputConfig: normalizeSessionTurnInputConfig(promoted.entry.inputConfig),
+      };
     } finally {
       releaseQueueMutation();
     }

@@ -68,6 +68,11 @@ File attachments use `file` blocks; the product contract is in
   for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
   speaker's side. Decision:
   [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
+- In an editable session, the image viewer offers markup for its current loaded image.
+  Markup uses a full-window lightbox; cancel returns to the same image preview.
+  The session composer accepts the annotated PNG and its notes through the same
+  validation and draft path as document selections; a failed handoff leaves the editor
+  open. Static and read-only image viewers do not offer this action.
 
 ## Codex file citations
 

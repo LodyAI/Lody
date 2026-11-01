@@ -112,10 +112,12 @@ before approved replacement; only the incoming identity is eligible for ready.
 On close stop new operations, drain actual work, then release ownership and owned
 buffers. A late callback cannot revive a retired runtime. Ordinary cache cleanup,
 logout and scope close retain identity and unresolved originals. Hard reset is an
-explicit separate action. Credential-confirmed terminal removal follows the
-existing desktop retention exception: bind the originating incarnation, drain only
+explicit separate action. Credential-confirmed terminal removal, and credential-confirmed revocation of
+this device, follow the existing desktop retention exception: bind the originating incarnation, drain only
 its workspace, retain cleanup evidence and spare other accounts/workspaces and
-replacement identities. Neither cleanup nor storage loss revokes copies elsewhere.
+replacement identities. Device revocation erases only this device's identity and
+keeps the membership; pairing again installs a new identity. Neither cleanup nor
+storage loss revokes copies elsewhere.
 
 ## Responsibility and acceptance
 
@@ -149,6 +151,27 @@ It does not implement a durable installation store. Browser cross-process
 KEK persistence, real IDB abort/quota/CAS, curve/HPKE byte equivalence, portable host
 and runtime composition, native first unlock/reinstall and minimum-OS device
 acceptance remain separate implementation evidence. No deployment is established.
+
+
+## Pairing start and approver (owner approved 2026-11-01)
+
+**Increment status: approved** on 2026-11-01 ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing)). Together with the [account-wide pairing increment](../e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01),
+this replaces two parts of the approved text:
+- the rule that the absence of a receipt "never starts this automatically";
+- the requirement of desktop approval.
+
+**Mobile.** Opening an encrypted workspace with no receipt and no residual protected
+state starts pairing automatically. The device is a personal installation behind the
+OS lock.
+
+**Web.** Pairing starts only after the user explicitly chooses "Request access".
+Browsers are often public or shared, so a signed-in session there must not silently
+create a persistent device identity or ask the account owner's devices to admit it.
+
+**Both.** Any active personal device of the same user may approve; machines and
+recovery devices may not. Every other row and rule is unchanged: residual, retired,
+missing or uncertain state still reconciles from exact evidence and never generates an
+identity over it.
 
 ## References
 

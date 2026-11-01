@@ -193,6 +193,7 @@ export function getIosSimulatorHardware(
 // Controls a device family can take. Unavailable ones stay listed, disabled.
 
 export type IosSimulatorControlId =
+  | 'back'
   | 'home'
   | 'app-switcher'
   | 'lock'
@@ -211,6 +212,7 @@ export function getIosSimulatorControlAvailability(
 ): Record<IosSimulatorControlId, boolean> {
   const handheld = hardware.family === 'iphone' || hardware.family === 'ipad';
   return {
+    back: false,
     home: hardware.family !== 'vision',
     'app-switcher': handheld,
     lock: handheld || hardware.family === 'watch',

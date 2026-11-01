@@ -84,3 +84,12 @@ this page is the full text of the rules summarised there.
   restoring the conversation to its tail must not unsubscribe before a query
   result arrives or discard an open editor. Workspace, user and surface visibility
   still gate the requests. Conversation provenance remains `leadingContent`.
+
+Session continuation uses the target machine's advertised protocol capability before
+starting reads: `sessionAutomations` for local IPC, `remoteAutomationControl` for
+remote control. Missing capabilities hide its settings and notes without polling;
+metadata updates enable the reader after a CLI upgrade. Supported owners retain
+connection-error recovery. Trailing connection warnings use `ConversationColumn`
+to align with messages in both normal and wide layouts. Workspace content and
+ownership admission remain unchanged; see the
+[continuation availability decision](../notes/implemented/feature/2026-10-30-session-continuation-general-availability.md).
