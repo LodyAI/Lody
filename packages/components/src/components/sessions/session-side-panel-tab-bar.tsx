@@ -663,9 +663,8 @@ const TAB_LAYOUT_TRANSITION = {
 
 const isSameDropIntent = (a: SidePanelTabDropIntent, b: SidePanelTabDropIntent): boolean => {
   if (a === null || b === null) return a === b;
-  if (a.kind === 'unsplit' || b.kind === 'unsplit') {
-    return a.kind === b.kind && a.tabId === (b as { tabId: string }).tabId;
-  }
+  if (a.kind === 'unsplit') return b.kind === 'unsplit' && a.tabId === b.tabId;
+  if (b.kind === 'unsplit') return false;
   return a.split[0] === b.split[0] && a.split[1] === b.split[1];
 };
 
