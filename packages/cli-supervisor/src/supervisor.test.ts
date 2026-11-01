@@ -507,6 +507,44 @@ describe('CliSupervisor lifecycle actor', () => {
       phase: 'stopping',
       message: expect.stringContaining('did not exit after SIGKILL'),
     });
+
+    // A retry re-sends SIGKILL at once instead of waiting out another grace period.
+    const retry = supervisor.stop();
+    const retryFailure = expect(retry).rejects.toThrow('did not exit after SIGKILL');
+    await vi.advanceTimersByTimeAsync(600);
+    await retryFailure;
+  });
+
+  it('retries termination of a group member that survived SIGKILL after its leader exited', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
+    const descendant = table.addDescendant(run.pid, { ignores: ['SIGTERM', 'SIGKILL'] });
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 1_000,
+      forceKillWaitMs: 500,
+      processOptions: { nodeProcess: table.api },
+    });
+
+    await supervisor.start();
+    const first = supervisor.stop();
+    const firstFailure = expect(first).rejects.toThrow('did not exit after SIGKILL');
+    await vi.advanceTimersByTimeAsync(1_600);
+    await firstFailure;
+    expect(table.isAlive(run.pid)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(true);
+
+    // The leader is gone, but the group is not released: a retry must not report success.
+    const second = supervisor.stop();
+    const secondFailure = expect(second).rejects.toThrow('did not exit after SIGKILL');
+    // An already escalated run goes straight to SIGKILL instead of a second grace period.
+    await vi.advanceTimersByTimeAsync(600);
+    await secondFailure;
+
+    table.exitOnItsOwn(descendant);
+    const third = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(600);
+    await third;
+    expect(supervisor.getState().phase).toBe('stopped');
   });
 
   it('cancels an in-progress preparation before restart and spawns only the new generation', async () => {

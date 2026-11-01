@@ -710,32 +710,38 @@ export class LoroStreamsMachineRpcServer {
           logError(
             `[rpc-server:${this.deps.machineId}] Loro Streams token rejected (status=${error.status}); the CLI token is invalid or has been revoked. Stopping request loop.`
           );
-          this.stopped = true;
+          // A full stop also aborts handlers and capability work in flight.
+          this.stop();
           this.deps.onFatalAuthFailure?.(error);
           return;
         }
 
+        let failure: unknown = error;
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
             this.deps.logger.warn(
               `[rpc-server:${this.deps.machineId}] request stream returned 404; recreating ${this.requestStreamId}`
             );
-            await this.streamClient.ensureJsonStream(
-              this.requestStreamId,
-              this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
-            );
-            this.requestState.nextOffset = '-1';
-            this.requestState.cursor = undefined;
-            continue;
-          }
-          if (error.status === 410) {
+            try {
+              await this.streamClient.ensureJsonStream(
+                this.requestStreamId,
+                this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+              );
+              this.requestState.nextOffset = '-1';
+              this.requestState.cursor = undefined;
+              continue;
+            } catch (ensureError) {
+              // Retry like any other loop error; never let it end the listener.
+              failure = ensureError;
+            }
+          } else if (error.status === 410) {
             this.requestState.nextOffset = '-1';
             this.requestState.cursor = undefined;
             continue;
           }
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = failure instanceof Error ? failure.message : String(failure);
         this.logRequestLoopError(message);
         await delay(REQUEST_LOOP_RETRY_DELAY_MS);
       }

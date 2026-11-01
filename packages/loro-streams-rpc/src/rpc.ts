@@ -2663,24 +2663,29 @@ export class LoroStreamsRpcResponseDispatcher {
         }
         if (readController.signal.aborted) continue;
 
+        let failure: unknown = error;
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
-            await this.options.streamClient.ensureJsonStream(
-              this.responseStreamId,
-              this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
-            );
-            this.responseState.nextOffset = '-1';
-            this.responseState.cursor = undefined;
-            continue;
-          }
-          if (error.status === 410) {
+            try {
+              await this.options.streamClient.ensureJsonStream(
+                this.responseStreamId,
+                this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+              );
+              this.responseState.nextOffset = '-1';
+              this.responseState.cursor = undefined;
+              continue;
+            } catch (ensureError) {
+              // Retry like any other loop error; never let it end the loop.
+              failure = ensureError;
+            }
+          } else if (error.status === 410) {
             this.responseState.nextOffset = '-1';
             this.responseState.cursor = undefined;
             continue;
           }
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = failure instanceof Error ? failure.message : String(failure);
         this.options.logger?.warn?.(
           `[rpc-client:${this.options.logLabel ?? this.options.workspaceId}] response loop error: ${message}`
         );
