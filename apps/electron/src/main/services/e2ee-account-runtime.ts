@@ -1,3 +1,4 @@
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -227,7 +228,7 @@ export function withDesktopE2eeAccount<A>(
           return yield* work(current)
         })
       )
-    )
+    ).pipe(withE2eeTestClock)
   ).catch((error: unknown) => {
     rememberDesktopE2eeFailure('account-operation', error)
     throw publicE2eeFailure(error)
@@ -707,7 +708,7 @@ export async function runDesktopE2eeOperation<A>(
       throw new Error('e2ee_account_mismatch')
   }
   assertAccount()
-  const result = await Effect.runPromise(work).catch((error) => {
+  const result = await Effect.runPromise(withE2eeTestClock(work)).catch((error) => {
     rememberDesktopE2eeFailure('runtime-operation', error)
     throw publicE2eeFailure(error)
   })

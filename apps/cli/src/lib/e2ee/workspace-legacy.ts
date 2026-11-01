@@ -1,3 +1,4 @@
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import {
   daemonLossObserver,
   daemonLossProbeEnabled,
@@ -645,7 +646,7 @@ async function openWorkspaceOwned(
   });
   await original.close();
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
-    Effect.runPromise(work.pipe(Scope.provide(scope)));
+    Effect.runPromise(withE2eeTestClock(work.pipe(Scope.provide(scope))));
   let clientLossAuthority:
     | { view: import('@lody/e2ee-core/protocol').LedgerView; generation: number }
     | undefined;
