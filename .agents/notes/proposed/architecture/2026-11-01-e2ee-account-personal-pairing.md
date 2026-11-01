@@ -190,22 +190,33 @@ behind the developer-mode beta switch "Account-wide device pairing".
   and signing. The UI checks a typed code locally only to name a typo before any network
   request, and wipes the decoded bytes at once.
 - **Visibility.** A host without the methods shows nothing, and the existing
-  per-workspace pairing stays below. No host implements the methods yet; desktop batch
-  signing comes next.
+  per-workspace pairing stays below. The desktop implements the methods over IPC; Web
+  and mobile hosts do not yet.
 
 ## Verification limits
 
 - The string format, key derivation, canonical request and approval bytes and both tags
   are pinned by `packages/e2ee-core/test/pairing-vector.json`. An independent
   standard-library Python generator (`test/generate-pairing-vector.py`) produces it.
-- The relay backend is a private default-off draft. Notifications, location and the
-  device wiring below are not done.
+- The relay backend is private and default off. Notifications and location are not done.
+- One end-to-end test runs on real desktop custody, bootstrap, ledger hosts and SQLite,
+  with an in-memory relay. No packaged, native or live-backend run exists.
 
 ## Desktop host
 
 [`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
-implements both sides in Electron main. It is not yet connected to IPC or to the
-per-workspace ledger hosts, which arrive as injected ports.
+implements both sides in Electron main.
+[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts)
+connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 port.
+- **Workspace list.** The renderer passes its encrypted workspace list as routing hints.
+  The host verifies every genesis against its own ledger or the request tag.
+- **New device.** It proves possession for the membership that verified history assigns
+  to the account's crypto user. On accept it finds the admission record by its
+  tag-authenticated ledger hash, takes that record's signer as the endorser, and installs
+  the invitation through the existing per-workspace join journal.
+- **Member approvers.** A Member cannot endorse a snapshot, so its approvals stay
+  awaiting delivery. A pending Spec increment proposes history delivery; it is not
+  implemented.
 - **Secret.** `S` stays in memory and never touches disk. A restart ends that request
   locally, and the device starts a new one with the same retained identities.
 - **Terminal states.** Approved, declined, expired and cancelled are recorded per lookup

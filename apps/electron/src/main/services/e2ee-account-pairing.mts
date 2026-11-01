@@ -17,6 +17,7 @@ import {
   encodePairingRequest,
   encodePairingSecret,
   formatPairingString,
+  hashRecordBytes,
   pairingApprovalTag,
   pairingRequestDigest,
   pairingRequestTag,
@@ -88,8 +89,13 @@ export interface AccountPairingApproverWorkspace {
   /** Prepares and signs one personal `AdmitDevice` for the row against the latest
    * verified ledger. No network; the caller journals the result before using it. */
   sign(row: PairingRequestRow): Effect.Effect<{ requestId: string; record: Uint8Array }, unknown>
-  /** Appends the exact journaled original; repeating it is safe and never re-signs. */
-  append(requestId: string, record: Uint8Array): Effect.Effect<void, unknown>
+  /** Appends the exact journaled original, bound to the new device's credential hash,
+   * then refreshes the verified ledger. Repeating it is safe and never re-signs. */
+  append(
+    requestId: string,
+    record: Uint8Array,
+    credentialHash: Uint8Array
+  ): Effect.Effect<void, unknown>
   /** A signed snapshot invitation once the admission is verified in the ledger, or
    * `null` while it cannot be delivered yet. */
   invitation(record: Uint8Array): Effect.Effect<Uint8Array | null, unknown>
@@ -303,8 +309,15 @@ export function makeDesktopAccountPairing(input: {
           const workspaces = yield* input.requesterWorkspaces()
           if (workspaces.length === 0) return yield* Effect.fail(fail('invalid-input'))
           const rows: PairingRequestRow[] = []
-          for (const workspace of workspaces)
-            rows.push({ genesis: workspace.genesis, ...(yield* workspace.identity()) })
+          // Each workspace stands alone: one that cannot prepare an identity now
+          // (for example a stale list entry) is left out, not the whole request.
+          for (const workspace of workspaces) {
+            const identity = yield* Effect.result(workspace.identity())
+            if (Result.isSuccess(identity))
+              rows.push({ genesis: workspace.genesis, ...identity.success })
+            else rememberDesktopE2eeFailure('account-pairing-identity', identity.failure)
+          }
+          if (rows.length === 0) return yield* Effect.fail(fail('invalid-input'))
           const request: PairingRequest = {
             account: input.account,
             lookupId: keys.lookupId,
@@ -386,7 +399,14 @@ export function makeDesktopAccountPairing(input: {
             if (!invitation) continue
             const bytes = raw(invitation.invitationHex)
             if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue
-            yield* workspace.accept(bytes, approved.admissionRecordHash)
+            // A failure here affects only this workspace; the next poll retries it.
+            const accepted = yield* Effect.result(
+              workspace.accept(bytes, approved.admissionRecordHash)
+            )
+            if (Result.isFailure(accepted)) {
+              rememberDesktopE2eeFailure('account-pairing-accept', accepted.failure)
+              continue
+            }
             yield* sql(() =>
               db
                 .prepare(
@@ -605,9 +625,30 @@ export function makeDesktopAccountPairing(input: {
               admission(workspace.workspaceId, row.signingPublicKey)
             ))!
             const appended = yield* Effect.result(
-              workspace.append(journaled.request_id, new Uint8Array(journaled.record))
+              workspace.append(
+                journaled.request_id,
+                new Uint8Array(journaled.record),
+                row.credentialHash
+              )
             )
             if (Result.isFailure(appended)) {
+              // The host reports `admission-lost` only when the verified ledger holds
+              // a different record in this original's slot: it can never commit, so
+              // retire it and let a later approval sign once more after rechecks.
+              const code =
+                appended.failure &&
+                typeof appended.failure === 'object' &&
+                'code' in appended.failure
+                  ? appended.failure.code
+                  : undefined
+              if (code === 'admission-lost')
+                yield* sql(() =>
+                  db
+                    .prepare(
+                      'DELETE FROM account_pairing_admissions WHERE workspace_id=? AND signing_key=? AND request_id=?'
+                    )
+                    .run(workspace.workspaceId, journaled.signing_key, journaled.request_id)
+                )
               outcomes.set(workspace.workspaceId, 'not-admitted')
               continue
             }
@@ -640,7 +681,10 @@ export function makeDesktopAccountPairing(input: {
               approverSigningPublicKey: deliverable[0]!.workspace.signingPublicKey,
               rows: deliverable.map((item) => ({
                 genesis: item.workspace.genesis,
-                admissionRecordHash: sha256(new Uint8Array(item.journaled.record)),
+                // The ledger's own record hash, so the new device finds the record.
+                admissionRecordHash: hashRecordBytes(
+                  new Uint8Array(item.journaled.record)
+                ).toBytes(),
                 invitationDigest: sha256(item.invitation)
               }))
             }

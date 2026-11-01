@@ -1673,6 +1673,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.personalPairing.invitation(session)
           )
         ),
+      signAccountAdmission: (
+        workspaceId: string,
+        row: {
+          signingPublicKey: Uint8Array
+          encryptionPublicKey: Uint8Array
+          possessionProof: Uint8Array
+        }
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.signAccount(row)
+          )
+        ),
+      accountInvitation: (workspaceId: string, record: Uint8Array) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.accountInvitation(record)
+          )
+        ),
       resetLocalPairing: (workspaceId: string, resetId: string) =>
         withPairing(workspaceId, (pairing) => pairing.reset(resetId)),
       localPairingContext: (workspaceId: string) =>
