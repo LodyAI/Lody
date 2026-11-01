@@ -28,6 +28,213 @@ import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
   it.each(
+    (['local', 'remote'] as const).flatMap((transport) =>
+      (['current', 'legacy', 'empty'] as const).map((format) => ({ transport, format }))
+    )
+  )(
+    'reads offline schedule metadata from a complete $format cache over $transport',
+    async ({ transport, format }) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const workspaceId = 'offline-metadata-workspace' as WorkspaceId;
+      const machineId = 'offline-metadata-machine' as MachineId;
+      const sessionId = 'offline-metadata-session' as SessionId;
+      const turns: SessionHistoryInput[] =
+        format === 'empty'
+          ? []
+          : [
+              {
+                id: 'scheduled-user',
+                role: 'user',
+                timestamp: '2026-10-31T00:00:00Z',
+                userId: 'synthetic-author',
+                inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+                scheduleRun: { scheduleId: 'synthetic-schedule' },
+                items: [{ type: 'text', text: 'Synthetic scheduled prompt' }],
+              },
+              {
+                id: 'scheduled-assistant',
+                role: 'assistant',
+                timestamp: '2026-10-31T00:00:01Z',
+                userTurnId: 'scheduled-user',
+                endedAt: 1234,
+                finished: true,
+                items: [{ type: 'text', text: 'Synthetic scheduled result' }],
+              },
+            ];
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      const options = { workspaceId, machineId, coherentInspection: true, incremental: true };
+      const offline = async (): Promise<never> => {
+        throw new Error('Synthetic owner offline');
+      };
+      const factory =
+        transport === 'local'
+          ? createLocalRoostSessionDataFactory({ ...options, sendControl: offline })
+          : createRemoteRoostSessionDataFactory({
+              ...options,
+              requestHistoryRead: offline,
+              requestHistoryWrite: offline,
+            });
+      const data = factory({ sessionId, doc, backendKind: 'roost' });
+      const getAll = IDBObjectStore.prototype.getAll;
+      let bulkRead: ReturnType<typeof vi.spyOn> | undefined;
+      try {
+        await cache.acceptPage(
+          {
+            rows: turns.map((turn, position) => {
+              const row = createRoostDirectoryRow(position, turn);
+              if (format !== 'legacy') return row;
+              const {
+                metadataVersion: _version,
+                userId: _user,
+                inputConfig: _config,
+                scheduleRun: _run,
+                ...legacy
+              } = row;
+              return legacy;
+            }),
+            startPosition: 0,
+            totalCount: turns.length,
+            hasMoreOlder: false,
+            cursor: null,
+            checkpoint: 'offline-metadata-checkpoint',
+          },
+          turns,
+          7
+        );
+        bulkRead = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+          ...args
+        ) {
+          if (this.name === 'rows') throw new Error('Metadata must not load all cached bodies');
+          return getAll.apply(this, args);
+        });
+        const expected =
+          format === 'empty'
+            ? []
+            : [
+                {
+                  id: 'scheduled-user',
+                  role: 'user',
+                  timestamp: turns[0]!.timestamp,
+                  userId: 'synthetic-author',
+                  inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+                  scheduleRun: { scheduleId: 'synthetic-schedule' },
+                },
+                {
+                  id: 'scheduled-assistant',
+                  role: 'assistant',
+                  timestamp: turns[1]!.timestamp,
+                  userTurnId: 'scheduled-user',
+                  endedAt: 1234,
+                  finished: true,
+                  inputConfig: undefined,
+                },
+              ];
+        expect(await readSessionHistoryMetadata(data.history)).toEqual(expected);
+      } finally {
+        bulkRead?.mockRestore();
+        data.dispose();
+        cache.dispose();
+        doc.free();
+      }
+    }
+  );
+
+  it.each(['partial', 'stale', 'other-account', 'read-failed'] as const)(
+    'reads owner metadata instead of using a %s cache',
+    async (condition) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const workspaceId = 'metadata-admission-workspace' as WorkspaceId;
+      const machineId = 'metadata-admission-machine' as MachineId;
+      const sessionId = 'metadata-admission-session' as SessionId;
+      const turns: SessionHistoryInput[] = [0, 1].map((index) => ({
+        id: `scheduled-${index}`,
+        role: 'user',
+        timestamp: '2026-10-31T00:00:00Z',
+        inputConfig: { modeId: 'ask', modelId: 'cached-model' },
+        items: [{ type: 'text', text: 'Synthetic prompt' }],
+      }));
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      const data = createLocalRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        coherentInspection: true,
+        incremental: true,
+        ...(condition === 'other-account' ? { accountId: 'different-account' } : {}),
+        sendControl: async (request) => {
+          if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+          const query = request.query;
+          if (query.kind !== 'readAt' && query.kind !== 'readMetadata')
+            throw new Error('Metadata lookup requested transcript bodies');
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                historyRevision: 8,
+                historyCount: turns.length,
+                result:
+                  query.kind === 'readAt'
+                    ? { state: 'missing' }
+                    : [
+                        {
+                          id: turns[0]!.id,
+                          role: 'user',
+                          timestamp: turns[0]!.timestamp,
+                          inputConfig: { modelId: 'owner-model' },
+                        },
+                      ],
+              },
+            ],
+          };
+        },
+      })({ sessionId, doc, backendKind: 'roost' });
+      let cursorRead: ReturnType<typeof vi.spyOn> | undefined;
+      try {
+        const start = condition === 'partial' ? 1 : 0;
+        await cache.acceptPage(
+          {
+            rows: turns
+              .slice(start)
+              .map((turn, offset) => createRoostDirectoryRow(start + offset, turn)),
+            startPosition: start,
+            totalCount: turns.length,
+            hasMoreOlder: start > 0,
+            cursor: null,
+          },
+          turns.slice(start),
+          7
+        );
+        if (condition === 'stale') await data.history.readAt(2);
+        if (condition === 'read-failed')
+          cursorRead = vi.spyOn(IDBObjectStore.prototype, 'openCursor').mockImplementation(() => {
+            throw new Error('Synthetic cache read failure');
+          });
+        expect(await readSessionHistoryMetadata(data.history)).toEqual([
+          {
+            id: turns[0]!.id,
+            role: 'user',
+            timestamp: turns[0]!.timestamp,
+            inputConfig: { modelId: 'owner-model' },
+          },
+        ]);
+      } finally {
+        cursorRead?.mockRestore();
+        data.dispose();
+        cache.dispose();
+        doc.free();
+      }
+    }
+  );
+
+  it.each(
     [0, 1, 500, 501].flatMap((count) =>
       [false, true].map((coherentInspection) => ({ count, coherentInspection }))
     )

@@ -1001,6 +1001,11 @@ const createRoostSessionDataFactoryFromTransport =
 
     const history: SessionHistoryReader = {
       readMetadata: async () => {
+        const head = await canReadCache();
+        if (head?.start === 0) {
+          const rows = await cached(() => cache.readCompleteDirectory(head));
+          if (rows) return readSessionHistoryMetadata({ readDirectory: () => rows });
+        }
         const entries = coherentInspectionEnabled()
           ? await readEntries({ kind: 'readMetadata' })
           : await history.readAll();

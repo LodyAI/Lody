@@ -39,6 +39,8 @@ The Loro column identifies the nine complete-body reads in scope. Its output, di
 
 Shared metadata readers expose identity, state, attribution, schedule markers and allowlisted input configuration. Loro reads the stored containers directly, including legacy text fields. Roost combines primary, late, complete-state, delta-state and permission-response segments into the logical projection.
 
+Renderer metadata reads reuse a complete admitted IndexedDB snapshot. A single read-only cursor projects cached turns individually, including metadata absent from older directory rows. Partial or stale snapshots continue through the owner query.
+
 The Native owner queue binds selection and hydration to a generation/event observation. Dispatch-index repair reads field pages; original-Create fingerprint recovery scans immutable creation bytes inside Native one record at a time.
 
 Owner RPC negotiates `sessionHistoryInspection` v2. Metadata, latest-goal, limited transcript and replay queries run in the owner command queue and return their publication with the result. Replay returns the budgeted prompt and statistics. ID lookups use the existing single-turn request.
@@ -77,7 +79,7 @@ The shared inspection entry previously prepared the complete field index before 
 
 Transcript queries memoize item types, text-presence flags and image counts in a private index. Every touched record invalidates its memo, including text-only updates with otherwise identical metadata. The index token, cache epoch and exact event coverage distinguish current entries from writes made by older owners. Missing, malformed or unavailable cache entries use the existing field projection. Memoization stores no text and leaves the response shape unchanged.
 
-Sparse membership planning already holds a certified field projection. Unchanged physical members retain those fields; replacement members use their complete prepared values and new physical aliases. Reuse requires a contiguous Native-exclusive write interval, the matching activation revision/head and observation scope, and a final generation/cursor check. The index is rewritten during the structural operation; subsequent reads use that projection. An interrupted or externally changed projection is rebuilt from authoritative fields. Initial field discovery remains necessary when no valid projection exists.
+Sparse membership planning already holds a certified field projection. Unchanged physical members retain those fields; replacement members use their complete prepared values and new physical aliases. Reuse requires a contiguous Native-exclusive write interval, the matching activation revision/head and observation scope, and a final generation/cursor check. The index is rewritten during the structural operation; subsequent reads use that projection. An interrupted or externally changed projection is rebuilt from authoritative fields. Normal appends and streaming writes maintain the index incrementally, and valid persisted checkpoints survive reopening. When no valid projection exists, indexed queries rebuild and persist it through paged discovery across the history's fields; a failed rebuild fails that query.
 
 The SDK page decoder separately reuses the same Turn's already-read authoritative header instead of exporting its full Create again for immutable parents. Its body/header comparison, stable read and bounded sealed-body cache remain in place. This is a TypeScript SDK implementation change; the Native API and stored format do not change.
 
