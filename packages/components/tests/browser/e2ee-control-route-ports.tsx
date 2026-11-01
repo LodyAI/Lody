@@ -24,6 +24,11 @@ export const createFileRoute = () => (options: { component: () => ReactNode }) =
 });
 export const useNavigate = () => noop;
 export const useSetAtom = () => noop;
+// The only atom the route reads is the account pairing beta, which stays off here.
+export const useAtomValue = () => false;
+export const e2eeAccountPairingFeatureEnabledAtom = 'accountPairing';
+export const isElectronRenderer = () => false;
+export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
 export const useE2eeAccountId = () => fixture.accountId;
 export const usePlatform = () => ({ e2eeWorkspaces: fixture.port });
@@ -74,6 +79,8 @@ export const E2eeRemoteMachinePairing = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;
+export const E2eeAccountPairingRequest = () => null;
+export const E2eeAccountPairingApprove = () => null;
 // The approval guide replaces the full page only for devices that still need approval.
 export const E2eeDeviceApprovalGuide = () =>
   createElement('output', { 'data-approval-guide': true });

@@ -117,6 +117,13 @@ Translation: current
 - **多个批准者。** 领取会返回所有已发布的批准，因为每个批准者只覆盖自己能签名的工作区。
 - **接纳记录。** 接纳记录走现有的账本追加路径。每条邀请行都带上批准者在该工作区的设备访问凭据。
 
+## 客户端界面
+
+宿主端口是 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts)
+中可选的 `E2eeAccountPairingRuntime`。页面在 [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx)，由开发者模式下的测试功能开关“账号级设备配对”控制。
+- **职责归属。** `S`、每个标签的校验、有效期检查、终态记录和签名都由宿主负责。界面在本地校验输入的配对码，只是为了在发出任何网络请求之前指出输入错误；解码出的字节随即清零。
+- **何时显示。** 宿主没有实现这些方法时，界面什么都不显示，原有的按工作区配对仍保留在下方。目前还没有宿主实现这些方法；下一步是桌面端的批量签名。
+
 ## 验证局限
 
 - 字符串格式、密钥派生、规范的请求与批准字节以及两个标签都由 `packages/e2ee-core/test/pairing-vector.json` 固定。该向量由一个只用标准库的独立 Python 生成器（`test/generate-pairing-vector.py`）产生。
