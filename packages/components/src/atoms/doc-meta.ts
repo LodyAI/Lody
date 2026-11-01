@@ -253,6 +253,49 @@ export type DocMetaCacheScope = {
 /** Identifies which runtime owns the current singleton metadata projection. */
 export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
 
+/** Public-ID-only automation projection. This names an expected execution
+ * target; it is not a write, persistence or execution receipt. */
+export const sessionMetaIdentityAtomFamily = atomFamily((sessionId: SessionId) => {
+  let previous: {
+    workspaceId: WorkspaceRuntime['workspaceId'];
+    sessionId: SessionId;
+    machineId: NonNullable<SessionMeta['machineId']>;
+  } | null = null;
+  return atom((get) => {
+    const runtime = get(activeWorkspaceRuntimeAtom);
+    const scope = get(docMetaCacheScopeAtom);
+    const roomId = getSessionRoomId(sessionId);
+    const meta = get(sessionMetaCacheAtom)[roomId];
+    if (
+      !runtime ||
+      !scope?.ready ||
+      scope.runtime !== runtime ||
+      scope.workspaceId !== runtime.workspaceId ||
+      scope.workspaceSlug !== runtime.workspaceSlug ||
+      get(docMetaProjectionPendingAtomFamily(roomId)) ||
+      !meta ||
+      meta.id !== sessionId ||
+      typeof meta.machineId !== 'string' ||
+      !meta.machineId.trim()
+    ) {
+      previous = null;
+      return null;
+    }
+    if (
+      previous?.workspaceId === scope.workspaceId &&
+      previous.sessionId === meta.id &&
+      previous.machineId === meta.machineId
+    )
+      return previous;
+    previous = {
+      workspaceId: scope.workspaceId,
+      sessionId: meta.id,
+      machineId: meta.machineId,
+    };
+    return previous;
+  });
+});
+
 /**
  * The ready projection for `repo`, or null while it bootstraps or belongs to
  * another runtime. Lets runtime startup readers skip a second full meta scan.
