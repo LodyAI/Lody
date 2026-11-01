@@ -59,7 +59,7 @@
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
-- Native Effect applies and persists configuration before prompting. Loro admission checks user revisions against loaded data without connection confirmation. Missing baselines load within budget or fail visibly; unversioned inputs retain legacy admission. Approved derivations and owner receipts retain frozen requirements; renderer outboxes are not acceptance. Dispatch preserves revisions. Failed inputs never redispatch; recovery creates new input. Steer retains live confirmation.
+- Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
@@ -98,7 +98,7 @@
   ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
-- Fork and continuation share `resolveSessionAcpTargetId`; publish the target agent’s confirmed configuration after fork, never the source’s current or historical configuration.
+- Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit
   display projections stay outside compensation.

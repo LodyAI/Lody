@@ -144,13 +144,18 @@ export function materializeReplay(args: {
   };
 }
 
-/** Imported history never establishes a live execution configuration. */
+/** The document rejects the imported runtime selection once a Lody turn is newer. */
 async function applyBoundHistoryImport(
-  backend: Pick<SessionBackend, 'applyHistoryImport'>,
+  backend: Pick<SessionBackend, 'applyHistoryImport' | 'applyAcpRuntimeConfigPatch'>,
   input: HistoryImportInput & { replay: MaterializedReplay }
 ): Promise<number> {
   const result = await backend.applyHistoryImport(input);
   if (result.status === 'accepted') {
+    const { history, runtimeConfig } = input.replay;
+    const lastUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
+    if (runtimeConfig && lastUserTurn) {
+      await backend.applyAcpRuntimeConfigPatch(lastUserTurn.id, runtimeConfig);
+    }
     return result.appended;
   }
   if (result.status === 'rejected') {

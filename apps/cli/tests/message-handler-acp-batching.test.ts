@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
-import { Effect } from 'effect';
 import { RequestError } from '@agentclientprotocol/sdk';
 import { LoroRepo } from 'loro-repo';
 import { getSessionRoomId, type ACPSessionId, type MachineId } from '@lody/shared';
@@ -17,7 +16,6 @@ import type {
 import type { SessionUsageUpdate } from 'acp-extension-core';
 import type { TurnOutcomeFact } from '@lody/shared/notifications';
 import { MessageHandler } from '../src/lib/message-handler';
-import { getAcpRuntimeConfigPatch } from '../src/lib/acp/runtime-config';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import { SessionManager } from '../src/session/session-manager';
@@ -296,21 +294,7 @@ const createRecoveryHarness = async (
     const session = new Session(config, logger, '/tmp', sandbox);
     session.acpSessionId = (replacement ? 'acp-replacement' : 'acp-old') as ACPSessionId;
     let promptPending = false;
-    const configuration = {
-      acpSessionId: session.acpSessionId,
-      generation: replacement ? 'replacement' : 'original',
-      state: 'ready' as const,
-    };
     session.agentClient = {
-      configurationGeneration: configuration.generation,
-      getRuntimeConfiguration: () => configuration,
-      getConfiguration: () => ({
-        options: [],
-        read: Effect.succeed(configuration),
-        setMode: () => Effect.void,
-        setModel: () => Effect.void,
-        setOption: () => Effect.void,
-      }),
       isCreated: () => true,
       getAvailableCommands: () => [],
       getConfigOptions: () => [],
@@ -322,18 +306,8 @@ const createRecoveryHarness = async (
       prompt: async () => {
         submissions.push(replacement ? 'replacement' : 'old');
         if (!replacement) {
-          for (const update of options.updates ?? []) {
-            Object.assign(
-              configuration,
-              getAcpRuntimeConfigPatch({ sessionId: configuration.acpSessionId, update })
-            );
-            manager.emit(
-              'onACPUpdateMessage',
-              sessionId,
-              { sessionId, update },
-              configuration.generation
-            );
-          }
+          for (const update of options.updates ?? [])
+            manager.emit('onACPUpdateMessage', sessionId, { sessionId, update });
           if (options.flushBeforeReturn) await host.flushACPUpdatesNow(sessionId);
           await options.onPrompt?.();
           if (options.completeNormally) return { stopReason: 'end_turn' };
@@ -1004,9 +978,7 @@ describe('MessageHandler ACP batching', () => {
             throw new Error('Turn ended before the ACP update');
           }),
         ]);
-        expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toHaveLength(
-          update.sessionUpdate === 'current_mode_update' ? 0 : 1
-        );
+        expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toHaveLength(1);
         if (flushBeforeDisconnect) {
           await h.host.flushACPUpdatesNow(h.sessionId);
           expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);

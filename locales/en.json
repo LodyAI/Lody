@@ -1,7 +1,4 @@
 {
-  "sessions.configuration.updateRequired": "Update the execution machine to send messages with confirmed configuration.",
-  "sessions.configuration.invalidSelection": "The selected configuration is unavailable. Review the settings before sending.",
-  "sessions.configuration.unconfirmed": "Agent configuration will be confirmed when the next message runs.",
   "export.e2ee.title": "Create a decrypted copy?",
   "export.e2ee.disclosure": "This creates a readable copy outside the encrypted workspace. Anyone with access to the clipboard or saved file can read it. Later workspace revocation cannot take it back.",
   "export.e2ee.confirm": "Create decrypted copy",
@@ -6028,8 +6025,5 @@
   "sessions.androidEmulator.quality.label": "Preview quality",
   "sessions.androidEmulator.quality.saver": "Data saver",
   "sessions.androidEmulator.quality.balanced": "Balanced",
-  "sessions.androidEmulator.quality.clear": "Clear",
-  "sessions.systemNotices.chatFailed.sessionConfigChanged": "The configuration was updated elsewhere. Resend with the current configuration.",
-  "sessions.messageStatus.failedResend": "Failed — resend",
-  "sessions.resendUndelivered.failedDescription": "Send the same content as a new message with the current configuration? Any work already completed could be repeated."
+  "sessions.androidEmulator.quality.clear": "Clear"
 }

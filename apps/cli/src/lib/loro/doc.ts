@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from 'node:util';
-import { assertSessionConfigRevision } from '@lody/shared';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -2119,10 +2118,6 @@ const acpRuntimeConfigEqual = (
   right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
 ): boolean =>
   left.acpSessionId === right.acpSessionId &&
-  left.generation === right.generation &&
-  left.state === right.state &&
-  left.error?.code === right.error?.code &&
-  left.error?.message === right.error?.message &&
   left.basedOnUserTurnId === right.basedOnUserTurnId &&
   left.modeId === right.modeId &&
   left.modelId === right.modelId &&
@@ -2192,8 +2187,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
   /** Serialize async ACP runtime patches so history reads cannot race a newer patch. */
-  private acpRuntimeConfigGeneration: string | undefined;
-  private persistedAcpRuntimeConfigRevision: number | undefined;
   private acpRuntimeConfigPatchSerial: Promise<unknown> = Promise.resolve();
   private destroyed = false;
   /** Backend bound during initialization; subscriptions must use this instance. */
@@ -2878,161 +2871,82 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     });
   }
 
-  isAcpConfigurationConfirmed(generation: string | undefined): boolean {
-    const current = this.mirror?.getState().acpRuntimeConfig;
-    return (
-      generation !== undefined &&
-      this.acpRuntimeConfigGeneration === generation &&
-      current?.generation === generation &&
-      current.revision === this.persistedAcpRuntimeConfigRevision &&
-      (current.state === 'ready' || current.state === 'failed')
-    );
-  }
-
-  /** Called only when a local execution owner attaches, never by remote readers. */
-  async invalidateStoredAcpRuntimeConfig(): Promise<void> {
-    if (this.acpRuntimeConfigGeneration || !this.mirror) return;
-    this.mirror.setState((state) => {
-      const current = state.acpRuntimeConfig;
-      if (current?.generation && current.state !== 'unknown') {
-        current.state = 'unknown';
-        current.revision += 1;
-        current.error = {
-          code: 'ACP_CONFIG_RESTARTED',
-          message: 'Agent configuration will be confirmed on the next connection.',
-        };
-      }
-      return state;
-    });
-    await this.flushLocalWrites();
-  }
-
-  /** Serialize first acceptance and its durable receipt with configuration publication. */
-  acceptWithConfigRevision<A>(
-    input: { configRevision?: number },
-    accept: () => Promise<A>,
-    alreadyAccepted: () => boolean | Promise<boolean> = () => false,
-    onRejected?: (error: Error) => Promise<A>,
-    loroInput?: { waitForSync: () => Promise<void> }
-  ): Promise<A> {
-    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
-      if (await alreadyAccepted()) return accept();
-      try {
-        if (loroInput && input.configRevision !== undefined) {
-          // Loaded document revision is an input baseline, not proof of a live ACP
-          // connection. Dispatch must be able to establish that connection after a crash.
-          const readRevision = () => this.mirror?.getState().acpRuntimeConfig?.revision;
-          if (readRevision() === undefined || this.acpRuntimeConfigGeneration === undefined) {
-            try {
-              await loroInput.waitForSync();
-            } catch (cause) {
-              throw new Error(
-                'SESSION_CONFIG_UNCONFIRMED: The session configuration could not be loaded.',
-                { cause }
-              );
-            }
-          }
-          const revision = readRevision();
-          if (revision === undefined || !Number.isSafeInteger(revision) || revision < 0)
-            throw new Error(
-              'SESSION_CONFIG_UNCONFIRMED: The session configuration could not be loaded.'
-            );
-          if (input.configRevision < revision)
-            throw new Error(
-              'SESSION_CONFIG_CHANGED: The agent configuration changed. Review the settings and send again.'
-            );
-        } else {
-          if (
-            input.configRevision !== undefined &&
-            !this.isAcpConfigurationConfirmed(this.acpRuntimeConfigGeneration)
-          )
-            throw new Error(
-              'SESSION_CONFIG_UNCONFIRMED: The agent configuration is not confirmed.'
-            );
-          assertSessionConfigRevision(input, this.mirror?.getState().acpRuntimeConfig);
-        }
-      } catch (error) {
-        if (
-          onRejected &&
-          error instanceof Error &&
-          /^SESSION_CONFIG_(CHANGED|UNCONFIRMED):/.test(error.message)
-        )
-          return onRejected(error);
-        throw error;
-      }
-      return accept();
-    });
-    this.acpRuntimeConfigPatchSerial = next.then(
-      () => undefined,
-      () => undefined
-    );
-    return next;
-  }
-
-  retireAcpRuntimeConfig(generation: string): Promise<boolean> {
-    const current = this.mirror?.getState().acpRuntimeConfig;
-    if (!current || current.generation !== generation) return Promise.resolve(false);
-    return this.applyAcpRuntimeConfigPatch('', {
-      acpSessionId: current.acpSessionId,
-      generation,
-      state: 'unknown',
-      error: {
-        code: 'ACP_CONFIG_DISCONNECTED',
-        message: 'Agent configuration will be confirmed on the next connection.',
-      },
-    }).then((changed) => {
-      if (this.acpRuntimeConfigGeneration === generation)
-        this.acpRuntimeConfigGeneration = undefined;
-      return changed;
-    });
-  }
-
-  /** Only the execution owner can establish a live connection generation. */
-  beginAcpRuntimeConfig(
-    basedOnUserTurnId: string,
-    patch: SessionAcpRuntimeConfigPatch
-  ): Promise<boolean> {
-    if (!patch.generation)
-      return Promise.reject(new Error('ACP configuration generation is required'));
-    const replacing = this.acpRuntimeConfigGeneration !== patch.generation;
-    this.acpRuntimeConfigGeneration = patch.generation;
-    return this.writeAcpRuntimeConfig(basedOnUserTurnId, patch, replacing);
-  }
-
   applyAcpRuntimeConfigPatch(
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
-    return this.writeAcpRuntimeConfig(basedOnUserTurnId, patch, false);
-  }
+    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
+      if (!this.mirror) {
+        throw new Error('SessionDocument not initialized');
+      }
 
-  private writeAcpRuntimeConfig(
-    basedOnUserTurnId: string,
-    patch: SessionAcpRuntimeConfigPatch,
-    replace: boolean
-  ): Promise<boolean> {
-    const next = this.acpRuntimeConfigPatchSerial.then(() => {
-      if (!this.mirror) throw new Error('SessionDocument not initialized');
-      if (!patch.generation || patch.generation !== this.acpRuntimeConfigGeneration) return false;
-      const current = this.mirror.getState().acpRuntimeConfig as
-        | SessionAcpRuntimeConfigSnapshot
-        | undefined;
-      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
-        ...(!replace && current?.generation === patch.generation ? current : {}),
-        ...patch,
-        basedOnUserTurnId: basedOnUserTurnId || current?.basedOnUserTurnId || '',
-        ...(patch.configOptionValues === undefined
-          ? {}
+      const durablePatch: SessionAcpRuntimeConfigPatch =
+        patch.configOptionValues === undefined
+          ? patch
           : {
+              ...patch,
               configOptionValues: Object.fromEntries(
                 Object.entries(patch.configOptionValues).filter(
-                  ([id]) => !isSensitiveAcpConfigOptionId(id)
+                  ([configId]) => !isSensitiveAcpConfigOptionId(configId)
                 )
               ),
-            }),
+            };
+
+      const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
+      if (!history) {
+        throw new Error('Session history is not initialized');
+      }
+      const count = await history.count();
+      const rows = await history.readDirectory(0, count);
+      const userTurnIndex = new Map<string, number>();
+      let latestUserTurnIndex = -1;
+      for (const row of rows) {
+        if (row.state !== 'ready' || row.scalars?.role !== 'user' || !row.turnId) continue;
+        userTurnIndex.set(row.turnId, row.position);
+        latestUserTurnIndex = row.position;
+      }
+
+      const state = this.mirror?.getState();
+      if (!state) throw new Error('SessionDocument not initialized');
+      const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
+      if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+        return false;
+      }
+
+      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+      const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
+      if (currentTurnIndex > incomingTurnIndex) {
+        return false;
+      }
+
+      const continuesCurrentSnapshot =
+        current?.acpSessionId === durablePatch.acpSessionId &&
+        current.basedOnUserTurnId === basedOnUserTurnId;
+      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+        ...(current?.acpSessionId === durablePatch.acpSessionId &&
+        current.availableCommands !== undefined
+          ? { availableCommands: current.availableCommands }
+          : {}),
+        ...(continuesCurrentSnapshot
+          ? {
+              ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+              ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+              ...(current.configOptionValues !== undefined
+                ? { configOptionValues: current.configOptionValues }
+                : {}),
+            }
+          : {}),
+        ...durablePatch,
+        basedOnUserTurnId,
       };
-      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) return false;
-      const nextSnapshot = { ...nextWithoutRevision, revision: (current?.revision ?? 0) + 1 };
+      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+        return false;
+      }
+
+      const nextSnapshot: SessionAcpRuntimeConfigSnapshot = {
+        ...nextWithoutRevision,
+        revision: (current?.revision ?? 0) + 1,
+      };
       this.mirror.setState((prev) => {
         prev.acpRuntimeConfig = nextSnapshot;
         return prev;
@@ -3713,12 +3627,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async flushLocalWrites(): Promise<void> {
-    const revision = this.mirror?.getState().acpRuntimeConfig?.revision;
     await this.repo.flush();
-    this.persistedAcpRuntimeConfigRevision = Math.max(
-      this.persistedAcpRuntimeConfigRevision ?? -1,
-      revision ?? -1
-    );
   }
 }
 

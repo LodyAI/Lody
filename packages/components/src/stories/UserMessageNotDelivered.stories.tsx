@@ -107,35 +107,3 @@ export const OrdinaryPending: Story = {
   },
   render: (args) => renderRow(args, undefined),
 };
-
-/** A revision rejected before the prompt retains its content and offers an explicit new send. */
-export const ConfigurationChanged: Story = {
-  args: {
-    message: { ...pendingUserMessage('stale-config-input', messageText), status: 'failed' },
-    sessionId,
-    onResendUndelivered: resendStub,
-  },
-  render: (args) => (
-    <>
-      {renderRow(args, undefined)}
-      {renderRow(
-        {
-          sessionId,
-          message: {
-            id: 'config-failure',
-            role: 'system',
-            timestamp: '2026-10-31T00:00:00Z',
-            items: [
-              {
-                type: 'system_notice',
-                name: 'chat_failed',
-                meta: { reason: 'session_config_changed' },
-              },
-            ],
-          } as SessionHistoryParsed,
-        },
-        undefined
-      )}
-    </>
-  ),
-};

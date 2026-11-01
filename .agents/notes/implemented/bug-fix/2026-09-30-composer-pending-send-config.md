@@ -1,4 +1,4 @@
-# Composer provenance during attachment preparation
+# Composer configuration during attachment preparation
 
 Status: implemented
 Translation: current
@@ -8,26 +8,53 @@ PR: [#1160](https://github.com/LodyAI/Lody/pull/1160)
 
 ## Abstract
 
-A held attachment send has frozen input before history publication. Its pending row
-preserves that input and supplies Role/MCP provenance while the document hydrates.
-Current run configuration belongs to the execution owner; the
-[configuration decision](../architecture/2026-10-31-session-config-ownership.md)
-replaces the former held-send mode/model/options baseline.
+A held attachment send already froze its configuration, but a newly opened
+composer read only synchronized history and queue sources and therefore displayed
+provider defaults until the upload finished. The composer now derives a temporary
+baseline from the latest local held send, preserving explicit edits for the next
+draft. The held send and its written turn share one logical identity for draft
+fencing. This keeps selection continuous without adding durable state or changing
+the frozen send; packaged-device behavior remains unverified.
 
-## Decision
+## Decision and ownership
+
+This completes the UI configuration handoff after [removing the send journal](../simplification/2026-09-29-remove-session-send-journal.md).
+The [attachment Spec](../../../../specs/session-files.md#61-send-boundary) owns the
+intended behavior; [run-config documentation](../../../docs/sessions-run-config.md)
+explains its integration with ordinary selection and Role provenance.
 
 `useSessionPendingConfig` subscribes to the latest frozen entry for one session,
-not attachment progress. A written entry remains the provenance source until its
-Turn appears; cancellation releases that source. A newly observed durable Turn
-permanently supersedes an older local source, even if the newer Turn is removed.
-Scope includes session and pending-send store.
+not to attachment progress. It supplies configuration and Role source fences to
+`session-chat-interface.tsx`. An older runtime baseline cannot override this local
+source. Selection remains a pure derivation over inputs and user edits.
 
-The logical Turn key survives held-to-history/queue handoff. Private run-config
-edits are consumed only by their own admission receipt, not this provenance fence.
-Freezing the entire composer would prevent editing the next draft; simplifying its
-face would lose ACP-only model and Role labels. Existing faces remain available.
+When a written history turn has not reached the rendered source snapshot yet,
+the hook retains the frozen entry until the matching Turn appears. Cancellation
+has no landed turn and releases the temporary source. A newly observed durable
+Turn supersedes an older local source permanently; removing that durable Turn
+cannot resurrect it. Scope identity includes both session and pending-send store.
 
-The attachment Spec owns [send admission](../../../../specs/session-files.md#61-send-boundary).
-Behavioral tests use the real pending-send store and controlled preparation promises
-for publication lag, cancellation, next-draft edits and session isolation. They do
-not establish packaged-device or live-provider acceptance.
+The preference revision uses the logical Turn key for both the held send and its
+history/queue row. A source-kind transition therefore cannot consume an explicit
+next-draft edit, even when its value equals the submitted value. Role receives the
+same baseline and lineage as the other controls. Desktop and mobile keep their
+normal configuration faces while submission disables menus or sheets.
+
+Keeping only the old simplified label would still omit models advertised through
+ACP config options and would drop Role identity. Freezing the whole visible
+composer would prevent independent editing of the next draft. Reusing the current
+control faces and the existing frozen entry addresses both boundaries.
+
+## Verification and limits
+
+Behavioral tests extend the existing configuration and control-face suites using
+synthetic messages, the real pending-send store and controlled preparation promises.
+They cover an empty hydrating document, continuation runtime fencing, history
+publication lag, explicit next-draft edits, failure/cancellation, multiple local
+sends, session switching and durable supersession. Face tests cover ACP-only model
+labels, Role identity and disabled mobile configuration.
+
+No native-device or daemon-delivery acceptance is claimed. Component type checking
+is limited by dependencies missing or older than this checkout's lockfile; document
+checking has pre-existing links into uninitialized ACP submodules. The change adds
+no persistence, transfer protocol or message-write path.

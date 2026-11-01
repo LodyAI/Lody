@@ -1,7 +1,6 @@
 # Show rejected model selections in the GUI
 
 Status: implemented
-Archived: 2026-10-31
 Translation: current
 PR: [#1341](https://github.com/LodyAI/Lody/pull/1341)
 
@@ -22,7 +21,7 @@ This partially replaces the CLI warning policy: model selection failures are
 visible, while Codex/Claude effort, Fast and Plan mismatch suppression remains.
 The [orchestration Spec](../../../../specs/session-orchestration.md#runtime-model-rejection)
 records the changed guarantee as draft. The
-[per-model capability decision](../../implemented/architecture/2026-09-29-per-model-acp-capability-row.md)
+[per-model capability decision](../architecture/2026-09-29-per-model-acp-capability-row.md)
 still owns effort and Fast discovery and validation.
 
 `applyAcpSessionRunConfig` records both scalar `modelId` and model config-option

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-it('advertises configuration ownership separately from ordinary input acceptance', () => {
-  expect(CURRENT_MACHINE_PROTOCOL_CAPABILITIES.sessionConfiguration).toBe(1);
-  expect(machineSupportsProtocolCapability({ protocolCapabilities: { sessionInputAcceptance: 1 } }, 'sessionConfiguration')).toBe(false);
-});
-
 import {
   ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,

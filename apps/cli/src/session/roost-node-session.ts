@@ -277,7 +277,6 @@ const createNodeServicesForLease = async (
   sessionDoc: SessionDocument,
   lease: OwnerLease
 ): Promise<RoostSessionBackendServices> => {
-  await sessionDoc.invalidateStoredAcpRuntimeConfig();
   const historyGeneration = new RoostHistoryGeneration(
     lease.client,
     lease.owner,
@@ -2979,31 +2978,27 @@ const createNodeServicesForLease = async (
           if (current.state !== 'ready')
             throw new Error('Accepted Roost input history is not readable');
         }
-        const commit = async () => {
-          if (dispatch) {
-            const userId = entry.userId?.trim();
-            if (!userId)
-              throw new HistoryWriteError([{ path: ['userId'], code: 'invalid_user_input' }]);
-            const existing = (await sessionDoc.getDocState())?.humanInputReceipts?.[entry.id];
-            if (existing && existing.userId !== userId)
-              throw new HistoryWriteError([{ path: ['userId'], code: 'input_identity_conflict' }]);
-            sessionDoc.recordHumanInputReceipt(entry.id, userId);
-          }
-          if (!prior) {
-            const branch = await ensureHeadSealed();
-            const accepted = await roostHistory.acceptInputToView({
-              ...identity,
-              expectedRevision: branch.state.revision,
-              expectedHead: branch.state.head,
-              input: { ...identity.input, parents: await parentForHead(branch) },
-            });
-            created = accepted.created;
-            await refreshProjectedMessage(accepted.turnId, accepted);
-            if (entry.finished === true) await finishIfNeeded(accepted.turnId);
-          }
-        };
-        if (prior) await commit();
-        else await sessionDoc.acceptWithConfigRevision(entry.inputConfig ?? {}, commit);
+        if (dispatch) {
+          const userId = entry.userId?.trim();
+          if (!userId)
+            throw new HistoryWriteError([{ path: ['userId'], code: 'invalid_user_input' }]);
+          const existing = (await sessionDoc.getDocState())?.humanInputReceipts?.[entry.id];
+          if (existing && existing.userId !== userId)
+            throw new HistoryWriteError([{ path: ['userId'], code: 'input_identity_conflict' }]);
+          sessionDoc.recordHumanInputReceipt(entry.id, userId);
+        }
+        if (!prior) {
+          const branch = await ensureHeadSealed();
+          const accepted = await roostHistory.acceptInputToView({
+            ...identity,
+            expectedRevision: branch.state.revision,
+            expectedHead: branch.state.head,
+            input: { ...identity.input, parents: await parentForHead(branch) },
+          });
+          created = accepted.created;
+          await refreshProjectedMessage(accepted.turnId, accepted);
+          if (entry.finished === true) await finishIfNeeded(accepted.turnId);
+        }
         if (dispatch) {
           const current = await readPrivateTurn(entry.id);
           if (current.state !== 'ready' && current.state !== 'missing')
