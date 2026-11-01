@@ -529,6 +529,58 @@ paths. Workspaces A cannot sign for stay pending for another approver.
   person.
 - Ledger details move to an advanced diagnostics view.
 
+### Member approvers deliver history instead of a snapshot (pending increment)
+
+**Increment status: draft, pending owner approval.** This increment is not implemented.
+Until the owner approves it, an approver whose role is Member admits the device but
+reports that workspace as awaiting delivery.
+
+**Problem.** Any active personal device of the user may approve, whatever the user's
+role. A Member can append the personal `AdmitDevice` for its own new device, but it
+cannot endorse a manager snapshot, so it cannot produce the signed snapshot invitation
+this section requires. Without this increment, a user who is only a Member of a
+workspace cannot use account-wide pairing to add a second device there. They have to
+fall back to the per-workspace pairing exchange.
+
+**Decision proposed.**
+- **Rows without an invitation.** An approval row may name the workspace's genesis and
+  admission record without a snapshot invitation. The approval HMAC still binds the
+  request digest, A's signing key and every row.
+- **Full history verification.** For such a row, N fetches the workspace's complete
+  signed ledger history and verifies it from the genesis that the row names. It then
+  checks four things:
+  - its own admission record is present, with the authenticated record hash;
+  - that record's signer is an active personal device of N's own membership;
+  - the admitted keys are N's retained keys;
+  - the history verifies with no gaps.
+
+  It then pins that genesis and that endorser, exactly as the existing per-workspace
+  history path does.
+- **Unchanged.** Owners and Admins keep delivering snapshot invitations, and N keeps
+  verifying them as before.
+
+**Why security is unchanged.**
+- **The genesis is authenticated.** The genesis in each row is covered by the approval
+  HMAC, keyed from `S`, which the service never sees. A substituted genesis fails the
+  MAC with probability about 2⁻¹²⁸. So N anchors trust on the same approver-confirmed
+  genesis that a snapshot invitation would carry.
+- **History replay cannot be forged.** Full history verification checks every
+  signature and permission from that genesis. The service can withhold or delay
+  records, but it cannot forge one, and N accepts only a history that contains its
+  own authenticated admission.
+- **Freshness is no weaker.** It is the same as the existing per-workspace history
+  path. Withholding later records only delays N, as it can with any approval.
+- **Same authority.** The approver's authority is unchanged. A Member may already admit
+  its own personal devices, and this increment adds no permission.
+
+**User impact.**
+- **With this increment.** A Member pairs a second device for all their workspaces at
+  once, the same as an Owner or Admin.
+- **Without it.** Workspaces where the user is only a Member stay awaiting delivery
+  after an account-wide approval, and need the per-workspace pairing exchange. Opening
+  them may take longer, because N verifies the whole history rather than one endorsed
+  snapshot.
+
 ## Retained verified state (proposed)
 
 Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 records: 22 s); extending a held view by one record costs about 5 ms. Replaying from genesis on every request is therefore not viable for a host or a client. This section proposes a core entry that lets a party resume from **its own** previously verified state. It does not change the ledger v1 record format. See the [proposal note](../.agents/notes/proposed/architecture/2026-10-19-e2ee-retained-ledger-state.md).
