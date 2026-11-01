@@ -1639,6 +1639,7 @@ const createNodeServicesForLease = async (
       revision = currentBranch().state.revision;
     const state = create();
     for (let from = 0; from < count; from += 500) {
+      if (closing || disposed) throw new Error('Roost session backend is disposed');
       const page = await source.readActiveBranchMembers(viewId, { from, limit: 500 });
       if (
         !page.complete ||
@@ -1664,8 +1665,10 @@ const createNodeServicesForLease = async (
       }
       if (grouped.size !== Math.min(500, count - from)) throw staleRead();
       for (const [id, segments] of grouped) {
+        if (closing || disposed) throw new Error('Roost session backend is disposed');
         if (id === excludeTurnId) continue;
         const [entry] = await readIndexedEntries(source, [{ entry: { id }, segments }]);
+        if (closing || disposed) throw new Error('Roost session backend is disposed');
         if (!entry) throw new Error('Roost replay member is unavailable');
         visit(state, entry as SessionHistoryInput);
       }

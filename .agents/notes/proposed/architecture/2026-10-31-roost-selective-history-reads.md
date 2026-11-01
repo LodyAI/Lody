@@ -45,6 +45,8 @@ The Native owner queue binds selection and hydration to a generation/event obser
 
 Owner RPC negotiates `sessionHistoryInspection` v2. Metadata, latest-goal, limited transcript and replay queries run in the owner command queue and return their publication with the result. Replay returns the budgeted prompt and statistics. ID lookups use the existing single-turn request.
 
+When backend disposal starts, replay and generic folds stop at a read boundary after any pending body read settles. They reject instead of returning partial history. The owner queue drains accepted writes before releasing its storage lease.
+
 General selection returns a digest of the queried fields, then validates those fields while hydrating the selected positions in one owner task. Ordinary text edits do not supersede an unchanged selection. Owners without v2 retain the pre-optimization single-`readAll` compatibility path; failures from an advertised v2 interface propagate without switching paths. Existing v1 requests remain accepted.
 
 ## Write design

@@ -38,6 +38,7 @@ import { SessionDocument } from '../src/lib/loro/doc';
 import { installRoostNodeSessionBackend } from '../src/session/roost-node-session';
 import {
   createSessionBackend,
+  disposeSessionBackend,
   routeRemoteOwnedSessionHistory,
   type SessionBackendFactory,
 } from '../src/session/session-backend';
@@ -6096,6 +6097,99 @@ it('serves certified goals and replay when the unrelated field index is unavaila
     ).finish()
   ).toEqual(replay);
 });
+
+it.each(
+  (['replay', 'fold'] as const).flatMap((operation) =>
+    (['page', 'first-body', 'last-body'] as const).map((pauseAt) => ({ operation, pauseAt }))
+  )
+)(
+  'stops $operation after the pending $pauseAt read settles on close and drains accepted writes',
+  async ({ operation, pauseAt }) => {
+    const fixture = await nativeFixture();
+    const entries = [nativeUser('close-user'), nativeAssistant('close-assistant')];
+    for (const entry of entries) await fixture.backend.appendHistoryTurn(entry);
+    const original = await fixture.backend.readHistory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const closingStarted = Promise.withResolvers<void>();
+    const members = NodeLodyHistory.prototype.readActiveBranchMembers;
+    const messages = NodeLodyHistory.prototype.readActiveBranchMessages;
+    let paused = false;
+    const pause = async () => {
+      if (paused) return;
+      paused = true;
+      entered.resolve();
+      await release.promise;
+    };
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMembers').mockImplementation(
+      async function (...args) {
+        const page = await members.apply(this, args);
+        if (pauseAt === 'page' && args[1]?.from === 0) await pause();
+        return page;
+      }
+    );
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+      async function (...args) {
+        const page = await messages.apply(this, args);
+        const target = pauseAt === 'first-body' ? entries[0]!.id : entries[1]!.id;
+        if (pauseAt !== 'page' && args[1].includes(target)) await pause();
+        return page;
+      }
+    );
+    const dispose = fixture.backend.dispose!.bind(fixture.backend);
+    vi.spyOn(fixture.backend, 'dispose').mockImplementation(async () => {
+      const closing = dispose();
+      closingStarted.resolve();
+      await closing;
+    });
+    const visited: string[] = [];
+    const read = (
+      operation === 'replay'
+        ? fixture.backend.readHistoryReplay!()
+        : fixture.backend.foldHistory(
+            () => visited,
+            (ids, entry) => {
+              ids.push(entry.id);
+            }
+          )
+    ).then(
+      (value) => ({ status: 'ready' as const, value }),
+      (error: unknown) => ({ status: 'failed' as const, error })
+    );
+    let closing: Promise<void> | undefined;
+    let write: Promise<void> | undefined;
+    let closed = false;
+    const appended = nativeUser('close-accepted-write');
+    try {
+      await entered.promise;
+      write = fixture.backend.appendHistoryTurn(appended);
+      closing = disposeSessionBackend(fixture.doc).then(() => {
+        closed = true;
+      });
+      await closingStarted.promise;
+      expect(closed).toBe(false);
+      release.resolve();
+      const result = await read;
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: new Error('Roost session backend is disposed'),
+      });
+      if (operation === 'fold')
+        expect(visited).toEqual(pauseAt === 'last-body' ? [entries[0]!.id] : []);
+      await write;
+      await closing;
+      expect(closed).toBe(true);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([read, ...(write ? [write] : []), ...(closing ? [closing] : [])]);
+      vi.restoreAllMocks();
+      await fixture.close();
+    }
+    const reopened = await nativeFixture(fixture.doc.sessionId);
+    expect(await reopened.backend.readHistory()).toEqual([...original, appended]);
+    await reopened.close();
+  }
+);
 
 it('reuses unchanged transcript visibility while recalculating a written tail', async () => {
   const fixture = await nativeFixture();
