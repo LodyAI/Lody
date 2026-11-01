@@ -437,6 +437,54 @@ approval. This does not approve production activation. The generic advisory perm
 policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
 change adds no send guard.
 
+## Account-wide personal device pairing (pending approval increment)
+
+**Increment status: draft; not covered by the approved revision above.** The owner
+approved the direction on 2026-11-01; this text awaits owner approval. Until then the
+existing explicit pairing exchange stays in force. Rationale, alternatives and the SAS
+derivation are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
+
+**Scenario.** A signed-in user opens an encrypted workspace on a new device N. N
+creates an independent protected personal identity for every encrypted workspace its
+account lists, and submits one account-scoped join request. It carries N's display
+name, a fresh request ID, an expiry and, per workspace, the genesis, N's signing and
+encryption public keys, possession proof and credential hash. The request also carries
+a commitment `H(nN)` to a 32-byte random value. No pairing code is exchanged. N then
+shows a waiting screen listing the account's approved personal devices.
+
+**Relay and notification.** The service relays the immutable request to every approved
+personal device of the same account and pushes a pending event to them. It never holds
+keys, never signs, and cannot approve. It attaches its own observed approximate
+location and request time, both unauthenticated. The request expires (proposed: 10
+minutes) and any approver may decline it.
+
+**Short authentication string.** An approver device A that opens the request contributes
+its own random `nA`, signed with its key. N then reveals `nN`. Both compute a 6-digit
+decimal code from `nA`, `nN`, A's signing key, the account and the complete list of
+`(genesis, N keys)`. The code appears on both screens. The commitment fixes N's inputs
+before A's value is known, so a substituted request gets a single 1-in-10⁶ guess
+per attempt and cannot be ground offline. A shows the device name, location, request time
+and code, and signs only after the user confirms that the codes match. A second
+approver runs its own exchange and code.
+
+**Approval covers the account.** One confirmation authorizes every workspace in which
+A is an active personal device of the same user's membership; all are selected by default
+and the user may deselect any. For each selected workspace, A verifies N's possession
+proof against its own pinned genesis and appends the existing personal `AdmitDevice`
+record. No new ledger operation is introduced. A then publishes a signed snapshot
+invitation, so N pins genesis and A's endorsement key from evidence that the confirmed
+code authenticated. Current and historical keys use the existing mailbox and history
+paths. Workspaces A cannot sign for stay pending for another approver.
+
+**Progress and failure.** A journals each workspace's exact signed admission before any
+network step. It resumes per workspace, retries the original bytes and reconciles
+unknown outcomes; it never re-signs. Ledgers are independent, so there is no
+cross-workspace atomicity. Each workspace is either admitted with its key delivered,
+admitted and awaiting delivery, or not admitted. N advances automatically as admissions
+and keys arrive and opens the conversation once the current key is installed. An
+expired, declined or unconfirmed request admits nothing. Revocation and removal
+semantics are unchanged. Ledger details move to an advanced diagnostics view.
+
 ## Retained verified state (proposed)
 
 Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 records: 22 s); extending a held view by one record costs about 5 ms. Replaying from genesis on every request is therefore not viable for a host or a client. This section proposes a core entry that lets a party resume from **its own** previously verified state. It does not change the ledger v1 record format. See the [proposal note](../.agents/notes/proposed/architecture/2026-10-19-e2ee-retained-ledger-state.md).

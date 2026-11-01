@@ -9,6 +9,8 @@ Translation: current
 
 An additional desktop could not open a workspace because the host only reopened its own creation journal. This change adds an independently pinned invitation origin, reuses core admission and signed snapshots, and keeps keys in the native host. A small authenticated join mailbox relays immutable public evidence; it grants neither membership nor keys. Current scope is another desktop for the same Owner/Admin member, with explicit approval, exact retries and an optional full-ledger audit. Packaged two-device and real keystore/cloud acceptance remain outstanding.
 
+The [account-wide pairing proposal](2026-11-01-e2ee-account-personal-pairing.md) would replace the direct pin transfer with a committed short authentication string and one approval for all of the account's workspaces; until it is approved, this explicit exchange remains the implemented path.
+
 ## Responsibility and trust
 
 The existing desktop transfers workspace/genesis, endorser public key, membership and pairing session directly. The recipient validates the genesis and stores those pins independently of the relay, creates a protected personal identity and credential, and signs the existing core possession and credential binding formats. Changing sessions after terminal settlement preserves identity, credential and independent pins.
