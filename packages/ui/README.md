@@ -371,6 +371,12 @@ callbacks keep their precedence, so an explicit caller padding or gap still
 applies. These props address the actual panel and are consumed there; Drawer
 continues to own its separate safe-area spacing.
 
+`Dialog.Title` and `Drawer.Title` accept an optional CSS-typed `fontWeight`.
+Omission preserves the default600 and original style object; an explicit value
+writes the physical heading property. Base UI `render` styles keep their priority,
+and updates preserve the heading node, accessible name and dialog draft.
+This does not add an `asChild` API or change `AlertDialog.Title`.
+
 `Dialog.Title` and `Dialog.Description` accept `visuallyHidden` (default false).
 The same owner composes the clipped 1px box with its normal styles, including
 clearing the title's logical close-control inset. Text, IDs, refs and Base UI

@@ -2101,6 +2101,52 @@ function LayoutPopover({
   );
 }
 
+function ModalTitleWeightSample({ drawer = false }: { drawer?: boolean }) {
+  const [weight, setWeight] = useState<number | 'initial' | 'inherit' | undefined>(550);
+  const [node, setNode] = useState<HTMLHeadingElement | null>(null);
+  const [readout, setReadout] = useState('Open to inspect the title');
+  const Modal = drawer ? Drawer : Dialog;
+  useEffect(() => {
+    if (!node) return undefined;
+    const measure = () => setReadout(getComputedStyle(node).fontWeight);
+    const settledWeight = (event: TransitionEvent) => {
+      if (event.target === node && event.propertyName === 'font-weight') measure();
+    };
+    node.addEventListener('transitionend', settledWeight);
+    measure();
+    return () => node.removeEventListener('transitionend', settledWeight);
+  }, [node, weight]);
+  return (
+    <div>
+      <Modal.Root>
+        <Modal.Trigger render={<Button variant="secondary" size="small" />}>
+          {drawer ? 'Drawer title weight' : 'Dialog title weight'}
+        </Modal.Trigger>
+        <Modal.Content>
+          <div style={{ fontWeight: 333 }}>
+            <Modal.Title
+              ref={setNode}
+              fontWeight={weight}
+              data-modal-title-weight-sample={drawer ? 'drawer' : 'dialog'}
+            >
+              Custom title weight
+            </Modal.Title>
+          </div>
+          <Modal.Description>The readout comes from the rendered heading.</Modal.Description>
+          <Cluster>
+            <Button onClick={() => setWeight(550)}>Custom 550</Button>
+            <Button onClick={() => setWeight('initial')}>Initial weight</Button>
+            <Button onClick={() => setWeight('inherit')}>Inherited weight</Button>
+            <Button onClick={() => setWeight(undefined)}>Default weight</Button>
+          </Cluster>
+          <Modal.Close render={<Button variant="secondary" />}>Close title weight</Modal.Close>
+        </Modal.Content>
+      </Modal.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
 function HiddenDialogNames() {
   const [hidden, setHidden] = useState(true);
   const title = useRef<HTMLHeadingElement>(null);
@@ -4964,6 +5010,8 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>accessible name</LegendKey>
               <Cluster>
                 <HiddenDialogNames />
+                <ModalTitleWeightSample />
+                <ModalTitleWeightSample drawer />
                 <HiddenDialogHeader />
               </Cluster>
             </Row>

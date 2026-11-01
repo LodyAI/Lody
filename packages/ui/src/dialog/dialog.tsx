@@ -89,6 +89,8 @@ export interface DialogTitleProps extends Omit<TitleBaseProps, 'className'> {
   /** Keeps the name mounted for accessibility while removing its visual footprint. */
   visuallyHidden?: boolean;
   className?: string;
+  /** Explicit heading weight; omission preserves the modal default. */
+  fontWeight?: CSSProperties['fontWeight'];
 }
 export interface DialogDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
   /** Keeps the accessible description mounted while removing its visual footprint. */
@@ -234,7 +236,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
 
 /** The heading. Base UI wires it to the panel's accessible name. */
 export const DialogTitle = forwardRef<HTMLHeadingElement, DialogTitleProps>(function DialogTitle(
-  { className, visuallyHidden = false, ...rest },
+  { className, visuallyHidden = false, fontWeight, ...rest },
   ref
 ) {
   const sx = stylex.props(
@@ -247,7 +249,7 @@ export const DialogTitle = forwardRef<HTMLHeadingElement, DialogTitleProps>(func
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={fontWeight == null ? sx.style : { ...sx.style, fontWeight }}
     />
   );
 });

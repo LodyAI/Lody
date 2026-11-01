@@ -527,6 +527,7 @@ const styles = stylex.create({
     paddingLeft: themeSpace[4],
   },
   pastedDrawerTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  pastedTitleWeight: { '--tw-font-weight': 'var(--font-weight-medium)' },
   pastedTitle: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
   pastedDrawerTitle: {
     minWidth: 0,
@@ -1780,10 +1781,14 @@ export function ChatComposer({
                     <div {...stylex.props(styles.pastedDrawerHeader)}>
                       <div {...stylex.props(styles.pastedDrawerTitleRow)}>
                         <Drawer.Title
-                          className={cn(
-                            stylex.props(styles.pastedTitle, styles.pastedDrawerTitle).className,
-                            'font-medium'
-                          )}
+                          fontWeight="var(--font-weight-medium)"
+                          className={
+                            stylex.props(
+                              styles.pastedTitle,
+                              styles.pastedDrawerTitle,
+                              styles.pastedTitleWeight
+                            ).className
+                          }
                         >
                           <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                           {pastedTextDialogTitle}
@@ -1834,7 +1839,10 @@ export function ChatComposer({
                 <>
                   <div {...stylex.props(styles.pastedDialogHeader)}>
                     <Dialog.Title
-                      className={cn(stylex.props(styles.pastedTitle).className, 'font-medium')}
+                      fontWeight="var(--font-weight-medium)"
+                      className={
+                        stylex.props(styles.pastedTitle, styles.pastedTitleWeight).className
+                      }
                     >
                       <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                       {pastedTextDialogTitle}

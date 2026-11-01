@@ -2608,6 +2608,75 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
 });
 
 const checkboxStyles = stylex.create({
+  focus: {
+    '--tw-ring-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor)',
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':has(:focus-visible)': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 50%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+    '--tw-ring-offset-width': {
+      default: null,
+      ':has(:focus-visible)': '1px',
+    },
+    '--tw-ring-offset-color': {
+      default: null,
+      ':has(:focus-visible)': 'hsl(var(--background))',
+    },
+    '--tw-ring-offset-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)',
+    },
+  },
+  base: {
+    position: 'relative',
+    display: 'inline-flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to',
+    transitionTimingFunction: 'var(--tw-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--tw-duration,var(--default-transition-duration))',
+  },
+  checked: {
+    borderColor: 'hsl(var(--foreground))',
+    backgroundColor: 'hsl(var(--foreground))',
+    color: 'hsl(var(--background))',
+  },
+  unchecked: {
+    borderColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 30%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 60%, transparent)',
+        },
+      },
+    },
+    backgroundColor: 'transparent',
+  },
   input: {
     position: 'absolute',
     inset: 'calc(var(--spacing) * 0)',
@@ -2643,11 +2712,11 @@ function Checkbox({
   return (
     <span
       className={cn(
-        'relative inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors',
-        checked || indeterminate
-          ? 'border-foreground bg-foreground text-background'
-          : 'border-foreground/30 bg-transparent hover:border-foreground/60',
-        'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50 has-[:focus-visible]:ring-offset-1 has-[:focus-visible]:ring-offset-background',
+        stylex.props(
+          checkboxStyles.base,
+          checked || indeterminate ? checkboxStyles.checked : checkboxStyles.unchecked,
+          checkboxStyles.focus
+        ).className,
         className
       )}
     >
@@ -2670,6 +2739,26 @@ function Checkbox({
 }
 
 const reviewCheckStyles = stylex.create({
+  focus: {
+    '--tw-ring-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor)',
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':has(:focus-visible)': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 45%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+  },
   base: {
     display: 'flex',
     flexShrink: 0,
@@ -2732,12 +2821,7 @@ function ReviewCheck({
   readonly label: string;
 }) {
   return (
-    <label
-      className={cn(
-        stylex.props(reviewCheckStyles.base).className,
-        'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45'
-      )}
-    >
+    <label className={stylex.props(reviewCheckStyles.base, reviewCheckStyles.focus).className}>
       <Checkbox state={state} onChange={onChange} ariaLabel={label} />
       {label}
     </label>

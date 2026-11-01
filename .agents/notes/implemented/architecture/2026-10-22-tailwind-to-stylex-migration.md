@@ -2608,36 +2608,33 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Accepted scoped migrations since147 remove173 source utilities, including the six private
-spacing consumers in189. The two opacity candidates in192 remain Tailwind.
-Six redundant size/shrink occurrences remain separate cleanup. The nine native
-compiler-trial defaults were restored after188 and receive zero credit.
-The helper's accepted208 cut contains224/8/21 across30 production sources.
-It adds fifteen private ReviewCheck base declarations and six native state
-declarations to196; its actual671-input
-build resolves audited immutable dependencies rather than the live Root tree.
-The accepted210 full non-story components cut contains1,331 occurrences in145
-files and720 unresolved expressions across1,397 sources. Its three core roots
-contain1,322/143/716 across791 sources: components893/129/623, legacy UI429/14/93,
-and53 route files0/0/0. The other nine occurrences are eight shared conversation
-column classes and one keyboard-sheet important bottom override. These are
-source lower bounds, not completion rates or whole-branch visual approval.
+Accepted scoped migrations since147 remove198 source utilities, including the six
+private spacing consumers in189 and25 accepted declarations in211/212/214.
+The two opacity candidates in192 remain Tailwind. Six redundant size/shrink
+occurrences remain separate cleanup; the nine restored native compiler-trial
+defaults receive zero credit. The215 build adapter and216 description candidate
+remain isolated and receive no accepted migration credit.
 
-`inventory-source-through210-accepted-proof.json` freezes those inputs; relative
-to204 only two accepted private Button-weight owners change. The earlier204
-three template-class expression removals remain a method-count change, not extra
-utility removals. Helper208 is frozen separately. Together these inputs give a
-static lower bound of1,555 occurrences in153 files with741 unresolved expressions; it is not an exact total or completion percentage.
-The helper remains a separate frozen208 input; its exact scan and source hashes
-are in `inventory-helper-source-through208-proof.json` and
-`inventory-helper-v2-after208.json`. Scope185
-removes twenty manually audited literals but only seven were in v2 resolution;
-its retained `h-svh` hook is also outside that lower bound. The earlier147 dictionary
-gap remains separate. The fresh198 `@lody/ui` scan recognizes zero utilities
-across84 files while retaining131 unresolved expressions; zero does not prove
-all dynamic classes. No fresh whole-test/renderer qualification is inferred from
-these inventories. Exact positions and unresolved expressions remain reviewable
-in the frozen JSONs and `remaining-source-inventory181.html` (the older181 cut).
+The accepted212 full non-story components cut contains1,327 occurrences in145
+files and720 unresolved expressions across1,397 sources. The separately frozen
+helper214 cut contains203 occurrences in8 files and21 unresolved expressions
+across30 sources. Their combined static lower bound is **1,530 occurrences in153
+files with741 unresolved expressions**, not an exact total, completion percentage
+or whole-branch visual approval. The scanner method is unchanged.
+`inventory-source-through212-accepted-proof.json` and
+`inventory-v2-through212-accepted-fullsrc.json` own the component inputs and scan;
+`inventory-helper-source-through214-proof.json` and
+`inventory-helper-v2-after214.json` own the helper cut. Both overlays verify their
+previous frozen inputs before applying only accepted owner files.
+
+Earlier204 template-class removals changed unresolved counts without extra utility
+removal. Scope185 removes twenty manually audited literals but only seven were in
+v2 resolution; its retained `h-svh` hook and the earlier147 dictionary gap remain
+outside the lower bound. The198 `@lody/ui` scan recognizes zero utilities across84
+files while retaining131 unresolved expressions; zero does not prove all dynamic
+classes. These inventories establish no fresh whole-test/renderer qualification.
+Exact positions and unresolved expressions remain in the frozen JSONs;
+`remaining-source-inventory181.html` remains the older181 cut.
 
 Tailwind's automatic scan also consumes source-Markdown examples. Final191 adds
 three arbitrary-property rules from the migration guide; none matches the two
@@ -2696,6 +2693,9 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Private review label207 | Fifteen native label base utilities become local StyleX with the same variables and medium-weight writer. All16 original PNG/RGBA pairs and112 target records match outside exact class/CSS URL carriers. A separate real wheel/scrollend/return sequence in the two affected profiles matches all six paired stages, geometry, extents, hits and original PNGs. Source inverse and737 retained CSS rules/182 at-rule nodes match exactly. Actual inline-only standalone files add eight native-state pairs; desktop four are PNG/RGBA exact, and two extra real navigation scenes retain matching final nav/scroll fields and PNGs. | Phone standalone four retain34 raw/zero-threshold pixels and their original reader lacks nav attributes; new fresh lazy/observer histories and equal horizontal-pan boundaries remain recorded. Two original initial states retain348 document-extent/later-position differences of446.5px; all original8,562 geometry records remain available. The offscreen600/153.5 states match the existing content-visibility intrinsic-size mechanism, but old cache/fixture history was not recorded and its cause remains unproved. Adopted private declarations do not establish all initial whole-page states equivalent; no14-state code subset or lazy/content-visibility fix is claimed. Actual theme is fixed Vesper dark. |
 | Native review states208 | Six hover/checked/transition occurrences use native CSS predicates; hover applies only when no descendant is checked, preserving the original checked winner without React state or specificity repair. Twenty Storybook pairs retain140 target records and10,949 geometry records;19 PNGs match. Eight trusted native events retain immediate checked predicates and fields. Four extra real group-navigation scenes match complete target/nav fields and PNGs. | One Storybook frame retains36raw/zero-threshold OPEN. Four of eight single-file pairs retain sidebar highlight differences totalling112,516raw/106,504threshold pixels; four phone pairs match. The old reader lacks nav attributes; the new four nav-ready scenes cover1280 only and do not close the original cause/history. Eight unrelated storage-key absent→[] differences are explicit, with active key and initial-comments readers verified. Whole at-rule order differs;733 retained rules/context/order and scoped trees match. |
 | Private Button weight210 | One optional physical fontWeight field preserves default500 and the omitted style path. Two source utilities across five fixed readers retain original variable readers/private writers. All68 real viewport pairs,830 records and1,594 geometry records match outside352 exact class/inline carriers; all106 CSS resources are byte-identical. Actual callbacks, pending/disabled and platform fonts match; ten new Gallery states are After-only. | Literal CSS weight0 is invalid: updating550 to0 leaves550 in Chrome; a valid var() resolving to0 instead inherits333. The old JSDOM0 assertion is preserved and corrected to a legal initial keyword, with UI25/314 and both types passing. Original extra native controls stay full-field controls; the first target-classification failure and Gallery26 console diagnostics/two blocked requests remain visible. |
+| Private Checkbox211 | Fifteen wrapper/material/transition utilities move to local StyleX; native input, refs, effects, events and glyphs remain unchanged. Fifteen formal pairs and one mixed-directory focus supplement are PNG/RGBA exact, with778 target,688 navigation and8,381 geometry records. | Only240 wrapper-class and four fixed CSS-URL carriers differ. All63 registrations and733 retained rules preserve order; whole at-rule185→183 differs. Original forceExpanded preparation drift remains; the final gate verifies actual collapse and reopening without injected state. |
+| Modal title weight212 | Dialog.Title and Drawer.Title accept optional physical fontWeight, preserving default600 and omitted style objects. Four consumer utilities cover five real title paths;54 formal PNG/RGBA pairs match,270 records/1,112 geometry differ only at88 exact class/inline carriers, and106 CSS files are byte-identical. | Sixteen Gallery views are After-only. Base UI render/hidden/ARIA contracts remain; no Title.asChild API is invented. Post-capture lint cleanup has separate final-bundle DOM qualification, not54 recaptured PNGs. Original caret mutation, Gallery transition/readiness failures and missing old terminal DOM evidence remain recorded. |
+| Native focus rings214 | Six ReviewCheck/Checkbox focus utilities move to native :has(:focus-visible), with no React focus state or marker. Eleven pairs retain519 targets,473 navigation and5,759 geometry records; nine PNG/RGBA pairs match and physical box-shadow is exactly equal. | Two original OPENs retain1,968 raw/1,632 threshold pixels in header corners and group-title text, with cause unknown. Thirty named ring color/shadow comma-space differences retain both raw values and have locked grammar/consumer verification; raw objects are not equal. All63 registrations and732 retained rules match, but whole at-rule183→181 differs. Earlier207/208 OPENs stay open. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 

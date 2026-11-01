@@ -1,7 +1,13 @@
 import { nativeScrollbar } from '../scroll-area/surface';
 import { Drawer as BaseDrawer } from '@base-ui/react/drawer';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useSyncExternalStore,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Button } from '../button/button';
 import {
   DialogFooter,
@@ -214,6 +220,8 @@ type DescriptionBaseProps = ComponentProps<typeof BaseDrawer.Description>;
 
 export interface DrawerTitleProps extends Omit<TitleBaseProps, 'className'> {
   className?: string;
+  /** Explicit heading weight; omission preserves the modal default. */
+  fontWeight?: CSSProperties['fontWeight'];
 }
 export interface DrawerDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
   className?: string;
@@ -225,7 +233,7 @@ export interface DrawerDescriptionProps extends Omit<DescriptionBaseProps, 'clas
  * would label nothing.
  */
 export const DrawerTitle = forwardRef<HTMLHeadingElement, DrawerTitleProps>(function DrawerTitle(
-  { className, ...rest },
+  { className, fontWeight, ...rest },
   ref
 ) {
   const sx = stylex.props(modal.title);
@@ -234,7 +242,7 @@ export const DrawerTitle = forwardRef<HTMLHeadingElement, DrawerTitleProps>(func
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={fontWeight == null ? sx.style : { ...sx.style, fontWeight }}
     />
   );
 });

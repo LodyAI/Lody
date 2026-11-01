@@ -1,3 +1,4 @@
+import { useState, type CSSProperties } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/portal-container';
 import { Button } from '../src/button/button';
@@ -24,6 +25,65 @@ const buttonNamed = (label: string) => {
 };
 
 describe('Dialog', () => {
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['Drawer', Drawer],
+  ] as const) {
+    test(`${name} updates optional title weight without replacing the accessible heading or draft`, async () => {
+      function Example() {
+        const [weight, setWeight] = useState<CSSProperties['fontWeight']>(380);
+        return (
+          <Modal.Root defaultOpen>
+            <Modal.Content data-weight-panel>
+              <Modal.Title fontWeight={weight}>Weight title</Modal.Title>
+              <Modal.Description>Weight description</Modal.Description>
+              <input aria-label="Weight draft" defaultValue="Original" />
+              <button onClick={() => setWeight('initial')}>Initial title weight</button>
+              <button onClick={() => setWeight(undefined)}>Default title weight</button>
+              <button onClick={() => setWeight(620)}>Custom title weight</button>
+            </Modal.Content>
+          </Modal.Root>
+        );
+      }
+      mounted = await mount(<Example />);
+      const popup = one('[data-weight-panel]');
+      const title = document.getElementById(popup.getAttribute('aria-labelledby')!)!;
+      const input = one('input') as HTMLInputElement;
+      await step(() => {
+        input.focus();
+        input.value = 'Edited draft';
+      });
+      for (const [action, weight] of [
+        ['Initial title weight', 'initial'],
+        ['Default title weight', ''],
+        ['Custom title weight', '620'],
+      ] as const) {
+        await click(buttonNamed(action));
+        expect(document.getElementById(popup.getAttribute('aria-labelledby')!)).toBe(title);
+        expect(title.style.fontWeight).toBe(weight);
+        expect(title.hasAttribute('fontWeight')).toBe(false);
+        expect(title.textContent).toBe('Weight title');
+        expect(input.value).toBe('Edited draft');
+      }
+    });
+    test(`${name} retains the rendered heading's explicit style above title typography`, async () => {
+      mounted = await mount(
+        <Modal.Root defaultOpen>
+          <Modal.Content>
+            <Modal.Title fontWeight={380} render={<h3 style={{ fontWeight: 760 }} />}>
+              Rendered weight title
+            </Modal.Title>
+            <Modal.Description>Rendered weight description</Modal.Description>
+          </Modal.Content>
+        </Modal.Root>
+      );
+      const title = document.getElementById(panel().getAttribute('aria-labelledby')!)!;
+      expect(title.tagName).toBe('H3');
+      expect(title.style.fontWeight).toBe('760');
+      expect(title.hasAttribute('fontWeight')).toBe(false);
+      expect(title.textContent).toBe('Rendered weight title');
+    });
+  }
   for (const [name, Modal] of [
     ['Dialog', Dialog],
     ['AlertDialog', AlertDialog],

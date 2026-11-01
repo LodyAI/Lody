@@ -34,8 +34,9 @@ public Slot contracts stay on their audited paths. The private Viewed label uses
 local StyleX for base layout, typography and material, preserving its medium
 writer. Its checked/hover states use native `:has(:checked)` and mutually exclusive
 hover conditions, retaining immediate input state and original color-mix fallbacks.
-Transition fields keep their legacy variable readers. Focus-ring utilities remain;
-the Checkbox and lazy diff layout are separate owners.
+Transition fields keep their legacy variable readers. Native focus rings use
+`:has(:focus-visible)` and preserve the original ring-variable composition;
+they add no React focus state. The lazy diff layout remains a separate owner.
 Reviewed responsive headings
 keep the original rem media condition, local text token and private-leading reader.
 Numeric and length line-height owners preserve all five numeric variables and
@@ -45,7 +46,10 @@ check complete production CSS before adding duplicate registrations. Removing
 Tailwind itself will also require explicit ownership of every retained writer
 registration and fallback.
 The private review checkbox keeps its native input and checked/indeterminate
-state. Its input box and glyphs use local styles; zero-valued inset and margin
+state. Its wrapper, checked/indeterminate branch, hover, transition, focus, input
+box and glyphs use local StyleX. Named ring custom properties may differ only in
+verified comma spacing while physical shadows remain equal; this is not general
+raw-value normalization. Zero-valued inset and margin
 retain `calc(var(--spacing) * 0)` so CSS-wide spacing values keep their behavior.
 
 Separator styling follows its existing JavaScript orientation branch; caller-written

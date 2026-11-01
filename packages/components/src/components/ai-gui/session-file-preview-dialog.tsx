@@ -95,10 +95,8 @@ export function SessionFilePreviewPanel({
       <div {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerText)}>
           <Title
-            className={clsx(
-              'font-semibold leading-tight',
-              stylex.props(styles.titleText).className
-            )}
+            fontWeight="var(--font-weight-semibold)"
+            className={clsx('leading-tight', stylex.props(styles.titleText).className)}
           >
             {file.fileName}
           </Title>
@@ -312,6 +310,7 @@ const styles = stylex.create({
   },
   /** The title's own size and weight stay with the primitive that owns them. */
   titleText: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
     [dialog.titleSize]: 'var(--text-sm)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

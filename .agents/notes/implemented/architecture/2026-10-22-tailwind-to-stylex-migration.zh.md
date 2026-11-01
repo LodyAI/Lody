@@ -1850,19 +1850,21 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-自147起已接受的有界迁移移除173处源码 utility，含189六处私有间距调用。192两处opacity候选保留Tailwind。另六处重复尺寸／shrink单列清理。
-九个 native 编译试验默认值已因188恢复，信用零。helper已接受208为224／8／21，覆盖30源；相较196新增十五个私有ReviewCheck基础声明及六个原生状态声明。实际671输入构建解析至已审不可变依赖，而非live Root源码。
-已接受210的全非story components源码为1,331处／145文件／720未解析，覆盖1,397源；
-其中三核心根为1,322／143／716，覆盖791源：components893／129／623、legacy UI429／14／93、
-53个route文件0／0／0。额外九处为共享conversation column八类及键盘sheet important bottom一类。
-这些是源码下界，不是完成率或整branch视觉通过。
+自147起已接受的有界迁移移除198处源码 utility，含189六处私有间距调用及211／212／214共25处声明。
+192两处opacity候选仍保留Tailwind。另六处重复尺寸／shrink单列清理；九个恢复的native编译试验默认值信用零。
+215构建adapter与216描述候选仍在隔离验证，尚无已接受迁移信用。
 
-精确输入见inventory-source-through210-accepted-proof.json；相较204仅改变两个已接受的私有Button字重owner。此前204三个template-class退出未解析计数不是额外utility删除。
-helper208单独冻结，合计静态下界为1,555处／153文件，741个未解析表达式；不是精确总量或完成百分比。helper单独使用208冻结源，源码hash及实扫见inventory-helper-source-through208-proof.json与inventory-helper-v2-after208.json。
-185手工审计移除二十literal，但原仅七个在v2解析范围；保留的h-svh hook也未计入此下界。
-147原字典缺口仍单列。198新扫描@lody/ui的84源识别零utility，仍有131未解析表达式；零不证明
-所有动态类。库存不带来新增整套测试／renderer资格，精确位置及未解析值保留在冻结JSON；
-remaining-source-inventory181.html是此前181范围，未冒充当前完整branch。
+已接受212的全非story components源码为1,327处／145文件／720未解析，覆盖1,397源。
+单独冻结的helper214为203处／8文件／21未解析，覆盖30源。合计静态下界为
+**1,530处／153文件／741个未解析表达式**，不是精确总量、完成百分比或整branch视觉通过。
+扫描方法未变。components精确输入及扫描见inventory-source-through212-accepted-proof.json与
+inventory-v2-through212-accepted-fullsrc.json；helper见inventory-helper-source-through214-proof.json与
+inventory-helper-v2-after214.json。两套overlay均先核对此前冻结输入，再只应用已接受owner文件。
+
+此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
+在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，
+仍有131未解析表达式；零不证明所有动态类。库存不带来新增整套测试／renderer资格，精确位置及未解析值
+保留在冻结JSON；remaining-source-inventory181.html仍是此前181范围。
 
 Tailwind自动扫描也消费源码Markdown中的例子。最终191因迁移指南新增三条arbitrary-property规则，
 两个最终实测DOM均无匹配。它们是已输出规则，不是额外产品class出现次数；源码库存不能替代完整CSS
@@ -1918,6 +1920,9 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 私有review标签207 | 十五个原生label基础utility迁为本地StyleX，保原变量及medium writer。原十六对PNG／RGBA、112目标记录除精确class／CSS URL载体外同；两个受影响profile另以真实wheel／scrollend／返回操作验证，六对应stage全部字段、几何、extent、命中及原PNG同。源码逆变换及737保留CSS规则／182 at-rule逐项同。真正inline-only单文件补八个原生状态对，桌面四对PNG／RGBA同；另两个真实导航场景最终nav／滚动字段及PNG同。 | 手机单文件四对保留34原始／零阈值像素，原reader缺nav属性；新增fresh lazy／observer历史差异及相同横向滚动边界全保。原两个initial状态保留348个文档extent／后续位置差异，幅度446.5px；原8,562几何记录全保。离屏600／153.5状态符合原content-visibility intrinsic-size机制，但旧cache／fixture历史没有记录，具体原因未证。采用私有声明不代表全部初始整页状态相同，没有虚构14状态代码子集或修改lazy／content-visibility。实际主题固定Vesper dark。 |
 | 原生review状态208 | 六个hover／checked／transition源码utility迁为原生CSS谓词；hover仅在无checked后代时生效，保留原checked胜出，不用React状态或特异性补丁。二十Storybook对保140目标、10,949几何，十九PNG同；八个真实native事件保持即时checked谓词与字段。另四个真实分组导航场景的目标／nav完整字段及PNG同。 | 一张Storybook留36原始／零阈值OPEN；八单文件对中四桌面保侧栏高亮差，共112,516原始／106,504阈值，四手机同。原reader缺nav属性，新增四nav-ready仅1280，不关闭旧history／具体原因。八个无关storage key缺失→[]差异精确列出，活动key与initialComments优先reader已核。whole at-rule顺序不全同；733保留规则／context／顺序及scoped树同。 |
 | 私有Button字重210 | 一个可选物理fontWeight字段保默认500及省略时原style路径。两个源码utility、五固定读取点保原变量与private writer。68真实整viewport对、830记录、1,594几何除352精确class／inline载体外同；106份CSS完整字节同。实际callback、pending／disabled及平台字体同，十新Gallery状态仅After-only。 | CSS字面weight0无效：Chrome从550更新0仍550；合法var()解析0则继承333。原JSDOM0断言保并改成合法initial关键词，UI25／314与两包类型通过。额外原生夹具控件完整字段仍作control；首次目标分类失败及Gallery26条console诊断／两阻断请求保留。 |
+| 私有Checkbox211 | 十五个wrapper／material／transition utility迁为本地StyleX；native input、ref、effect、事件及glyph不变。十五正式对加一个mixed-directory焦点补充对PNG／RGBA全同，保778目标、688导航及8,381几何记录。 | 仅240 wrapper class及四固定CSS URL载体变化。63注册及733保留规则原序同，whole at-rule185→183不同。原forceExpanded准备漂移保留；最终门禁以真实折叠再展开确认，不注入状态。 |
+| Modal标题字重212 | Dialog.Title与Drawer.Title新增可选物理fontWeight，保默认600及省略时原style对象。四consumer utility覆盖五条真实标题路径；54正式对PNG／RGBA同，270记录／1,112几何仅88精确class／inline载体不同，106 CSS文件字节同。 | 十六Gallery视图仅After-only；保Base UI render／hidden／ARIA，不虚构Title.asChild。采集后lint清理另有最终bundle DOM资格，不称重采54图。原caret修改、Gallery transition／readiness失败及缺失旧terminal DOM证据保留。 |
+| 原生焦点环214 | 六个ReviewCheck／Checkbox焦点utility迁为原生:has(:focus-visible)，无React焦点状态或marker。十一对保519目标、473导航及5,759几何，九PNG／RGBA同；物理box-shadow严格同。 | 原两OPEN保1,968原始／1,632阈值像素，位于header角及group标题文字，具体原因未知。三十个具名ring color／shadow逗号空白差异保两侧raw并逐项核锁定语法／consumer，不称raw对象相同。63注册及732保留规则同，whole at-rule183→181不同。207／208旧OPEN不关闭。 |
 | Spinner透明度192与queued pulse | 两opacity候选拒绝：4个direct控制同，4个真实零特异性祖先使0.7→1，共721原始像素；Root源码未改。 | 旧named默认在utilities中凭特异性胜出，普通StyleX则早于caller utility层，直接替换不能保合同。另完整animation变量简写在锁定compiler模式下不产CSS；默认keyframes不能替代元素本地变量合同。未采用compiler模式、新primitive API或特异性补丁。 |
 | Native编译试验188 | 三个真实arbitrary-property调用方使strip598→16px、viewport598→840px、裁切／命中改变，默认与named控制仍同。 | 十三试集成路径全恢复，六新增文件及三临时依赖link已移除，cache包未删。九默认仍Tailwind。此前66对成功与实际App312原始OPEN只保留为证据，不作接受结论。 |
 

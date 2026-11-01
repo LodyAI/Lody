@@ -70,6 +70,7 @@ const dialogNavigationLayoutTheme = stylex.createTheme(button, {
 
 const styles = stylex.create({
   dialogTitle: {
+    '--tw-font-weight': 'var(--font-weight-medium)',
     [dialog.titleSize]: 'var(--text-base)',
     [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
     overflow: 'hidden',
@@ -304,7 +305,8 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   {t('sessions.operationReply.received', 'Reply received')}
                 </Dialog.Description>
                 <Dialog.Title
-                  className={cn(stylex.props(styles.dialogTitle).className, 'font-medium')}
+                  fontWeight="var(--font-weight-medium)"
+                  className={cn(stylex.props(styles.dialogTitle).className)}
                   title={title}
                 >
                   {title}
