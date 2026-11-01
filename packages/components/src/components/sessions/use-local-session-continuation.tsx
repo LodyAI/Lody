@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAtomValue } from 'jotai';
+import { MACHINE_PROTOCOL_CAPABILITIES, machineSupportsProtocolCapability } from '@lody/shared';
+import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { SessionContinuationView } from './session-continuation';
 import type { SessionContinuationTweaksValue } from './session-continuation-tweaks';
@@ -60,7 +63,17 @@ type Snapshot = {
   views: SessionContinuationView[];
   settings: AutomationSettings | null;
 };
-export function useLocalSessionContinuation(target: Target | null, visible: boolean) {
+export function useLocalSessionContinuation(requestedTarget: Target | null, visible: boolean) {
+  const machine = useAtomValue(
+    getMachineMetaByIdAtomFamily(requestedTarget?.machineId as MachineId | undefined)
+  );
+  const supported = machineSupportsProtocolCapability(
+    machine,
+    requestedTarget?.remote
+      ? MACHINE_PROTOCOL_CAPABILITIES.remoteAutomationControl
+      : MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations
+  );
+  const target = supported ? requestedTarget : null;
   const key = target
     ? `${target.workspaceId}:${target.machineId}:${target.sessionId}:${target.remote?.requesterUserId ?? ''}`
     : '';
@@ -97,7 +110,12 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
   );
 
   useEffect(() => {
-    if (!visible || !workspaceId || !machineId || !sessionId) return undefined;
+    if (!workspaceId || !machineId || !sessionId) {
+      setSnapshot(null);
+      setErrorKey(null);
+      return undefined;
+    }
+    if (!visible) return undefined;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
@@ -172,6 +190,7 @@ export function useLocalSessionContinuation(target: Target | null, visible: bool
     [current, send]
   );
   return {
+    supported: !!target,
     views: current?.views ?? [],
     value,
     recoveryEnabled: current?.settings ? current.settings.recoverCapacity === true : null,

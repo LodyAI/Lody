@@ -5065,7 +5065,7 @@ export const SessionChatInterface = memo(
       sessionId: session.id,
       history: sessionHistory,
       hostRecoveryEnabled:
-        isLocalSession && automationSupported && continuation.recoveryEnabled !== false,
+        isLocalSession && continuation.supported && continuation.recoveryEnabled !== false,
       canRetry:
         !continuation.recoveryEnabled &&
         sessionDocReady &&
@@ -7446,12 +7446,12 @@ export const SessionChatInterface = memo(
                                         />
                                       ))}
                                       {continuation.error && (
-                                        <span>
+                                        <ConversationColumn>
                                           {t(
                                             'sessions.continuation.connectionError',
                                             'Unable to reach the local automation service.'
                                           )}
-                                        </span>
+                                        </ConversationColumn>
                                       )}
                                     </>
                                   )

@@ -12,6 +12,6 @@ Automation was available to Agents through MCP while its Session controls requir
 
 ## Boundary
 
-Electron manages local and eligible remote machine automation owners and consults the shared workspace content capability before making requests. The Agent's MCP server and the Host retain their existing ownership and authorization rules. Removing the old renderer-only preference does not enable any Session policy or migrate persisted automation. Remote control uses the [remote control design](../../proposed/architecture/2026-10-30-remote-session-automation-control.md); encrypted automation remains unsupported.
+Electron manages local and eligible remote machine automation owners and consults the shared workspace content capability before making requests. The renderer also requires the target daemon’s `sessionAutomations` capability for local IPC or `remoteAutomationControl` for remote control; missing capabilities disable reads and controls without reporting a connection failure. The Agent's MCP server and the Host retain their existing ownership and authorization rules. Removing the old renderer-only preference does not enable any Session policy or migrate persisted automation. Remote control uses the [remote control design](../../proposed/architecture/2026-10-30-remote-session-automation-control.md); encrypted automation remains unsupported.
 
 The component tests exercise normal-mode waiting, settings and cancellation. Live cross-device and encrypted delivery remain unverified.
