@@ -97,37 +97,6 @@ describe('ChatFailedDetailDialog', () => {
     expect(alert?.querySelector('dialog, details')).toBeNull();
   });
 
-  it.each(['en', 'zh_CN'])(
-    'shows the configuration rejection and recovery guidance in %s',
-    async (language) => {
-      await initI18n(language);
-      act(() =>
-        root.render(
-          createElement(MessageRowView, {
-            sessionId: 'config-failure-session' as SessionId,
-            message: {
-              id: 'config-failure',
-              role: 'system',
-              timestamp: '2026-10-31T00:00:00Z',
-              items: [
-                {
-                  type: 'system_notice',
-                  name: 'chat_failed',
-                  meta: { reason: 'session_config_changed' },
-                },
-              ],
-            },
-          })
-        )
-      );
-      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-        language === 'en'
-          ? 'The configuration was updated elsewhere. Resend with the current configuration.'
-          : '配置已在别处更新，请用当前配置重新发送。'
-      );
-    }
-  );
-
   it('shows the raw error verbatim instead of a truncated hover string', () => {
     render();
     expect(document.body.textContent).toContain(RAW_MESSAGE);

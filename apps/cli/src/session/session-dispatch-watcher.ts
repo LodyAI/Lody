@@ -761,13 +761,12 @@ export class SessionDispatchWatcher {
       }
 
       if (offer.inputOrigin === 'human') {
-        const accepted = await this.deps.executionService.acceptInboxHumanInput?.({
+        await this.deps.executionService.acceptInboxHumanInput?.({
           sessionId,
           inputId: userTurnId,
           userId: offer.userId,
           config: offer.inputConfig,
         });
-        if (accepted === false) return finish('already-terminal');
       }
 
       // Sweep expired entries across all sessions on every accept. A turn that
@@ -2150,7 +2149,6 @@ export class SessionDispatchWatcher {
         magpieGatewayUrl: launchConfig?.magpieGatewayUrl,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
-        configRevision: entry.inputConfig?.configRevision,
         configOptionValues: entry.inputConfig?.configOptionValues,
         memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
@@ -2197,7 +2195,6 @@ export class SessionDispatchWatcher {
         magpieGatewayUrl: launchConfig?.magpieGatewayUrl,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
-        configRevision: entry.inputConfig?.configRevision,
         configOptionValues: entry.inputConfig?.configOptionValues,
         memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
@@ -2257,7 +2254,6 @@ export class SessionDispatchWatcher {
       agentType: queuedItem.acpSessionConfig?.agentType ?? meta.agentType,
       modeId: queuedItem.acpSessionConfig?.modeId,
       modelId: queuedItem.acpSessionConfig?.modelId,
-      configRevision: queuedItem.acpSessionConfig?.configRevision,
       configOptionValues: isConfigOptionValueRecord(queuedItem.acpSessionConfig?.configOptionValues)
         ? queuedItem.acpSessionConfig.configOptionValues
         : undefined,

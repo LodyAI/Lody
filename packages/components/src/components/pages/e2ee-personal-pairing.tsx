@@ -305,7 +305,7 @@ function PersonalPairingSession({
       {preview && (
         <>
           <p>{t('e2ee.pair.compare')}</p>
-          <p {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
+          <p data-testid="e2ee-pair-preview-key" {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
           <Button
             disabled={phase === 'busy' || phase === 'published'}
             onClick={() => void approve()}
@@ -317,7 +317,7 @@ function PersonalPairingSession({
       {joining && (
         <>
           {joining.signingPublicKey && (
-            <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
+            <p data-testid="e2ee-pair-joining-key" {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
           )}
           <div {...stylex.props(styles.actions)}>
             <Button

@@ -46,9 +46,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   generations; remote Turns never consume them. Never retain history IDs or empty
   visited-session entries. Deletion/account teardown invalidates edit callbacks;
   navigation preserves intent. [Contract](../../../../specs/session-run-config-drafts.md).
-- Existing-session run config uses confirmed execution state plus private edits. Catalog
-  refresh reports invalid choices without substitution; absent values inherit at dispatch.
-  Held sends supply only Role/MCP provenance; pending rows retain frozen input.
+- Held-send config is a session/runtime-scoped input to selection, never a stored
+  resolved selection. Keep its logical Turn fence across history/queue handoff;
+  next-draft edits win and attachment progress does not rebuild the catalog.
 - A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.

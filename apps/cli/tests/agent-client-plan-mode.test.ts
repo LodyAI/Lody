@@ -80,10 +80,6 @@ function createTestClient(options?: {
   // Simulate session startup by setting internal fields directly
   // @ts-expect-error - accessing private field for test setup
   client.acpSessionId = 'acp-test' as ACPSessionId;
-  // @ts-expect-error - synthetic legacy session handshake
-  client.hasLegacyModes = true;
-  // @ts-expect-error - synthetic connection identity
-  client.configGeneration = 'test-connection';
 
   return {
     client,
@@ -246,32 +242,98 @@ describe('AgentClient plan mode permission restoration', () => {
   });
 
   describe('permission mode routing', () => {
-    it.each([
-      { selected: 'default', observed: ['plan', 'acceptEdits'] },
-      { selected: 'default', observed: ['acceptEdits'] },
-      { selected: 'acceptEdits', observed: ['plan', 'acceptEdits'] },
-    ])(
-      'keeps agent-confirmed modes after selecting $selected and observing $observed',
-      async ({ selected, observed }) => {
-        const { client } = createTestClient();
-        let upstreamMode = '';
-        // @ts-expect-error - synthetic protocol boundary
-        client.connection = {
-          setSessionMode: async ({ modeId }: { modeId: string }) => {
-            upstreamMode = modeId;
-            return {};
-          },
-        };
-        await client.setSessionMode('acp-test' as ACPSessionId, selected);
-        expect(client.getRuntimeConfiguration().modeId).toBe(selected);
-        for (const mode of observed) {
-          upstreamMode = mode;
-          await client.sessionUpdate(makeCurrentModeUpdateNotification(mode));
-          expect(client.getRuntimeConfiguration().modeId).toBe(mode);
-          expect(upstreamMode).toBe(mode);
-        }
-      }
-    );
+    it('does not treat current_mode_update as Codex plan-mode control state', async () => {
+      const { client } = createTestClient();
+      const setSessionModeSpy = vi.fn(async () => ({}));
+      // @ts-expect-error - accessing private field for test setup
+      client.connection = { setSessionMode: setSessionModeSpy };
+
+      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
+      setSessionModeSpy.mockClear();
+
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
+
+      expect(setSessionModeSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not restore mode when agent transitions between non-plan modes', async () => {
+      const { client } = createTestClient();
+      const setSessionModeSpy = vi.fn(async () => ({}));
+      // @ts-expect-error - accessing private field for test setup
+      client.connection = { setSessionMode: setSessionModeSpy };
+
+      // User selects default mode
+      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
+      setSessionModeSpy.mockClear();
+
+      // Agent transitions from default to acceptEdits (not from plan)
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
+
+      // Should NOT trigger a mode restore
+      expect(setSessionModeSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not restore mode when agent exits plan to the same mode user selected', async () => {
+      const { client } = createTestClient();
+      const setSessionModeSpy = vi.fn(async () => ({}));
+      // @ts-expect-error - accessing private field for test setup
+      client.connection = { setSessionMode: setSessionModeSpy };
+
+      // User selects acceptEdits mode
+      await client.setSessionMode('acp-test' as ACPSessionId, 'acceptEdits');
+      setSessionModeSpy.mockClear();
+
+      // Agent enters plan mode
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
+
+      // Agent exits plan mode → transitions to acceptEdits (same as user's selection)
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
+
+      // Should NOT trigger a mode restore since modes already match
+      expect(setSessionModeSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps plan mode separate from session/set_mode permission routing', async () => {
+      const { client } = createTestClient();
+      const setSessionModeSpy = vi.fn(async () => ({}));
+      // @ts-expect-error - accessing private field for test setup
+      client.connection = { setSessionMode: setSessionModeSpy };
+
+      // User selects default mode
+      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
+
+      // Agent enters plan mode
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('plan'));
+
+      // Agent exits plan mode → transitions to acceptEdits
+      await client.sessionUpdate(makeCurrentModeUpdateNotification('acceptEdits'));
+
+      expect(setSessionModeSpy).toHaveBeenCalledTimes(1);
+      expect(setSessionModeSpy).toHaveBeenCalledWith({
+        sessionId: 'acp-test',
+        modeId: 'default',
+      });
+    });
+
+    it('does not track user-selected mode for auto-restore', async () => {
+      const { client } = createTestClient();
+      const setSessionModeSpy = vi.fn(async () => ({}));
+      // @ts-expect-error - accessing private field for test setup
+      client.connection = { setSessionMode: setSessionModeSpy };
+
+      await client.setSessionMode('acp-test' as ACPSessionId, 'acceptEdits');
+      await client.setSessionMode('acp-test' as ACPSessionId, 'default');
+
+      expect(setSessionModeSpy).toHaveBeenNthCalledWith(1, {
+        sessionId: 'acp-test',
+        modeId: 'acceptEdits',
+      });
+      expect(setSessionModeSpy).toHaveBeenNthCalledWith(2, {
+        sessionId: 'acp-test',
+        modeId: 'default',
+      });
+    });
   });
 
   describe('context window usage updates', () => {
@@ -1164,7 +1226,7 @@ describe('AgentClient plan mode permission restoration', () => {
       });
     });
 
-    it('reports an advertised config method refusal without falling back to legacy model mutation', async () => {
+    it('falls back to legacy session/set_model only for method-not-found', async () => {
       const { client } = createTestClient({ cliType: 'registry', agentType: 'hybrid' });
       const setSessionConfigOptionSpy = vi.fn(async () => {
         throw Object.assign(new Error('Method not found'), { code: -32601 });
@@ -1193,11 +1255,13 @@ describe('AgentClient plan mode permission restoration', () => {
         availableModels: [{ modelId: 'new', name: 'New' }],
       };
 
-      await expect(
-        client.unstable_setSessionModel('acp-test' as ACPSessionId, 'new')
-      ).rejects.toThrow('Method not found');
-      expect(requestSpy).not.toHaveBeenCalled();
-      expect(client.getRuntimeConfiguration().modelId).toBe('old');
+      await client.unstable_setSessionModel('acp-test' as ACPSessionId, 'new');
+
+      expect(setSessionConfigOptionSpy).toHaveBeenCalledTimes(1);
+      expect(requestSpy).toHaveBeenCalledWith('session/set_model', {
+        sessionId: 'acp-test',
+        modelId: 'new',
+      });
     });
 
     it('rejects model changes when the session advertises no switching surface', async () => {
@@ -1207,7 +1271,7 @@ describe('AgentClient plan mode permission restoration', () => {
 
       await expect(
         client.unstable_setSessionModel('acp-test' as ACPSessionId, 'unknown')
-      ).rejects.toMatchObject({ reason: 'unsupported', field: 'model' });
+      ).rejects.toThrow('[ACP_MODEL_SWITCH_UNSUPPORTED]');
       expect(client.currentModel).toBeUndefined();
     });
 

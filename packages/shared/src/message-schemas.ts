@@ -403,7 +403,6 @@ export const ACPTurnConfigSchema = z
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
-    configRevision: z.number().int().nonnegative().optional(),
     memory: MemoryBindingSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
@@ -507,8 +506,6 @@ export const normalizeSessionTurnInputConfig = (
   if (configOptionValues) {
     normalized.configOptionValues = configOptionValues;
   }
-  const configRevision = maybeParseField(z.number().int().nonnegative(), record.configRevision);
-  if (configRevision !== undefined) normalized.configRevision = configRevision;
 
   if (record.memory !== undefined) normalized.memory = MemoryBindingSchema.parse(record.memory);
   const mcpServerIds = normalizeMcpServerIdSelection(record.mcpServerIds);
@@ -3606,7 +3603,6 @@ export const ChatFailedReasonSchema = z.enum([
   'acp_not_ready',
   'agent_disconnected',
   'agent_no_output',
-  'session_config_changed',
   'turn_pre_prompt_failed',
   'message_delivery_failed',
   'machine_access_denied',

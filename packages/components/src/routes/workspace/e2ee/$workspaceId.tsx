@@ -21,6 +21,7 @@ import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
   E2eeWorkspaceControlPage,
@@ -69,6 +70,8 @@ function WorkspaceControlRoute() {
     clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace]);
   const [generation, setGeneration] = useState(0);
+  // The joining device starts on the approval guide; details reveal the full ledger page.
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
     const reconnect = () => setGeneration((value) => value + 1);
     window.addEventListener('online', reconnect);
@@ -484,6 +487,40 @@ function WorkspaceControlRoute() {
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  // A signed-in device without an approved identity here sees the next step first;
+  // the ledger, diagnostics and failures stay one click away in the full page.
+  const awaitingApproval = Boolean(
+    port?.runtime &&
+    accountId &&
+    current?.scope === scope &&
+    !current.loading &&
+    // Only "this device needs approval" (new, lost or revoked identity); every other
+    // failure keeps the full page with its repair actions.
+    (!current.failure || current.failure.kind === 'approval-required') &&
+    !current.custodyFailure &&
+    !current.history?.locallyPinned &&
+    current.nativeStatus?.deviceKind !== 'personal'
+  );
+  if (awaitingApproval && !showDetails && port?.runtime && accountId)
+    return (
+      <E2eeDeviceApprovalGuide
+        reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
+        onRefresh={refresh}
+        onShowDetails={() => setShowDetails(true)}
+        onBack={() => {
+          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
+        }}
+      >
+        <E2eePersonalPairing
+          key={identity}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          canApprove={false}
+          approved={false}
+          onJoined={refresh}
+        />
+      </E2eeDeviceApprovalGuide>
+    );
   return (
     <>
       {current?.offline && (

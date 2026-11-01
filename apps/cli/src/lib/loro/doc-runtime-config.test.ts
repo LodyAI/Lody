@@ -13,9 +13,9 @@ const historyEntry = (id: string, role: 'user' | 'assistant') => ({
   fileDiff: [],
 });
 
-const createDocument = (flush = async () => {}) => {
+const createDocument = () => {
   const doc = new SessionDocument(
-    { flush } as LoroRepo,
+    {} as LoroRepo,
     'session-runtime-config' as SessionId,
     async () => {},
     {
@@ -33,281 +33,145 @@ const createDocument = (flush = async () => {}) => {
 };
 
 describe('SessionDocument ACP runtime config', () => {
-  const connection = {
-    acpSessionId: 'acp-1' as never,
-    generation: 'connection-1',
-    state: 'ready' as const,
-  };
-
-  it('requires the current revision to finish local persistence before it can be used', async () => {
-    let release = () => {};
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const doc = createDocument(() => held);
-    await doc.beginAcpRuntimeConfig('', { ...connection, modeId: 'default' });
-    const flush = doc.flushLocalWrites();
-    expect(doc.isAcpConfigurationConfirmed(connection.generation)).toBe(false);
-    await expect(
-      doc.acceptWithConfigRevision({ configRevision: 1 }, async () => 'unexpected')
-    ).rejects.toThrow('SESSION_CONFIG_UNCONFIRMED');
-    await doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'plan' });
-    release();
-    await flush;
-    expect(doc.isAcpConfigurationConfirmed(connection.generation)).toBe(false);
-    await doc.flushLocalWrites();
-    expect(doc.isAcpConfigurationConfirmed(connection.generation)).toBe(true);
-    await expect(
-      doc.acceptWithConfigRevision({ configRevision: 2 }, async () => 'accepted')
-    ).resolves.toBe('accepted');
-  });
-
-  it('loads the Loro input revision without manufacturing live connection confirmation', async () => {
+  it('keeps commands within one runtime across turns, clears them, and replaces the runtime', async () => {
     const doc = createDocument();
-    doc.mirror!.setState((state) => {
-      state.acpRuntimeConfig = { ...connection, revision: 1, modeId: 'default' };
-      return state;
-    });
-    const entered = Promise.withResolvers<void>();
-    const synced = Promise.withResolvers<void>();
-    doc.waitForRemoteSync = async () => {
-      entered.resolve();
-      await synced.promise;
-    };
-    const accept = doc.acceptWithConfigRevision(
-      { configRevision: 3 },
-      async () => 'accepted',
-      () => false,
-      undefined,
-      { waitForSync: () => doc.waitForRemoteSync() }
-    );
-    await entered.promise;
-    doc.mirror!.setState((state) => {
-      state.acpRuntimeConfig = { ...connection, state: 'unknown', revision: 3, modeId: 'plan' };
-      return state;
-    });
-    synced.resolve();
-    expect(await accept).toBe('accepted');
-    expect(doc.isAcpConfigurationConfirmed(connection.generation)).toBe(false);
-    await expect(
-      doc.acceptWithConfigRevision(
-        { configRevision: 2 },
-        async () => 'unexpected',
-        () => false,
-        undefined,
-        { waitForSync: () => doc.waitForRemoteSync() }
-      )
-    ).rejects.toThrow('SESSION_CONFIG_CHANGED');
-    // A renderer ahead of the loaded snapshot is not an old-baseline write.
-    expect(
-      await doc.acceptWithConfigRevision(
-        { configRevision: 4 },
-        async () => 'accepted',
-        () => false,
-        undefined,
-        { waitForSync: () => doc.waitForRemoteSync() }
-      )
-    ).toBe('accepted');
-  });
-
-  it('keeps confirmed changes independently of newer history and queue inputs', async () => {
-    const doc = createDocument();
-    await doc.beginAcpRuntimeConfig('turn-1', {
-      ...connection,
-      modeId: 'plan',
-      configOptionValues: { plan: true },
-    });
-    await updateTestHistory(doc, (history) => [...history, historyEntry('turn-2', 'user')]);
     await doc.applyAcpRuntimeConfigPatch('turn-1', {
-      ...connection,
-      modeId: 'default',
-      configOptionValues: { plan: false },
-    });
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-      modeId: 'default',
-      configOptionValues: { plan: false },
-      revision: 2,
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [{ name: 'review-a', description: 'Review A' }],
     });
     expect(
       await doc.applyAcpRuntimeConfigPatch('turn-1', {
-        ...connection,
-        modeId: 'default',
-        configOptionValues: { plan: false },
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [{ name: 'review-a', description: 'Review A' }],
       })
     ).toBe(false);
-  });
-
-  it('requires owner attachment and fences old connections even when ACP reuses its session id', async () => {
-    const doc = createDocument();
-    expect(await doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'plan' })).toBe(false);
-    await doc.beginAcpRuntimeConfig('', {
-      ...connection,
-      modeId: 'plan',
-      availableCommands: [{ name: 'old' }],
+    await updateTestHistory(doc, (history) => [...history, historyEntry('turn-2', 'user')]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      modelId: 'model-b',
     });
-    const staleWrite = doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'plan' });
-    await doc.beginAcpRuntimeConfig('', {
-      ...connection,
-      generation: 'connection-2',
-      modeId: 'default',
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-a', description: 'Review A' },
+    ]);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [{ name: 'stale' }],
+      })
+    ).toBe(false);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [],
     });
-    expect(await staleWrite).toBe(false);
-    expect(await doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'plan' })).toBe(false);
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-      generation: 'connection-2',
-      modeId: 'default',
-      revision: 2,
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-2', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [],
+      })
+    ).toBe(false);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-2' as never,
+      availableCommands: [{ name: 'review-b' }],
     });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-b' },
+    ]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', { acpSessionId: 'acp-3' as never });
     expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toBeUndefined();
   });
 
-  it('merges partial updates but replaces the whole option table, preserving false', async () => {
+  it('merges same-turn patches and makes replay idempotent', async () => {
     const doc = createDocument();
-    await doc.beginAcpRuntimeConfig('', {
-      ...connection,
-      modeId: 'default',
-      configOptionValues: { plan: true, effort: 'high' },
-      availableCommands: [{ name: 'review' }],
-    });
-    await doc.applyAcpRuntimeConfigPatch('', {
-      ...connection,
-      configOptionValues: { plan: false },
-      state: 'applying',
-    });
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-      modeId: 'default',
-      state: 'applying',
-      configOptionValues: { plan: false },
-      availableCommands: [{ name: 'review' }],
-    });
-    await doc.applyAcpRuntimeConfigPatch('', {
-      ...connection,
-      availableCommands: [],
-      state: 'failed',
-      error: { code: 'REJECTED', message: 'Configuration rejected' },
-    });
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-      state: 'failed',
-      configOptionValues: { plan: false },
-      availableCommands: [],
-      error: { code: 'REJECTED' },
+
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        configOptionValues: { collaboration_mode: 'default' },
+      })
+    ).toBe(true);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        modelId: 'gpt-5.6-sol',
+      })
+    ).toBe(true);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        modelId: 'gpt-5.6-sol',
+      })
+    ).toBe(false);
+
+    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
+      acpSessionId: 'acp-1',
+      basedOnUserTurnId: 'turn-1',
+      revision: 2,
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { collaboration_mode: 'default' },
     });
   });
 
-  it('orders first acceptance before a competing config publication and ignores retired connections', async () => {
+  it('rejects missing and stale turns, then starts a clean snapshot for the latest turn', async () => {
     const doc = createDocument();
-    await doc.beginAcpRuntimeConfig('', { ...connection, modeId: 'default' });
-    let release: (() => void) | undefined;
-    await doc.flushLocalWrites();
-    let started: (() => void) | undefined;
-    const entered = new Promise<void>((resolve) => {
-      started = resolve;
-    });
-    const commit = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const accept = doc.acceptWithConfigRevision({ configRevision: 1 }, async () => {
-      started?.();
-      await commit;
-      return 'accepted';
-    });
-    await entered;
-    const update = doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'plan' });
-    expect(doc.mirror?.getState().acpRuntimeConfig?.modeId).toBe('default');
-    release?.();
-    expect(await accept).toBe('accepted');
-    await update;
-    await doc.flushLocalWrites();
-    await expect(
-      doc.acceptWithConfigRevision({ configRevision: 1 }, async () => 'unexpected')
-    ).rejects.toThrow('SESSION_CONFIG_CHANGED');
-    await doc.retireAcpRuntimeConfig(connection.generation);
-    expect(await doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'default' })).toBe(
-      false
-    );
-    expect(doc.mirror?.getState().acpRuntimeConfig?.state).toBe('unknown');
-  });
-
-  it('checks the durable acceptance receipt inside the publication queue for duplicate first claims', async () => {
-    const doc = createDocument();
-    await doc.beginAcpRuntimeConfig('', { ...connection, modeId: 'plan' });
-    await doc.flushLocalWrites();
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    let receipt = false;
-    const first = doc.acceptWithConfigRevision(
-      { configRevision: 1 },
-      async () => {
-        entered.resolve();
-        await release.promise;
-        receipt = true;
-        return 'first';
-      },
-      () => receipt
-    );
-    await entered.promise;
-    const update = doc.applyAcpRuntimeConfigPatch('', { ...connection, modeId: 'default' });
-    const duplicate = doc.acceptWithConfigRevision(
-      { configRevision: 1 },
-      async () => 'duplicate',
-      () => receipt
-    );
-    release.resolve();
-    expect(await first).toBe('first');
-    await update;
-    expect(await duplicate).toBe('duplicate');
-    await doc.flushLocalWrites();
-    await expect(
-      doc.acceptWithConfigRevision(
-        { configRevision: 1 },
-        async () => 'new',
-        () => false
-      )
-    ).rejects.toThrow('SESSION_CONFIG_CHANGED');
-  });
-
-  it('does not accept persisted confirmation until a live generation attaches after restart', async () => {
-    const doc = createDocument();
-    doc.mirror?.setState((state) => {
-      state.acpRuntimeConfig = {
-        ...connection,
-        revision: 4,
-        basedOnUserTurnId: 'old',
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('missing', {
+        acpSessionId: 'acp-1' as never,
         modeId: 'plan',
-      };
-      return state;
-    });
-    await expect(
-      doc.acceptWithConfigRevision({ configRevision: 4 }, async () => 'accepted')
-    ).rejects.toThrow('SESSION_CONFIG_UNCONFIRMED');
-    await doc.invalidateStoredAcpRuntimeConfig();
-    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
-      state: 'unknown',
-      modeId: 'plan',
-      revision: 5,
-    });
-    await doc.beginAcpRuntimeConfig('', {
-      ...connection,
-      generation: 'connection-2',
+      })
+    ).toBe(false);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        modeId: 'plan',
+        configOptionValues: { collaboration_mode: 'plan' },
+      })
+    ).toBe(true);
+
+    await updateTestHistory(doc, (history) => [
+      ...history,
+      historyEntry('assistant-1', 'assistant'),
+      historyEntry('turn-2', 'user'),
+    ]);
+
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        modeId: 'default',
+      })
+    ).toBe(false);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-2', {
+        acpSessionId: 'acp-2' as never,
+        modeId: 'default',
+      })
+    ).toBe(true);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
+      acpSessionId: 'acp-2',
+      basedOnUserTurnId: 'turn-2',
+      revision: 2,
       modeId: 'default',
     });
-    await doc.flushLocalWrites();
-    expect(doc.isAcpConfigurationConfirmed('connection-2')).toBe(true);
-    await doc.invalidateStoredAcpRuntimeConfig();
-    expect(doc.mirror?.getState().acpRuntimeConfig?.state).toBe('ready');
   });
 
-  it('never publishes sensitive values through begin or subsequent updates', async () => {
+  it('never persists sensitive option ids even when a caller passes them directly', async () => {
     const doc = createDocument();
-    await doc.beginAcpRuntimeConfig('', {
-      ...connection,
-      configOptionValues: { api_token: 'secret', effort: 'high' },
+
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-sensitive' as never,
+        configOptionValues: {
+          api_token: 'secret-value',
+          credential: 'also-secret',
+          reasoning_effort: 'high',
+        },
+      })
+    ).toBe(true);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
+      acpSessionId: 'acp-sensitive',
+      basedOnUserTurnId: 'turn-1',
+      revision: 1,
+      configOptionValues: { reasoning_effort: 'high' },
     });
-    expect(doc.mirror?.getState().acpRuntimeConfig?.configOptionValues).toEqual({ effort: 'high' });
-    await doc.applyAcpRuntimeConfigPatch('', {
-      ...connection,
-      configOptionValues: { credential: 'secret', plan: false },
-    });
-    expect(doc.mirror?.getState().acpRuntimeConfig?.configOptionValues).toEqual({ plan: false });
   });
 });

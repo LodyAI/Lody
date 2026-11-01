@@ -117,7 +117,7 @@ export type CreateAcpClientOptions = {
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
-  onUpdateMessage(message: AcpSessionNotification, generation?: string): void;
+  onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
     request: RequestPermissionRequest
@@ -287,7 +287,7 @@ export type StartLocalAcpAgentOptions = {
   terminalManager: TerminalManager;
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
   terminalEnabled?: boolean;
-  onUpdateMessage(message: AcpSessionNotification, generation?: string): void;
+  onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
     request: RequestPermissionRequest

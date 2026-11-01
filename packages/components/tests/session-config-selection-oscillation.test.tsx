@@ -70,7 +70,7 @@ const history = [
 ];
 
 const acpRuntimeConfig = {
-  acpSessionId: 'acp-session-1', generation: 'connection-1', state: 'ready',
+  acpSessionId: 'acp-session-1',
   basedOnUserTurnId: LATEST_USER_TURN_ID,
   revision: 1,
   modeId: 'auto',
@@ -79,7 +79,7 @@ const acpRuntimeConfig = {
 };
 
 const conversationConfig = resolveSessionConversationConfig(history, []);
-const runtimeConfig = resolveSessionAcpRuntimeConfig(acpRuntimeConfig);
+const runtimeConfig = resolveSessionAcpRuntimeConfig(history, [], acpRuntimeConfig);
 
 const preferences = {
   modeId: conversationConfig.modeId,
@@ -264,13 +264,14 @@ describe('composer configuration across attachment sends', () => {
       documentReady,
     });
     selection = useAcpSessionConfigSelectionState({
-      enabled: true,
+      enabled: documentReady || baseline.hasPendingConfig,
       targetKey: currentSessionId,
       preferenceRevision: `${currentSessionId}:${baseline.sourceFence.currentTurnKey ?? ''}`,
-      preferences: {},
-      inheritDefaults: true,
-      runtimePreferences: resolveSessionAcpRuntimeConfig({
-            acpSessionId: 'synthetic-runtime', generation: 'connection-1', state: 'ready',
+      preferences: baseline.config,
+      runtimePreferences: baseline.hasPendingConfig
+        ? null
+        : resolveSessionAcpRuntimeConfig(rows, [], {
+            acpSessionId: 'synthetic-runtime',
             basedOnUserTurnId: 'old',
             revision: 1,
             modelId: 'default',
@@ -354,10 +355,10 @@ describe('composer configuration across attachment sends', () => {
     container.remove();
   });
 
-  it('keeps the runtime config while a held input supplies only pending Role selection', () => {
+  it('shows the first frozen config even before the empty document hydrates', () => {
     enqueue();
     render({ documentReady: false });
-    expect(visible()).toEqual({ model: 'default', mode: null, role: roleId });
+    expect(visible()).toEqual({ model: 'chosen', mode: 'agent', effort: 'high', role: roleId });
     expect(baseline.sourceFence.currentTurnKey).toBe('turn:first');
   });
 
@@ -376,27 +377,27 @@ describe('composer configuration across attachment sends', () => {
     expect(durable[0]!.inputConfig?.modelId).toBe('chosen');
   });
 
-  it('keeps confirmed configuration between a held send and its landed turn', async () => {
+  it('never flashes the default between a held send and its landed turn', async () => {
     enqueue();
     render();
     await settle();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
     durable = [turn('first')];
     render();
     expect(baseline.hasPendingConfig).toBe(false);
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
   });
 
-  it('keeps runtime configuration independent of continuation and queue publication', async () => {
+  it('takes a continuation config ahead of the previous turn runtime snapshot', async () => {
     durable = [turn('old', 'next')];
     render();
     expect(visible().model).toBe('default');
     enqueue();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
     await settle();
     durable = [...durable, turn('first')];
     render();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
   });
 
   it('keeps an explicit next-draft choice even when it equals the held model', async () => {
@@ -415,7 +416,7 @@ describe('composer configuration across attachment sends', () => {
     render();
     shouldFail = true;
     await settle();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
     flushSync(() => selection.selectModel('next'));
     await act(async () => {
       await pendingSends.cancel('first');
@@ -425,16 +426,16 @@ describe('composer configuration across attachment sends', () => {
     expect(landed.size).toBe(0);
   });
 
-  it('never imports held-send configuration from this or another session', () => {
+  it('uses the last accepted local send and never imports another session config', () => {
     enqueue(turn('first'));
     enqueue(turn('second', 'next'));
     enqueue(turn('other', 'chosen'), otherSessionId);
     render();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('next');
     render({ currentSessionId: otherSessionId });
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('chosen');
     render();
-    expect(visible().model).toBe('default');
+    expect(visible().model).toBe('next');
   });
 
   it('does not resurrect an old local baseline after a newer durable turn is removed', () => {

@@ -3,6 +3,7 @@ import { resolveSessionConversationConfig } from '@lody/shared';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
+  resolveSessionAcpRuntimeConfig,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   SessionId,
@@ -17,6 +18,7 @@ import {
   type SessionForkSpec,
   type SessionForkOperation,
   type SessionHistoryInput,
+  type SessionAcpRuntimeConfigSnapshot,
   type SessionMeta,
   type ProjectRef,
   resolveSessionMcpSelection,
@@ -42,6 +44,8 @@ type ForkWarning = SessionForkResponse['warnings'][number];
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
 
+type ForkRuntimeConfig = Omit<SessionAcpRuntimeConfigSnapshot, 'acpSessionId' | 'revision'>;
+
 type WorktreeForkPreparedInput = {
   spec: SessionForkSpec;
   source: SessionMeta;
@@ -51,6 +55,7 @@ type WorktreeForkPreparedInput = {
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   sourceSnapshot: SessionBackendForkSnapshot;
+  sourceRuntimeConfig?: ForkRuntimeConfig;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -485,12 +490,14 @@ export class SessionForkService {
     // This detached capture belongs to the fork operation, which may outlive
     // the cached source document while git creates the new worktree.
     const sourceBackend = await createSessionBackend(sourceDoc, source);
-    const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
-      this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      sourceBackend.captureForkSnapshot(),
-      this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
-      reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
-    ]);
+    const [targetExisting, sourceSnapshot, agentConfig, user, sourceControlState] =
+      await Promise.all([
+        this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
+        sourceBackend.captureForkSnapshot(),
+        this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
+        reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
+        sourceDoc.getDocState(),
+      ]);
     if (worktreeFork) {
       const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
         historyBackend: source.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
@@ -585,6 +592,17 @@ export class SessionForkService {
       );
     }
 
+    const runtimeConfig = sourceControlState?.acpRuntimeConfig;
+    const baseline = resolveSessionAcpRuntimeConfig(historyResult.history, [], runtimeConfig);
+    const sourceRuntimeConfig: ForkRuntimeConfig | undefined =
+      baseline && runtimeConfig?.acpSessionId === sourceAcpSessionId
+        ? {
+            basedOnUserTurnId: runtimeConfig.basedOnUserTurnId,
+            modelId: baseline.modelId,
+            modeId: baseline.modeId,
+            configOptionValues: baseline.configOptionValues,
+          }
+        : undefined;
     const forkSessionTurnId = historyResult.acpTurnId;
     if (sourceBusy) {
       const sourceRuntime = this.deps.sessionManager.getSession(sourceSessionId);
@@ -786,6 +804,7 @@ export class SessionForkService {
         marker,
         historyResult,
         sourceSnapshot,
+        sourceRuntimeConfig,
         agentConfig,
         user,
         operation,
@@ -894,11 +913,12 @@ export class SessionForkService {
         });
         const targetBackend = await createSessionBackend(targetDoc, targetMeta);
         await targetBackend.importForkHistory(sourceSnapshot, historyResult.history);
-        if (!targetSession.agentClient) throw new Error('Fork agent configuration is unavailable');
-        await targetDoc.beginAcpRuntimeConfig(
-          [...historyResult.history].reverse().find((turn) => turn.role === 'user')?.id ?? '',
-          targetSession.agentClient.getRuntimeConfiguration()
-        );
+        if (sourceRuntimeConfig) {
+          await targetBackend.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
+            ...sourceRuntimeConfig,
+            acpSessionId: targetSession.acpSessionId,
+          });
+        }
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -975,6 +995,7 @@ export class SessionForkService {
       marker,
       historyResult,
       sourceSnapshot,
+      sourceRuntimeConfig,
       agentConfig,
       user,
       operation,
@@ -1057,11 +1078,12 @@ export class SessionForkService {
         // durable acpSessionId then implies the doc writes are durable too).
         const targetBackend = await createSessionBackend(targetDoc, targetMeta);
         await targetBackend.importForkHistory(sourceSnapshot, historyResult.history);
-        if (!targetSession.agentClient) throw new Error('Fork agent configuration is unavailable');
-        await targetDoc.beginAcpRuntimeConfig(
-          [...historyResult.history].reverse().find((turn) => turn.role === 'user')?.id ?? '',
-          targetSession.agentClient.getRuntimeConfiguration()
-        );
+        if (sourceRuntimeConfig) {
+          await targetBackend.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
+            ...sourceRuntimeConfig,
+            acpSessionId: targetAcpSessionId,
+          });
+        }
         targetDoc.setForkOperation(undefined);
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,

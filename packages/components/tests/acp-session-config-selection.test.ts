@@ -47,7 +47,7 @@ describe('ACP session config derivation', () => {
     ).toBe('gpt-5.6-sol');
   });
 
-  it('retains an invalid preference and reports authoritative validation failure', () => {
+  it('replaces an invalid preference only after authoritative validation', () => {
     const inputs = { edits: emptyEdits, preferences: { modelId: 'removed-model' } };
     expect(resolveAcpSessionConfigSelection(inputs, baseOptions).selectedModelId).toBe(
       'removed-model'
@@ -57,8 +57,7 @@ describe('ACP session config derivation', () => {
         ...baseOptions,
         capabilityAuthority: 'authoritative',
       }).selectedModelId
-    ).toBe('removed-model');
-    expect(resolveAcpSessionConfigSelection(inputs, { ...baseOptions, capabilityAuthority: 'authoritative' }).validationErrors).toEqual(['model']);
+    ).toBe('gpt-5.5');
   });
 
   it('derives fresh defaults but preserves explicit user selections', () => {
@@ -82,15 +81,15 @@ describe('ACP session config derivation', () => {
       resolveAcpSessionConfigSelection({ edits: edited, preferences: {} }, authoritative)
         .selectedModelId
     ).toBe('gpt-5.5');
-    // An invalid edit remains visible until the user changes it.
+    // An INVALID user edit falls through the chain under authoritative caps.
     const invalidEdit: AcpSessionUserConfigEdits = { model: { value: 'gone' }, configOptions: {} };
     expect(
       resolveAcpSessionConfigSelection({ edits: invalidEdit, preferences: {} }, authoritative)
         .selectedModelId
-    ).toBe('gone');
+    ).toBe('gpt-5.6-sol');
   });
 
-  it('keeps unknown config keys and invalid values through authoritative refresh', () => {
+  it('keeps unknown config keys provisionally and removes them authoritatively', () => {
     const selectors = [
       {
         configId: 'fast-mode',
@@ -121,7 +120,7 @@ describe('ACP session config derivation', () => {
         capabilityAuthority: 'authoritative',
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ future_option: 'enabled', 'fast-mode': 'future-value' });
+    ).toEqual({ 'fast-mode': 'off' });
   });
 
   it('applies the runtime baseline over non-user fields', () => {
@@ -177,12 +176,6 @@ describe('ACP session config derivation', () => {
         options
       ).configOptionValues
     ).toEqual({ collaboration_mode: 'default', reasoning_effort: 'high' });
-  });
-
-  it('inherits agent defaults for an unconfirmed existing session without seeding catalog values', () => {
-    const resolved = resolveAcpSessionConfigSelection({ edits: emptyEdits, preferences: {}, inheritDefaults: true }, baseOptions);
-    expect(resolved.selectedModelId).toBeNull();
-    expect(resolved.configOptionValues).toEqual({});
   });
 
   it('removes non-user options omitted from a full runtime snapshot', () => {
@@ -258,7 +251,9 @@ describe('ACP session config derivation', () => {
       // The runtime snapshot owns the key set: `fast` is omitted, never
       // resurrected from the stale preference or a selector fallback.
       expect(first.configOptionValues).toEqual(
-        { effort: 'high', mode: 'auto', model: 'claude-fable-5' }
+        authority === 'provisional'
+          ? { effort: 'high', mode: 'auto', model: 'claude-fable-5' }
+          : { effort: 'high' }
       );
     }
   });
@@ -299,11 +294,10 @@ describe('ACP session config derivation', () => {
       },
       { cliType: 'builtin', agentType: 'codex' }
     );
-    expect(resolved.selectedModelId).toBe('gpt-5.6-sol');
-    expect(resolved.validationErrors).toContain('model');
+    expect(resolved.selectedModelId).toBe('gpt-5.5');
     // `max` is not a reasoning tier of the resolved model: the stale
     // preference falls through to the normalized selector's own value.
-    expect(resolved.configOptionValues.reasoning_effort).toBe('max');
+    expect(resolved.configOptionValues.reasoning_effort).toBe('medium');
   });
 
   it('returns the resolved-model selectors so dispatch filtering keeps resolved-valid values', () => {
@@ -326,7 +320,7 @@ describe('ACP session config derivation', () => {
       {
         edits: emptyEdits,
         preferences: {
-          modelId: 'grok-4.6',
+          modelId: 'grok-4.5',
           configOptionValues: { reasoning_effort: 'xhigh' },
         },
       },
@@ -693,7 +687,7 @@ describe.each(['custom', 'registry'] as const)('%s model-category effort selecti
     expect(restored.configOptionValues.provider_effort).toBe('high');
   });
 
-  it('reports an invalid model edit without reverting to the runtime model', () => {
+  it('validates the model before effort and falls back from an invalid edit to the runtime model', () => {
     const inputs: AcpSessionConfigSelectionInputs = {
       edits: { configOptions: { provider_model: 'removed', provider_effort: 'xhigh' } },
       runtimePreferences: {
@@ -702,11 +696,11 @@ describe.each(['custom', 'registry'] as const)('%s model-category effort selecti
       preferences: { configOptionValues: { provider_model: 'a' } },
     };
     const resolved = resolve(inputs);
-    expect(resolved.configOptionValues).toEqual({ provider_model: 'removed', provider_effort: 'xhigh' });
-    expect(resolved.validationErrors).toContain('provider_model');
+    expect(resolved.configOptionValues).toEqual({ provider_model: 'b', provider_effort: 'xhigh' });
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 
-  it('retains a removed candidate and reports it without choosing another model', () => {
+  it('restores controls when an unsupported candidate is removed from the authoritative catalog', () => {
     const inputs: AcpSessionConfigSelectionInputs = {
       edits: { configOptions: { provider_model: 'adaptive' } },
       preferences: { configOptionValues: { provider_model: 'b' } },
@@ -731,9 +725,8 @@ describe.each(['custom', 'registry'] as const)('%s model-category effort selecti
     });
     expect(efforts(options)).toBeUndefined();
     const resolved = resolveAcpSessionConfigSelection(inputs, options, target);
-    expect(efforts(resolved)).toBeUndefined();
-    expect(resolved.configOptionValues.provider_model).toBe('adaptive');
-    expect(resolved.validationErrors).toContain('provider_model');
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.configOptionValues.provider_model).toBe('b');
   });
 
   it('uses the generic config value even if a stale dedicated model id exists', () => {
@@ -754,18 +747,17 @@ describe.each(['custom', 'registry'] as const)('%s model-category effort selecti
         runtimePreferences: { configOptionValues: runtimeValues },
         preferences: { configOptionValues: { provider_model: 'b', provider_effort: 'xhigh' } },
       });
-      expect(resolved.configOptionValues).toEqual(runtimeValues);
+      expect(resolved.configOptionValues).toEqual({});
       expect(efforts(resolved)).toEqual(['medium', 'high', 'max']);
     }
   });
 
-  it('preserves concrete invalid model and effort without a runtime snapshot', () => {
+  it('uses preference/default fallback without a runtime snapshot and drops invalid effort', () => {
     const resolved = resolve({
       edits: { configOptions: { provider_model: 'removed', provider_effort: 'xhigh' } },
       preferences: { configOptionValues: { provider_model: 'removed', provider_effort: 'low' } },
     });
-    expect(resolved.configOptionValues).toEqual({ provider_model: 'removed', provider_effort: 'xhigh' });
-    expect(resolved.validationErrors).toContain('provider_model');
+    expect(resolved.configOptionValues).toEqual({ provider_model: 'a', provider_effort: 'high' });
     expect(efforts(resolved)).toEqual(['medium', 'high', 'max']);
   });
 

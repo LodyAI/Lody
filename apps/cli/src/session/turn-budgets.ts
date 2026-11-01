@@ -11,8 +11,6 @@
  *   `cliShutdownMs`; it lives in another package, so keep that by review.
  */
 export const TURN_BUDGETS = {
-  /** Required ACP configuration must settle before a prompt is submitted. */
-  configurationMs: 30_000,
   /** One Git observation command (status, diff, branch). */
   gitObservationMs: 15_000,
   /** All workspace-reading results of one turn, shared by every end path. */

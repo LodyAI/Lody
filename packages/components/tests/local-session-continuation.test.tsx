@@ -1,10 +1,22 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createStore, Provider } from 'jotai';
+import { createStore, getDefaultStore, Provider } from 'jotai';
+import { getMachineMetaByIdAtomFamily } from '../src/atoms/machines';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { describeSessionContinuation } from '../src/components/sessions/session-continuation';
 import { useLocalSessionContinuation } from '../src/components/sessions/use-local-session-continuation';
+
+vi.mock('../src/atoms/machines', async () => {
+  const { atom } = await import('jotai');
+  const machine = atom({
+    protocolCapabilities: { sessionAutomations: 1, remoteAutomationControl: 1 },
+  });
+  return { getMachineMetaByIdAtomFamily: () => machine };
+});
+const machineAtom = getMachineMetaByIdAtomFamily() as import('jotai').PrimitiveAtom<{
+  protocolCapabilities: Record<string, number>;
+} | null>;
 
 const automation = vi.fn();
 vi.mock('../src/lib/electron-ipc-client', () => ({
@@ -23,10 +35,14 @@ describe('local Session continuation', () => {
     container = document.createElement('div');
     root = createRoot(container);
     store = createStore();
+    getDefaultStore().set(machineAtom, {
+      protocolCapabilities: { sessionAutomations: 1, remoteAutomationControl: 1 },
+    });
   });
   afterEach(() => {
     act(() => root.unmount());
     automation.mockReset();
+    vi.useRealTimers();
   });
   it('does not access the owner when no supported local Session is selected', async () => {
     function View() {
@@ -36,6 +52,93 @@ describe('local Session continuation', () => {
     await act(async () => root.render(<View />));
     expect(container.textContent).toBe('[]');
     expect(automation).not.toHaveBeenCalled();
+  });
+  it.each([false, true])(
+    'hides unsupported automation without polling (remote=%s), then recovers on upgrade',
+    async (remote) => {
+      vi.useFakeTimers();
+      store.set(machineAtom, { protocolCapabilities: {} });
+      let requests = 0;
+      const execute = async (command: { type: string }) => {
+        requests++;
+        return command.type === 'list'
+          ? { type: 'list', waits: [] }
+          : { type: 'settings', settings: { recoverCapacity: true } };
+      };
+      automation.mockImplementation(({ command }) => execute(command));
+      const runtime = {
+        requestSessionAutomationControl: (
+          _m: string,
+          _s: string,
+          _u: string,
+          command: { type: string }
+        ) => execute(command),
+      } as unknown as import('../src/atoms/runtime').WorkspaceRuntime;
+      function View() {
+        const data = useLocalSessionContinuation(
+          remote ? { ...target, remote: { runtime, requesterUserId: 'user' } } : target,
+          true
+        );
+        return (
+          <output>
+            {JSON.stringify({
+              supported: data.supported,
+              error: data.error,
+              recovery: data.recoveryEnabled,
+              views: data.views,
+            })}
+          </output>
+        );
+      }
+      await act(async () =>
+        root.render(
+          <Provider store={store}>
+            <View />
+          </Provider>
+        )
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(container.textContent).toBe(
+        '{"supported":false,"error":false,"recovery":null,"views":[]}'
+      );
+      expect(requests).toBe(0);
+      await act(async () =>
+        store.set(machineAtom, {
+          protocolCapabilities: remote ? { remoteAutomationControl: 1 } : { sessionAutomations: 1 },
+        })
+      );
+      expect(container.textContent).toBe(
+        '{"supported":true,"error":false,"recovery":true,"views":[]}'
+      );
+      await act(async () => store.set(machineAtom, null));
+      expect(container.textContent).toBe(
+        '{"supported":false,"error":false,"recovery":null,"views":[]}'
+      );
+      const completed = requests;
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(requests).toBe(completed);
+    }
+  );
+  it('keeps supported connection failures visible and recovers on retry', async () => {
+    vi.useFakeTimers();
+    automation.mockRejectedValue(new Error('disconnected'));
+    function View() {
+      const data = useLocalSessionContinuation(target, true);
+      return (
+        <output>
+          {String(data.error)}:{String(data.recoveryEnabled)}
+        </output>
+      );
+    }
+    await act(async () => root.render(<View />));
+    expect(container.textContent).toBe('true:null');
+    automation.mockImplementation(async ({ command }) =>
+      command.type === 'list'
+        ? { type: 'list', waits: [] }
+        : { type: 'settings', settings: { recoverCapacity: false } }
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(container.textContent).toBe('false:false');
   });
   it('reads and changes a remote Session through its machine owner', async () => {
     const calls: string[] = [];
