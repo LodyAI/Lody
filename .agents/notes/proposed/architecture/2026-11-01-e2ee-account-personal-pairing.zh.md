@@ -132,8 +132,7 @@ Translation: current
 
 ## 桌面宿主
 
-[`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
-在 Electron main 中实现了双方的流程。[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts) 把它接到按工作区的宿主上，`E2eeIpc` 再把它暴露给 #2196 定义的宿主接口。
+共享的流程位于 [`@lody/e2ee-client/account-pairing`](../../../../packages/e2ee-client/src/account-pairing.ts)，持久状态通过 `AccountPairingStore` 端口存取。[`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts) 是桌面端的 SQLite 存储与组装。[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts) 把它接到按工作区的宿主上，`E2eeIpc` 再把它暴露给 #2196 定义的宿主接口。
 - **工作区列表。** 渲染进程把自己的加密工作区列表作为路由提示传入。宿主会用该工作区自己的账本或请求标签，校验每一个 genesis。
 - **新设备。** 新设备为已验证历史中分配给本账号 crypto user 的那个成员身份提供持有证明。accept 时，它按受标签认证的账本哈希找到接纳记录，把该记录的签名者当作背书者，再通过现有的按工作区加入日志安装邀请。
 - **Member 批准方。** Member 不能为快照背书，所以它的批准会停在"等待送达"。另有一个待批准的 Spec 增量提议改用历史送达，目前没有实现。

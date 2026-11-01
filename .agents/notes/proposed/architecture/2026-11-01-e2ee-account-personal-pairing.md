@@ -204,8 +204,10 @@ behind the developer-mode beta switch "Account-wide device pairing".
 
 ## Desktop host
 
+The shared workflow is [`@lody/e2ee-client/account-pairing`](../../../../packages/e2ee-client/src/account-pairing.ts),
+behind an `AccountPairingStore` port.
 [`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
-implements both sides in Electron main.
+is the desktop's SQLite store and composition.
 [`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts)
 connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 port.
 - **Workspace list.** The renderer passes its encrypted workspace list as routing hints.
