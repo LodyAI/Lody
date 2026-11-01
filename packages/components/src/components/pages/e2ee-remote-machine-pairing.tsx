@@ -109,7 +109,7 @@ export function E2eeRemoteMachinePairing({
         {preview?.summary && (
           <>
             <p>{t('e2ee.remoteMachine.machine', { id: preview.material?.machineId })}</p>
-            <p {...stylex.props(styles.code)}>{preview.summary}</p>
+            <p data-testid="e2ee-remote-machine-summary" {...stylex.props(styles.code)}>{preview.summary}</p>
             <p>{t('e2ee.remoteMachine.location', { location })}</p>
             <p {...stylex.props(styles.message)}>{t('e2ee.remoteMachine.locationHelp')}</p>
             <p>

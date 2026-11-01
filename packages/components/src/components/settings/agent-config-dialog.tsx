@@ -3422,6 +3422,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     >
       <Dialog.Content
         data-testid="agent-config-dialog"
+        data-agent-config-id={agentConfigId}
         data-machine-id={machine.id}
         // The wide header draws the close beside the capability status so they
         // share a centre line. The dialog cross is pinned to the panel padding

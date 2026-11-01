@@ -61,6 +61,7 @@ export function MachineConnectedResources(props: MachineConnectedResourcesProps)
           )}
         />
         <MachineConnectedResourcesContent
+          machineId={props.machineId}
           configs={props.configs}
           projects={[]}
           projectsLoading={props.projectsLoading}
@@ -74,6 +75,7 @@ export function MachineConnectedResources(props: MachineConnectedResourcesProps)
   if (props.readOnly) {
     return (
       <MachineConnectedResourcesContent
+        machineId={props.machineId}
         configs={props.configs}
         projects={props.preloadedProjects}
         projectsLoading={props.projectsLoading}
@@ -111,6 +113,7 @@ function ManageableMachineConnectedResources({
 
   return (
     <MachineConnectedResourcesContent
+      machineId={machineId}
       configs={configs}
       projects={projects}
       projectsLoading={(isLoading || projectsLoading) && projects.length === 0}
@@ -122,6 +125,7 @@ function ManageableMachineConnectedResources({
 }
 
 function MachineConnectedResourcesContent({
+  machineId,
   configs,
   projects,
   projectsLoading,
@@ -130,6 +134,7 @@ function MachineConnectedResourcesContent({
   onSharedWithTeamChange,
   hideFolders,
 }: {
+  machineId: MachineId;
   configs: AgentConfigMeta[];
   projects: PresentedProject[];
   projectsLoading: boolean;
@@ -224,7 +229,8 @@ function MachineConnectedResourcesContent({
             </h3>
           </div>
           {!readOnly ? (
-            <Button variant="secondary" size="small" onClick={onManageAgents}>
+            <Button data-testid="settings-machine-manage-agents"
+              data-machine-id={machineId} variant="secondary" size="small" onClick={onManageAgents}>
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}

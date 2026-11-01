@@ -1108,6 +1108,8 @@ describe('AgentConfigDialog', () => {
     const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
+    const displayedConfigId = document.querySelector('[data-testid="agent-config-dialog"]')?.getAttribute('data-agent-config-id');
+    expect(displayedConfigId).toMatch(/^[0-9a-f-]{36}$/u);
 
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
     expect(onCheckBinaryStatus).not.toHaveBeenCalled();
@@ -1141,6 +1143,7 @@ describe('AgentConfigDialog', () => {
     await vi.waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
+          id: displayedConfigId,
           cliType: 'builtin',
           agentType: 'deepseek',
           env: {

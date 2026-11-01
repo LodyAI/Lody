@@ -259,7 +259,12 @@ export function ProviderRow({
       ].filter((fact): fact is string => fact != null)
     : [kind].filter((fact): fact is string => fact != null);
   return (
-    <div {...withClassName(stylex.props(styles.root), className)}>
+    <div
+      data-testid="agent-provider"
+      data-agent-config-id={config.id}
+      data-machine-id={config.machineId}
+      {...withClassName(stylex.props(styles.root), className)}
+    >
       <div {...stylex.props(styles.row, surface.pressableLine)}>
         <button
           type="button"
@@ -278,7 +283,9 @@ export function ProviderRow({
           </div>
           <div {...stylex.props(styles.body)}>
             <div {...stylex.props(catalog.titleLine)}>
-              <span {...stylex.props(catalog.name)}>{config.name}</span>
+              <span data-testid="agent-provider-name" {...stylex.props(catalog.name)}>
+                {config.name}
+              </span>
             </div>
             {facts.length > 0 ? (
               <span {...stylex.props(catalog.meta)}>
