@@ -148,3 +148,5 @@ Read parent rules and linked context.
 
 - Stories render real components and only mock data; appearance lives in production.
   Keep stories minimal; verify UI changes in the app.
+
+Automation identity markers follow [their source rules](automation/AGENTS.md).

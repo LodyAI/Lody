@@ -1,3 +1,4 @@
+import { SessionMetaIdentityMarker } from './automation/session-meta-identity-marker';
 import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
@@ -2285,7 +2286,8 @@ export const SessionChatInputArea = memo(
         />
       </Button>
     ) : (
-      <Button data-testid="composer-send"
+      <Button
+        data-testid="composer-send"
         type="button"
         icon
         variant="ghost"
@@ -2441,6 +2443,7 @@ export const SessionChatInputArea = memo(
           }
         }}
       >
+        <SessionMetaIdentityMarker sessionId={session.id} isVisible={isVisible} />
         {/* The Role editor is a Dialog, so it is hosted OUT here rather than
             inside the run-config menu or the mobile drawer, where it would
             unmount with them the moment it opened. Mounted only while OPEN:
