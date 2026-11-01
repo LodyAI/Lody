@@ -71,12 +71,26 @@ const persistedSidePanelStateSchema = z
     tab: persistedSidePanelTabSchema.nullable().default(null),
     tabs: z.array(persistedSidePanelTabSchema).default([]),
     sideSessionId: SessionIdSchema.nullable().default(null),
+    split: z
+      .tuple([persistedSidePanelTabSchema, persistedSidePanelTabSchema])
+      .nullable()
+      .default(null),
   })
   .transform((state) => {
     const tabs = [...new Set(state.tabs)];
+    const [splitStart, splitEnd] = state.split ?? [];
     return {
       ...state,
       tabs,
+      // A split outlives neither of its tabs.
+      split:
+        splitStart &&
+        splitEnd &&
+        splitStart !== splitEnd &&
+        tabs.includes(splitStart) &&
+        tabs.includes(splitEnd)
+          ? ([splitStart, splitEnd] as const)
+          : null,
       // States written before functional side-panel tabs became opt-in only
       // stored the selected tab. Treat those sessions as unopened so the new
       // empty state is the first thing users see.

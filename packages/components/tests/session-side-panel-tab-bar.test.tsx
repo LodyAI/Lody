@@ -8,6 +8,8 @@ import {
   getSidePanelTabCloseFallback,
   getSidePanelTabSelection,
   getSidePanelTabStateAfterClose,
+  getEffectiveSidePanelTabSplit,
+  resolveSidePanelTabDropIntent,
   SessionSidePanelEmptyState,
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
@@ -101,6 +103,70 @@ describe('getSidePanelTabSelection', () => {
       activeSideSessionId: null,
       activeViewerTabId: null,
     });
+  });
+});
+
+describe('resolveSidePanelTabDropIntent', () => {
+  // ios [100, 200], browser [210, 300], android [310, 400]
+  const targets = [
+    { id: 'ios-simulator', left: 100, right: 200 },
+    { id: 'android-emulator', left: 310, right: 400 },
+  ];
+
+  it('pairs a dragged device tab with the target on the side it lands', () => {
+    const base = { draggedTabId: 'android-emulator', split: null, targets, group: null };
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 120 })).toEqual({
+      kind: 'split',
+      split: ['android-emulator', 'ios-simulator'],
+    });
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 180 })).toEqual({
+      kind: 'split',
+      split: ['ios-simulator', 'android-emulator'],
+    });
+  });
+
+  it('snaps back when released away from a splittable tab', () => {
+    expect(
+      resolveSidePanelTabDropIntent({
+        draggedTabId: 'android-emulator',
+        pointerX: 250,
+        split: null,
+        targets,
+        group: null,
+      })
+    ).toBeNull();
+  });
+
+  it('swaps group members across the middle and detaches past the margin', () => {
+    const base = {
+      draggedTabId: 'ios-simulator',
+      split: ['ios-simulator', 'android-emulator'] as const,
+      targets: [],
+      group: { left: 100, right: 300 },
+    };
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 150 })).toBeNull();
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 250 })).toEqual({
+      kind: 'split',
+      split: ['android-emulator', 'ios-simulator'],
+    });
+    // Inside the margin it is still a swap, not a detach.
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 310 })?.kind).toBe('split');
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 330 })).toEqual({
+      kind: 'unsplit',
+      tabId: 'ios-simulator',
+    });
+    expect(resolveSidePanelTabDropIntent({ ...base, pointerX: 60 })).toEqual({
+      kind: 'unsplit',
+      tabId: 'ios-simulator',
+    });
+  });
+});
+
+describe('getEffectiveSidePanelTabSplit', () => {
+  it('drops a split once either member leaves the strip', () => {
+    const split = ['ios-simulator', 'android-emulator'] as const;
+    expect(getEffectiveSidePanelTabSplit(split, ['files', ...split])).toBe(split);
+    expect(getEffectiveSidePanelTabSplit(split, ['files', 'ios-simulator'])).toBeNull();
   });
 });
 
@@ -223,6 +289,50 @@ describe('SessionSidePanelTabBar', () => {
 
     await act(async () => menuItems[0]?.click());
     expect(onPanelOpen).toHaveBeenCalledWith('pr');
+  });
+
+  it('draws a split pair as one group in split order that still selects each member', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(SessionSidePanelTabBar, {
+          tabs: [
+            { id: 'files', label: 'Files', kind: 'files', closeable: true },
+            { id: 'ios-simulator', label: 'iOS', kind: 'ios-simulator', closeable: true },
+            { id: 'browser', label: 'Browser', kind: 'browser', closeable: true },
+            { id: 'android-emulator', label: 'Android', kind: 'android-emulator', closeable: true },
+          ],
+          activeTabId: 'ios-simulator',
+          onTabSelect,
+          onTabClose,
+          closeTabLabel: (label: string) => `Close ${label}`,
+          split: ['android-emulator', 'ios-simulator'],
+          onTabsSplit: () => undefined,
+          onTabUnsplit: () => undefined,
+        })
+      );
+    });
+
+    const strip = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tablist"] > *'),
+      (element) =>
+        element.getAttribute('role') === 'group'
+          ? `[${Array.from(element.querySelectorAll('[role="tab"]'), (tab) => tab.textContent).join('|')}]`
+          : element.textContent
+    );
+    expect(strip).toEqual(['Files', '[Android|iOS]', 'Browser']);
+
+    const android = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+      (tab) => tab.textContent === 'Android'
+    );
+    await act(async () => android?.click());
+    expect(onTabSelect).toHaveBeenCalledWith('android-emulator');
+    await act(async () =>
+      container?.querySelector<HTMLButtonElement>('[aria-label="Close Android"]')?.click()
+    );
+    expect(onTabClose).toHaveBeenCalledWith('android-emulator');
   });
 
   it('opens a functional panel from the empty state', async () => {

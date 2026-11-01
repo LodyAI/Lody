@@ -157,6 +157,7 @@ import {
   getSidePanelTabSelection,
   getSidePanelTabCloseFallback,
   getSidePanelTabStateAfterClose,
+  getEffectiveSidePanelTabSplit,
   getSideSessionPanelTabId,
   isViewerTabId,
   parseSideSessionPanelTabId,
@@ -164,6 +165,7 @@ import {
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
+  type SidePanelTabSplit,
 } from './session-side-panel-tab-bar';
 import { getSessionTabCloseTarget, type SessionTabFocusRegion } from './session-tab-close-target';
 import {
@@ -515,6 +517,8 @@ const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
    conversation) is unreadably cramped at the default ~25% split. Honored only
    when the window is wide enough; see DesktopSessionDetailLayout. */
 const PR_SIDEBAR_MIN_WIDTH_PX = 500;
+/** Two device screens side by side need roughly two portrait phones' width. */
+const DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX = 720;
 
 const detailStyles = stylex.create({
   projectInfo: {
@@ -678,6 +682,24 @@ const detailStyles = stylex.create({
   invisibleFill: {
     visibility: 'hidden',
     pointerEvents: 'none',
+  },
+  // Split device panels slide between full width and their half.
+  splitSlide: {
+    transitionProperty: 'left, right',
+    transitionDuration: {
+      default: '220ms',
+      '@media (prefers-reduced-motion: reduce)': '0ms',
+    },
+    transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+  },
+  splitStart: {
+    right: '50%',
+  },
+  splitEnd: {
+    left: '50%',
+    borderInlineStartWidth: '1px',
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: 'hsl(var(--border) / 0.7)',
   },
   sidebarBody: {
     position: 'relative',
@@ -1176,9 +1198,15 @@ const SessionDetail = ({
   const [openedSidebarTabs, setOpenedSidebarTabs] = useState<SidebarTab[]>(
     () => initialTabState.sidePanel.tabs
   );
+  /* Two fixed panels the user dragged together; both render side by side
+     whenever either is selected. Closing either dissolves it. */
+  const [sidePanelSplit, setSidePanelSplit] = useState<readonly [SidebarTab, SidebarTab] | null>(
+    () => initialTabState.sidePanel.split
+  );
   /* One-shot request for DesktopSessionDetailLayout to widen the sidebar for
-     the PR tab; `seq` bumps per request so repeats are not dropped. */
-  const [prSidebarWidthRequest, setPrSidebarWidthRequest] = useState<{
+     the PR tab or a device split; `seq` bumps per request so repeats are not
+     dropped. */
+  const [sidebarWidthRequest, setSidebarWidthRequest] = useState<{
     seq: number;
     minWidthPx: number;
   } | null>(null);
@@ -1452,6 +1480,7 @@ const SessionDetail = ({
     setActiveSidebarTab(nextInitialTabState.sidePanel.tab);
     setActiveSideSessionId(nextInitialTabState.sidePanel.sideSessionId);
     setOpenedSidebarTabs(nextInitialTabState.sidePanel.tabs);
+    setSidePanelSplit(nextInitialTabState.sidePanel.split);
     setDraftTabsState(readPersistedDraftTabs(sessionId));
     setPendingDraftChildSessionIds({});
     setPendingForks(readPendingWorktreeForks(sessionId));
@@ -3951,7 +3980,7 @@ const SessionDetail = ({
         const sidebarEmpty =
           activeSidebarTab === null && activeSideSessionId === null && activeViewerTabId === null;
         if (!isSidebarOpen || sidebarEmpty) {
-          setPrSidebarWidthRequest((current) => ({
+          setSidebarWidthRequest((current) => ({
             seq: (current?.seq ?? 0) + 1,
             minWidthPx: PR_SIDEBAR_MIN_WIDTH_PX,
           }));
@@ -4633,6 +4662,31 @@ const SessionDetail = ({
     visibleSideSessions,
   ]);
   const sidePanelTabIds = useMemo(() => sidePanelTabs.map((tab) => tab.id), [sidePanelTabs]);
+  const effectiveSidePanelSplit = useMemo(
+    () =>
+      getEffectiveSidePanelTabSplit(sidePanelSplit, visibleOpenedSidebarTabs) as
+        | readonly [SidebarTab, SidebarTab]
+        | null,
+    [sidePanelSplit, visibleOpenedSidebarTabs]
+  );
+  const handleSidePanelTabsSplit = useCallback(
+    (split: SidePanelTabSplit, draggedTabId: string) => {
+      setSidePanelSplit(split as readonly [SidebarTab, SidebarTab]);
+      handleSidebarTabSelect(draggedTabId as SidebarTab);
+      setSidebarWidthRequest((current) => ({
+        seq: (current?.seq ?? 0) + 1,
+        minWidthPx: DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX,
+      }));
+    },
+    [handleSidebarTabSelect]
+  );
+  const handleSidePanelTabUnsplit = useCallback(
+    (tabId: string) => {
+      setSidePanelSplit(null);
+      handleSidebarTabSelect(tabId as SidebarTab);
+    },
+    [handleSidebarTabSelect]
+  );
 
   const handleCloseSidebarTab = useCallback(
     (tabId: SidebarTab) => {
@@ -4642,6 +4696,8 @@ const SessionDetail = ({
         tabId
       ) as SidebarTab | null;
       setOpenedSidebarTabs((current) => current.filter((candidate) => candidate !== tabId));
+      // Reopening a closed member must not silently re-form its old split.
+      setSidePanelSplit((current) => (current?.includes(tabId) ? null : current));
       if (!sidebarOpen) {
         setIsSidebarOpen(false);
       }
@@ -5164,6 +5220,7 @@ const SessionDetail = ({
         tab: activeSidebarTab,
         tabs: openedSidebarTabs,
         sideSessionId: activeSideSessionId,
+        split: sidePanelSplit,
       },
     });
   }, [
@@ -5176,6 +5233,7 @@ const SessionDetail = ({
     isSidebarOpen,
     openedSidebarTabs,
     sessionId,
+    sidePanelSplit,
   ]);
 
   // Side Chat always stays available: it launches another session rather than
@@ -7004,6 +7062,28 @@ const SessionDetail = ({
       />
     ) : null;
 
+  // A split shows both of its panels whenever either one is selected.
+  const fixedPanelSplitVisible =
+    effectiveSidePanelSplit !== null &&
+    activeSidebarTab !== null &&
+    effectiveSidePanelSplit.includes(activeSidebarTab);
+  const getFixedPanelPlacement = (tabId: SidebarTab): 'full' | 'start' | 'end' | 'hidden' => {
+    if (fixedPanelSplitVisible && effectiveSidePanelSplit?.includes(tabId)) {
+      return effectiveSidePanelSplit[0] === tabId ? 'start' : 'end';
+    }
+    return activeSidebarTab === tabId ? 'full' : 'hidden';
+  };
+  const iosSimulatorPlacement = getFixedPanelPlacement('ios-simulator');
+  const androidEmulatorPlacement = getFixedPanelPlacement('android-emulator');
+  const getFixedPanelFillClassName = (placement: ReturnType<typeof getFixedPanelPlacement>) =>
+    stylex.props(
+      detailStyles.absoluteFill,
+      detailStyles.splitSlide,
+      placement === 'start' && detailStyles.splitStart,
+      placement === 'end' && detailStyles.splitEnd,
+      placement === 'hidden' && detailStyles.invisibleFill
+    ).className;
+
   // Keep the browser mounted while another sidebar tab is selected. Managed
   // pages retain DOM state and Electron's native view is only hidden, so tab
   // switching behaves like a browser rather than rebuilding the page.
@@ -7043,17 +7123,12 @@ const SessionDetail = ({
       ) : null}
       {activeIosSimulatorSession && openedSidebarTabs.includes('ios-simulator') ? (
         <div
-          className={
-            stylex.props(
-              detailStyles.absoluteFill,
-              activeSidebarTab !== 'ios-simulator' && detailStyles.invisibleFill
-            ).className
-          }
-          aria-hidden={activeSidebarTab !== 'ios-simulator'}
+          className={getFixedPanelFillClassName(iosSimulatorPlacement)}
+          aria-hidden={iosSimulatorPlacement === 'hidden'}
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={activeSidebarTab === 'ios-simulator' && isSidebarVisible}
+            active={iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
@@ -7062,18 +7137,13 @@ const SessionDetail = ({
       ) : null}
       {activeAndroidEmulatorSession && openedSidebarTabs.includes('android-emulator') ? (
         <div
-          className={
-            stylex.props(
-              detailStyles.absoluteFill,
-              activeSidebarTab !== 'android-emulator' && detailStyles.invisibleFill
-            ).className
-          }
-          aria-hidden={activeSidebarTab !== 'android-emulator'}
+          className={getFixedPanelFillClassName(androidEmulatorPlacement)}
+          aria-hidden={androidEmulatorPlacement === 'hidden'}
         >
           <SessionDevicePreviewPanel
             platform="android"
             session={activeAndroidEmulatorSession}
-            active={activeSidebarTab === 'android-emulator' && isSidebarVisible}
+            active={androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
             }
@@ -7363,6 +7433,9 @@ const SessionDetail = ({
         closeTabLabel={(tabLabel) =>
           t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
         }
+        split={effectiveSidePanelSplit}
+        onTabsSplit={handleSidePanelTabsSplit}
+        onTabUnsplit={handleSidePanelTabUnsplit}
         moreSlot={
           <SessionFileActionsMenu
             filePath={activeViewerFilePath}
@@ -7424,7 +7497,7 @@ const SessionDetail = ({
         sidebarOpen={isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
-        sidebarMinWidthRequest={prSidebarWidthRequest}
+        sidebarMinWidthRequest={sidebarWidthRequest}
         sidebarRestoreSeq={sidebarRestoreSeq}
       />
       {/* These dialogs live at the desktop root too (the mobile branch renders its own
