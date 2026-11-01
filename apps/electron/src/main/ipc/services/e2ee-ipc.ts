@@ -26,7 +26,8 @@ import {
   runDesktopE2eeOperation,
   inspectDesktopE2eeCachedState,
   withDesktopE2eeAccount,
-  cleanupRemovedDesktopWorkspace
+  cleanupRemovedDesktopWorkspace,
+  publicAccessLoss
 } from '../../services/e2ee-account-runtime'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
@@ -44,7 +45,13 @@ const accessLoss = (error: unknown): AccessLoss | null =>
     ? 'member_removed'
     : error instanceof E2eeDeviceRevokedError
       ? 'device_revoked'
-      : null
+      : publicAccessLoss(error)
+/** Exact local outcomes the sender gate needs at once; they never need a credential check. */
+const definitiveDispatchRefusals = new Set([
+  'e2ee_machine_not_shared',
+  'e2ee_machine_not_owned',
+  'e2ee_invalid-input'
+])
 const isAccessLossMessage = (error: unknown) =>
   error instanceof Error &&
   (error.message === 'e2ee_member_removed' || error.message === 'e2ee_device_revoked')
@@ -1610,21 +1617,39 @@ export class E2eeIpc extends IpcService {
       const access = await withDesktopE2eeAccount(
         (owner) =>
           owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? Effect.succeed({
-                accountId: owner.accountId,
-                work: owner.host.prepareDispatch(
-                  workspaceId,
-                  targetMachineId,
-                  input,
-                  cloud.client.machineSharing(),
-                  (request) => cloud.client.history(request)
-                )
+            ? Effect.gen(function* () {
+                return {
+                  accountId: owner.accountId,
+                  credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+                  status: yield* owner.host.status(workspaceId),
+                  work: owner.host.prepareDispatch(
+                    workspaceId,
+                    targetMachineId,
+                    input,
+                    cloud.client.machineSharing(),
+                    (request) => cloud.client.history(request)
+                  )
+                }
               })
             : Effect.fail(new Error('e2ee_not_open')),
         workspaceId,
         false
       )
-      return runDesktopE2eeOperation(access.accountId, access.work)
+      return runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
+        if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
+        // Preparation is local, so it cannot see a removal by itself. Like management,
+        // ask the server with this device's credential; only its exact answer is loss.
+        if (!(error instanceof Error && definitiveDispatchRefusals.has(error.message))) {
+          try {
+            await Effect.runPromise(
+              cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+            )
+          } catch (checked) {
+            if (accessLoss(checked)) return this.removeLocalWorkspace(access, accessLoss(checked)!)
+          }
+        }
+        throw error
+      })
     })
   }
   @IpcMethod()
