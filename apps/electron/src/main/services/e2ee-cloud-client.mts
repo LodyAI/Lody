@@ -194,6 +194,9 @@ export class E2eeCloudDiagnosticError extends BackendError {
 }
 
 function requestFailure(error: unknown): BackendError {
+  // Terminal types from authentication, transport or decoding are not authority.
+  if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
+    return unavailable()
   if (error instanceof BackendError) return error
   // Never retain the SDK's raw error, server logs, request body, or token.
   const capacity = z
@@ -211,8 +214,6 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
-  if (code === 'e2ee_member_removed') return new E2eeMemberRemovedError()
-  if (code === 'e2ee_device_revoked') return new E2eeDeviceRevokedError()
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -249,42 +250,82 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   function request<T>(
     work: (client: ConvexHttpClient) => Promise<unknown>,
     schema: z.ZodType<T>,
-    requestSignal?: AbortSignal
+    requestSignal?: AbortSignal,
+    credentialBound = false
   ) {
-    return Effect.tryPromise({
-      try: async (signal) => {
-        const combined = AbortSignal.any([
-          signal,
-          owner.signal,
-          ...(requestSignal ? [requestSignal] : [])
-        ])
-        combined.throwIfAborted()
-        const response = await input.convexToken(combined)
-        combined.throwIfAborted()
-        const tokenResponse = z
-          .union([
-            z.object({ data: z.object({ token: z.string().min(1) }) }),
-            z.object({ token: z.string().min(1) })
+    return Effect.suspend(() => {
+      // Private to this evaluation: replays and concurrent calls cannot borrow authority.
+      let terminalFailure: BackendError | undefined
+      return Effect.tryPromise({
+        try: async (signal) => {
+          const combined = AbortSignal.any([
+            signal,
+            owner.signal,
+            ...(requestSignal ? [requestSignal] : [])
           ])
-          .safeParse(response)
-        if (!tokenResponse.success) throw unavailable()
-        const token =
-          'data' in tokenResponse.data ? tokenResponse.data.data.token : tokenResponse.data.token
-        // A request owns its auth and abort signal. Concurrent work cannot change
-        // another request's credentials through a shared mutable SDK client.
-        const client = new ConvexHttpClient(input.deploymentUrl, {
-          auth: token,
-          logger: false,
-          fetch: (url, options) => {
-            combined.throwIfAborted()
-            return fetch(url, { ...options, signal: combined })
-          }
-        })
-        const value = await work(client)
-        combined.throwIfAborted()
-        return decode(schema, value)
-      },
-      catch: requestFailure
+          combined.throwIfAborted()
+          const response = await input.convexToken(combined).catch(() => {
+            throw unavailable()
+          })
+          combined.throwIfAborted()
+          const tokenResponse = z
+            .union([
+              z.object({ data: z.object({ token: z.string().min(1) }) }),
+              z.object({ token: z.string().min(1) })
+            ])
+            .safeParse(response)
+          if (!tokenResponse.success) throw unavailable()
+          const token =
+            'data' in tokenResponse.data ? tokenResponse.data.data.token : tokenResponse.data.token
+          // A request owns its auth and abort signal. Concurrent work cannot change
+          // another request's credentials through a shared mutable SDK client.
+          const client = new ConvexHttpClient(input.deploymentUrl, {
+            auth: token,
+            logger: false,
+            fetch: async (url, options) => {
+              combined.throwIfAborted()
+              const httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
+                throw unavailable()
+              })
+              // Convex's function-failure status, only for an explicitly credential-bound
+              // endpoint. JWT, transport and JSON exceptions never reach this assignment.
+              if (credentialBound && httpResponse.status === 560) {
+                const unread = httpResponse.clone()
+                const rejection = z
+                  .object({
+                    status: z.literal('error'),
+                    errorMessage: z.string(),
+                    errorData: z.object({
+                      code: z.enum(['e2ee_member_removed', 'e2ee_device_revoked'])
+                    })
+                  })
+                  .safeParse(
+                    await httpResponse.json().catch(() => {
+                      throw unavailable()
+                    })
+                  )
+                combined.throwIfAborted()
+                if (rejection.success) {
+                  terminalFailure =
+                    rejection.data.errorData.code === 'e2ee_member_removed'
+                      ? new E2eeMemberRemovedError()
+                      : new E2eeDeviceRevokedError()
+                  throw terminalFailure
+                }
+                return unread
+              }
+              return httpResponse
+            }
+          })
+          const value = await work(client)
+          combined.throwIfAborted()
+          return decode(schema, value)
+        },
+        catch: (error) =>
+          terminalFailure !== undefined && error === terminalFailure
+            ? terminalFailure
+            : requestFailure(error)
+      })
     }).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
   }
 
@@ -313,7 +354,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                   ...(round ? { round } : {})
                 }),
               z.object({ ok: z.literal(true) }),
-              signal
+              signal,
+              true
             )
           ),
           Effect.asVoid
@@ -326,7 +368,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             request(
               (client) => client.query(api.e2eeEpochStaging.readGroup, { ...device, key }),
               z.unknown(),
-              signal
+              signal,
+              true
             ).pipe(
               Effect.flatMap((value) => {
                 if (value === null) return Effect.succeed(null)
@@ -368,7 +411,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                   occupied: occupiedSlot
                 }),
               z.object({ ok: z.literal(true), done: z.boolean() }),
-              signal
+              signal,
+              true
             ).pipe(
               Effect.flatMap((value) => (value.done ? Effect.void : Effect.fail(unavailable())))
             )
@@ -382,7 +426,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       work: (client: ConvexHttpClient) => Promise<unknown>,
       schema: z.ZodType<T>
     ) {
-      return request(work, schema, signal)
+      return request(work, schema, signal, true)
     }
     const device = { ...access }
     return KeyMailbox.of({
@@ -463,7 +507,9 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       }
       return request(
         (client) => client.mutation(api.e2eeMembers.createInvitation, original),
-        z.object({ offer: MemberOfferSchema })
+        z.object({ offer: MemberOfferSchema }),
+        undefined,
+        true
       )
     },
     memberSubmit: (args: E2eeMemberRequests['submit']) => {
@@ -488,25 +534,36 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             .max(100),
           hasMore: z.boolean(),
           seatPreview
-        })
+        }),
+        undefined,
+        true
       )
     },
     memberRead: (args: E2eeMemberRequests['read']) => {
       const original = { ...memberDeviceAccess(args), requestId: args.requestId }
-      return request((client) => client.query(api.e2eeMembers.read, original), memberRequest)
+      return request(
+        (client) => client.query(api.e2eeMembers.read, original),
+        memberRequest,
+        undefined,
+        true
+      )
     },
     memberReject: (args: E2eeMemberRequests['reject']) => {
       const original = { ...memberDeviceAccess(args), requestId: args.requestId }
       return request(
         (client) => client.mutation(api.e2eeMembers.reject, original),
-        z.object({ state: z.literal('rejected') })
+        z.object({ state: z.literal('rejected') }),
+        undefined,
+        true
       )
     },
     memberRevoke: (args: E2eeMemberRequests['revoke']) => {
       const original = { ...memberDeviceAccess(args), token: args.token }
       return request(
         (client) => client.mutation(api.e2eeMembers.revoke, original),
-        z.object({ revoked: z.literal(true) })
+        z.object({ revoked: z.literal(true) }),
+        undefined,
+        true
       )
     },
     memberClaim: (args: E2eeMemberRequests['claim']) => {
@@ -559,7 +616,9 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...requestInput }
       return request(
         (client) => client.query(api.e2eeJoinMailbox.readRequest, original),
-        joinSession
+        joinSession,
+        undefined,
+        true
       )
     },
     joinCancel: (requestInput: E2eeJoinRequests['cancel']) => {
@@ -573,7 +632,9 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...requestInput }
       return request(
         (client) => client.mutation(api.e2eeJoinMailbox.publish, original),
-        z.object({ status: z.literal('published') })
+        z.object({ status: z.literal('published') }),
+        undefined,
+        true
       )
     },
     joinClaim: (requestInput: E2eeJoinRequests['claim']) => {
@@ -589,22 +650,30 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     machineBegin: (requestInput: E2eeMachinePairingRequests['begin']) =>
       request(
         (client) => client.mutation(api.e2eeMachinePairing.begin, requestInput),
-        RemoteMachineStatusSchema
+        RemoteMachineStatusSchema,
+        undefined,
+        true
       ),
     machineInspect: (requestInput: E2eeMachinePairingRequests['inspect']) =>
       request(
         (client) => client.query(api.e2eeMachinePairing.inspect, requestInput),
-        RemoteMachineStatusSchema
+        RemoteMachineStatusSchema,
+        undefined,
+        true
       ),
     machineAuthorizeExisting: (requestInput: E2eeMachinePairingRequests['inspect']) =>
       request(
         (client) => client.mutation(api.e2eeMachinePairing.authorizeExisting, requestInput),
-        RemoteMachineStatusSchema
+        RemoteMachineStatusSchema,
+        undefined,
+        true
       ),
     machineCancel: (requestInput: E2eeMachinePairingRequests['cancel']) =>
       request(
         (client) => client.mutation(api.e2eeMachinePairing.cancel, requestInput),
-        RemoteMachineStatusSchema
+        RemoteMachineStatusSchema,
+        undefined,
+        true
       ),
     ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
       let observed: { head: string; length: number } | undefined
@@ -701,31 +770,37 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         request(
           (client) => client.action(api.e2eeMachineSharing.readHead, sharingInput),
           sharingReplySchemas.readHead,
-          signal
+          signal,
+          true
         ),
       readVersion: (sharingInput) =>
         request(
           (client) => client.action(api.e2eeMachineSharing.readVersion, sharingInput),
           sharingReplySchemas.readVersion,
-          signal
+          signal,
+          true
         ),
       readRequest: (sharingInput) =>
         request(
           (client) => client.action(api.e2eeMachineSharing.readRequest, sharingInput),
           sharingReplySchemas.readRequest,
-          signal
+          signal,
+          true
         ),
       commit: (sharingInput) =>
         request(
           (client) => client.action(api.e2eeMachineSharing.commit, sharingInput),
           sharingReplySchemas.commit,
-          signal
+          signal,
+          true
         )
     }),
     contentStreamsToken: (access: E2eeContentTokenRequest) =>
       request(
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),
-        contentToken
+        contentToken,
+        undefined,
+        true
       ),
     history: (requestInput: E2eeWorkspaceHistoryRequest, signal?: AbortSignal) => {
       const original = {
@@ -735,7 +810,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       return request(
         (client) => client.action(api.e2eeWorkspaces.history, original),
         historyPage,
-        signal
+        signal,
+        original.credential !== undefined
       )
     },
     staging
