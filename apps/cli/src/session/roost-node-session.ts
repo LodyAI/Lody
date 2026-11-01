@@ -1109,18 +1109,20 @@ const createNodeServicesForLease = async (
       if (generation === readGeneration) fullEntriesCache = projected.map((entry) => clone(entry));
       return projected.map((entry) => clone(entry));
     });
+  const readCertifiedGoal = async (cursor: bigint, count: number) => {
+    let latest =
+      operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
+    if (latest === undefined)
+      latest = await readGoalProjection(historyHost, cursor, count).catch(() => undefined);
+    return latest;
+  };
   const readGoalAtInspection: InspectionQuery<SessionGoalMessage | null> = async (
     index,
     checkpoint,
     source
   ) => {
     const cursor = BigInt(checkpoint.header.cursor);
-    let latest =
-      operationCursor === undefined && cursor === knownCursor ? goalProjection : undefined;
-    if (latest === undefined)
-      latest = await readGoalProjection(historyHost, cursor, checkpoint.header.count).catch(
-        () => undefined
-      );
+    let latest = await readCertifiedGoal(cursor, checkpoint.header.count);
     if (latest === undefined) {
       latest = null;
       for (let end = checkpoint.header.count; end > 0; end -= 500) {
@@ -1142,7 +1144,6 @@ const createNodeServicesForLease = async (
     }
     return latest ? clone(latest.goal) : null;
   };
-  const readLatestGoal = () => inspectHistory(readGoalAtInspection);
   const rememberPageEntries = (start: number, projected: readonly SessionEntry[]): void => {
     for (const [offset, turn] of projected.entries()) {
       const position = start + offset;
@@ -1162,7 +1163,10 @@ const createNodeServicesForLease = async (
   };
   const readIndexedEntries = async (
     source: NodeLodyHistory,
-    dispatchRows: readonly RoostDispatchRow[]
+    dispatchRows: readonly {
+      entry: Pick<SessionDispatchEntry, 'id'>;
+      segments: RoostDispatchRow['segments'];
+    }[]
   ): Promise<SessionEntry[]> => {
     const physical = dispatchRows.flatMap((row) =>
       row.segments.map((segment) => ({ ...segment, businessId: row.entry.id }))
@@ -1266,11 +1270,11 @@ const createNodeServicesForLease = async (
               from: position,
               limit: stop - position,
             });
-            if (
-              !page.complete ||
-              page.startPosition !== position ||
-              page.totalCount !== totalHistoryCount
-            )
+            if (page.totalCount !== totalHistoryCount) {
+              needsRefresh = true;
+              throw staleRead();
+            }
+            if (!page.complete || page.startPosition !== position)
               throw new Error('Roost requested history range is incomplete');
             selected = await projectBranchPage(page, decodeMessages(page.messages), false);
             if (selected.length !== stop - position)
@@ -1613,25 +1617,96 @@ const createNodeServicesForLease = async (
   };
   const inspectionToken = (rows: readonly HistoryQueryRow[]) =>
     createHash('sha256').update(JSON.stringify(rows)).digest('hex');
-  const readReplayAtInspection = async (
-    index: RoostDispatchIndex,
-    checkpoint: RoostDispatchCheckpoint,
-    source: NodeLodyHistory,
-    excludeTurnId?: string
-  ) => {
-    const builder = createReplayPromptBuilder({ excludeTurnId });
-    for (let from = 0; from < checkpoint.header.count; from += 500)
-      for (const row of await index.range(
-        checkpoint,
-        from,
-        Math.min(checkpoint.header.count, from + 500)
-      )) {
-        if (row.entry.id === excludeTurnId) continue;
-        const [entry] = await readIndexedEntries(source, [row]);
-        if (entry) builder.add(entry as SessionHistoryInput);
-      }
-    return builder.finish();
+  const readGoalDirect = async () => {
+    const cursor = await roostHistory.observedEventCursor();
+    if (cursor !== knownCursor) {
+      needsRefresh = true;
+      throw staleRead();
+    }
+    const latest = await readCertifiedGoal(cursor, totalHistoryCount);
+    if (latest === undefined) return inspectAtCursor(cursor, readGoalAtInspection);
+    goalProjection = latest;
+    goalCoveredStart = latest?.position ?? 0;
+    return latest ? clone(latest.goal) : null;
   };
+  const foldMemberHistory = async <T>(
+    source: NodeLodyHistory,
+    create: () => T,
+    visit: (state: T, entry: SessionHistoryInput) => void,
+    excludeTurnId?: string
+  ): Promise<T> => {
+    const count = totalHistoryCount,
+      revision = currentBranch().state.revision;
+    const state = create();
+    for (let from = 0; from < count; from += 500) {
+      const page = await source.readActiveBranchMembers(viewId, { from, limit: 500 });
+      if (
+        !page.complete ||
+        page.startPosition !== from ||
+        page.totalCount !== count ||
+        page.state.revision !== revision
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      const grouped = new Map<string, RoostDispatchRow['segments']>();
+      for (const member of page.members) {
+        let segments = grouped.get(member.businessId);
+        if (!segments) {
+          segments = [];
+          grouped.set(member.businessId, segments);
+        }
+        segments.push({
+          turnId: bytesHex(member.turnId),
+          segmentId: member.segmentId,
+          ...(member.physicalSegmentId ? { physicalSegmentId: member.physicalSegmentId } : {}),
+        });
+      }
+      if (grouped.size !== Math.min(500, count - from)) throw staleRead();
+      for (const [id, segments] of grouped) {
+        if (id === excludeTurnId) continue;
+        const [entry] = await readIndexedEntries(source, [{ entry: { id }, segments }]);
+        if (!entry) throw new Error('Roost replay member is unavailable');
+        visit(state, entry as SessionHistoryInput);
+      }
+    }
+    return state;
+  };
+  const readReplayFromMembers = async (source: NodeLodyHistory, excludeTurnId?: string) =>
+    (
+      await foldMemberHistory(
+        source,
+        () => createReplayPromptBuilder({ excludeTurnId }),
+        (builder, entry) => builder.add(entry),
+        excludeTurnId
+      )
+    ).finish();
+  const readObservedHistory = <T>(read: () => Promise<T>) =>
+    onOwner(() =>
+      readStable(async () => {
+        const source = roostHistory,
+          host = historyHost,
+          generation = readGeneration,
+          cursor = await source.observedEventCursor();
+        if (cursor !== knownCursor) {
+          needsRefresh = true;
+          throw staleRead();
+        }
+        const result = await read();
+        await historyGeneration.resolve();
+        if (
+          source !== historyGeneration.history ||
+          host !== historyGeneration.host ||
+          generation !== readGeneration ||
+          cursor !== (await source.observedEventCursor())
+        ) {
+          needsRefresh = true;
+          throw staleRead();
+        }
+        return result;
+      })
+    );
+  const readLatestGoal = () => readObservedHistory(readGoalDirect);
   const readLatestUserId = () =>
     inspectHistory(async (index, checkpoint) => {
       for (let end = checkpoint.header.count; end > 0; end -= 500) {
@@ -2143,7 +2218,11 @@ const createNodeServicesForLease = async (
         rows.push(
           ...(await index.range(checkpoint, from, Math.min(checkpoint.header.count, from + 500)))
         );
-      return { rows, query: rows.map((row) => index.inspection(row).query as HistoryQueryRow) };
+      return {
+        cursor,
+        rows,
+        query: rows.map((row) => index.inspection(row).query as HistoryQueryRow),
+      };
     });
   const historyQueryRows = async (
     rows: readonly RoostDispatchRow[],
@@ -2152,9 +2231,15 @@ const createNodeServicesForLease = async (
     visibility?: boolean
   ): Promise<HistoryQueryRow[]> => {
     if (!visibility) return rows.map((row) => index.inspection(row).query as HistoryQueryRow);
-    const query: HistoryQueryRow[] = [];
-    for (let from = 0; from < rows.length; from += 40) {
-      const page = rows.slice(from, from + 40);
+    const checkpoint = index.current();
+    if (!checkpoint) throw staleRead();
+    const cached = await index
+      .readTranscriptItems(checkpoint, rows)
+      .catch(() => rows.map(() => undefined));
+    const missing = rows.filter((_row, position) => cached[position] === undefined);
+    const refreshed = new Map<string, HistoryQueryRow>();
+    for (let from = 0; from < missing.length; from += 40) {
+      const page = missing.slice(from, from + 40);
       const members = page.flatMap((row) =>
         row.segments.map((segment) => ({
           ...segment,
@@ -2168,11 +2253,22 @@ const createNodeServicesForLease = async (
         members,
         roostTranscriptShape
       );
-      query.push(
-        ...selected.map((entry) => inspectHistoryEntry(entry, true).query as HistoryQueryRow)
-      );
+      for (const entry of selected)
+        refreshed.set(entry.id, inspectHistoryEntry(entry, true).query as HistoryQueryRow);
     }
-    return query;
+    await index
+      .rememberTranscriptItems(
+        checkpoint,
+        [...refreshed].map(([id, row]) => ({ id, items: row.items ?? [] }))
+      )
+      .catch(() => {});
+    return rows.map((row, position) => {
+      const query = refreshed.get(row.entry.id);
+      if (query) return query;
+      const items = cached[position];
+      if (!items) throw staleRead();
+      return { ...index.inspection(row).query, items } as HistoryQueryRow;
+    });
   };
   type QuerySnapshot = Awaited<ReturnType<typeof querySnapshot>>;
   const commitSparseHistory = async (
@@ -2184,6 +2280,9 @@ const createNodeServicesForLease = async (
     storedCopy = false
   ): Promise<boolean> => {
     const branch = currentBranch();
+    const observationScope = historyGeneration.observationScope;
+    if (snapshot.cursor !== operationCursor) throw staleRead();
+    const preparedById = new Map<string, SessionHistoryInput>();
     const membershipOperation = `${operationId}:membership:${operationDigest([branch.state.revision.toString(), branch.state.head])}`;
     const oldById = new Map(
       snapshot.rows.map((row, index) => [row.entry.id, { row, query: snapshot.query[index]! }])
@@ -2220,6 +2319,7 @@ const createNodeServicesForLease = async (
         businessId: entry.id,
         segmentId: `primary:${operationDigest([membershipOperation, prepared])}`,
       };
+      preparedById.set(entry.id, prepared);
       messages.push({ identity, content: encodeRoostContent(prepared) });
       members.push({ identity, segmentId: 'primary' });
     }
@@ -2234,7 +2334,7 @@ const createNodeServicesForLease = async (
       if (command.type !== 'accept') throw new Error('Unsupported sparse history receipt');
       return command;
     });
-    await historyGeneration.replaceMembers(
+    const activation = await historyGeneration.replaceMembers(
       {
         viewId,
         expectedRevision: branch.state.revision,
@@ -2247,7 +2347,74 @@ const createNodeServicesForLease = async (
       },
       operationCursor!
     );
+    const certifiedCursor = historyGeneration.exclusiveWriteCursor();
     await reloadBranch({ publish: true });
+    if (
+      activation.created &&
+      observationScope === historyGeneration.observationScope &&
+      certifiedCursor !== undefined &&
+      knownCursor === certifiedCursor &&
+      currentBranch().state.revision === activation.revision &&
+      equal(currentBranch().state.head, activation.newHead)
+    ) {
+      const index = dispatchIndex(),
+        source = roostHistory,
+        host = historyHost,
+        generation = readGeneration;
+      const replacementMembers = new Map(
+        messages.map((message) => [message.identity.businessId, message.identity])
+      );
+      const pages = async function* (): AsyncGenerator<readonly RoostDispatchRow[]> {
+        for (let from = 0; from < next.length; from += 32) {
+          const rows: RoostDispatchRow[] = [];
+          for (let position = from; position < Math.min(next.length, from + 32); position++) {
+            const entry = next[position];
+            if (!entry) throw staleRead();
+            const prepared = preparedById.get(entry.id);
+            if (!prepared) {
+              const old = oldById.get(entry.id);
+              if (!old?.row.inspection) throw staleRead();
+              rows.push({ ...old.row, position });
+              continue;
+            }
+            const identity = replacementMembers.get(entry.id);
+            if (!identity) throw staleRead();
+            const member = await source.lookupMember(identity);
+            if (!member) throw staleRead();
+            rows.push({
+              position,
+              entry: dispatchEntry(prepared),
+              inspection: inspectHistoryEntry(prepared as SessionEntry),
+              segments: [
+                {
+                  turnId: bytesHex(member.turnId),
+                  segmentId: 'primary',
+                  physicalSegmentId: identity.segmentId,
+                },
+              ],
+            });
+          }
+          yield rows;
+        }
+      };
+      try {
+        await index.rebuild(certifiedCursor, next.length, pages(), async () => {
+          await historyGeneration.resolve();
+          if (
+            source !== historyGeneration.history ||
+            host !== historyGeneration.host ||
+            generation !== readGeneration ||
+            certifiedCursor !== (await source.observedEventCursor())
+          ) {
+            needsRefresh = true;
+            throw staleRead();
+          }
+        });
+      } catch (error) {
+        index.forget();
+        console.error(`Roost dispatch projection needs repair for ${viewId}`, error);
+      }
+    }
     goalProjection = undefined;
     goalCoveredStart = totalHistoryCount;
     recordChange({ kind: 'structure', from: 0, to: Math.max(snapshot.rows.length, next.length) });
@@ -3464,71 +3631,82 @@ const createNodeServicesForLease = async (
     onOwner(() =>
       readStable(async () => {
         const source = roostHistory,
+          host = historyHost,
           generation = readGeneration,
           cursor = await source.observedEventCursor();
-        const result = await inspectAtCursor(cursor, async (index, checkpoint, selectedSource) => {
-          if (query.kind === 'readLatestGoal')
-            return readGoalAtInspection(index, checkpoint, selectedSource);
-          if (query.kind === 'readReplayPrompt') {
-            return readReplayAtInspection(index, checkpoint, selectedSource, query.excludeTurnId);
-          }
-          const rows = await inspectionRows(
-            index,
-            checkpoint,
-            query.kind === 'readQuerySnapshot' ? query : undefined
-          );
-          if (query.kind === 'readMetadata')
-            return rows.map((row) => {
-              const fields = index.inspection(row);
-              return {
-                ...fields.scalars,
-                inputConfig: fields.inputConfig,
-                ...(fields.userId === undefined ? {} : { userId: fields.userId }),
-                ...(fields.scheduleRun === undefined ? {} : { scheduleRun: fields.scheduleRun }),
-              };
-            });
-          if (query.kind === 'readTranscript') {
-            const projected = await historyQueryRows(rows, index, selectedSource, true);
-            const selected = selectTranscriptHistoryPositions(projected, query);
-            return {
-              ...selected,
-              entries: await readIndexedEntries(
-                selectedSource,
-                selected.positions.map((position) => rows[position]!)
-              ),
-            };
-          }
-          const projected = await historyQueryRows(
-            rows,
-            index,
-            selectedSource,
-            query.transcriptVisibility
-          );
-          const token = inspectionToken(projected);
-          if (query.kind === 'readQuerySnapshot') return { rows: projected, token };
-          if (query.token !== token)
-            throw Object.assign(new Error('History selection changed'), { code: 'superseded' });
-          const positions = [...new Set(query.positions)];
-          const selected = positions.map((position) => {
-            const row = rows[position];
-            if (!Number.isSafeInteger(position) || !row)
-              throw new Error('Invalid history selection');
-            return row;
-          });
-          const bodies = await readIndexedEntries(selectedSource, selected);
-          const byPosition = new Map(
-            positions.map((position, offset) => [position, bodies[offset]])
-          );
-          return query.positions.map((position) => {
-            const entry = byPosition.get(position);
-            if (!entry) throw new Error('Owner history selection is incomplete');
-            return entry;
-          });
-        });
+        if (cursor !== knownCursor) {
+          needsRefresh = true;
+          throw staleRead();
+        }
+        const result =
+          query.kind === 'readLatestGoal'
+            ? await readGoalDirect()
+            : query.kind === 'readReplayPrompt'
+              ? await readReplayFromMembers(source, query.excludeTurnId)
+              : await inspectAtCursor(cursor, async (index, checkpoint, selectedSource) => {
+                  const rows = await inspectionRows(
+                    index,
+                    checkpoint,
+                    query.kind === 'readQuerySnapshot' ? query : undefined
+                  );
+                  if (query.kind === 'readMetadata')
+                    return rows.map((row) => {
+                      const fields = index.inspection(row);
+                      return {
+                        ...fields.scalars,
+                        inputConfig: fields.inputConfig,
+                        ...(fields.userId === undefined ? {} : { userId: fields.userId }),
+                        ...(fields.scheduleRun === undefined
+                          ? {}
+                          : { scheduleRun: fields.scheduleRun }),
+                      };
+                    });
+                  if (query.kind === 'readTranscript') {
+                    const projected = await historyQueryRows(rows, index, selectedSource, true);
+                    const selected = selectTranscriptHistoryPositions(projected, query);
+                    return {
+                      ...selected,
+                      entries: await readIndexedEntries(
+                        selectedSource,
+                        selected.positions.map((position) => rows[position]!)
+                      ),
+                    };
+                  }
+                  const projected = await historyQueryRows(
+                    rows,
+                    index,
+                    selectedSource,
+                    query.transcriptVisibility
+                  );
+                  const token = inspectionToken(projected);
+                  if (query.kind === 'readQuerySnapshot') return { rows: projected, token };
+                  if (query.token !== token)
+                    throw Object.assign(new Error('History selection changed'), {
+                      code: 'superseded',
+                    });
+                  const positions = [...new Set(query.positions)];
+                  const selected = positions.map((position) => {
+                    const row = rows[position];
+                    if (!Number.isSafeInteger(position) || !row)
+                      throw new Error('Invalid history selection');
+                    return row;
+                  });
+                  const bodies = await readIndexedEntries(selectedSource, selected);
+                  const byPosition = new Map(
+                    positions.map((position, offset) => [position, bodies[offset]])
+                  );
+                  return query.positions.map((position) => {
+                    const entry = byPosition.get(position);
+                    if (!entry) throw new Error('Owner history selection is incomplete');
+                    return entry;
+                  });
+                });
         if (!history.getPublication) throw new Error('Native history publication is unavailable');
         const published = await history.getPublication();
+        await historyGeneration.resolve();
         if (
-          source !== roostHistory ||
+          source !== historyGeneration.history ||
+          host !== historyGeneration.host ||
           generation !== readGeneration ||
           cursor !== (await source.observedEventCursor())
         ) {
@@ -3550,25 +3728,11 @@ const createNodeServicesForLease = async (
     sessionData,
     readHistoryInspection,
     readHistoryReplay: (excludeTurnId) =>
-      inspectHistory((index, checkpoint, source) =>
-        readReplayAtInspection(index, checkpoint, source, excludeTurnId)
-      ),
+      readObservedHistory(() => readReplayFromMembers(roostHistory, excludeTurnId)),
     readLatestGoal,
     readLatestUserId,
     foldHistory: (create, visit) =>
-      inspectHistory(async (index, checkpoint, source) => {
-        const state = create();
-        for (let from = 0; from < checkpoint.header.count; from += 500)
-          for (const row of await index.range(
-            checkpoint,
-            from,
-            Math.min(checkpoint.header.count, from + 500)
-          )) {
-            const [entry] = await readIndexedEntries(source, [row]);
-            if (entry) visit(state, entry as SessionHistoryInput);
-          }
-        return state;
-      }),
+      readObservedHistory(() => foldMemberHistory(roostHistory, create, visit)),
     readHistoryQuery: (options) =>
       inspectHistory(async (index, checkpoint, source) => {
         const rows = await inspectionRows(index, checkpoint, options);

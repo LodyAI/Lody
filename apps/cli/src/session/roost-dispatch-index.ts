@@ -15,6 +15,28 @@ import {
   type SessionDispatchEntry,
 } from './session-dispatch-history';
 
+const utf8 = new TextEncoder();
+const visibilityTable = 'lody_transcript_visibility_v1';
+const transcriptItemSchema = z
+  .object({
+    type: z.unknown().optional(),
+    _textNonBlank: z.boolean().optional(),
+    _imageCount: z.number().int().nonnegative(),
+  })
+  .strict();
+const visibilitySchema = z
+  .object({ epoch: z.string().uuid(), items: z.array(transcriptItemSchema) })
+  .strict();
+const coverageSchema = z
+  .object({
+    token: z.string().uuid(),
+    epoch: z.string().uuid(),
+    cursor: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  })
+  .strict();
+type Coverage = z.infer<typeof coverageSchema>;
+const coverageKey = { table: visibilityTable, key: new Uint8Array() };
+const visibilityKey = (id: string) => ({ table: visibilityTable, key: utf8.encode(id) });
 const marker = { table: 'lody_dispatch_checkpoint_v1', key: new Uint8Array() };
 const rowsTable = 'lody_dispatch_rows_v1';
 const pendingTable = 'lody_dispatch_pending_v1';
@@ -24,7 +46,6 @@ const toolOwnersTable = 'lody_history_tool_owners_v1';
 const permissionOwnersTable = 'lody_history_permission_owners_v1';
 const outputOwnersTable = 'lody_history_output_owners_v1';
 const systemTurnsTable = 'lody_history_system_turns_v1';
-const utf8 = new TextEncoder();
 const encode = (value: unknown) => utf8.encode(JSON.stringify(value));
 const decode = (bytes: Uint8Array) => JSON.parse(new TextDecoder().decode(bytes)) as unknown;
 const stale = () =>
@@ -171,6 +192,7 @@ type Plan = {
   next: RoostDispatchCheckpoint;
   puts: IndexEntry[];
   changed: RoostDispatchRow[];
+  nextVisibility?: Coverage;
 };
 const rowKey = (id: string) => ({ table: rowsTable, key: utf8.encode(id) });
 const positionKey = (position: number) => {
@@ -220,10 +242,12 @@ const inspectionRefs = (row: RoostDispatchRow): { table: string; key: Uint8Array
  * rows contain only scalar evidence and physical references, never message bodies. */
 export class RoostDispatchIndex {
   private cached: RoostDispatchCheckpoint | undefined;
+  private visibility: Coverage | undefined;
   private readonly rows = new Map<string, RoostDispatchRow>();
   constructor(readonly host: RoostNodeStream) {}
 
   forget(): void {
+    this.visibility = undefined;
     this.cached = undefined;
     this.rows.clear();
   }
@@ -354,6 +378,10 @@ export class RoostDispatchIndex {
     const changed: RoostDispatchRow[] = [];
     const puts: IndexEntry[] = [];
     for (const update of updates) {
+      puts.push({
+        ...visibilityKey(update.after.id),
+        value: encode(null),
+      });
       const before = await this.row(update.after.id, base);
       const row = rowSchema.parse({
         position: update.position ?? before?.position,
@@ -381,12 +409,17 @@ export class RoostDispatchIndex {
     }
     const header = { ...base.header, cursor: through.toString(), count };
     const next = { header, bytes: encode(header) };
+    const nextVisibility =
+      this.visibility?.token === base.header.token && this.visibility.cursor === base.header.cursor
+        ? { ...this.visibility, cursor: through.toString() }
+        : undefined;
+    if (nextVisibility) puts.push({ ...coverageKey, value: encode(nextVisibility) });
     puts.push({ ...marker, value: next.bytes });
     // One identity can be touched several times by a command. The last put wins.
     const unique = new Map(
       puts.map((put) => [`${put.table}:${Buffer.from(put.key).toString('hex')}`, put])
     );
-    return { base, next, puts: [...unique.values()], changed };
+    return { base, next, puts: [...unique.values()], changed, nextVisibility };
   }
 
   expected(plan: Plan): IndexEntry {
@@ -401,6 +434,7 @@ export class RoostDispatchIndex {
     if (!after || !Buffer.from(after).equals(Buffer.from(checkpoint.bytes))) throw stale();
   }
   accept(plan: Plan): void {
+    this.visibility = plan.nextVisibility;
     this.cached = plan.next;
     for (const row of plan.changed) this.remember(row);
   }
@@ -432,6 +466,7 @@ export class RoostDispatchIndex {
         throw stale();
     };
     for (const table of [
+      visibilityTable,
       rowsTable,
       pendingTable,
       completedTable,
@@ -469,6 +504,79 @@ export class RoostDispatchIndex {
     const bytes = encode(header);
     await guarded([{ ...marker, value: bytes }]);
     this.cached = { header, bytes };
+  }
+
+  async readTranscriptItems(
+    checkpoint: RoostDispatchCheckpoint,
+    rows: readonly RoostDispatchRow[]
+  ) {
+    const result: (Record<string, unknown>[] | undefined)[] = [];
+    let coverage: Coverage | undefined;
+    for (let from = 0; from < rows.length; from += 500) {
+      const selected = rows.slice(from, from + 500);
+      const [current, rawCoverage, ...values] = await this.host.readIndex([
+        marker,
+        coverageKey,
+        ...selected.map((row) => visibilityKey(row.entry.id)),
+      ]);
+      if (!current || !Buffer.from(current).equals(Buffer.from(checkpoint.bytes))) throw stale();
+      if (from === 0) {
+        let value: unknown;
+        try {
+          value = rawCoverage ? decode(rawCoverage) : undefined;
+        } catch {}
+        const parsed = coverageSchema.safeParse(value);
+        coverage =
+          parsed.success &&
+          parsed.data.token === checkpoint.header.token &&
+          parsed.data.cursor === checkpoint.header.cursor
+            ? parsed.data
+            : {
+                token: checkpoint.header.token,
+                cursor: checkpoint.header.cursor,
+                epoch: randomUUID(),
+              };
+        this.visibility = coverage;
+      }
+      for (const raw of values) {
+        if (!raw) {
+          result.push(undefined);
+          continue;
+        }
+        let value: unknown;
+        try {
+          value = raw ? decode(raw) : undefined;
+        } catch {}
+        const parsed = value === null ? undefined : visibilitySchema.safeParse(value);
+        result.push(
+          parsed?.success && parsed.data.epoch === coverage?.epoch ? parsed.data.items : undefined
+        );
+      }
+    }
+    return result;
+  }
+  async rememberTranscriptItems(
+    checkpoint: RoostDispatchCheckpoint,
+    rows: readonly { id: string; items: readonly Record<string, unknown>[] }[]
+  ) {
+    const coverage = this.visibility;
+    if (
+      !coverage ||
+      coverage.token !== checkpoint.header.token ||
+      coverage.cursor !== checkpoint.header.cursor
+    )
+      return;
+    for (let from = 0; from < rows.length; from += 32) {
+      const changes = rows.slice(from, from + 32).map((row) => ({
+        ...visibilityKey(row.id),
+        value: encode({ epoch: coverage.epoch, items: row.items }),
+      }));
+      changes.push({ ...coverageKey, value: encode(coverage) });
+      if (
+        !(await this.host.compareAndWriteIndex([{ ...marker, value: checkpoint.bytes }], changes))
+      )
+        throw stale();
+    }
   }
 
   inspection(row: RoostDispatchRow): RoostHistoryInspection {

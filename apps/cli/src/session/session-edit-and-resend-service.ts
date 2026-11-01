@@ -5,6 +5,7 @@ import {
   getSessionRoomId,
   isSessionGoalActive,
   normalizeSessionInputBlocks,
+  normalizeSessionTurnInputConfig,
   resolveSessionMcpSelection,
   sessionEditAndResendFailure,
   SessionStatusFactory,
@@ -305,13 +306,31 @@ export class SessionEditAndResendService {
         }
         commitMeta = preCommitMeta;
 
-        const [original] = await backend.readHistorySelection((rows) => {
-          for (let index = rows.length - 1; index >= 0; index--)
-            if (rows[index]?.role === 'user') return [index];
-          return [];
-        });
+        const rejectChangedSelection = async () => {
+          if (preparedSessionId && runtime) {
+            await this.closePrepared(runtime, preparedSessionId);
+            preparedSessionId = null;
+          }
+          return sessionEditAndResendFailure(
+            spec,
+            'STALE_USER_TURN',
+            'The session changed before the replacement could be committed.'
+          );
+        };
+        let original: SessionHistoryInput | undefined;
+        try {
+          [original] = await backend.readHistorySelection((rows) => {
+            for (let index = rows.length - 1; index >= 0; index--)
+              if (rows[index]?.role === 'user') return [index];
+            return [];
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'superseded')
+            throw error;
+          return await rejectChangedSelection();
+        }
         if (!original || original.id !== commitEditable.turn.id)
-          throw new Error('The editable user turn is no longer readable.');
+          return await rejectChangedSelection();
         const inputConfig = this.buildReplacementInputConfig(
           commitMeta,
           original,
@@ -483,7 +502,7 @@ export class SessionEditAndResendService {
     preparedSessionId: ACPSessionId
   ): SessionTurnInputConfig {
     return {
-      ...original.inputConfig,
+      ...normalizeSessionTurnInputConfig(original.inputConfig),
       ...replacement,
       cliType: meta.cliType,
       agentType: meta.agentType,

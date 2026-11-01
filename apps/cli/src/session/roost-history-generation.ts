@@ -35,6 +35,7 @@ type WriteEvidence = {
   indexes: Map<string, number>;
   metadataThrough: bigint | undefined;
   settledThrough: bigint | undefined;
+  exclusiveThrough: bigint | undefined;
 };
 const updateKey = (id: Uint8Array, seq: bigint) => `${Buffer.from(id).toString('hex')}:${seq}`;
 const indexKey = (table: string, key: Uint8Array) => `${table}:${Buffer.from(key).toString('hex')}`;
@@ -130,6 +131,7 @@ export class RoostHistoryGeneration {
       indexes: new Map(),
       metadataThrough: after,
       settledThrough: after,
+      exclusiveThrough: after,
     };
     this.writeEvidence = evidence;
     return {
@@ -140,7 +142,11 @@ export class RoostHistoryGeneration {
       verify: async (through: bigint): Promise<boolean> => {
         // Native certifies the whole interval only when no pending remote work
         // added events. Contiguous certified commits need no second event scan.
-        if (evidence.raw === this.raw && evidence.metadataThrough === through) return true;
+        if (
+          evidence.raw === this.raw &&
+          (evidence.metadataThrough === through || evidence.exclusiveThrough === through)
+        )
+          return true;
         if (evidence.raw !== this.raw || through < after || through - after > 256n) return false;
         const events = await evidence.raw.eventsAfter(after, 256n);
         const updates = new Map(evidence.updates);
@@ -183,6 +189,11 @@ export class RoostHistoryGeneration {
   ) {
     const evidence = this.writeEvidence;
     if (!evidence || evidence.raw !== raw) return;
+    if (options?.requireLocalInterval && result.before === evidence.exclusiveThrough) {
+      evidence.exclusiveThrough = result.through;
+    } else if (result.before !== result.through || result.updates.length) {
+      evidence.exclusiveThrough = undefined;
+    }
     if (
       result.metadataAttached &&
       result.derivedIndexesApplied &&
@@ -213,6 +224,10 @@ export class RoostHistoryGeneration {
   /** Only the current command's exact, fully indexed local commit interval. */
   settledWriteCursor(): bigint | undefined {
     return this.writeEvidence?.raw === this.raw ? this.writeEvidence.settledThrough : undefined;
+  }
+
+  exclusiveWriteCursor(): bigint | undefined {
+    return this.writeEvidence?.raw === this.raw ? this.writeEvidence.exclusiveThrough : undefined;
   }
 
   private bind(raw: RoostNodeStream): NodeLodyHistory {
@@ -278,7 +293,7 @@ export class RoostHistoryGeneration {
           indexPuts,
         }
       );
-      this.recordWrite(raw, result, { indexPuts });
+      this.recordWrite(raw, result, { ...options, indexPuts });
       const epoch = result.updates.at(-1)?.turnId;
       if (!epoch) throw new Error('Roost branch activation receipt is missing');
       // Advance only from this transaction's receipt. A subsequent index read
@@ -299,6 +314,7 @@ export class RoostHistoryGeneration {
               if (args[2]?.eventKeys?.length) {
                 evidence.metadataThrough = undefined;
                 evidence.settledThrough = undefined;
+                evidence.exclusiveThrough = undefined;
               }
               for (const key of args[2]?.eventKeys ?? [])
                 addEvidence(evidence.indexes, indexKey(key.table, key.key));

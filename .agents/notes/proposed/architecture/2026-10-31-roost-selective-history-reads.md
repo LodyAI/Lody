@@ -71,12 +71,39 @@ Measurements cover the first request after setup, retained heap after GC, footpr
 
 These are single-process synthetic measurements. Peak RSS includes setup and Native temporaries; footprint includes GC/page variation. Permission and output previously filled the same cache, so their savings overlap.
 
+## Owner-query field reuse (2026-11-01)
+
+The shared inspection entry previously prepared the complete field index before choosing the query. Certified goal summaries and ordered replay do not need those fields. They now use the same per-session owner queue and stable Native observation directly; a missing goal summary retains authoritative discovery. Replay and generic folds visit logical members in order and hydrate one entry at a time, preserving the formatter, budget, paths and statistics.
+
+Transcript queries memoize item types, text-presence flags and image counts in a private index. Every touched record invalidates its memo, including text-only updates with otherwise identical metadata. The index token, cache epoch and exact event coverage distinguish current entries from writes made by older owners. Missing, malformed or unavailable cache entries use the existing field projection. Memoization stores no text and leaves the response shape unchanged.
+
+Sparse membership planning already holds a certified field projection. Unchanged physical members retain those fields; replacement members use their complete prepared values and new physical aliases. Reuse requires a contiguous Native-exclusive write interval, the matching activation revision/head and observation scope, and a final generation/cursor check. The index is rewritten during the structural operation; subsequent reads use that projection. An interrupted or externally changed projection is rebuilt from authoritative fields. Initial field discovery remains necessary when no valid projection exists.
+
+The SDK page decoder separately reuses the same Turn's already-read authoritative header instead of exporting its full Create again for immutable parents. Its body/header comparison, stable read and bounded sealed-body cache remain in place. This is a TypeScript SDK implementation change; the Native API and stored format do not change.
+
+The baseline is Lody `29d74d496` with published SDK/Native 0.3.1. Measurements use Node 24.22.1 on an Apple M4 with 32 GiB RAM and real temporary SQLite databases. The main fixture has 8,192 synthetic records of approximately 1 KiB text plus a live assistant. Setup, complete-reference reads and connection time are excluded; SDK/OS caches are warm. An unready inspection marker exercises field discovery. Explicit signals submit output and permission writes at the query's first Native request, and every query and persisted write is compared with its complete reference. Timings are observations; this experiment does not measure application RSS.
+
+| Operation | Before | Implementation |
+| --- | --- | --- |
+| Repeated last-50 transcript after output changes | 3.44 s | 0.31 s |
+| Certified latest goal with an unready field index | 4.09 s | 2.06 ms |
+| Replay with an unready field index | 8.49 s | 4.57 s |
+| Metadata after removing a turn | 4.08 s | 0.25 s |
+| Removal plus its following metadata query | About 5.6 s | 2.32 s |
+| Replay with 127 × 1 MiB prefix and a small live tail | 7.81 s | 2.42 s with SDK header reuse |
+
+The removal itself increases from approximately 1.5 s to 2.06 s: its 0.44 s index rewrite replaces the later field rediscovery. The combined operation becomes shorter. A genuinely unready metadata index still takes approximately 4–5 s to discover; first-use transcript visibility also requires computation. Output's queue delay follows the query duration. Permission writes have the same queue dependency and can themselves require a cold index. Replay is an Agent restore path; limited history can also run during active output.
+
+Range paging classifies a changed total count as stale and uses the existing bounded retry. Edit/resend normalizes inherited input configuration before creating the replacement, and a changed selection returns `STALE_USER_TURN` after closing the prepared ACP session. The shared service applies these rules to Loro and Roost.
+
 ## Verification
 
-The [Native contract suite](../../../../apps/cli/tests/roost-session-backend-contract.test.ts) exercises cold repair, selected reads, receipt recovery and branch changes. [RPC tests](../../../../apps/cli/src/session/roost-session-backend.test.ts) cover checkpoint/generation changes. [Writer tests](../../../../packages/shared/tests/history-writer.test.ts) and [Agent storage tests](../../../../apps/cli/tests/session-history-storage.test.ts) compare persisted results and range compensation. [Replay tests](../../../../apps/cli/src/lib/replay-prompt-builder.test.ts) compare exact prompts and statistics across budget boundaries.
+The [Native contract suite](../../../../apps/cli/tests/roost-session-backend-contract.test.ts) exercises cold repair, selected reads, receipt recovery, branch changes, visibility invalidation, older writers and state overlays across sparse edits and forced field discovery. [RPC tests](../../../../apps/cli/src/session/roost-session-backend.test.ts) cover checkpoint/generation changes. [Writer tests](../../../../packages/shared/tests/history-writer.test.ts) and [Agent storage tests](../../../../apps/cli/tests/session-history-storage.test.ts) compare persisted results and range compensation. [Replay tests](../../../../apps/cli/src/lib/replay-prompt-builder.test.ts) compare exact prompts and statistics across budget boundaries.
 
-Electron acceptance covers follow-up messages, Fork, goals, queue and unread state on both backends. Local validation uses matching source SDK and Native packages.
+Electron acceptance covers follow-up messages, Fork, goals, queue and unread state on both backends. Dependency validation uses published `@loro-dev/roost@0.3.1` and `@loro-dev/roost-node@0.3.1`.
 
 ## Dependencies
 
-[Roost #29](https://github.com/loro-dev/roost/pull/29) supplies the SDK/Native APIs. [Foundation #2132](https://github.com/LodyAI/Lody/pull/2132) contains common queries and Roost integration; [Loro #2133](https://github.com/LodyAI/Lody/pull/2133) adds selected writes on that base. Published 0.3.0 lacks the new APIs; Lody's dependency versions and lockfile need updating after the paired SDK/Native release.
+[Roost #29](https://github.com/loro-dev/roost/pull/29) supplies the SDK/Native APIs. [Foundation #2132](https://github.com/LodyAI/Lody/pull/2132) contains common queries and Roost integration; [Loro #2133](https://github.com/LodyAI/Lody/pull/2133) adds selected writes on that base. Lody consumes these APIs through SDK and Native 0.3.1, with all six exact-version platform packages in the lockfile.
+
+[Edit/resend tests](../../../../apps/cli/src/session/session-edit-and-resend-service.test.ts) cover inherited configuration, concurrent selection refusal and prepared-session cleanup before the rewrite barrier is released.

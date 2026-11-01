@@ -237,6 +237,7 @@ function createHarness(
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
     realDoc,
+    sessionDoc,
     meta,
     readStoredMeta: () => storedMeta,
     repo,
@@ -581,3 +582,65 @@ describe('SessionEditAndResendService', () => {
     }
   );
 });
+
+it('normalizes inherited input configuration before edit-and-resend', async () => {
+  const history = historyFixture();
+  history[2]!.inputConfig = {
+    ...history[2]!.inputConfig,
+    modelId: '  model-1  ',
+    chainDepth: 'legacy-invalid',
+  } as unknown as SessionTurnInputConfig;
+  const harness = createHarness({ history });
+  expect(await harness.service.editAndResend(spec)).toMatchObject({ success: true });
+  expect(harness.getHistory().at(-1)?.inputConfig).toMatchObject({ modelId: 'model-1' });
+  expect(harness.getHistory().at(-1)?.inputConfig?.chainDepth).toBeUndefined();
+});
+
+it.each([false, true])(
+  'reports a stale user turn when the selected input changes (superseded=%s)',
+  async (superseded) => {
+    const harness = createHarness();
+    const writer = harness.sessionDoc.sessionData.writer;
+    const read = writer.readSelected.bind(writer);
+    const peer: SessionHistoryInput = {
+      id: 'peer-latest-user',
+      role: 'user',
+      userId: 'peer',
+      timestamp: '2026-08-03T00:00:04.000Z',
+      status: 'pending',
+      read: false,
+      items: [{ type: 'text', text: 'Concurrent input' }],
+      fileDiff: [],
+    };
+    vi.spyOn(writer, 'readSelected').mockImplementationOnce((...args) => {
+      harness.realDoc.sessionData.writer.append(peer);
+      if (superseded)
+        throw Object.assign(new Error('History selection changed'), { code: 'superseded' });
+      return read(...args);
+    });
+    const closing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    harness.agentClient.closeDetachedSession.mockImplementationOnce(async () => {
+      closing.resolve();
+      await release.promise;
+      return true;
+    });
+    const pending = harness.service.editAndResend(spec);
+    try {
+      await closing.promise;
+      expect(harness.executionService.getExecutionSnapshot().hasRewriteBarrier).toBe(true);
+      release.resolve();
+      expect(await pending).toMatchObject({ success: false, error: { code: 'STALE_USER_TURN' } });
+      expect(harness.executionService.getExecutionSnapshot().hasRewriteBarrier).toBe(false);
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect(harness.getHistory().map((row) => row.id)).toEqual([
+      ...historyFixture().map((row) => row.id),
+      peer.id,
+    ]);
+    expect(harness.readStoredMeta()).toEqual(harness.meta);
+    expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+  }
+);

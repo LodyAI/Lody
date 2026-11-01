@@ -520,7 +520,10 @@ Owners advertising `sessionHistoryInspection` v2 serve metadata, goals, limited
 transcripts and replay in one owner task. General selection validates a digest of
 query fields rather than requiring unrelated body revisions to remain unchanged.
 Older owners retain the single-`readAll` compatibility path; v2 failures propagate
-without that fallback. Recovery replay formats entries individually on the owner. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+without that fallback. Certified goals and recovery replay avoid preparing unrelated
+query fields; replay formats ordered members individually on the owner. Transcript
+queries reuse visibility flags for unchanged records. Sparse membership edits
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
 records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
