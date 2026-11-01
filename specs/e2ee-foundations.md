@@ -437,6 +437,98 @@ approval. This does not approve production activation. The generic advisory perm
 policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
 change adds no send guard.
 
+## Account-wide personal device pairing (owner approved 2026-11-01)
+
+**Increment status: approved.** Owner Zixuan Chen (zxch3n) approved this increment on
+2026-11-01 ([approval](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#account-wide-personal-device-pairing)). Approval is not implementation, deployment or
+real-device acceptance; until implemented, the existing explicit pairing exchange
+remains the shipped path. The string format, the security argument and the rejected
+alternatives are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
+
+**Scenario.** A signed-in user opens an encrypted workspace on a new device N. Desktop
+and mobile start automatically; Web starts only after the user chooses "Request
+access". N creates an independent protected personal identity for every encrypted
+workspace its account lists. It then draws a fresh 128-bit secret S and shows a QR code
+and a copyable pairing string, both encoding S.
+
+**Request.** N submits one account-scoped request carrying:
+- N's display name and an expiry;
+- per workspace, the genesis, N's signing and encryption public keys, possession proof
+  and credential hash;
+- a lookup ID derived one-way from S;
+- an HMAC over the canonical request, keyed by a key derived from S.
+
+S never reaches the service. The service relays the request to the user's approved
+personal devices and pushes a notification showing the device name, an approximate
+location estimated from the IP address it sees (labeled "approximate, for reference
+only") and the request time. It holds no keys, never signs and cannot approve.
+
+**Who may approve.** Any active personal device of the same user, whatever the user's
+role. Machines and recovery devices never approve.
+
+**Approval.** On an approving device A, the user scans N's QR code or pastes its string.
+A checks the string's checksum and derives the lookup ID, then fetches the request,
+which only the same account can read. It then verifies the HMAC. If the HMAC fails,
+the request was altered after N created it: A refuses it and shows a warning. On
+success A shows the request details. The reverse direction is also supported, for
+example a new phone and an approving desktop: A generates S and shows the QR code, N
+scans it and submits its request under that S, and A then verifies it in the same way.
+
+**Confirmation and warning.** Before signing, A shows this warning: "Only scan or paste
+a code that is showing on another device of your own. Never enter a code someone sent
+you. Once approved, this device gets access to the selected workspaces and all their
+history." The confirmation names the specific target device and its scope:
+- the number and names of the workspaces to join, each deselectable;
+- the device name, labeled "provided by the requesting device";
+- the location, labeled "approximate, estimated by the server".
+
+After a successful approval, every approved personal device of the user and the
+account's email receive a "new device added" notice with a link to revoke it.
+
+**Threat-model limit.** Whoever holds `S` cannot tell an attacker's device, which the user
+was talked into approving, from the user's own device. An attacker who knows the
+account password can create a genuine request and persuade the user to scan or paste its
+code; every MAC then verifies and the service need not misbehave. The warning, the scope
+display and the after-the-fact notice reduce and expose this social-engineering risk but
+do not prevent it, as with Signal's linked-device warning.
+
+**Approval covers the account.** After the user confirms, A authorizes every workspace
+in which it is an active personal device of the same user's membership. All are
+selected by default and the user may deselect any. For each selected workspace, A
+verifies N's possession proof against its own pinned genesis and appends the existing
+personal `AdmitDevice` record. No new ledger operation is introduced. A then publishes
+signed snapshot invitations together with an approval HMAC under S, which binds the
+request digest and A's signing key. N verifies that HMAC before pinning genesis and A's
+endorsement key. Current and historical keys use the existing mailbox and history
+paths. Workspaces A cannot sign for stay pending for another approver.
+
+**Lifetime and refusal.**
+- The request's own expiry is covered by its MAC and is at most 10 minutes. A checks it
+  independently before signing, and N checks it before accepting an approval; a late
+  approval is refused.
+- A and N each persist the terminal states they know: approved, declined, expired, and
+  each `S` already used. A restart or retry can neither extend nor revive a request, and
+  N destroys its `S` after use.
+- Requests are rate-limited per account, and any approver may decline. An approval
+  authenticator replayed for any other request is refused.
+- **Limit.** If another approving device already declined or consumed the request and
+  the service hides that fact, the MACs cannot reveal it. One-time use is therefore
+  guaranteed only within each client's local state and the 10-minute expiry, which also
+  bounds the impact of a leaked string.
+
+**Progress and failure.**
+- A journals each workspace's exact signed admission before any network step. It
+  resumes per workspace, retries the original bytes, reconciles unknown outcomes and
+  never re-signs.
+- Ledgers are independent, so there is no cross-workspace atomicity. Each workspace is
+  either admitted with its key delivered, admitted and awaiting delivery, or not
+  admitted.
+- N advances automatically and opens the workspace once the current key is installed.
+- Revocation and removal semantics are unchanged.
+- Manual pairing uses the same string when push is unavailable or the devices pair in
+  person.
+- Ledger details move to an advanced diagnostics view.
+
 ## Retained verified state (proposed)
 
 Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 records: 22 s); extending a held view by one record costs about 5 ms. Replaying from genesis on every request is therefore not viable for a host or a client. This section proposes a core entry that lets a party resume from **its own** previously verified state. It does not change the ledger v1 record format. See the [proposal note](../.agents/notes/proposed/architecture/2026-10-19-e2ee-retained-ledger-state.md).
