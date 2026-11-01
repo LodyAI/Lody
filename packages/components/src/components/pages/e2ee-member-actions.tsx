@@ -61,6 +61,8 @@ export function E2eeMemberActions(props: {
         <Menu.Content align="end" width="compact">
           {management.actorRole === 'owner' && (
             <Menu.Item
+              data-testid="e2ee-member-role"
+              data-membership-id={member.membershipId}
               onClick={() => {
                 void run(() => management.setRole(member.membershipId, role));
               }}
@@ -93,7 +95,11 @@ export function E2eeMemberActions(props: {
           if (!pending) setConfirming(open);
         }}
       >
-        <Dialog.Content width={440}>
+        <Dialog.Content
+          data-testid="e2ee-member-remove-dialog"
+          data-membership-id={member.membershipId}
+          width={440}
+        >
           <Dialog.Header>
             <Dialog.Title>{t('e2ee.members.removeTitle', { name: props.name })}</Dialog.Title>
             <Dialog.Description>{t('e2ee.members.removeDescription')}</Dialog.Description>

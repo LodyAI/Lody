@@ -126,6 +126,7 @@ describe('personal desktop approval', () => {
       await inputOffer();
       await click('e2ee.pair.trust');
       expect(submitted).toEqual(offer);
+      expect(container.querySelector('[data-testid="e2ee-pair-joining-key"]')?.textContent).toBe('55'.repeat(32));
       await click('e2ee.pair.claim');
       expect(joined).toBe(false);
       expect(container.textContent).toContain('e2ee.pair.waiting');
@@ -172,6 +173,7 @@ describe('personal desktop approval', () => {
     await render();
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
+    expect(container.querySelector('[data-testid="e2ee-pair-preview-key"]')?.textContent).toBe('55'.repeat(32));
     await click('e2ee.pair.approve');
     expect(admitted).toBe(true);
     expect(container.textContent).toContain('e2ee.pair.published');

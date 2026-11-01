@@ -414,6 +414,7 @@ describe('remote encrypted machine approval', () => {
       expect(container.textContent).not.toContain(summary);
       await click('e2ee.remoteMachine.check');
       expect(state).toBe('claimed');
+      expect(container.querySelector('[data-testid="e2ee-remote-machine-summary"]')?.textContent).toBe(summary);
       expect(container.textContent).toContain(summary);
       expect(container.textContent).toContain('e2ee.localAgent.fileProtection');
       await click('e2ee.remoteMachine.allow');
