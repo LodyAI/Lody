@@ -2150,6 +2150,130 @@ void test('credential-authenticated member removal drains and deletes through th
   await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
 })
 
+void test('prepareDispatch confirms access loss after its reader closes through the real account boundary', async (t) => {
+  for (const [name, response, code] of [
+    ['removed', Effect.fail(new E2eeMemberRemovedError()), 'member_removed'],
+    ['revoked', Effect.fail(new E2eeDeviceRevokedError()), 'device_revoked'],
+    ['allowed', Effect.succeed({ token: 'synthetic-unused-token' }), null],
+    ['network', Effect.fail(new Error('synthetic network failure')), null],
+    ['unclassified', Effect.fail(new Error('e2ee_member_removed')), null],
+    ['other-reader', Effect.succeed({ token: 'synthetic-unused-token' }), null],
+    ['account-switch', Effect.fail(new E2eeMemberRemovedError()), null],
+    ['credential-change', Effect.fail(new E2eeMemberRemovedError()), null]
+  ]) {
+    await t.test(name, async (subtest) => {
+      const { api, identity } = await nativeAccountFixture(subtest)
+      let nativeOwner
+      const first = await createAccountWorkspace(api, 'workspace')
+      const sender = Object.assign(new EventEmitter(), { id: 41 })
+      const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        'electron-ipc-decorator': {
+          IpcService: class {},
+          IpcMethod: () => (_target, _name, descriptor) => descriptor,
+          getIpcContext: () => ({ event: { sender } })
+        },
+        '../../platform': { isLocalPlatform: () => false },
+        '../../services/e2ee-bootstrap.mjs': {},
+        '../assert-sender': { assertProductWindowSender: () => {} },
+        '../ipc-service-deps': {
+          getIpcServiceDeps: () => ({
+            authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+          })
+        },
+        '../../services/e2ee-account-runtime': {
+          ...api,
+          desktopE2eeCloudClient: async () => ({
+            accountId: 'account',
+            client: {
+              contentStreamsToken: ({ workspaceId, credential }) =>
+                Effect.gen(function* () {
+                  assert.equal(workspaceId, 'workspace')
+                  assert.equal(credential, retainedCredential)
+                  // Response delivery is explicit; no clock or scheduler race.
+                  if (name === 'account-switch') {
+                    identity.userId = 'other-account'
+                    identity.generation++
+                  }
+                  if (name === 'credential-change')
+                    nativeOwner.bootstrap.deviceCredential = () =>
+                      Effect.succeed('replacement-credential')
+                  return yield* response
+                }),
+              machineSharing: () => ({})
+            }
+          })
+        }
+      })
+      const ipc = new E2eeIpc()
+      let dispatched = false
+      const retainedCredential = await api.withDesktopE2eeAccount(
+        (owner) => {
+          nativeOwner = owner
+          owner.readers.set('workspace', new Map([[sender.id, 1]]))
+          if (name === 'other-reader') owner.readers.get('workspace').set(42, 1)
+          owner.host.prepareDispatch = () =>
+            Effect.sync(() => {
+              dispatched = true
+              return { frame: 'synthetic-dispatch-must-not-escape' }
+            })
+          return owner.bootstrap.deviceCredential('workspace')
+        },
+        'workspace',
+        false
+      )
+      // Real close removes the calling reader and drains the native workspace.
+      await ipc.close('workspace')
+      await assert.rejects(ipc.status('workspace'))
+      const original = await readFile(join(first.directory, 'creations.sqlite'))
+      const outcome = ipc.prepareDispatch('workspace', 'synthetic-machine', {
+        sessionId: 'session',
+        userTurnId: 'turn',
+        userId: 'display-only',
+        timestamp: new Date(0).toISOString(),
+        inputConfig: {}
+      })
+      await assert.rejects(
+        outcome,
+        code
+          ? new RegExp(`^Error: e2ee_${code}$`)
+          : name === 'account-switch'
+            ? /^Error: e2ee_(?:account_mismatch|missing-binding)$/
+            : /^Error: e2ee_host_operation_failed$/
+      )
+      assert.equal(dispatched, false)
+      if (code) {
+        // Cleanup retains its terminal receipt database, erasing creation/key state.
+        const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
+        try {
+          assert.equal(db.prepare('SELECT count(*) AS n FROM creations').get().n, 0)
+          assert.equal(db.prepare('SELECT count(*) AS n FROM removed_workspaces').get().n, 1)
+        } finally {
+          db.close()
+        }
+        await assert.rejects(readdir(join(first.directory, 'workspaces', 'workspace')), {
+          code: 'ENOENT'
+        })
+      } else {
+        assert.deepEqual(await readFile(join(first.directory, 'creations.sqlite')), original)
+        identity.userId = 'account'
+        identity.generation++
+        const cached = await api.withDesktopE2eeAccount(
+          (owner) => owner.host.inspectCachedState('workspace', 'synthetic-machine'),
+          'workspace',
+          false
+        )
+        assert.equal(cached.entryPresent, name === 'other-reader')
+        if (name === 'other-reader') {
+          sender.id = 42
+          assert.equal((await ipc.status('workspace')).signingPublicKey, first.signingPublicKey)
+          sender.id = 41
+        }
+      }
+      await assert.rejects(ipc.status('workspace'))
+    })
+  }
+})
+
 void test('a failed prepareDispatch diagnoses its device credential and reports only an exact access loss', async (t) => {
   const input = {
     sessionId: 'session',

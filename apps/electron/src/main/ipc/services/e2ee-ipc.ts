@@ -1825,25 +1825,39 @@ export class E2eeIpc extends IpcService {
       const cloud = await desktopE2eeCloudClient()
       const access = await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+          owner.accountId === cloud.accountId
             ? Effect.gen(function* () {
+                const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+                const status = yield* owner.host.status(workspaceId)
+                // A renderer may already have closed after learning ledger loss.
+                // Keep dispatch denied, but let its retained credential confirm why.
+                const work = owner.readers.get(workspaceId)?.has(id)
+                  ? owner.host.prepareDispatch(
+                      workspaceId,
+                      targetMachineId,
+                      input,
+                      cloud.client.machineSharing(),
+                      (request) => cloud.client.history(request)
+                    )
+                  : Effect.fail(new Error('e2ee_not_open'))
+                // status can reopen the native host. A diagnostic read must not
+                // leave it running without readers; drain outside the account lock.
+                const cleanup = owner.readers.get(workspaceId)?.size
+                  ? Effect.void
+                  : yield* owner.host.beginCloseWorkspace(workspaceId)
                 return {
                   accountId: owner.accountId,
-                  credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-                  status: yield* owner.host.status(workspaceId),
-                  work: owner.host.prepareDispatch(
-                    workspaceId,
-                    targetMachineId,
-                    input,
-                    cloud.client.machineSharing(),
-                    (request) => cloud.client.history(request)
-                  )
+                  credential,
+                  status,
+                  work,
+                  cleanup
                 }
               })
             : Effect.fail(new Error('e2ee_not_open')),
         workspaceId,
         false
       )
+      await runDesktopE2eeOperation(access.accountId, access.cleanup)
       return runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
         if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
         // Preparation is local, so it cannot see a removal by itself. Like management,

@@ -125,4 +125,6 @@ The account operation boundary projects those typed results, also as a cause, to
 exact codes and marks them for `accessLoss`; a matching message alone never counts.
 A failed local operation such as dispatch preparation checks this device's credential,
 as management does, and only that exact answer records the loss and stops the host.
+Dispatch without a calling reader stays denied but still diagnoses retained credentials.
+A temporary status host must drain outside the account lock unless another reader owns it.
 [Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).
