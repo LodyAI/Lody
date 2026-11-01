@@ -31,12 +31,17 @@ A credential-confirmed revocation of this device is the same exception, scoped t
 owner approval; until then explicit pairing stays in force. The protocol is the
 [foundations increment](../e2ee-foundations.md#account-wide-personal-device-pairing-pending-approval-increment).
 
-On a desktop, opening an encrypted workspace that has no local identity is the explicit
-start. Main creates the protected identities and credentials through the same custody
-owner before any network step, keeps them across restarts, and never reuses a residual
-key. Main alone holds the request, the nonce and the journal of signed admissions.
-The renderer receives only the code, device list, per-workspace progress and the
-user's confirm, deselect or decline decisions. On an approving desktop, the pending
-event raises an in-app prompt and an OS notification without content. Approval signs
-inside main after the code is confirmed. An unfinished batch resumes after restart
-from its journal. Logout, cleanup and confirmed removal keep their existing rules.
+**As the new device.** Opening an encrypted workspace that has no local identity starts
+the request automatically. Main creates the protected identities and credentials
+through the same custody owner before any network step, keeps them across restarts,
+and never reuses a residual key. Main alone holds the request, the CPace state and the
+journal of signed admissions. The renderer only provides the typed code and shows the
+device list and per-workspace progress.
+
+**As an approving desktop.** The pending event raises an in-app prompt and an OS
+notification without content. After "Allow", main generates the code and shows it, and
+the renderer receives only that code and the user's deselect or decline decisions.
+Signing happens inside main after the handshake confirms. An unfinished batch resumes
+after restart from its journal.
+
+Logout, cleanup and confirmed removal keep their existing rules.

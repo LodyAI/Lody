@@ -152,6 +152,28 @@ KEK persistence, real IDB abort/quota/CAS, curve/HPKE byte equivalence, portable
 and runtime composition, native first unlock/reinstall and minimum-OS device
 acceptance remain separate implementation evidence. No deployment is established.
 
+
+## Pairing start and approver (pending approval increment)
+
+**Increment status: draft; not covered by the approved revision above.** On owner
+approval, together with the [account-wide pairing increment](../e2ee-foundations.md#account-wide-personal-device-pairing-pending-approval-increment),
+this replaces two parts of the approved text:
+- the rule that the absence of a receipt "never starts this automatically";
+- the requirement of desktop approval.
+
+**Mobile.** Opening an encrypted workspace with no receipt and no residual protected
+state starts pairing automatically. The device is a personal installation behind the
+OS lock.
+
+**Web.** Pairing starts only after the user explicitly chooses "Request access".
+Browsers are often public or shared, so a signed-in session there must not silently
+create a persistent device identity or ask the account owner's devices to admit it.
+
+**Both.** Any active personal device of the same user may approve; machines and
+recovery devices may not. Every other row and rule is unchanged: residual, retired,
+missing or uncertain state still reconciles from exact evidence and never generates an
+identity over it.
+
 ## References
 
 - [Client ports](../../packages/e2ee-core/src/services/client-custody.ts), [existing service contracts](../../packages/e2ee-core/docs/services.md), [desktop custody](desktop-custody.md).

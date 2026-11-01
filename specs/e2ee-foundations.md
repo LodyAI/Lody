@@ -440,50 +440,64 @@ change adds no send guard.
 ## Account-wide personal device pairing (pending approval increment)
 
 **Increment status: draft; not covered by the approved revision above.** The owner
-approved the direction on 2026-11-01; this text awaits owner approval. Until then the
-existing explicit pairing exchange stays in force. Rationale, alternatives and the SAS
-derivation are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
+approved the direction and its open choices on 2026-11-01; this text awaits owner
+approval. Until then the existing explicit pairing exchange stays in force. Rationale,
+alternatives and the CPace construction are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
 
-**Scenario.** A signed-in user opens an encrypted workspace on a new device N. N
-creates an independent protected personal identity for every encrypted workspace its
-account lists, and submits one account-scoped join request. It carries N's display
-name, a fresh request ID, an expiry and, per workspace, the genesis, N's signing and
-encryption public keys, possession proof and credential hash. The request also carries
-a commitment `H(nN)` to a 32-byte random value. No pairing code is exchanged. N then
-shows a waiting screen listing the account's approved personal devices.
+**Scenario.** A signed-in user opens an encrypted workspace on a new device N. Desktop
+and mobile start automatically; Web starts only after the user chooses "Request access".
+N creates an independent protected personal identity for every encrypted workspace its
+account lists. It then submits one account-scoped request carrying N's display name, a
+fresh request ID, an expiry and, per workspace, the genesis, N's signing and encryption
+public keys, possession proof and credential hash. No pairing code is exchanged in
+advance.
 
-**Relay and notification.** The service relays the immutable request to every approved
-personal device of the same account and pushes a pending event to them. It never holds
-keys, never signs, and cannot approve. It attaches its own observed approximate
-location and request time, both unauthenticated. The request expires (proposed: 10
-minutes) and any approver may decline it.
+**Who may approve.** Any active personal device of the same user, whatever the user's
+role. Machines and recovery devices never approve.
 
-**Short authentication string.** An approver device A that opens the request contributes
-its own random `nA`, signed with its key. N then reveals `nN`. Both compute a 6-digit
-decimal code from `nA`, `nN`, A's signing key, the account and the complete list of
-`(genesis, N keys)`. The code appears on both screens. The commitment fixes N's inputs
-before A's value is known, so a substituted request gets a single 1-in-10⁶ guess
-per attempt and cannot be ground offline. A shows the device name, location, request time
-and code, and signs only after the user confirms that the codes match. A second
-approver runs its own exchange and code.
+**Relay and notification.** The service relays the immutable request to the user's
+approved personal devices and pushes a notification showing:
+- the device name;
+- an approximate location estimated from the IP address the service sees, labeled
+  "approximate, for reference only";
+- the request time.
 
-**Approval covers the account.** One confirmation authorizes every workspace in which
-A is an active personal device of the same user's membership; all are selected by default
-and the user may deselect any. For each selected workspace, A verifies N's possession
-proof against its own pinned genesis and appends the existing personal `AdmitDevice`
-record. No new ledger operation is introduced. A then publishes a signed snapshot
-invitation, so N pins genesis and A's endorsement key from evidence that the confirmed
-code authenticated. Current and historical keys use the existing mailbox and history
-paths. Workspaces A cannot sign for stay pending for another approver.
+The service holds no keys, never signs and cannot approve. A request expires after 10
+minutes, requests are rate-limited per account, and any approver may decline.
+
+**Code entry with CPace.** When the user chooses "Allow" on an approving device A, A
+generates a fresh random 6-digit code and shows it only on A. The user types it on N.
+The code never passes through the service. N and A run CPace over relayed messages,
+with the code as the password. The channel identifier binds:
+- the account;
+- the request digest, covering every `(genesis, N keys)` row;
+- A's signing public key;
+- a fresh session ID.
+
+Both sides confirm the derived key over the full transcript. A key or request
+substituted by the service makes the handshake fail, and a recorded transcript permits
+no offline guessing. A counts every attempt that fails to confirm; after 5 failures it
+voids the request, and the user starts a new one. The first device to choose "Allow"
+holds the attempt; others show it as in progress.
+
+**Approval covers the account.** After confirmation, A authorizes every workspace in
+which it is an active personal device of the same user's membership. All are selected
+by default and the user may deselect any. For each selected workspace, A verifies N's
+possession proof against its own pinned genesis and appends the existing personal
+`AdmitDevice` record; no new ledger operation is introduced. A then publishes a signed
+snapshot invitation, and N pins genesis and A's endorsement key from the confirmed
+handshake. Current and historical keys use the existing mailbox and history paths.
+Workspaces A cannot sign for stay pending for another approver.
 
 **Progress and failure.** A journals each workspace's exact signed admission before any
 network step. It resumes per workspace, retries the original bytes and reconciles
 unknown outcomes; it never re-signs. Ledgers are independent, so there is no
 cross-workspace atomicity. Each workspace is either admitted with its key delivered,
-admitted and awaiting delivery, or not admitted. N advances automatically as admissions
-and keys arrive and opens the conversation once the current key is installed. An
-expired, declined or unconfirmed request admits nothing. Revocation and removal
-semantics are unchanged. Ledger details move to an advanced diagnostics view.
+admitted and awaiting delivery, or not admitted. N advances automatically and opens the
+conversation once the current key is installed. An expired, declined or voided request
+admits nothing. Revocation and removal semantics are unchanged. Manual pairing remains
+the fallback when push is unavailable, or when an offline approver must pair in
+person. Ledger details move to an advanced diagnostics view.
 
 ## Retained verified state (proposed)
 
