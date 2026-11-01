@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
-    "@anthropic-ai/claude-agent-sdk": "0.3.284",
+    "@anthropic-ai/claude-agent-sdk": "0.3.316",
     "@better-auth/api-key": "catalog:",
     "@convex-dev/better-auth": "catalog:",
     "@effect/vitest": "catalog:",

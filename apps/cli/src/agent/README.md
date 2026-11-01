@@ -228,7 +228,7 @@ See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-f
 ### Claude upstream 0.84.0 source synchronization
 
 The bundled Claude gitlink includes upstream 0.84.0 while the fork package remains
-0.79.0. Lody builds that source directly, with SDK 0.3.284 / Claude Code 2.1.284;
+0.79.0. Lody builds that source directly, with SDK 0.3.316 / Claude Code 2.1.316;
 no npm adapter release is required. Lody advertises Core extensions and standard
 ACP capabilities, without AIR, terminal-output deltas or session notices. Standard
 tool fields and text fallback remain authoritative. Consumer audit and limits:
