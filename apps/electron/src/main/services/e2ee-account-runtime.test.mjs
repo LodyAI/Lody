@@ -22,6 +22,7 @@ import {
 import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
+import { makeDesktopAccountPairingHost } from './e2ee-account-pairing-host.mts'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts'
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
@@ -61,10 +62,12 @@ async function load(relative, dependencies, console = globalThis.console, env = 
                 ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
                 : id === '../../services/e2ee-personal-pairing.mjs'
                   ? { PersonalPairingOfferSchema }
-                  : id === '../../services/e2ee-client-loss-probe'
-                    ? // Production default: the E2E probe is disabled and forwards work.
-                      { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
-                    : require(id)
+                  : id === '../../services/e2ee-account-pairing-host.mjs'
+                    ? { makeDesktopAccountPairingHost }
+                    : id === '../../services/e2ee-client-loss-probe'
+                      ? // Production default: the E2E probe is disabled and forwards work.
+                        { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
+                      : require(id)
     }
   )
   return exports
@@ -2710,4 +2713,151 @@ void test('passive cache inspection stays account/product-window bound without o
   await assert.rejects(f.ipc.inspectCachedState('team', 'machine'), /untrusted sender/)
   f.setTrusted(true)
   await assert.rejects(f.ipc.inspectCachedState('', 'machine'), /e2ee_invalid-input/)
+})
+
+void test('account-wide pairing runs from the new device request to an installed invitation on real hosts', async (t) => {
+  // Real custody, bootstrap, ledger hosts and SQLite journals on both devices; the
+  // cloud is an in-memory relay plus the approver's own ledger as the history source.
+  const f = await personalJoinFixture(t)
+  const approver = await f.open('approver')
+  await approver.create()
+  const newDevice = await f.open('new-device')
+  const { genesisHash } = await Effect.runPromise(approver.host.status(f.workspaceId))
+  const ledgerPage = async () => {
+    const ledger = await Effect.runPromise(approver.host.ledgerView(f.workspaceId))
+    return {
+      workspaceId: f.workspaceId,
+      genesisHash,
+      startIndex: 0,
+      recordsHex: ledger.recordsHex,
+      checkpoint: { length: ledger.status.length, headHash: ledger.status.headHash },
+      position: `p1:${f.workspaceId}:${ledger.status.length}:source:0`,
+      nextCursor: null
+    }
+  }
+  const requests = new Map()
+  const approvals = new Map()
+  const appended = []
+  const cloud = {
+    accountIdentity: () =>
+      Effect.succeed({ accountId: approver.accountId, cryptoUserId: 'aa'.repeat(32) }),
+    history: () => Effect.promise(ledgerPage),
+    appendRecord: (request) =>
+      Effect.promise(async () => {
+        appended.push(request)
+        await f.append(approver, genesisHash, request.recordHex)
+        return { ok: true }
+      }),
+    pairingSubmit: (request) =>
+      Effect.sync(() => {
+        if (!requests.has(request.lookupId))
+          requests.set(request.lookupId, { ...request, requestId: 'request-1' })
+        const row = requests.get(request.lookupId)
+        return {
+          requestId: row.requestId,
+          status: 'pending',
+          deviceName: row.deviceName,
+          approximateLocation: null,
+          requestedAt: Date.now(),
+          expiresAt: row.expiresAt
+        }
+      }),
+    pairingRead: ({ lookupId }) =>
+      Effect.sync(() => {
+        const row = requests.get(lookupId)
+        return row
+          ? {
+              requestId: row.requestId,
+              status: 'pending',
+              deviceName: row.deviceName,
+              approximateLocation: null,
+              requestedAt: Date.now(),
+              expiresAt: row.expiresAt,
+              lookupId,
+              requestHex: row.requestHex,
+              requestTagHex: row.requestTagHex,
+              workspaces: row.workspaces
+            }
+          : null
+      }),
+    pairingDecline: () => Effect.succeed({ status: 'declined' }),
+    pairingPublish: (request) =>
+      Effect.sync(() => {
+        const list = approvals.get(request.lookupId) ?? []
+        list.push({
+          approvalHex: request.approvalHex,
+          approvalTagHex: request.approvalTagHex,
+          publishedAt: Date.now(),
+          invitations: request.invitations.map(
+            ({ workspaceId, genesisHash: g, invitationHex }) => ({
+              workspaceId,
+              genesisHash: g,
+              invitationHex
+            })
+          )
+        })
+        approvals.set(request.lookupId, list)
+        return { status: 'published' }
+      }),
+    pairingClaim: ({ lookupId }) =>
+      Effect.sync(() =>
+        requests.has(lookupId)
+          ? { status: 'pending', approvals: approvals.get(lookupId) ?? [] }
+          : null
+      )
+  }
+  const hints = [{ workspaceId: f.workspaceId, name: 'Synthetic encrypted workspace', genesisHash }]
+  const hostFor = (owner, name) => {
+    const db = new DatabaseSync(join(owner.path, name))
+    t.after(() => db.close())
+    return makeDesktopAccountPairingHost({
+      accountId: owner.accountId,
+      deviceName: 'Synthetic second desktop',
+      db,
+      cloud,
+      withOwner: (_workspaceId, work) => Effect.runPromise(work(owner)),
+      run: (effect) => Effect.runPromise(effect),
+      workspaces: () => hints
+    })
+  }
+  const requester = hostFor(newDevice, 'account-pairing.sqlite')
+  const approving = hostFor(approver, 'account-pairing.sqlite')
+
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  assert.equal(request.status, 'waiting')
+  assert.deepEqual(
+    request.workspaces.map((item) => [item.workspaceId, item.state]),
+    [[f.workspaceId, 'pending']]
+  )
+  // The new device has a retained identity but no access yet.
+  await assert.rejects(Effect.runPromise(newDevice.host.open(f.workspaceId)))
+
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  assert.deepEqual(preview.workspaces, [
+    { workspaceId: f.workspaceId, name: 'Synthetic encrypted workspace' }
+  ])
+  assert.equal(preview.deviceName, 'Synthetic second desktop')
+  const result = await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  assert.deepEqual(result.workspaces, [{ workspaceId: f.workspaceId, outcome: 'admitted' }])
+  assert.equal(appended.length, 1)
+
+  const joined = await Effect.runPromise(requester.accountPairingRequest())
+  assert.equal(joined.status, 'joined')
+  // The installed invitation opens the workspace with the new device's own identity.
+  const opened = await Effect.runPromise(newDevice.host.open(f.workspaceId))
+  assert.equal(opened.deviceKind, 'personal')
+  const approverStatus = await Effect.runPromise(approver.host.status(f.workspaceId))
+  assert.notEqual(opened.signingPublicKey, approverStatus.signingPublicKey)
+  assert.equal(opened.genesisHash, genesisHash)
+  // A finished code cannot be used again on either device.
+  await assert.rejects(
+    Effect.runPromise(approving.inspectAccountPairing(request.pairingString)),
+    (error) => error.code === 'pairing-used'
+  )
 })

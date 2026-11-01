@@ -56,6 +56,9 @@ const accountDirectory = (accountId: string) =>
     'e2ee-bootstrap',
     createHash('sha256').update(accountId).digest('hex')
   )
+/** The account-wide pairing journal; it holds no secret and no private key. */
+export const desktopAccountPairingDatabase = (accountId: string) =>
+  join(accountDirectory(accountId), 'account-pairing.sqlite')
 type IdentityLocation = string | { requestId: string }
 function identityDirectory(accountId: string, location?: IdentityLocation) {
   const root = accountDirectory(accountId)
@@ -692,6 +695,9 @@ function publicE2eeFailure(error: unknown): Error {
     'account_unavailable',
     'custody_unavailable',
     'missing-binding',
+    'pairing-tampered',
+    'pairing-expired',
+    'pairing-used',
     'member_removed',
     'device_revoked',
     'conflict',

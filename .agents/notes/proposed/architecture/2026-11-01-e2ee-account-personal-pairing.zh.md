@@ -122,17 +122,21 @@ Translation: current
 宿主端口是 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts)
 中可选的 `E2eeAccountPairingRuntime`。页面在 [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx)，由开发者模式下的测试功能开关“账号级设备配对”控制。
 - **职责归属。** `S`、每个标签的校验、有效期检查、终态记录和签名都由宿主负责。界面在本地校验输入的配对码，只是为了在发出任何网络请求之前指出输入错误；解码出的字节随即清零。
-- **何时显示。** 宿主没有实现这些方法时，界面什么都不显示，原有的按工作区配对仍保留在下方。目前还没有宿主实现这些方法；下一步是桌面端的批量签名。
+- **何时显示。** 宿主没有实现这些方法时，界面什么都不显示，原有的按工作区配对仍保留在下方。桌面端已通过 IPC 实现这些方法，Web 和手机宿主还没有。
 
 ## 验证局限
 
 - 字符串格式、密钥派生、规范的请求与批准字节以及两个标签都由 `packages/e2ee-core/test/pairing-vector.json` 固定。该向量由一个只用标准库的独立 Python 生成器（`test/generate-pairing-vector.py`）产生。
-- 中继后端是私有仓里默认关闭的 draft。通知、位置和下面的设备端接线都还没完成。
+- 中继后端在私有仓，默认关闭。通知和位置还没完成。
+- 有一个端到端测试，跑在真实的桌面 custody、bootstrap、账本宿主和 SQLite 上，中继是内存实现。还没有打包、原生或真实后端的运行。
 
 ## 桌面宿主
 
 [`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
-在 Electron main 中实现了双方的流程。它还没有接入 IPC，也没有接入按工作区的账本宿主；这些宿主以注入端口的形式提供。
+在 Electron main 中实现了双方的流程。[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts) 把它接到按工作区的宿主上，`E2eeIpc` 再把它暴露给 #2196 定义的宿主接口。
+- **工作区列表。** 渲染进程把自己的加密工作区列表作为路由提示传入。宿主会用该工作区自己的账本或请求标签，校验每一个 genesis。
+- **新设备。** 新设备为已验证历史中分配给本账号 crypto user 的那个成员身份提供持有证明。accept 时，它按受标签认证的账本哈希找到接纳记录，把该记录的签名者当作背书者，再通过现有的按工作区加入日志安装邀请。
+- **Member 批准方。** Member 不能为快照背书，所以它的批准会停在"等待送达"。另有一个待批准的 Spec 增量提议改用历史送达，目前没有实现。
 - **密钥。** `S` 只保存在内存里，从不写入磁盘。重启会在本地结束这个请求，之后设备会用同一批保留的身份发起新请求。
 - **终态。** 已批准、已拒绝、已过期和已取消，按 lookup ID 记录在本地 SQLite 中。第一个写入的终态生效，之后不再改变，也不会因为中继报告的状态而复活。
 - **批准方。** 批准方先用标签认证请求，并按本机时钟检查过期时间；每次签名前都会立即重新检查这两项。

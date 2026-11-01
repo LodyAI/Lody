@@ -5,6 +5,7 @@ import test from 'node:test'
 import { Effect, Exit, Result } from 'effect'
 import {
   decodePairingRequest,
+  hashRecordBytes,
   encodePairingRequest,
   pairingApprovalTag,
   derivePairingKeys,
@@ -219,7 +220,7 @@ void test('a new device is approved per workspace, verifying each approval befor
   assert.equal(requester.installed.length, 1)
   assert.equal(
     requester.installed[0].admissionRecordHash,
-    hex(sha(new Uint8Array([...fill(0x30), 1])))
+    hex(hashRecordBytes(new Uint8Array([...fill(0x30), 1])).toBytes())
   )
 
   const b = approverHosts(['w2'])
@@ -557,7 +558,11 @@ void test('a request that fails before it is journaled wipes its secret', async 
   const relay = makeRelay()
   const clock = { now: NOW }
   const requester = requesterHosts()
-  requester.hosts[1] = { ...requester.hosts[1], identity: () => Effect.fail(new Error('locked')) }
+  // Every workspace fails, so the request itself fails before it is journaled.
+  requester.hosts = requester.hosts.map((host) => ({
+    ...host,
+    identity: () => Effect.fail(new Error('locked'))
+  }))
   const issued = []
   const db = new DatabaseSync(':memory:')
   const pairing = makeDesktopAccountPairing({
@@ -574,8 +579,202 @@ void test('a request that fails before it is journaled wipes its secret', async 
       return secret
     }
   })
-  assert.equal(await refusal(pairing.requestAccountPairing({})), 'Error: locked')
+  assert.equal(await refusal(pairing.requestAccountPairing({})), 'invalid-input')
   assert.equal(issued.length, 1)
   assert.ok(issued[0].every((byte) => byte === 0))
   assert.equal(relay.requests.size, 0)
+})
+
+void test('a workspace that cannot prepare an identity is left out instead of blocking the request', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const requester = requesterHosts()
+  requester.hosts[1] = {
+    ...requester.hosts[1],
+    identity: () => Effect.fail(new Error('missing-binding'))
+  }
+  const newDevice = device({ relay, requester, clock })
+  const state = await run(newDevice.pairing.requestAccountPairing({}))
+  assert.deepEqual(
+    state.workspaces.map((item) => item.workspaceId),
+    ['w1']
+  )
+  const [submitted] = [...relay.requests.values()]
+  assert.deepEqual(
+    submitted.workspaces.map((item) => item.workspaceId),
+    ['w1']
+  )
+})
+
+void test('one workspace that fails to install does not block the others', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const requester = requesterHosts()
+  let failing = true
+  const accept = requester.hosts[0].accept
+  requester.hosts[0] = {
+    ...requester.hosts[0],
+    accept: (...args) => (failing ? Effect.fail(new Error('conflict')) : accept(...args))
+  }
+  const newDevice = device({ relay, requester, clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const approver = device({ relay, approver: approverHosts(), clock, seed: 50 })
+  await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  const partial = await run(newDevice.pairing.accountPairingRequest())
+  assert.deepEqual(
+    partial.workspaces.map((item) => [item.workspaceId, item.state]),
+    [
+      ['w1', 'pending'],
+      ['w2', 'joined']
+    ]
+  )
+  failing = false
+  assert.equal((await run(newDevice.pairing.accountPairingRequest())).status, 'joined')
+})
+
+void test('an admission the ledger settled differently is retired and signed once more', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  // The first original lost its slot to a concurrent record: the host reports it lost.
+  let lost = true
+  const append = a.hosts[0].append
+  a.hosts[0].append = (...args) =>
+    lost
+      ? ((lost = false), Effect.fail(Object.assign(new Error('lost'), { code: 'admission-lost' })))
+      : append(...args)
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const first = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1']
+    })
+  )
+  assert.deepEqual(first.workspaces, [{ workspaceId: 'w1', outcome: 'not-admitted' }])
+  const second = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1']
+    })
+  )
+  assert.deepEqual(second.workspaces, [{ workspaceId: 'w1', outcome: 'admitted' }])
+  assert.equal(a.log.signed.length, 2)
+  assert.deepEqual(
+    a.log.appended.map((item) => item.requestId),
+    ['admit-w1-2']
+  )
+})
+
+void test('expiry is checked again after the pre-signing refresh, before anything is signed or appended', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString, expiresAt } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  // The refresh is network work; time passes the request's expiry while it runs.
+  a.hosts[0].refresh = () =>
+    Effect.sync(() => {
+      clock.now = expiresAt
+    })
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  assert.equal(
+    await refusal(
+      approver.pairing.approveAccountPairing({
+        pairingString,
+        requestId: 'request-1',
+        workspaceIds: ['w1']
+      })
+    ),
+    'pairing-expired'
+  )
+  assert.deepEqual(a.log.signed, [])
+  assert.deepEqual(a.log.appended, [])
+})
+
+void test('a workspace whose refresh or signature fails is not admitted while the others proceed', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts()
+  a.hosts[0].refresh = () => Effect.fail(new Error('history unavailable'))
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const result = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(result.workspaces, [
+    { workspaceId: 'w1', outcome: 'not-admitted' },
+    { workspaceId: 'w2', outcome: 'admitted' }
+  ])
+  assert.deepEqual(
+    a.log.signed.map((item) => item.workspaceId),
+    ['w2']
+  )
+  // A failed signature is isolated the same way, and a retry signs only the missing one.
+  delete a.hosts[0].refresh
+  const sign = a.hosts[0].sign
+  a.hosts[0].sign = () => Effect.fail(new Error('ledger busy'))
+  const again = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(
+    again.workspaces.map((item) => item.outcome),
+    ['not-admitted', 'admitted']
+  )
+  a.hosts[0].sign = sign
+  const last = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(
+    last.workspaces.map((item) => item.outcome),
+    ['admitted', 'admitted']
+  )
+  assert.deepEqual(
+    a.log.signed.map((item) => item.workspaceId),
+    ['w2', 'w1']
+  )
+})
+
+void test('an account mismatch during the pre-signing refresh refuses the whole approval', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts()
+  // The live cloud proxy reports a different signed-in account for w1.
+  a.hosts[0].refresh = () => Effect.fail(new Error('e2ee_account_mismatch'))
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const refused = await refusal(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.match(refused, /account_mismatch/)
+  assert.deepEqual(a.log.signed, [])
+  assert.deepEqual(a.log.appended, [])
+  assert.equal(relay.approvals.size, 0)
 })

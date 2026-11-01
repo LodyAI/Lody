@@ -5,6 +5,10 @@ import {
   sharingChangeSchema
 } from '@lody/e2ee-machine-sharing/schemas'
 import { randomUUID } from 'node:crypto'
+import { chmodSync, mkdirSync } from 'node:fs'
+import { hostname } from 'node:os'
+import { dirname } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import {
   E2eeDeviceRevokedError,
   E2eeMemberRemovedError
@@ -27,8 +31,14 @@ import {
   inspectDesktopE2eeCachedState,
   withDesktopE2eeAccount,
   cleanupRemovedDesktopWorkspace,
-  publicAccessLoss
+  publicAccessLoss,
+  desktopAccountPairingDatabase
 } from '../../services/e2ee-account-runtime'
+import {
+  makeDesktopAccountPairingHost,
+  type AccountPairingCloud,
+  type AccountPairingWorkspaceHint
+} from '../../services/e2ee-account-pairing-host.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -60,6 +70,58 @@ function pairingSession(value: string) {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
     throw new Error('e2ee_invalid-input')
 }
+/** Routing hints from the renderer's workspace list; every genesis is still verified. */
+function pairingHints(value: unknown): AccountPairingWorkspaceHint[] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error('e2ee_invalid-input')
+  return value.map((item) => {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof item.workspaceId !== 'string' ||
+      item.workspaceId.length === 0 ||
+      item.workspaceId.length > 256 ||
+      typeof item.name !== 'string' ||
+      item.name.length > 256 ||
+      typeof item.genesisHash !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(item.genesisHash)
+    )
+      throw new Error('e2ee_invalid-input')
+    return { workspaceId: item.workspaceId, name: item.name, genesisHash: item.genesisHash }
+  })
+}
+/** The journal holds no secret, but stays private to this user like the rest of E2EE state. */
+function openPairingDatabase(path: string) {
+  const db = new DatabaseSync(path)
+  chmodSync(path, 0o600)
+  return db
+}
+function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
+  const current = Effect.flatMap(
+    Effect.tryPromise({ try: () => desktopE2eeCloudClient(), catch: (error) => error }),
+    (cloud) =>
+      cloud.accountId === accountId
+        ? Effect.succeed(cloud.client)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+  )
+  return {
+    accountIdentity: () => Effect.flatMap(current, (client) => client.accountIdentity()),
+    history: (request) => Effect.flatMap(current, (client) => client.history(request)),
+    appendRecord: (request) => Effect.flatMap(current, (client) => client.appendRecord(request)),
+    pairingSubmit: (request) => Effect.flatMap(current, (client) => client.pairingSubmit(request)),
+    pairingRead: (request) => Effect.flatMap(current, (client) => client.pairingRead(request)),
+    pairingDecline: (request) =>
+      Effect.flatMap(current, (client) => client.pairingDecline(request)),
+    pairingPublish: (request) =>
+      Effect.flatMap(current, (client) => client.pairingPublish(request)),
+    pairingClaim: (request) => Effect.flatMap(current, (client) => client.pairingClaim(request))
+  }
+}
+const PAIRING_REFUSALS = new Set([
+  'pairing-tampered',
+  'pairing-expired',
+  'pairing-used',
+  'invalid-input'
+])
 function sender() {
   const { event } = getIpcContext()
   assertProductWindowSender(event)
@@ -853,6 +915,142 @@ export class E2eeIpc extends IpcService {
       this.pairingFailure = error
       return { admitted: true as const, invitationPublished: false }
     }
+  }
+  // ----- Account-wide personal device pairing (default off in the renderer) -----
+
+  private accountPairings = new Map<
+    string,
+    {
+      hints: AccountPairingWorkspaceHint[]
+      pairing: ReturnType<typeof makeDesktopAccountPairingHost>
+    }
+  >()
+  /** One long-lived workflow per account: it keeps open requests' secrets in memory. */
+  private async accountPairing(hints?: AccountPairingWorkspaceHint[]) {
+    const cloud = await desktopE2eeCloudClient()
+    let current = this.accountPairings.get(cloud.accountId)
+    if (!current) {
+      const path = desktopAccountPairingDatabase(cloud.accountId)
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+      const holder: { hints: AccountPairingWorkspaceHint[] } = { hints: [] }
+      const accountId = cloud.accountId
+      current = Object.assign(holder, {
+        pairing: makeDesktopAccountPairingHost({
+          accountId,
+          deviceName: hostname().slice(0, 128) || 'Lody desktop',
+          db: openPairingDatabase(path),
+          // Resolve the live client per call: a sign-out, switch or reset closes the
+          // client this account had, and a cached one would fail every later call.
+          cloud: liveAccountPairingCloud(accountId),
+          withOwner: (workspaceId, work, create) =>
+            withDesktopE2eeAccount((owner) => work(owner), workspaceId, create),
+          run: (effect) => runDesktopE2eeOperation(accountId, effect),
+          workspaces: () => holder.hints
+        })
+      })
+      this.accountPairings.set(cloud.accountId, current)
+    }
+    if (hints) current.hints = hints
+    return current.pairing
+  }
+  /** Only the typed refusals the UI explains leave main; causes stay here. */
+  private async pairingCall<A>(work: () => Promise<A>): Promise<A> {
+    try {
+      return await work()
+    } catch (error) {
+      this.pairingFailure = error
+      const code =
+        error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
+      // Raw causes stay in main; the IPC decorator logs rejected Errors.
+      // eslint-disable-next-line preserve-caught-error
+      if (code && PAIRING_REFUSALS.has(code)) throw new Error(`e2ee_${code}`)
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error('e2ee_host_operation_failed')
+    }
+  }
+  @IpcMethod()
+  async requestAccountPairing(input: { pairingString?: string }, workspaces: unknown) {
+    sender()
+    const hints = pairingHints(workspaces)
+    if (input?.pairingString !== undefined && typeof input.pairingString !== 'string')
+      throw new Error('e2ee_invalid-input')
+    const pairing = await this.accountPairing(hints)
+    return this.pairingCall(() =>
+      Effect.runPromise(
+        pairing.requestAccountPairing(
+          input?.pairingString === undefined ? {} : { pairingString: input.pairingString }
+        )
+      )
+    )
+  }
+  @IpcMethod()
+  async accountPairingRequest(workspaces: unknown) {
+    sender()
+    const pairing = await this.accountPairing(pairingHints(workspaces))
+    return this.pairingCall(() => Effect.runPromise(pairing.accountPairingRequest()))
+  }
+  @IpcMethod()
+  async cancelAccountPairing() {
+    sender()
+    const pairing = await this.accountPairing()
+    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing()))
+  }
+  @IpcMethod()
+  async accountPairingCode() {
+    sender()
+    const pairing = await this.accountPairing()
+    return this.pairingCall(() => Effect.runPromise(pairing.accountPairingCode()))
+  }
+  @IpcMethod()
+  async inspectAccountPairing(pairingString: string, workspaces: unknown) {
+    sender()
+    if (typeof pairingString !== 'string') throw new Error('e2ee_invalid-input')
+    const pairing = await this.accountPairing(pairingHints(workspaces))
+    return this.pairingCall(() => Effect.runPromise(pairing.inspectAccountPairing(pairingString)))
+  }
+  @IpcMethod()
+  async approveAccountPairing(
+    input: { pairingString: string; requestId: string; workspaceIds: string[] },
+    workspaces: unknown
+  ) {
+    sender()
+    if (
+      !input ||
+      typeof input.pairingString !== 'string' ||
+      typeof input.requestId !== 'string' ||
+      !Array.isArray(input.workspaceIds) ||
+      input.workspaceIds.length > 64 ||
+      input.workspaceIds.some((id) => typeof id !== 'string')
+    )
+      throw new Error('e2ee_invalid-input')
+    const pairing = await this.accountPairing(pairingHints(workspaces))
+    return this.pairingCall(() =>
+      Effect.runPromise(
+        pairing.approveAccountPairing({
+          pairingString: input.pairingString,
+          requestId: input.requestId,
+          workspaceIds: [...input.workspaceIds]
+        })
+      )
+    )
+  }
+  @IpcMethod()
+  async declineAccountPairing(
+    input: { pairingString: string; requestId: string },
+    workspaces: unknown
+  ) {
+    sender()
+    if (!input || typeof input.pairingString !== 'string' || typeof input.requestId !== 'string')
+      throw new Error('e2ee_invalid-input')
+    const pairing = await this.accountPairing(pairingHints(workspaces))
+    return this.pairingCall(() =>
+      Effect.runPromise(
+        pairing.declineAccountPairing({
+          pairingString: input.pairingString,
+          requestId: input.requestId
+        })
+      )
+    )
   }
   @IpcMethod()
   async claimPersonalJoin(workspaceId: string, pairingSessionId: string) {
