@@ -1,6 +1,6 @@
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb';
 import { createRoostHistoryCache } from '../src/lib/roost-history-cache';
-import { createRoostDirectoryRow } from '@lody/shared/session-data';
+import { createRoostDirectoryRow, readSessionHistoryMetadata } from '@lody/shared/session-data';
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
@@ -27,6 +27,282 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
+  it.each(
+    (['local', 'remote'] as const).flatMap((transport) =>
+      (['current', 'legacy', 'empty'] as const).map((format) => ({ transport, format }))
+    )
+  )(
+    'reads offline schedule metadata from a complete $format cache over $transport',
+    async ({ transport, format }) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const workspaceId = 'offline-metadata-workspace' as WorkspaceId;
+      const machineId = 'offline-metadata-machine' as MachineId;
+      const sessionId = 'offline-metadata-session' as SessionId;
+      const turns: SessionHistoryInput[] =
+        format === 'empty'
+          ? []
+          : [
+              {
+                id: 'scheduled-user',
+                role: 'user',
+                timestamp: '2026-10-31T00:00:00Z',
+                userId: 'synthetic-author',
+                inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+                scheduleRun: { scheduleId: 'synthetic-schedule' },
+                items: [{ type: 'text', text: 'Synthetic scheduled prompt' }],
+              },
+              {
+                id: 'scheduled-assistant',
+                role: 'assistant',
+                timestamp: '2026-10-31T00:00:01Z',
+                userTurnId: 'scheduled-user',
+                endedAt: 1234,
+                finished: true,
+                items: [{ type: 'text', text: 'Synthetic scheduled result' }],
+              },
+            ];
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      const options = { workspaceId, machineId, coherentInspection: true, incremental: true };
+      const offline = async (): Promise<never> => {
+        throw new Error('Synthetic owner offline');
+      };
+      const factory =
+        transport === 'local'
+          ? createLocalRoostSessionDataFactory({ ...options, sendControl: offline })
+          : createRemoteRoostSessionDataFactory({
+              ...options,
+              requestHistoryRead: offline,
+              requestHistoryWrite: offline,
+            });
+      const data = factory({ sessionId, doc, backendKind: 'roost' });
+      const getAll = IDBObjectStore.prototype.getAll;
+      let bulkRead: ReturnType<typeof vi.spyOn> | undefined;
+      try {
+        await cache.acceptPage(
+          {
+            rows: turns.map((turn, position) => {
+              const row = createRoostDirectoryRow(position, turn);
+              if (format !== 'legacy') return row;
+              const {
+                metadataVersion: _version,
+                userId: _user,
+                inputConfig: _config,
+                scheduleRun: _run,
+                ...legacy
+              } = row;
+              return legacy;
+            }),
+            startPosition: 0,
+            totalCount: turns.length,
+            hasMoreOlder: false,
+            cursor: null,
+            checkpoint: 'offline-metadata-checkpoint',
+          },
+          turns,
+          7
+        );
+        bulkRead = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
+          ...args
+        ) {
+          if (this.name === 'rows') throw new Error('Metadata must not load all cached bodies');
+          return getAll.apply(this, args);
+        });
+        const expected =
+          format === 'empty'
+            ? []
+            : [
+                {
+                  id: 'scheduled-user',
+                  role: 'user',
+                  timestamp: turns[0]!.timestamp,
+                  userId: 'synthetic-author',
+                  inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+                  scheduleRun: { scheduleId: 'synthetic-schedule' },
+                },
+                {
+                  id: 'scheduled-assistant',
+                  role: 'assistant',
+                  timestamp: turns[1]!.timestamp,
+                  userTurnId: 'scheduled-user',
+                  endedAt: 1234,
+                  finished: true,
+                  inputConfig: undefined,
+                },
+              ];
+        expect(await readSessionHistoryMetadata(data.history)).toEqual(expected);
+      } finally {
+        bulkRead?.mockRestore();
+        data.dispose();
+        cache.dispose();
+        doc.free();
+      }
+    }
+  );
+
+  it.each(['partial', 'stale', 'other-account', 'read-failed'] as const)(
+    'reads owner metadata instead of using a %s cache',
+    async (condition) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const workspaceId = 'metadata-admission-workspace' as WorkspaceId;
+      const machineId = 'metadata-admission-machine' as MachineId;
+      const sessionId = 'metadata-admission-session' as SessionId;
+      const turns: SessionHistoryInput[] = [0, 1].map((index) => ({
+        id: `scheduled-${index}`,
+        role: 'user',
+        timestamp: '2026-10-31T00:00:00Z',
+        inputConfig: { modeId: 'ask', modelId: 'cached-model' },
+        items: [{ type: 'text', text: 'Synthetic prompt' }],
+      }));
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const doc = new LoroDoc();
+      const data = createLocalRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        coherentInspection: true,
+        incremental: true,
+        ...(condition === 'other-account' ? { accountId: 'different-account' } : {}),
+        sendControl: async (request) => {
+          if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+          const query = request.query;
+          if (query.kind !== 'readAt' && query.kind !== 'readMetadata')
+            throw new Error('Metadata lookup requested transcript bodies');
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                historyRevision: 8,
+                historyCount: turns.length,
+                result:
+                  query.kind === 'readAt'
+                    ? { state: 'missing' }
+                    : [
+                        {
+                          id: turns[0]!.id,
+                          role: 'user',
+                          timestamp: turns[0]!.timestamp,
+                          inputConfig: { modelId: 'owner-model' },
+                        },
+                      ],
+              },
+            ],
+          };
+        },
+      })({ sessionId, doc, backendKind: 'roost' });
+      let cursorRead: ReturnType<typeof vi.spyOn> | undefined;
+      try {
+        const start = condition === 'partial' ? 1 : 0;
+        await cache.acceptPage(
+          {
+            rows: turns
+              .slice(start)
+              .map((turn, offset) => createRoostDirectoryRow(start + offset, turn)),
+            startPosition: start,
+            totalCount: turns.length,
+            hasMoreOlder: start > 0,
+            cursor: null,
+          },
+          turns.slice(start),
+          7
+        );
+        if (condition === 'stale') await data.history.readAt(2);
+        if (condition === 'read-failed')
+          cursorRead = vi.spyOn(IDBObjectStore.prototype, 'openCursor').mockImplementation(() => {
+            throw new Error('Synthetic cache read failure');
+          });
+        expect(await readSessionHistoryMetadata(data.history)).toEqual([
+          {
+            id: turns[0]!.id,
+            role: 'user',
+            timestamp: turns[0]!.timestamp,
+            inputConfig: { modelId: 'owner-model' },
+          },
+        ]);
+      } finally {
+        cursorRead?.mockRestore();
+        data.dispose();
+        cache.dispose();
+        doc.free();
+      }
+    }
+  );
+
+  it.each(
+    [0, 1, 500, 501].flatMap((count) =>
+      [false, true].map((coherentInspection) => ({ count, coherentInspection }))
+    )
+  )(
+    'reads schedule metadata with $count turns (owner queries: $coherentInspection)',
+    async ({ count, coherentInspection }) => {
+      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
+      const sessionId = `synthetic-metadata-${count}-${coherentInspection}` as SessionId;
+      const turns: SessionHistoryInput[] = Array.from({ length: count }, (_, index) => ({
+        id: `turn-${index}`,
+        role: 'user',
+        timestamp: '2026-10-31T00:00:00Z',
+        inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
+        scheduleRun: { scheduleId: 'synthetic-schedule' },
+        items: [{ type: 'text', text: 'Synthetic body' }],
+      }));
+      const data = createLocalRoostSessionDataFactory({
+        coherentInspection,
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        sendControl: async (request) => {
+          if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+          const query = request.query;
+          let result: unknown;
+          if (query.kind === 'readMetadata' && coherentInspection)
+            result = turns.map(({ items: _items, ...metadata }) => metadata);
+          else if (query.kind === 'readAll' && !coherentInspection) result = turns;
+          else if (query.kind === 'count') result = turns.length;
+          else if (query.kind === 'readDirectory')
+            result = turns
+              .slice(query.from, query.to)
+              .map((turn, index) => createRoostDirectoryRow(query.from + index, turn));
+          else throw new Error('Metadata lookup requested transcript bodies');
+          return {
+            ok: true,
+            responses: [
+              {
+                type: 'session/history-read_response',
+                sessionId,
+                success: true,
+                result,
+                historyRevision: 0,
+                historyCount: turns.length,
+              },
+            ],
+          };
+        },
+      })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      try {
+        expect(
+          (await data.history.readDirectory(0, Number.MAX_SAFE_INTEGER)).map((row) => row.turnId)
+        ).toEqual(turns.map((turn) => turn.id));
+        const metadata = await readSessionHistoryMetadata(data.history);
+        expect(metadata).toEqual(
+          turns.map((turn) => ({
+            id: turn.id,
+            role: turn.role,
+            timestamp: turn.timestamp,
+            inputConfig: turn.inputConfig,
+            scheduleRun: turn.scheduleRun,
+          }))
+        );
+      } finally {
+        data.dispose();
+      }
+    }
+  );
+
   it('receives an existing owner acceptance through the real SDK after a silent SSE stall', async () => {
     vi.useFakeTimers();
     const connected = Promise.withResolvers<void>();

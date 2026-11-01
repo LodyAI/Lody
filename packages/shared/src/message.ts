@@ -802,6 +802,7 @@ export interface SessionHistoryReadRequest {
 
 /** Bounded logical reads over the owner session's active history branch. */
 export type SessionHistoryReadQuery =
+  | SessionHistoryInspectionQuery
   | {
       readonly kind: 'watchChanges';
       readonly checkpoint: string;
@@ -810,7 +811,7 @@ export type SessionHistoryReadQuery =
       readonly waitMs: number;
     }
   | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
-  | { readonly kind: 'count' }
+  | { readonly kind: 'count'; readonly withCheckpoint?: true }
   | { readonly kind: 'readAt'; readonly position: number }
   | { readonly kind: 'readTurn'; readonly turnId: string; readonly atCheckpoint?: string }
   | {
@@ -819,7 +820,19 @@ export type SessionHistoryReadQuery =
       readonly to: number;
       readonly atCheckpoint?: string;
     }
-  | { readonly kind: 'readDirectory'; readonly from: number; readonly to: number }
+  | {
+      readonly kind: 'readDirectory';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
+  | {
+      readonly kind: 'readQuery';
+      readonly from: number;
+      readonly to: number;
+      readonly transcriptVisibility?: boolean;
+      readonly atCheckpoint?: string;
+    }
   | { readonly kind: 'readLatestPage'; readonly limit: number; readonly withCheckpoint?: boolean }
   | {
       readonly kind: 'readOlderPage';
@@ -835,6 +848,25 @@ export type SessionHistoryReadQuery =
     }
   | { readonly kind: 'readAll' }
   | { readonly kind: 'readTurnOutput'; readonly userTurnId: string };
+
+/** Coherent owner queries negotiated by sessionHistoryInspection v2. */
+export type SessionHistoryInspectionQuery =
+  | { readonly kind: 'readMetadata' }
+  | { readonly kind: 'readLatestGoal' }
+  | { readonly kind: 'readTranscript'; readonly limit?: number; readonly reverse?: boolean }
+  | {
+      readonly kind: 'readQuerySnapshot';
+      readonly from?: number;
+      readonly to?: number;
+      readonly transcriptVisibility?: boolean;
+    }
+  | {
+      readonly kind: 'readSelection';
+      readonly positions: readonly number[];
+      readonly token: string;
+      readonly transcriptVisibility?: boolean;
+    }
+  | { readonly kind: 'readReplayPrompt'; readonly excludeTurnId?: string };
 
 /** Complete logical changes since one owner-issued durable observation. */
 export type SessionHistoryChanges =

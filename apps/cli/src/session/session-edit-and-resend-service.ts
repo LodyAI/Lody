@@ -5,7 +5,7 @@ import {
   getSessionRoomId,
   isSessionGoalActive,
   normalizeSessionInputBlocks,
-  resolveLatestSessionGoalFromHistory,
+  normalizeSessionTurnInputConfig,
   resolveSessionMcpSelection,
   sessionEditAndResendFailure,
   SessionStatusFactory,
@@ -19,7 +19,12 @@ import {
   type SessionMeta,
   type SessionTurnInputConfig,
 } from '@lody/shared';
-import { resolveEditableTail, type SessionTurn } from '@lody/shared/session-data';
+import {
+  readSessionHistoryMetadata,
+  resolveEditableTail,
+  type SessionHistoryMetadata,
+  type SessionTurn,
+} from '@lody/shared/session-data';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -37,7 +42,7 @@ export type SessionEditAndResendInput = Omit<SessionEditAndResendSpec, 'inputCon
  * before the editable-tail rule is consulted. The rule itself (eligibility,
  * boundary) lives once in the shared planner.
  */
-const lastUserIndex = (history: readonly SessionHistoryInput[]): number => {
+const lastUserIndex = (history: readonly SessionHistoryMetadata[]): number => {
   for (let index = history.length - 1; index >= 0; index -= 1) {
     if (history[index]?.role === 'user') return index;
   }
@@ -107,7 +112,7 @@ export class SessionEditAndResendService {
     }
 
     const backend = await createSessionBackend(sessionDoc, meta);
-    const history = await backend.readHistory();
+    const history = await readSessionHistoryMetadata(backend.history);
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
       try {
@@ -140,7 +145,7 @@ export class SessionEditAndResendService {
     }
 
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
-    const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
+    const latestGoal = (await backend.readLatestGoal()) ?? legacyMeta.latestGoal;
     if (isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
@@ -196,7 +201,7 @@ export class SessionEditAndResendService {
 
         const [freshMeta, freshHistory] = await Promise.all([
           sessionDoc.getMetaState(),
-          backend.readHistory(),
+          readSessionHistoryMetadata(backend.history),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
         if (!freshMeta || !freshEditable || freshEditable.forkTurnId !== editable.forkTurnId) {
@@ -232,8 +237,7 @@ export class SessionEditAndResendService {
           );
         }
         const freshLegacyMeta = freshMeta as SessionMeta & SessionLegacyMetaFields;
-        const freshGoal =
-          resolveLatestSessionGoalFromHistory(freshHistory) ?? freshLegacyMeta.latestGoal;
+        const freshGoal = (await backend.readLatestGoal()) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (isSessionGoalActive(freshGoal)) {
           await this.closePrepared(runtime, preparedSessionId);
@@ -302,9 +306,34 @@ export class SessionEditAndResendService {
         }
         commitMeta = preCommitMeta;
 
+        const rejectChangedSelection = async () => {
+          if (preparedSessionId && runtime) {
+            await this.closePrepared(runtime, preparedSessionId);
+            preparedSessionId = null;
+          }
+          return sessionEditAndResendFailure(
+            spec,
+            'STALE_USER_TURN',
+            'The session changed before the replacement could be committed.'
+          );
+        };
+        let original: SessionHistoryInput | undefined;
+        try {
+          [original] = await backend.readHistorySelection((rows) => {
+            for (let index = rows.length - 1; index >= 0; index--)
+              if (rows[index]?.role === 'user') return [index];
+            return [];
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'superseded')
+            throw error;
+          return await rejectChangedSelection();
+        }
+        if (!original || original.id !== commitEditable.turn.id)
+          return await rejectChangedSelection();
         const inputConfig = this.buildReplacementInputConfig(
           commitMeta,
-          commitEditable.turn,
+          original,
           spec.inputConfig,
           preparedSessionId
         );
@@ -473,7 +502,7 @@ export class SessionEditAndResendService {
     preparedSessionId: ACPSessionId
   ): SessionTurnInputConfig {
     return {
-      ...original.inputConfig,
+      ...normalizeSessionTurnInputConfig(original.inputConfig),
       ...replacement,
       cliType: meta.cliType,
       agentType: meta.agentType,

@@ -29,6 +29,7 @@ import {
   runWithSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionBackend } from '@/session/session-backend';
+import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
 import { __lodyMcpServerInternals, runWithMcpSessionContext } from '@/mcp/lody-mcp-server';
@@ -1853,6 +1854,66 @@ describe.each([
     }
   );
 });
+
+it.each(['CLI', 'MCP'] as const)(
+  'retains the frozen Role snapshot through an unconfigured %s follow-up after Role deletion',
+  async (entryPoint) => {
+    const capability = createModelCapability();
+    const fixture = createFixture('codex', capability);
+    fixture.setCapability(capability, true);
+    const snapshot = {
+      id: 'synthetic-frozen-role',
+      revision: 7,
+      name: 'Synthetic reviewer',
+      emoji: '🔎',
+    };
+    await fixture.seedChat({
+      prompt: 'Synthetic earlier prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+      modeId: 'plan',
+      modelId: 'model-a',
+      agentRoleId: snapshot.id,
+      agentRoleRevision: snapshot.revision,
+      agentRoleSnapshot: snapshot,
+    });
+    if (entryPoint === 'CLI') await fixture.run('chat', {});
+    else {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lody-role-snapshot-followup-'));
+      roots.add(root);
+      vi.stubEnv('LODY_DATA_DIR', root);
+      const requesterSessionId = 'role-snapshot-requester' as SessionId;
+      await fixture.seedChat(
+        { prompt: 'Synthetic delegated request', cliType: 'builtin', agentType: 'codex' },
+        requesterSessionId
+      );
+      await fixture.runMcp(requesterSessionId, () =>
+        __lodyMcpServerInternals.startSessionChatOperation({
+          operationId: 'role-snapshot-followup',
+          sessionId,
+          prompt: 'Continue',
+        })
+      );
+    }
+    const latest = (await fixture.history()).at(-1)!;
+    expect(latest.inputConfig).toMatchObject({
+      agentRoleId: snapshot.id,
+      agentRoleRevision: snapshot.revision,
+      agentRoleSnapshot: snapshot,
+    });
+    expect(fixture.dispatched).toEqual([latest]);
+    const meta = fixture.metadata.get(getSessionRoomId(sessionId)) as SessionMeta;
+    const author = await resolveSessionMessageAuthor(
+      fixture.manager,
+      meta,
+      latest.id,
+      latest.inputConfig,
+      undefined,
+      workspaceId
+    );
+    expect(author.role).toEqual(snapshot);
+  }
+);
 
 describe('agent chat to a busy target', () => {
   const inputConfig = { prompt: 'Earlier prompt', cliType: 'builtin', agentType: 'codex' } as const;

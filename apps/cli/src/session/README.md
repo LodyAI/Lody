@@ -516,6 +516,16 @@ GC inspects goals through synchronous Loro fields or Roost's certified projectio
 and reverse logical pages. See the
 [goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
 
+Owners advertising `sessionHistoryInspection` v2 serve metadata, goals, limited
+transcripts and replay in one owner task. General selection validates a digest of
+query fields rather than requiring unrelated body revisions to remain unchanged.
+Older owners retain the single-`readAll` compatibility path; v2 failures propagate
+without that fallback. Certified goals and recovery replay avoid preparing unrelated
+query fields; replay formats ordered members individually on the owner. Transcript
+queries reuse visibility flags for unchanged records. Sparse membership edits
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+records the affected paths and memory measurements.
+
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing

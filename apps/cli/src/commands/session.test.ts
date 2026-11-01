@@ -98,6 +98,7 @@ import {
   selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
+  readSessionTranscript,
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
   validateTurnConfigOptionValues,
@@ -2683,6 +2684,14 @@ describe('prepared command attachment inputs', () => {
       appendUserPromptHistory({ ...args, inputBlocks: [{ ...file, fileId: 'other-file' }] })
     ).rejects.toThrow('already used');
     expect(writer.readStored()).toHaveLength(1);
+    doc
+      .getList('history')
+      .push({ ...first, items: [{ type: 'text', text: 'later duplicate' }] } as never);
+    doc.commit();
+    expect(await appendUserPromptHistory(args)).toEqual({ ...first, existingStatus: 'pending' });
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    expect(writer.readStored()[1]?.items).toEqual([{ type: 'text', text: 'later duplicate' }]);
+    expect(writer.readStored()).toHaveLength(2);
   });
 
   it('prepares an attachment-only first turn and rejects an empty message before publication', async () => {
@@ -3195,4 +3204,69 @@ describe('paired machine billing entitlement while offline', () => {
       vi.unstubAllEnvs();
     }
   });
+});
+
+it('limits history by visible entries while retaining exact totals, positions and order', async () => {
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ doc, sessionId: 'limited-transcript' as SessionId });
+  const rows: SessionHistoryInput[] = [
+    createHistoryEntry({ id: 'hidden', items: [{ type: 'thought', text: 'hidden' }] }),
+    createHistoryEntry({
+      id: 'user',
+      role: 'user',
+      items: [{ type: 'text', text: '  question  ' }],
+    }),
+    createHistoryEntry({ id: 'blank', items: [{ type: 'text', text: '\ufeff \u3000' }] }),
+    createHistoryEntry({
+      id: 'image',
+      items: [
+        {
+          type: 'image',
+          fileName: 'picture',
+          imageId: 'synthetic-image',
+          sizeBytes: 32,
+          mimeType: 'image/png',
+        } as never,
+      ],
+    }),
+    createHistoryEntry({
+      id: 'notice',
+      role: 'system',
+      items: [{ type: 'system_notice', name: 'agent_warning', text: 'hidden notice' }],
+    }),
+    createHistoryEntry({
+      id: 'answer',
+      items: [
+        { type: 'text', text: 'old answer' },
+        { type: 'text', text: 'latest answer' },
+      ],
+    }),
+  ];
+  for (const row of rows) data.writer.append(row);
+  const history = data.history.readAll();
+  const transcript = toSessionTranscriptEntries(history);
+  const full = vi.spyOn(data.history, 'readAll').mockImplementation(() => {
+    throw new Error('whole history forbidden');
+  });
+  try {
+    const backend = {
+      readHistory: async () => {
+        throw new Error('whole history forbidden');
+      },
+      readHistorySelection: async (
+        select: Parameters<typeof data.writer.readSelected>[0],
+        options?: { transcriptVisibility?: boolean }
+      ) => data.writer.readSelected(select, options),
+    };
+    for (const limit of [1, 2, 50])
+      for (const reverse of [false, true]) {
+        expect(await readSessionTranscript(backend, { limit, reverse })).toEqual({
+          total: transcript.length,
+          entries: selectSessionTranscriptEntries(transcript, { limit, reverse }),
+        });
+      }
+  } finally {
+    full.mockRestore();
+    data.dispose();
+  }
 });

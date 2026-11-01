@@ -1,4 +1,5 @@
 import { AndroidEmulatorService } from '@/android-emulator/service';
+import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
@@ -175,7 +176,6 @@ import {
   isSessionGoalActive,
   type SessionGoalAction,
   type SessionGoalResponse,
-  resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
   deleteMachineFlockRowFromFlock,
   getMachineFlockDeleteLocalProjectEntries,
@@ -1173,11 +1173,11 @@ export class MessageHandler {
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = await backend.readHistory();
+        const history = await backend.readHistoryQuery();
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
-            userId = entry.userId;
+            userId = entry.userId as string;
             break;
           }
         }
@@ -1568,10 +1568,7 @@ export class MessageHandler {
       const backend = await this.getSessionBackend(sessionDoc);
       const meta = await backend.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-      const current =
-        resolveLatestSessionGoalFromHistory(await backend.readHistory()) ??
-        legacyMeta?.latestGoal ??
-        null;
+      const current = (await backend.readLatestGoal()) ?? legacyMeta?.latestGoal ?? null;
       // Skip both the history sweep and the meta write when the snapshot is
       // already cleared — `clearThreadGoalFromHistory` would otherwise scan
       // every entry to find no work to do.
@@ -5088,65 +5085,6 @@ export class MessageHandler {
     return out;
   }
 
-  private summarizeSessionHistoryForDiagnostics(
-    history: SessionHistoryInput[]
-  ): Record<string, unknown> {
-    const historyItemTypes: Record<string, number> = {};
-    const systemNoticeMetaUndefinedKeys: Array<{ entryId: string; keys: string[] }> = [];
-    let historyItems = 0;
-
-    for (const entry of history) {
-      if (!entry || typeof entry !== 'object') continue;
-      const items = Array.isArray(entry.items) ? (entry.items as unknown[]) : [];
-      for (const item of items) {
-        historyItems += 1;
-        const type = (item as { type?: unknown } | undefined)?.type;
-        const typeKey = typeof type === 'string' ? type : 'unknown';
-        historyItemTypes[typeKey] = (historyItemTypes[typeKey] ?? 0) + 1;
-
-        if (typeKey === 'system_notice') {
-          const meta = (item as { meta?: unknown } | undefined)?.meta;
-          if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
-            const metaRecord = meta as Record<string, unknown>;
-            const keys = Object.keys(metaRecord);
-            const undefinedKeys = keys.filter((k) => metaRecord[k] === undefined);
-            if (undefinedKeys.length > 0 && systemNoticeMetaUndefinedKeys.length < 5) {
-              systemNoticeMetaUndefinedKeys.push({
-                entryId: entry.id,
-                keys: undefinedKeys.slice(0, 10),
-              });
-            }
-          }
-        }
-      }
-    }
-
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    const lastItems = last && Array.isArray(last.items) ? (last.items as unknown[]) : [];
-    const lastItemTypes: Record<string, number> = {};
-    for (const item of lastItems) {
-      const type = (item as { type?: unknown } | undefined)?.type;
-      const typeKey = typeof type === 'string' ? type : 'unknown';
-      lastItemTypes[typeKey] = (lastItemTypes[typeKey] ?? 0) + 1;
-    }
-
-    return {
-      historyEntries: history.length,
-      historyItems,
-      historyItemTypes,
-      systemNoticeMetaUndefinedKeys,
-      lastEntry: last
-        ? {
-            id: last.id,
-            role: last.role,
-            timestamp: last.timestamp,
-            items: lastItems.length,
-            itemTypes: lastItemTypes,
-          }
-        : null,
-    };
-  }
-
   private async appendACPUpdatesToAssistantEntry(args: {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
@@ -5413,11 +5351,11 @@ export class MessageHandler {
       );
       try {
         const history = sessionDoc
-          ? await (await this.getSessionBackend(sessionDoc)).readHistory()
+          ? await (await this.getSessionBackend(sessionDoc)).readHistoryQuery()
           : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
-            history ? JSON.stringify(this.summarizeSessionHistoryForDiagnostics(history)) : 'no doc'
+            history ? JSON.stringify(summarizeHistoryQuery(history)) : 'no doc'
           }`
         );
       } catch (diagnosticError) {
@@ -6157,7 +6095,12 @@ export class MessageHandler {
       logger: this.logger,
       sessionId,
       userTurnId,
-      readHistory: async () => (await this.getSessionBackend(sessionDoc)).readHistory(),
+      hasUserTurn: async (id) => {
+        const backend = await this.getSessionBackend(sessionDoc);
+        return (await backend.readHistoryQuery()).some(
+          (row) => row.id === id && row.role === 'user'
+        );
+      },
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
       onBeforeOpen: async () => {
         await this.writeAssistantEntryForTurn(
@@ -7657,6 +7600,19 @@ export class MessageHandler {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
       const history = backend.history;
+      if (
+        query.kind === 'readMetadata' ||
+        query.kind === 'readLatestGoal' ||
+        query.kind === 'readTranscript' ||
+        query.kind === 'readQuerySnapshot' ||
+        query.kind === 'readSelection' ||
+        query.kind === 'readReplayPrompt'
+      ) {
+        if (!backend.readHistoryInspection)
+          throw new Error('Owner history inspection is unavailable');
+        await backend.flushLocalWrites();
+        return await backend.readHistoryInspection(query);
+      }
       for (let attempt = 0; attempt < 4; attempt += 1) {
         // The read and its revision must straddle no unpublished history write.
         // These are local durability barriers, never remote synchronization.
@@ -7711,7 +7667,9 @@ export class MessageHandler {
             break;
           }
           case 'count':
-            result = await history.count();
+            result = query.withCheckpoint
+              ? { count: await history.count(), checkpoint: before.checkpoint }
+              : await history.count();
             break;
           case 'readAt':
             result = await history.readAt(query.position);
@@ -7730,6 +7688,9 @@ export class MessageHandler {
             break;
           case 'readDirectory':
             result = await history.readDirectory(query.from, query.to);
+            break;
+          case 'readQuery':
+            result = await backend.readHistoryQuery(query);
             break;
           case 'readLatestPage':
             if (!history.readLatestDirectoryPage) {
@@ -7789,12 +7750,19 @@ export class MessageHandler {
           query.kind === 'readChanges' ||
           ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
             query.withCheckpoint) ||
-          ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
+          ((query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory') &&
+            query.atCheckpoint);
         if (protectedRead) {
           if (!history.getCheckpoint) throw new Error('History checkpoints are unavailable');
           const current = await history.getCheckpoint();
           const expected =
-            query.kind === 'readTurn' || query.kind === 'readRange'
+            query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory'
               ? query.atCheckpoint
               : (result as { checkpoint?: string }).checkpoint;
           if (current !== expected)
@@ -7819,8 +7787,17 @@ export class MessageHandler {
         query.kind === 'readChanges' ||
         ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
           query.withCheckpoint) ||
-        ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint);
-      if (protectedRead && error instanceof Error && 'code' in error && error.code === 'stale') {
+        ((query.kind === 'readTurn' ||
+          query.kind === 'readRange' ||
+          query.kind === 'readQuery' ||
+          query.kind === 'readDirectory') &&
+          query.atCheckpoint);
+      if (
+        (protectedRead || query.kind === 'readSelection') &&
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'stale' || error.code === 'superseded')
+      ) {
         this.logger.trace(`[${sessionId}] History observation superseded operation=${query.kind}`);
         return {
           type: 'session/history-read_response',
@@ -7930,7 +7907,7 @@ export class MessageHandler {
           const entries = payload.history.map(
             (entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry) as SessionHistoryInput
           );
-          const existingIds = new Set((await backend.readHistory()).map((entry) => entry.id));
+          const existingIds = new Set((await backend.readHistoryQuery()).map((entry) => entry.id));
           for (const entry of entries) {
             if (existingIds.has(entry.id))
               throw new Error(`History copy target already contains ${entry.id}`);
@@ -8749,7 +8726,15 @@ export class MessageHandler {
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await this.getSessionBackend(sessionDoc);
-    const history = await backend.readHistory();
+    const history = await backend.readHistorySelection((rows) =>
+      rows.flatMap((row, index) =>
+        row.items?.some(
+          (item) => item.type === 'file' && item.fileId === fileId && item.transport === 'local'
+        )
+          ? [index]
+          : []
+      )
+    );
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -9488,16 +9473,9 @@ export class MessageHandler {
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = await backend.readHistory();
-      for (let i = history.length - 1; i >= 0; i -= 1) {
-        const entry = history[i];
-        if (!entry || entry.role !== 'user') continue;
-        const userId = entry.userId;
-        if (typeof userId === 'string' && userId.trim()) {
-          historyUserId = userId;
-          break;
-        }
-      }
+      historyUserId = backend.readLatestUserId
+        ? await backend.readLatestUserId()
+        : await readLatestUserId(backend.history);
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to append permission request to history: ${formatErrorMessage(
@@ -9768,7 +9746,17 @@ export class MessageHandler {
           ? await backend
               .readTurn(permissionTurnId)
               .then((read) => (read.state === 'ready' ? [read.turn as SessionHistoryInput] : []))
-          : await backend.readHistory();
+          : await backend.readHistorySelection((rows) => {
+              const first = rows.findIndex((row) =>
+                row.items?.some(
+                  (item) =>
+                    item.type === 'tool_call' &&
+                    (item.permissionRequest as { requestId?: unknown } | undefined)?.requestId ===
+                      requestId
+                )
+              );
+              return first < 0 ? [] : [first];
+            });
         return findPermissionOutcomeInHistory(history, requestId);
       };
       let checkingHistory = false;
@@ -11038,9 +11026,7 @@ export class MessageHandler {
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
-    const historyGoal = backend.readLatestGoal
-      ? await backend.readLatestGoal()
-      : resolveLatestSessionGoalFromHistory(await backend.readHistory());
+    const historyGoal = await backend.readLatestGoal();
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 
