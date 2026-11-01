@@ -654,8 +654,43 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(opens).toBe(2);
   expect(closes).toBe(1);
   expect(container.textContent).not.toContain('removed from this workspace');
-  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
+  // A revoked device lands on the approval guide, with re-pairing guidance.
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+});
+
+it('lands a device that needs approval on the guide and keeps the ledger behind Details', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      throw new PersonalHostError({ code: 'approval-required' });
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide).not.toBeNull();
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.lead');
+  // The existing explicit pairing stays available during the transition.
+  expect(guide?.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('false');
+  expect(container.querySelector('[data-control-state]')?.textContent).not.toBe(
+    'approval-required'
+  );
+  const details = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'e2ee.approvalGuide.details'
+  );
+  expect(details).toBeDefined();
+  await act(async () => details!.click());
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
 });
 
 it('fences the preallocated control reader before a cold open settles', async () => {
