@@ -191,3 +191,22 @@ as an independently retryable inline video comment on the matching open PR.
 The current active coverage is tracked in [the coverage matrix](./COVERAGE.md).
 The suite checker parses Gherkin and enforces IDs, priorities, runtime ownership,
 documentation indexes, and P0 matrix entries before any application build.
+
+## Fast local and CI builds
+
+`pnpm e2e:build:test` prepares the original CLI adapters/bundles/native resources,
+synchronizes the CLI, and builds the isolated Electron test profile. Typecheck and
+lint remain in independent code checks. CLI uses a 2 GiB heap, independently of the
+renderer. To consume this output locally:
+
+```sh
+pnpm e2e:build:test
+LODY_E2E_BUILD_PROFILE=test-build pnpm e2e:smoke
+LODY_E2E_BUILD_PROFILE=test-build pnpm e2e:full
+```
+
+PR, Daily and Scout workflows select this profile explicitly. The launcher checks
+all three output markers and never falls back to a release output. `pnpm e2e:build`
+and the default launcher profile still use the original release path. Final release
+acceptance uses those release commands with `LODY_E2E_BUILD_PROFILE=release`. These unpackaged journeys do not validate
+installer signing or notarization.

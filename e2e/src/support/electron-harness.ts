@@ -1,3 +1,4 @@
+import { desktopBuildArtifacts } from './build-artifacts.js';
 import {
   closeSync,
   existsSync,
@@ -30,7 +31,7 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ELECTRON_DIR = join(ROOT, 'apps', 'electron');
-const MAIN_ENTRY = join(ELECTRON_DIR, 'out', 'main', 'index.js');
+
 const BUNDLED_CLI_ENTRY = join(ELECTRON_DIR, 'resources', 'cli', 'index.js');
 const requireFromElectron = createRequire(join(ELECTRON_DIR, 'package.json'));
 const TEARDOWN_OPERATION_TIMEOUT_MS = 20_000;
@@ -139,7 +140,8 @@ export class ElectronHarness {
   constructor(readonly artifacts: ScenarioArtifacts) {}
 
   async launch(options: ElectronLaunchOptions = {}): Promise<void> {
-    if (!existsSync(MAIN_ENTRY) || !existsSync(BUNDLED_CLI_ENTRY)) {
+    const build = desktopBuildArtifacts(ROOT, process.env.LODY_E2E_BUILD_PROFILE ?? 'release');
+    if (!existsSync(build.main) || !existsSync(BUNDLED_CLI_ENTRY)) {
       throw new Error(
         'Desktop E2E artifacts are missing. Run `pnpm e2e:build` before launching scenarios.'
       );
@@ -187,7 +189,7 @@ export class ElectronHarness {
         ...(options.remoteDebuggingPort
           ? [`--remote-debugging-port=${options.remoteDebuggingPort}`]
           : []),
-        MAIN_ENTRY,
+        build.main,
         `--user-data-dir=${this.electronUserDataDir}`,
         '--lang=en-US',
       ],
@@ -237,7 +239,7 @@ export class ElectronHarness {
     this.traceStarted = true;
     // firstWindow can still expose about:blank before Electron's loadFile commits.
     // Wait for the application document, not the placeholder's readyState.
-    const rendererUrl = pathToFileURL(join(ELECTRON_DIR, 'out', 'renderer', 'index.html'));
+    const rendererUrl = pathToFileURL(build.renderer);
     await this.page.waitForURL((url) => url.href.split('#')[0] === rendererUrl.href, {
       waitUntil: 'domcontentloaded',
       timeout: 60_000,
