@@ -91,6 +91,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Provider automation binds `agent-provider-add` to the actual resolved machine
   and `agent-config-dialog` to its captured machine through `data-machine-id`.
   Preserve these identities when selection falls back or a dialog remains open.
+  Add actions and the dialog itself must honor the provider list's workspace RPC
+  restriction before mounting probes or persisting a draft. Signed file RPC
+  availability does not grant provider management; same-machine IPC remains available.
 
 ## Agent Roles
 
