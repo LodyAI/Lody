@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2191](https://github.com/LodyAI/Lody/pull/2191)
 
 [English](2026-11-01-conversation-selection-quote-reintroduction.md)
 
