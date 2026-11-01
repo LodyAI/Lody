@@ -13,7 +13,7 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
@@ -21,6 +21,13 @@ import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import {
+  E2eeAccountPairingApprove,
+  E2eeAccountPairingRequest,
+} from '@/components/pages/e2ee-account-pairing';
+import { e2eeAccountPairingFeatureEnabledAtom } from '@/atoms/settings';
+import { isElectronRenderer } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
 import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
@@ -57,6 +64,7 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 const retiredReaders = createWorkspaceRuntimeRetirements();
 
 function WorkspaceControlRoute() {
+  const accountPairing = useAtomValue(e2eeAccountPairingFeatureEnabledAtom);
   const { workspaceId } = Route.useParams();
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -511,6 +519,15 @@ function WorkspaceControlRoute() {
           void navigate({ to: '/workspace/create', search: { allowExisting: true } });
         }}
       >
+        {accountPairing && (
+          <E2eeAccountPairingRequest
+            key={identity + ':account-pairing'}
+            runtime={port.runtime}
+            // Web asks first: a browser is often shared or public.
+            autoStart={isElectronRenderer() || isNativeAppShell()}
+            onJoined={refresh}
+          />
+        )}
         <E2eePersonalPairing
           key={identity}
           workspaceId={workspaceId}
@@ -610,6 +627,9 @@ function WorkspaceControlRoute() {
               profiles={directory?.scope === scope ? directory.profiles : undefined}
             />
           </>
+        )}
+        {accountPairing && port?.runtime && accountId && current?.history?.locallyPinned && (
+          <E2eeAccountPairingApprove key={identity + ':account-pairing'} runtime={port.runtime} />
         )}
         {port?.runtime && accountId && (
           <E2eePersonalPairing

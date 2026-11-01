@@ -152,10 +152,11 @@ function ResultAlert(props: { result: VerificationResult | 'unreadable' }) {
   );
 }
 
-type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
+export type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
 
-/** Reads QR frames until one decodes, then releases the camera. */
-function useQrCamera(active: boolean, onCode: (text: string) => void) {
+/** Reads QR frames until one decodes, then releases the camera. A denied, absent or
+ * busy camera reports `unavailable`; callers keep a paste fallback. */
+export function useQrCamera(active: boolean, onCode: (text: string) => void) {
   const video = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<CameraState>('idle');
   const latest = useRef(onCode);

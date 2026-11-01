@@ -180,6 +180,19 @@ under `e2eeAccountPairing`: submit, pending, read by lookup ID, decline, publish
 - **Admissions.** These go through the existing ledger append path. Each invitation row
   carries the approver's device access for its workspace.
 
+## Client surface
+
+The host port is the optional `E2eeAccountPairingRuntime` in
+[`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts). The pages
+are in [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx),
+behind the developer-mode beta switch "Account-wide device pairing".
+- **Ownership.** The host owns `S`, every tag check, the lifetime check, terminal records
+  and signing. The UI checks a typed code locally only to name a typo before any network
+  request, and wipes the decoded bytes at once.
+- **Visibility.** A host without the methods shows nothing, and the existing
+  per-workspace pairing stays below. No host implements the methods yet; desktop batch
+  signing comes next.
+
 ## Verification limits
 
 - The string format, key derivation, canonical request and approval bytes and both tags
