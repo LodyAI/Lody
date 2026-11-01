@@ -2663,6 +2663,7 @@ export class LoroStreamsRpcResponseDispatcher {
         }
         if (readController.signal.aborted) continue;
 
+        let failure: unknown = error;
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
             try {
@@ -2675,23 +2676,16 @@ export class LoroStreamsRpcResponseDispatcher {
               continue;
             } catch (ensureError) {
               // Retry like any other loop error; never let it end the loop.
-              this.options.logger?.warn?.(
-                `[rpc-client:${this.options.logLabel ?? this.options.workspaceId}] response stream recreate failed: ${
-                  ensureError instanceof Error ? ensureError.message : String(ensureError)
-                }`
-              );
-              await delay(1000);
-              continue;
+              failure = ensureError;
             }
-          }
-          if (error.status === 410) {
+          } else if (error.status === 410) {
             this.responseState.nextOffset = '-1';
             this.responseState.cursor = undefined;
             continue;
           }
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = failure instanceof Error ? failure.message : String(failure);
         this.options.logger?.warn?.(
           `[rpc-client:${this.options.logLabel ?? this.options.workspaceId}] response loop error: ${message}`
         );

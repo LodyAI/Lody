@@ -34,7 +34,14 @@ async function load(relative, dependencies, context = {}) {
 }
 
 function syntheticApp() {
+  const listeners = new Map()
   return {
+    on(event, listener) {
+      listeners.set(event, [...(listeners.get(event) ?? []), listener])
+    },
+    emit(event) {
+      for (const listener of listeners.get(event) ?? []) listener()
+    },
     isPackaged: true,
     getVersion: () => '1.0.0',
     getPath: () => '/synthetic-user-data',
@@ -179,4 +186,35 @@ void test('a Sparkle install that fails asynchronously restores hide-on-close wi
 
   assert.equal(service.getState().phase, 'error')
   assert.equal(quitting, false)
+})
+
+void test('a Sparkle error during a quit already owned by the barrier keeps windows closing', async () => {
+  const app = syntheticApp()
+  let quitting = false
+  let emit = () => {}
+  const { service } = await loadUpdater({
+    app,
+    intervals: new Set(),
+    sparkleBridge: {
+      init: () => true,
+      setEventHandler: (handler) => {
+        emit = handler
+      },
+      setAutomaticChecks() {},
+      installUpdateNow() {}
+    },
+    windowState: {
+      setAppQuitting: (next) => {
+        quitting = next
+      }
+    }
+  })
+  service.start()
+  await service.quitAndInstall()
+
+  // The quit barrier now owns the flag while it closes product windows.
+  app.emit('before-quit')
+  emit({ type: 'error', message: 'synthetic background check failure' })
+
+  assert.equal(quitting, true)
 })

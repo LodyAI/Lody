@@ -710,9 +710,9 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.genesis === hex(genesis.toBytes()) &&
           ref.membershipId === hex(membership.toBytes())
       );
-    if (selected?.entryId !== intent.selected!.entryId) {
+    if (selected?.entryId !== candidate.entryId) {
       if (selected?.entryId !== intent.old.entryId) return yield* vaultError('conflict');
-      const changed = yield* vault.replace(intent.selected!);
+      const changed = yield* vault.replace(candidate);
       if (changed.outcome !== 'Committed') return yield* vaultError('conflict');
     }
     if (!request.compromised && (yield* revokeOld()) !== 'Committed')

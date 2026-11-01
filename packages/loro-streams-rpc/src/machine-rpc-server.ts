@@ -716,6 +716,7 @@ export class LoroStreamsMachineRpcServer {
           return;
         }
 
+        let failure: unknown = error;
         if (error instanceof LoroStreamsGatewayError) {
           if (error.status === 404) {
             this.deps.logger.warn(
@@ -731,21 +732,16 @@ export class LoroStreamsMachineRpcServer {
               continue;
             } catch (ensureError) {
               // Retry like any other loop error; never let it end the listener.
-              this.logRequestLoopError(
-                ensureError instanceof Error ? ensureError.message : String(ensureError)
-              );
-              await delay(REQUEST_LOOP_RETRY_DELAY_MS);
-              continue;
+              failure = ensureError;
             }
-          }
-          if (error.status === 410) {
+          } else if (error.status === 410) {
             this.requestState.nextOffset = '-1';
             this.requestState.cursor = undefined;
             continue;
           }
         }
 
-        const message = error instanceof Error ? error.message : String(error);
+        const message = failure instanceof Error ? failure.message : String(failure);
         this.logRequestLoopError(message);
         await delay(REQUEST_LOOP_RETRY_DELAY_MS);
       }

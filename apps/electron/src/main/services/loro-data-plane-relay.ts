@@ -85,14 +85,10 @@ export class LoroDataPlaneRelay {
     }
 
     this.clearRedialTimer()
-    this.stopPingLoop()
-    this.clearPendingDaemonWrites()
     this.sendersPeers.clear()
     const socket = this.socket
-    this.socket = null
-    // Release the dial too, so re-enabling starts a fresh socket at once.
-    this.connecting = null
-    this.setConnected(false)
+    // Also releases the dial, so re-enabling starts a fresh socket at once.
+    this.dropSocket()
     socket?.destroy(new Error('loro_data_plane_relay_disabled'))
   }
 

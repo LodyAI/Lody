@@ -120,6 +120,10 @@ export class AppUpdaterService {
     if (sparkleBridge) {
       this.sparkleBridge = sparkleBridge
       this.attachSparkleEventHandler(sparkleBridge)
+      // Once a quit starts, the quit barrier owns the app-quitting flag.
+      app.on('before-quit', () => {
+        this.sparkleInstallRequested = false
+      })
       sparkleBridge.setAutomaticChecks(true)
       return
     }
