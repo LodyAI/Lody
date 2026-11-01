@@ -12,6 +12,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
 
 export type WorkspaceJoinPageState =
@@ -136,7 +137,7 @@ export function WorkspaceJoinRequestPage({
               </label>
               <Textarea
                 id="join-request-reason"
-                className={`min-h-28 ${stylex.props(styles.reason).className}`}
+                {...stylex.props(styles.reason)}
                 value={reason}
                 maxLength={1000}
                 disabled={state === 'submitting'}
@@ -262,7 +263,10 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.sm,
     fontWeight: themeFontWeight.medium,
   },
-  reason: { marginTop: themeSpace[2] },
+  reason: {
+    marginTop: themeSpace[2],
+    [field.textareaMinHeight]: 'calc(var(--spacing) * 28)',
+  },
   identity: { marginTop: themeSpace[2] },
   submit: { marginTop: themeSpace[5] },
   back: { marginTop: themeSpace[4] },

@@ -38,6 +38,10 @@ can still retain a utility because a StyleX value contains the same keyword;
 check complete production CSS before adding duplicate registrations. Removing
 Tailwind itself will also require explicit ownership of every retained writer
 registration and fallback.
+The private review checkbox keeps its native input and checked/indeterminate
+state. Its input box and glyphs use local styles; zero-valued inset and margin
+retain `calc(var(--spacing) * 0)` so CSS-wide spacing values keep their behavior.
+
 Separator styling follows its existing JavaScript orientation branch; caller-written
 or Radix-normalized data attributes do not choose its axis. Rendering the original
 invalid-orientation case retains its original attribute/style mismatch.

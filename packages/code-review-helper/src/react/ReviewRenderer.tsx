@@ -2607,6 +2607,20 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
   );
 });
 
+const checkboxStyles = stylex.create({
+  input: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    margin: 'calc(var(--spacing) * 0)',
+    cursor: 'pointer',
+    opacity: 0,
+  },
+  glyph: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+  },
+});
+
 function Checkbox({
   state,
   onChange,
@@ -2644,12 +2658,12 @@ function Checkbox({
         aria-label={ariaLabel}
         onChange={(event) => onChange(event.currentTarget.checked)}
         onClick={(event) => event.stopPropagation()}
-        className="absolute inset-0 m-0 cursor-pointer opacity-0"
+        className={stylex.props(checkboxStyles.input).className}
       />
       {indeterminate ? (
-        <Minus className="size-3" strokeWidth={3.5} />
+        <Minus className={stylex.props(checkboxStyles.glyph).className} strokeWidth={3.5} />
       ) : checked ? (
-        <Check className="size-3" strokeWidth={3.5} />
+        <Check className={stylex.props(checkboxStyles.glyph).className} strokeWidth={3.5} />
       ) : null}
     </span>
   );
