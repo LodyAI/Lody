@@ -22,6 +22,7 @@ import {
 import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
+import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
 import { makeDesktopAccountPairingHost } from './e2ee-account-pairing-host.mts'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts'
@@ -2159,11 +2160,15 @@ void test('prepareDispatch confirms access loss after its reader closes through 
     ['unclassified', Effect.fail(new Error('e2ee_member_removed')), null],
     ['other-reader', Effect.succeed({ token: 'synthetic-unused-token' }), null],
     ['account-switch', Effect.fail(new E2eeMemberRemovedError()), null],
-    ['credential-change', Effect.fail(new E2eeMemberRemovedError()), null]
+    ['credential-change', Effect.fail(new E2eeMemberRemovedError()), null],
+    ['credential-change-other-reader', Effect.fail(new E2eeMemberRemovedError()), null],
+    ['status-failure', Effect.succeed({ token: 'synthetic-unused-token' }), null]
   ]) {
     await t.test(name, async (subtest) => {
       const { api, identity } = await nativeAccountFixture(subtest)
-      let nativeOwner
+      let credentialReplaced = false
+      let replacement
+      let replacementBytes
       const first = await createAccountWorkspace(api, 'workspace')
       const sender = Object.assign(new EventEmitter(), { id: 41 })
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
@@ -2194,9 +2199,43 @@ void test('prepareDispatch confirms access loss after its reader closes through 
                     identity.userId = 'other-account'
                     identity.generation++
                   }
-                  if (name === 'credential-change')
-                    nativeOwner.bootstrap.deviceCredential = () =>
-                      Effect.succeed('replacement-credential')
+                  if (name.startsWith('credential-change')) {
+                    yield* Effect.promise(async () => {
+                      await api.resetDesktopE2eeIdentity({ workspaceId, resetId: randomUUID() })
+                      replacement = await createAccountWorkspace(api, workspaceId)
+                      const nextCredential = await api.withDesktopE2eeAccount(
+                        (owner) => {
+                          owner.readers.set(workspaceId, new Map([[sender.id, 1]]))
+                          return owner.bootstrap.deviceCredential(workspaceId)
+                        },
+                        workspaceId,
+                        false
+                      )
+                      assert.notEqual(nextCredential, retainedCredential)
+                      assert.notEqual(replacement.signingPublicKey, first.signingPublicKey)
+                      await ipc.close(workspaceId)
+                      const cached = await api.withDesktopE2eeAccount(
+                        (owner) => owner.host.inspectCachedState(workspaceId, 'synthetic-machine'),
+                        workspaceId,
+                        false
+                      )
+                      assert.equal(cached.entryPresent, false)
+                      if (name === 'credential-change-other-reader') {
+                        await api.withDesktopE2eeAccount(
+                          (owner) => {
+                            owner.readers.set(workspaceId, new Map([[42, 1]]))
+                            return owner.host.open(workspaceId)
+                          },
+                          workspaceId,
+                          false
+                        )
+                      }
+                      replacementBytes = await readFile(
+                        join(replacement.directory, 'creations.sqlite')
+                      )
+                    })
+                    credentialReplaced = true
+                  }
                   return yield* response
                 }),
               machineSharing: () => ({})
@@ -2208,7 +2247,6 @@ void test('prepareDispatch confirms access loss after its reader closes through 
       let dispatched = false
       const retainedCredential = await api.withDesktopE2eeAccount(
         (owner) => {
-          nativeOwner = owner
           owner.readers.set('workspace', new Map([[sender.id, 1]]))
           if (name === 'other-reader') owner.readers.get('workspace').set(42, 1)
           owner.host.prepareDispatch = () =>
@@ -2216,6 +2254,13 @@ void test('prepareDispatch confirms access loss after its reader closes through 
               dispatched = true
               return { frame: 'synthetic-dispatch-must-not-escape' }
             })
+          if (name === 'status-failure') {
+            const status = owner.host.status
+            owner.host.status = (workspaceId) =>
+              status(workspaceId).pipe(
+                Effect.flatMap(() => Effect.fail(new Error('synthetic post-open status failure')))
+              )
+          }
           return owner.bootstrap.deviceCredential('workspace')
         },
         'workspace',
@@ -2241,6 +2286,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
             : /^Error: e2ee_host_operation_failed$/
       )
       assert.equal(dispatched, false)
+      if (name.startsWith('credential-change')) assert.equal(credentialReplaced, true)
       if (code) {
         // Cleanup retains its terminal receipt database, erasing creation/key state.
         const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
@@ -2254,7 +2300,10 @@ void test('prepareDispatch confirms access loss after its reader closes through 
           code: 'ENOENT'
         })
       } else {
-        assert.deepEqual(await readFile(join(first.directory, 'creations.sqlite')), original)
+        assert.deepEqual(
+          await readFile(join(first.directory, 'creations.sqlite')),
+          replacementBytes ?? original
+        )
         identity.userId = 'account'
         identity.generation++
         const cached = await api.withDesktopE2eeAccount(
@@ -2262,15 +2311,141 @@ void test('prepareDispatch confirms access loss after its reader closes through 
           'workspace',
           false
         )
-        assert.equal(cached.entryPresent, name === 'other-reader')
-        if (name === 'other-reader') {
+        const otherReader = name === 'other-reader' || name === 'credential-change-other-reader'
+        assert.equal(cached.entryPresent, otherReader)
+        if (otherReader) {
           sender.id = 42
-          assert.equal((await ipc.status('workspace')).signingPublicKey, first.signingPublicKey)
+          assert.equal(
+            (await ipc.status('workspace')).signingPublicKey,
+            (replacement ?? first).signingPublicKey
+          )
           sender.id = 41
         }
       }
       await assert.rejects(ipc.status('workspace'))
     })
+  }
+})
+
+void test('prepareDispatch isolates JWT, transport and parse failures from credential authority through the real cloud client', async (t) => {
+  for (const hasReader of [false, true]) {
+    for (const code of ['e2ee_member_removed', 'e2ee_device_revoked']) {
+      for (const source of ['jwt', 'transport', 'parse', 'endpoint']) {
+        await t.test(`${hasReader ? 'reader' : 'closed'}-${code}-${source}`, async (subtest) => {
+          const { api, identity } = await nativeAccountFixture(subtest)
+          const first = await createAccountWorkspace(api, 'workspace')
+          const sender = Object.assign(new EventEmitter(), { id: 41 })
+          const scope = await Effect.runPromise(Scope.make())
+          subtest.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+          const failure = { data: { code } }
+          let endpointCalls = 0
+          let dispatchCalls = 0
+          const credential = await api.withDesktopE2eeAccount(
+            (owner) => {
+              owner.readers.set('workspace', new Map([[sender.id, 1]]))
+              owner.host.prepareDispatch = () =>
+                Effect.sync(() => {
+                  dispatchCalls++
+                  throw new Error('synthetic local dispatch failure')
+                })
+              return owner.bootstrap.deviceCredential('workspace')
+            },
+            'workspace',
+            false
+          )
+          const client = await Effect.runPromise(
+            makeE2eeCloudClient({
+              platformKind: 'cloud',
+              deploymentUrl: 'https://synthetic.convex.cloud',
+              convexToken: async () => {
+                if (source === 'jwt') throw failure
+                return { token: 'synthetic-jwt' }
+              },
+              fetch: async (_url, init) => {
+                const request = JSON.parse(init.body)
+                assert.equal(request.path, 'e2eeContent:contentStreamsToken')
+                assert.equal(request.args[0].credential, credential)
+                endpointCalls++
+                if (source === 'transport') throw failure
+                const response = Response.json(
+                  { status: 'error', errorMessage: 'synthetic rejection', errorData: { code } },
+                  { status: 560 }
+                )
+                if (source === 'parse')
+                  response.json = async () => {
+                    throw failure
+                  }
+                return response
+              }
+            }).pipe(Scope.provide(scope))
+          )
+          const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+            'electron-ipc-decorator': {
+              IpcService: class {},
+              IpcMethod: () => (_target, _name, descriptor) => descriptor,
+              getIpcContext: () => ({ event: { sender } })
+            },
+            '../../platform': { isLocalPlatform: () => false },
+            '../../services/e2ee-bootstrap.mjs': {},
+            '../assert-sender': { assertProductWindowSender: () => {} },
+            '../ipc-service-deps': {
+              getIpcServiceDeps: () => ({
+                authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+              })
+            },
+            '../../services/e2ee-account-runtime': {
+              ...api,
+              desktopE2eeCloudClient: async () => ({ accountId: 'account', client })
+            }
+          })
+          const ipc = new E2eeIpc()
+          if (!hasReader) await ipc.close('workspace')
+          const original = await readFile(join(first.directory, 'creations.sqlite'))
+          const error = await ipc
+            .prepareDispatch('workspace', 'synthetic-machine', {
+              sessionId: 'session',
+              userTurnId: 'turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: {}
+            })
+            .then(
+              () => assert.fail('dispatch must fail'),
+              (cause) => cause
+            )
+          const db = new DatabaseSync(join(first.directory, 'creations.sqlite'))
+          try {
+            const authoritative = source === 'endpoint'
+            assert.deepEqual(
+              {
+                message: error.message,
+                endpointCalls,
+                creations: db.prepare('SELECT count(*) AS n FROM creations').get().n,
+                receipts: db.prepare('SELECT count(*) AS n FROM removed_workspaces').get().n
+              },
+              {
+                message: authoritative ? code : 'e2ee_host_operation_failed',
+                endpointCalls: source === 'jwt' ? 0 : 1,
+                creations: authoritative ? 0 : 1,
+                receipts: authoritative ? 1 : 0
+              }
+            )
+          } finally {
+            db.close()
+          }
+          assert.equal(dispatchCalls, hasReader ? 1 : 0)
+          if (source !== 'endpoint') {
+            assert.deepEqual(await readFile(join(first.directory, 'creations.sqlite')), original)
+            const cached = await api.withDesktopE2eeAccount(
+              (owner) => owner.host.inspectCachedState('workspace', 'synthetic-machine'),
+              'workspace',
+              false
+            )
+            assert.equal(cached.entryPresent, hasReader)
+          }
+        })
+      }
+    }
   }
 })
 
