@@ -9,7 +9,7 @@ Translation: current
 
 An additional desktop could not open a workspace because the host only reopened its own creation journal. This change adds an independently pinned invitation origin, reuses core admission and signed snapshots, and keeps keys in the native host. A small authenticated join mailbox relays immutable public evidence; it grants neither membership nor keys. Current scope is another desktop for the same Owner/Admin member, with explicit approval, exact retries and an optional full-ledger audit. Packaged two-device and real keystore/cloud acceptance remain outstanding.
 
-The [account-wide pairing proposal](2026-11-01-e2ee-account-personal-pairing.md) would replace the direct pin transfer with a 6-digit code verified by a CPace handshake and one approval for all of the account's workspaces; until it is approved, this explicit exchange remains the implemented path.
+The [account-wide pairing proposal](2026-11-01-e2ee-account-personal-pairing.md) would replace the direct pin transfer with a scanned or pasted one-time pairing string that authenticates the request, and one approval for all of the account's workspaces; until it is approved, this explicit exchange remains the implemented path.
 
 ## Responsibility and trust
 

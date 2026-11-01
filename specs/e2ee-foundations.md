@@ -439,65 +439,68 @@ change adds no send guard.
 
 ## Account-wide personal device pairing (pending approval increment)
 
-**Increment status: draft; not covered by the approved revision above.** The owner
-approved the direction and its open choices on 2026-11-01; this text awaits owner
-approval. Until then the existing explicit pairing exchange stays in force. Rationale,
-alternatives and the CPace construction are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
+**Increment status: draft; not covered by the approved revision above.** On
+2026-11-01 the owner chose this pairing string design. This text awaits owner approval; until then the existing explicit pairing
+exchange stays in force. The string format, the security argument and the rejected
+alternatives are in the [proposal](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md).
 
 **Scenario.** A signed-in user opens an encrypted workspace on a new device N. Desktop
-and mobile start automatically; Web starts only after the user chooses "Request access".
-N creates an independent protected personal identity for every encrypted workspace its
-account lists. It then submits one account-scoped request carrying N's display name, a
-fresh request ID, an expiry and, per workspace, the genesis, N's signing and encryption
-public keys, possession proof and credential hash. No pairing code is exchanged in
-advance.
+and mobile start automatically; Web starts only after the user chooses "Request
+access". N creates an independent protected personal identity for every encrypted
+workspace its account lists. It then draws a fresh 128-bit secret S and shows a QR code
+and a copyable pairing string, both encoding S.
+
+**Request.** N submits one account-scoped request carrying:
+- N's display name and an expiry;
+- per workspace, the genesis, N's signing and encryption public keys, possession proof
+  and credential hash;
+- a lookup ID derived one-way from S;
+- an HMAC over the canonical request, keyed by a key derived from S.
+
+S never reaches the service. The service relays the request to the user's approved
+personal devices and pushes a notification showing the device name, an approximate
+location estimated from the IP address it sees (labeled "approximate, for reference
+only") and the request time. It holds no keys, never signs and cannot approve.
 
 **Who may approve.** Any active personal device of the same user, whatever the user's
 role. Machines and recovery devices never approve.
 
-**Relay and notification.** The service relays the immutable request to the user's
-approved personal devices and pushes a notification showing:
-- the device name;
-- an approximate location estimated from the IP address the service sees, labeled
-  "approximate, for reference only";
-- the request time.
+**Approval.** On an approving device A, the user scans N's QR code or pastes its string.
+A checks the string's checksum and derives the lookup ID, then fetches the request,
+which only the same account can read. It then verifies the HMAC. If the HMAC fails,
+the request was altered after N created it: A refuses it and shows a warning. On
+success A shows the request details. The reverse direction is also supported, for
+example a new phone and an approving desktop: A generates S and shows the QR code, N
+scans it and submits its request under that S, and A then verifies it in the same way.
 
-The service holds no keys, never signs and cannot approve. A request expires after 10
-minutes, requests are rate-limited per account, and any approver may decline.
+**Approval covers the account.** After the user confirms, A authorizes every workspace
+in which it is an active personal device of the same user's membership. All are
+selected by default and the user may deselect any. For each selected workspace, A
+verifies N's possession proof against its own pinned genesis and appends the existing
+personal `AdmitDevice` record. No new ledger operation is introduced. A then publishes
+signed snapshot invitations together with an approval HMAC under S, which binds the
+request digest and A's signing key. N verifies that HMAC before pinning genesis and A's
+endorsement key. Current and historical keys use the existing mailbox and history
+paths. Workspaces A cannot sign for stay pending for another approver.
 
-**Code entry with CPace.** When the user chooses "Allow" on an approving device A, A
-generates a fresh random 6-digit code and shows it only on A. The user types it on N.
-The code never passes through the service. N and A run CPace over relayed messages,
-with the code as the password. The channel identifier binds:
-- the account;
-- the request digest, covering every `(genesis, N keys)` row;
-- A's signing public key;
-- a fresh session ID.
+**Lifetime and refusal.**
+- S is single-use and dies with its request. The request expires after 10 minutes,
+  requests are rate-limited per account, and any approver may decline.
+- A string for an expired, declined, approved or unknown request is refused, and so is
+  an approval authenticator replayed for any other request.
 
-Both sides confirm the derived key over the full transcript. A key or request
-substituted by the service makes the handshake fail, and a recorded transcript permits
-no offline guessing. A counts every attempt that fails to confirm; after 5 failures it
-voids the request, and the user starts a new one. The first device to choose "Allow"
-holds the attempt; others show it as in progress.
-
-**Approval covers the account.** After confirmation, A authorizes every workspace in
-which it is an active personal device of the same user's membership. All are selected
-by default and the user may deselect any. For each selected workspace, A verifies N's
-possession proof against its own pinned genesis and appends the existing personal
-`AdmitDevice` record; no new ledger operation is introduced. A then publishes a signed
-snapshot invitation, and N pins genesis and A's endorsement key from the confirmed
-handshake. Current and historical keys use the existing mailbox and history paths.
-Workspaces A cannot sign for stay pending for another approver.
-
-**Progress and failure.** A journals each workspace's exact signed admission before any
-network step. It resumes per workspace, retries the original bytes and reconciles
-unknown outcomes; it never re-signs. Ledgers are independent, so there is no
-cross-workspace atomicity. Each workspace is either admitted with its key delivered,
-admitted and awaiting delivery, or not admitted. N advances automatically and opens the
-conversation once the current key is installed. An expired, declined or voided request
-admits nothing. Revocation and removal semantics are unchanged. Manual pairing remains
-the fallback when push is unavailable, or when an offline approver must pair in
-person. Ledger details move to an advanced diagnostics view.
+**Progress and failure.**
+- A journals each workspace's exact signed admission before any network step. It
+  resumes per workspace, retries the original bytes, reconciles unknown outcomes and
+  never re-signs.
+- Ledgers are independent, so there is no cross-workspace atomicity. Each workspace is
+  either admitted with its key delivered, admitted and awaiting delivery, or not
+  admitted.
+- N advances automatically and opens the workspace once the current key is installed.
+- Revocation and removal semantics are unchanged.
+- Manual pairing uses the same string when push is unavailable or the devices pair in
+  person.
+- Ledger details move to an advanced diagnostics view.
 
 ## Retained verified state (proposed)
 
