@@ -2608,22 +2608,22 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Audited scopes 147–194 remove 124 source utilities, including the six private
+Audited scopes 147–195 remove 127 source utilities, including the six private
 spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
 The helper's frozen189 cut contains252/8/21 across30 production sources,
 matched by hash to its successful670-input final build.
-The accepted194 full non-story components cut contains1,352 occurrences in152
+The accepted195 full non-story components cut contains1,349 occurrences in151
 files and730 unresolved expressions across1,397 sources. Its three core roots
-contain1,343/150/726 across791 sources: components914/136/633, legacy UI429/14/93,
+contain1,340/149/726 across791 sources: components911/135/633, legacy UI429/14/93,
 and53 route files0/0/0. The other nine occurrences are eight shared conversation
 column classes and one keyboard-sheet important bottom override. These are
 source lower bounds, not completion rates or whole-branch visual approval.
 
-`inventory-source-through194-accepted-proof.json` freezes those inputs; relative
-to191 only SessionDetail’s pending-child Spinner and LoginPage’s handoff link differ.
-Together with the helper, the static lower bound is1,604 occurrences in160 files,
+`inventory-source-through195-accepted-proof.json` freezes those inputs; relative
+to194 only the owned UsageCalendarSkeleton changes, removing its final three utilities.
+Together with the helper, the static lower bound is1,601 occurrences in159 files,
 with751 unresolved expressions; it is not an exact total or completion percentage.
 The helper remains a separate frozen189 input; its exact scan and source hashes
 are in `inventory-helper-source-through189-proof.json` and
@@ -2682,6 +2682,7 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Private warning interaction191 | One Popup pointer-events constraint;16 pairs,148 target records and1,204 form-geometry records match apart from12 exact class carriers. Original Positioner hit interception, blur and narrow-story clipping remain. | Twelve PNGs exact;four caret-location OPENs total72raw/72threshold remain without a timing-cause claim. The paired After includes192 isolated candidates; a separate final191-only build matches Root inputs. Its documentation scan adds three unused arbitrary-property utility rules; existing ordered rules/registrations remain equal. Final observation is supplemental After-only evidence, not new paired PNGs. |
 | Actual pending child193 | Two size utilities use the existing Spinner diameter API. All11 actual Electron PNG/RGBA pairs match, with77 target,176 ancestor and3,443 geometry records; Back restores the main conversation in all22 captures. | Raw objects differ:957 exact boot-clock/generated-ID fields and44 binding/dimension carriers remain explicit. The real900ms rotation is sampled at a fixed400ms phase; this does not prove every natural animation frame. Eight other unreachable or unheld pending-state dimensions stay Tailwind. |
 | Login handoff link194 | Two size utilities use existing Button width/height props. All32 expanded-link regions and pixels outside the live canvas match;4 separate native reduced-motion whole PNG/RGBA pairs are exact. Tab, Enter, pointer activation and the actual handoff href match. | All32 normal-motion whole-image OPENs remain, totaling191,628 raw/threshold pixels inside the WebGL canvas; no exact paint cause is claimed. The same-origin sandbox fixture blocks external-protocol launch and records manual activation. It proves the actual post-transfer UI, not OS handoff. Two precise legal-link origins, frame environment and binding carriers remain separate raw differences. |
+| Usage Skeleton195 | Three consumer utilities move to optional inline display and bar/tile shapes. All44 real-browser PNG/RGBA pairs and14,732 full node records match; six new Gallery views are After-only. Old shapes, optional sizing, local spacing and mini-radius11 remain verified. | Bar keeps the line default height and mini bottom corners, with3px top corners; tile owns20% corners without height/aspect ratio. The caller retains square geometry. One wrong-dependency After44-frame group is rejected and retained; final workspace resolutions identify the actual new UI source. Four normal pulse pairs use400ms phase sampling, not natural timeline synchronization. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 

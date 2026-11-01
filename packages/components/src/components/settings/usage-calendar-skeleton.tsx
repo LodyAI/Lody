@@ -2,7 +2,6 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Skeleton } from '@lody/ui/skeleton';
 import { feedback as feedbackTokens } from '@lody/ui/feedback/feedback.tokens.stylex';
-import { withClassName } from '@/lib/stylex';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
   CELL_GAP_PX,
@@ -316,11 +315,7 @@ function LinePill({
     variant === 'value' ? styles.lineValue : variant === 'ring' ? styles.lineRing : null;
   return (
     <div aria-hidden="true" {...stylex.props(styles.line, lineStyle, variantStyle)}>
-      <Skeleton
-        height="0.75em"
-        width={width}
-        {...withClassName(stylex.props(styles.linePillAlignment), 'inline-block')}
-      />
+      <Skeleton height="0.75em" width={width} inline {...stylex.props(styles.linePillAlignment)} />
     </div>
   );
 }
@@ -473,7 +468,7 @@ function DayBarsSkeleton() {
       <div {...stylex.props(styles.hourColumns)}>
         {DAY_BAR_HEIGHTS.map((height, hour) => (
           <div key={hour} {...stylex.props(styles.dayTrack(DAY_BAR_TRACK_PX))}>
-            <Skeleton width="100%" height={`${height}%`} className="rounded-t-[3px]" />
+            <Skeleton shape="bar" width="100%" height={`${height}%`} />
           </div>
         ))}
       </div>
@@ -559,9 +554,9 @@ function YearSkeleton() {
               {Array.from({ length: USAGE_CALENDAR_CELLS }, (_, index) => (
                 <Skeleton
                   key={index}
-                  shape="block"
+                  shape="tile"
                   width="100%"
-                  {...withClassName(stylex.props(styles.calendarCellShape), 'rounded-[20%]')}
+                  {...stylex.props(styles.calendarCellShape)}
                 />
               ))}
             </div>

@@ -4,13 +4,15 @@ import { appendClassName } from '../internal/class-name';
 import { feedbackSurface as surface } from './surface';
 
 /** What has not arrived: a line of text, a block of something, or a face. */
-export type SkeletonShape = 'line' | 'block' | 'circle' | 'ring';
+export type SkeletonShape = 'line' | 'block' | 'circle' | 'ring' | 'bar' | 'tile';
 
 export interface SkeletonProps extends Omit<
   ComponentProps<'div'>,
   'className' | 'width' | 'height'
 > {
   shape?: SkeletonShape;
+  /** Let a text placeholder participate in its surrounding line. */
+  inline?: boolean;
   /** How much room it holds. A number is pixels; a string is a CSS length. */
   width?: string | number;
   height?: string | number;
@@ -24,6 +26,8 @@ const SHAPES = {
   block: surface.skeletonBlock,
   circle: surface.skeletonCircle,
   ring: surface.skeletonRing,
+  bar: surface.skeletonBar,
+  tile: surface.skeletonTile,
 } as const;
 
 /**
@@ -53,12 +57,13 @@ const dyn = stylex.create({
  * hidden from a screen reader for the same reason.
  */
 export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
-  { shape = 'line', width, height, strokeWidth, className, ...rest },
+  { shape = 'line', inline, width, height, strokeWidth, className, ...rest },
   ref
 ) {
   const sx = stylex.props(
     surface.skeleton,
     SHAPES[shape],
+    inline === true && surface.skeletonInline,
     width != null && dyn.width(width),
     height != null && dyn.height(height),
     shape === 'ring' && strokeWidth != null && dyn.strokeWidth(strokeWidth)

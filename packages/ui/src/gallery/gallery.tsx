@@ -2840,6 +2840,23 @@ function SkeletonRingSample() {
   );
 }
 
+function SkeletonInlineSample() {
+  const [step, setStep] = useState(0);
+  const inline = [undefined, true, false][step];
+  return (
+    <div data-skeleton-inline-demo data-inline-step={step}>
+      <span>
+        Loading <Skeleton inline={inline} width={48} height={12} data-skeleton-inline-owner />{' '}
+        summary
+      </span>
+      <Button size="small" variant="secondary" onClick={() => setStep((value) => (value + 1) % 3)}>
+        Next skeleton display
+      </Button>
+      <span {...stylex.props(styles.readout)}>inline {String(inline)}</span>
+    </div>
+  );
+}
+
 function SkeletonRow() {
   return (
     <>
@@ -2856,6 +2873,24 @@ function SkeletonRow() {
       <Row>
         <LegendKey>skeleton ring</LegendKey>
         <SkeletonRingSample />
+      </Row>
+      <Row>
+        <LegendKey>skeleton bar</LegendKey>
+        <Cluster>
+          <Skeleton shape="bar" width={48} data-skeleton-bar-default />
+          <Skeleton shape="bar" width={24} height={48} />
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>skeleton tile</LegendKey>
+        <Cluster>
+          <Skeleton shape="tile" width={72} height={40} data-skeleton-tile-rectangle />
+          <Skeleton shape="tile" width={72} data-skeleton-tile-default />
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>skeleton inline</LegendKey>
+        <SkeletonInlineSample />
       </Row>
     </>
   );

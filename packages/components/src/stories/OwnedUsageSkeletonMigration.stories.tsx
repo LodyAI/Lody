@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { radius } from '@lody/ui/tokens/scales.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useLayoutEffect, useState, type CSSProperties } from 'react';
 import { UsageCalendarSkeleton } from '@/components/settings/usage-calendar-skeleton';
@@ -9,7 +11,7 @@ function Fixture({
   maxWidth,
 }: {
   range?: SettingsUsageRange;
-  scope?: 'default' | 'root' | 'subtree';
+  scope?: 'default' | 'root' | 'subtree' | 'mini-radius';
   maxWidth?: number;
 }) {
   const [ready, setReady] = useState(false);
@@ -33,6 +35,7 @@ function Fixture({
   };
   return (
     <div
+      {...stylex.props(scope === 'mini-radius' && styles.miniRadius)}
       style={hostStyle}
       data-usage-skeleton-fixture={range}
       data-usage-skeleton-scope={scope}
@@ -61,3 +64,8 @@ export const SubtreeSpacing: Story = { args: { range: 'day', scope: 'subtree' } 
 export const ContainerBelow: Story = { args: { range: 'total', maxWidth: 705 } };
 export const ContainerBoundary: Story = { args: { range: 'total', maxWidth: 706 } };
 export const ContainerAbove: Story = { args: { range: 'total', maxWidth: 707 } };
+
+export const MiniRadiusDay: Story = { args: { range: 'day', scope: 'mini-radius' } };
+export const MiniRadiusYear: Story = { args: { range: 'total', scope: 'mini-radius' } };
+
+const styles = stylex.create({ miniRadius: { [radius.mini]: '11px' } });

@@ -99,7 +99,7 @@ describe('Skeleton', () => {
     const ref = createRef<HTMLDivElement>();
     const child = <span data-skeleton-child>Retained content</span>;
     mounted = await mount(
-      <Skeleton ref={ref} shape="ring" width={96} height={48} strokeWidth={7}>
+      <Skeleton ref={ref} shape="ring" inline width={96} height={48} strokeWidth={7}>
         {child}
       </Skeleton>
     );
@@ -137,6 +137,20 @@ describe('Skeleton', () => {
     expect(element.hasAttribute('stroke-width')).toBe(false);
     expect(element.hasAttribute('strokewidth')).toBe(false);
     expect(element.getAttribute('aria-hidden')).toBe('true');
+    for (const shape of ['bar', 'tile'] as const) {
+      await step(() =>
+        mounted!.root.render(
+          <Skeleton ref={ref} shape={shape} inline={false} width={0}>
+            {child}
+          </Skeleton>
+        )
+      );
+      expect(values()).toEqual(['0px']);
+      expect(ref.current).toBe(element);
+      expect(element.querySelector('[data-skeleton-child]')).toBe(content);
+      expect(element.hasAttribute('inline')).toBe(false);
+      expect(element.hasAttribute('shape')).toBe(false);
+    }
   });
 
   test('optional sizes can change without invalid style atoms or stale inline dimensions', async () => {

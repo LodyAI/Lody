@@ -915,6 +915,7 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 
 | `leaves193-acceptance.html` | Two private pending-child Spinner dimensions; 11 real Electron PNG pairs exact | 957 boot/ID raw differences, original strict-comparison failure and three supplementary images retained; not full JSON equality |
 | `leaves194-login-acceptance.html` | Two private handoff-anchor dimensions; 32 target/expanded-ring regions and pixels outside the canvas exact; four native reduced-motion whole PNG pairs exact | All 32 natural-motion whole images remain OPEN; strict sandbox exercises real Continue/Tab/Enter and href, without OS protocol or external Auth acceptance |
+| `skeleton-shapes195-acceptance.html` | Three Usage skeleton utilities; corrected workspace UI graph gives 44 exact PNG/RGBA pairs and 14,732 strict node records | Original wrong-graph After44 and two Gallery timeouts remain REJECTED; six Gallery states are After-only with zero paired credit; four normal-motion pairs use actual pulse paused at400ms |
 
 The unchanged workspace-inset browser spec passes16 after-only cases in the
 healthy190 build. The prior32 failures remain recorded as a different environment;

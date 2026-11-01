@@ -673,6 +673,12 @@ width-only line keeps its text-line height; an explicit `0` is applied. Updating
 either prop replaces that dimension; removing it clears the previous size and
 restores the shape's default sizing.
 
+`shape="bar"` keeps the line’s default height and `radius.mini` bottom corners,
+with 3px top corners. `shape="tile"` uses 20% corners without a default height or
+aspect ratio; the caller states any square-cell constraint. Both use `corner.shape`.
+`inline={true}` makes the placeholder an inline block; false or omission adds no
+display override. Existing shape, dimension and animation behavior is unchanged.
+
 `shape="ring"` keeps a transparent centre, square aspect ratio and round contour.
 Its optional `strokeWidth` accepts pixels or a CSS length; omission uses 2px,
 explicit zero removes the contour and removal restores the default. It has no

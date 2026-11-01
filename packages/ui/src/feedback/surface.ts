@@ -287,6 +287,16 @@ export const feedbackSurface = stylex.create({
     cornerShape: corner.shape,
   },
   skeletonBlock: { borderRadius: radius.medium, cornerShape: corner.shape },
+  skeletonBar: {
+    height: text.bodyLeading,
+    borderTopLeftRadius: '3px',
+    borderTopRightRadius: '3px',
+    borderBottomLeftRadius: radius.mini,
+    borderBottomRightRadius: radius.mini,
+    cornerShape: corner.shape,
+  },
+  skeletonTile: { borderRadius: '20%', cornerShape: corner.shape },
+  skeletonInline: { display: 'inline-block' },
   skeletonCircle: { borderRadius: radius.full, cornerShape: corner.round },
   skeletonRing: {
     aspectRatio: '1 / 1',
