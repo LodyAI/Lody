@@ -2077,6 +2077,7 @@
   "sessions.fileDiff.loading": "正在加载差异…",
   "sessions.fileDiff.loadingChanges": "正在加载变更…",
   "sessions.fileDiff.noUncommittedChanges": "没有未提交的修改。",
+  "sessions.fileDiff.ownerMachineOffline": "运行此会话的机器已离线，重新连接后会加载这些修改。",
   "sessions.fileDiff.preparingLargeDiff": "正在准备差异",
   "sessions.fileDiff.preparingLargeDiffDescription": "{{path}} 的差异正在主线程外解析。",
   "sessions.fileDiff.scopeBranch": "分支累计",
