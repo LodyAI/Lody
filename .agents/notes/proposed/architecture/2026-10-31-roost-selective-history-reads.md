@@ -37,7 +37,7 @@ The Loro column identifies the nine complete-body reads in scope. Its output, di
 
 ## Query design
 
-Shared metadata readers expose identity, state, attribution, schedule markers and allowlisted input configuration. Loro reads the stored containers directly, including legacy text fields. Roost combines primary, late, complete-state, delta-state and permission-response segments into the logical projection.
+Shared metadata readers expose identity, state, attribution, schedule markers and allowlisted input configuration. Loro reads the stored containers directly, including legacy text fields and the frozen Role display snapshot. Unconfigured follow-ups retain that snapshot after the catalog Role changes or is deleted. Roost combines primary, late, complete-state, delta-state and permission-response segments into the logical projection.
 
 Renderer metadata reads reuse a complete admitted IndexedDB snapshot. A single read-only cursor projects cached turns individually, including metadata absent from older directory rows. Partial or stale snapshots continue through the owner query.
 
