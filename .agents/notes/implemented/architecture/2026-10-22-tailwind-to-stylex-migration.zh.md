@@ -1850,17 +1850,17 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-自147起已接受的有界迁移移除135处源码 utility，含189六处私有间距调用。192两处opacity候选保留Tailwind。另六处重复尺寸／shrink单列清理。
+自147起已接受的有界迁移移除138处源码 utility，含189六处私有间距调用。192两处opacity候选保留Tailwind。另六处重复尺寸／shrink单列清理。
 九个 native 编译试验默认值已因188恢复，信用零。helper已接受196为245／8／21，覆盖30源；相较189仅私有Checkbox不同。实际670输入构建解析至已审不可变依赖，而非live Root源码。
-已接受197的全非story components源码为1,348处／150文件／729未解析，覆盖1,397源；
-其中三核心根为1,339／148／725，覆盖791源：components910／134／632、legacy UI429／14／93、
+已接受198的全非story components源码为1,345处／150文件／726未解析，覆盖1,397源；
+其中三核心根为1,336／148／722，覆盖791源：components907／134／629、legacy UI429／14／93、
 53个route文件0／0／0。额外九处为共享conversation column八类及键盘sheet important bottom一类。
 这些是源码下界，不是完成率或整branch视觉通过。
 
-精确输入见inventory-source-through197-accepted-proof.json；相较195仅私有加入工作区Textarea不同。
-helper196单独冻结，合计静态下界为1,593处／158文件，750个未解析表达式；不是精确总量或完成百分比。helper单独使用196冻结源，源码hash及实扫见inventory-helper-source-through196-proof.json与inventory-helper-v2-after196.json。
+精确输入见inventory-source-through198-accepted-proof.json；相较197仅私有Login标签owner不同。
+helper196单独冻结，合计静态下界为1,590处／158文件，747个未解析表达式；不是精确总量或完成百分比。helper单独使用196冻结源，源码hash及实扫见inventory-helper-source-through196-proof.json与inventory-helper-v2-after196.json。
 185手工审计移除二十literal，但原仅七个在v2解析范围；保留的h-svh hook也未计入此下界。
-147原字典缺口仍单列。独立@lody/ui的84源识别零utility，仍有131未解析表达式；零不证明
+147原字典缺口仍单列。198新扫描@lody/ui的84源识别零utility，仍有131未解析表达式；零不证明
 所有动态类。库存不带来新增整套测试／renderer资格，精确位置及未解析值保留在冻结JSON；
 remaining-source-inventory181.html是此前181范围，未冒充当前完整branch。
 
@@ -1910,6 +1910,7 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 用量Skeleton195 | 三处调用方utility迁入可选inline和bar／tile形状。44对真实浏览器PNG／RGBA及14,732完整节点记录全同；六个新增Gallery视图为After-only。既有形状、可选尺寸、本地spacing与mini圆角11已验。 | bar保line默认高度和mini底角，仅顶角3px；tile为20%圆角，不加高度或宽高比，方形仍归调用方。错误依赖来源的44帧After整组拒绝并保留；最终workspace解析精确追溯实际新UI源。四对正常脉动使用400ms固定相位，不证明自然时间线同步。 |
 | 私有审阅Checkbox196 | 七处utility迁入本地input／glyph样式，保留精确zero-spacing表达式及原生状态／事件。原20个默认dark对18PNG同；另两CSS-wide与两真正5px对全同。真实指针／Tab／Space、目录半选及reload清零行为保持。 | 原两个单像素OPEN与17个raw差异项（含全节点列表不匹配）保留。同源真实滚动证明112px占位块会变534px diff host，解释422px机制，但历史observer时机未证。另一个已加载滚动对像素、45目标及560几何记录同。旧phoneSpacing5标识实际为默认Vesperdark，以更正sidecar及真正5px补充区分；原provider固定dark，light未覆盖。 |
 | 加入工作区Textarea197 | 一处私有min-height使用既有本元素field Token，保留精确spacing表达式。44对PNG／RGBA与644节点的物理CSS、其它变量、状态和几何同；实际controlled输入、1000字符上限与提交禁用行为同。 | 完整raw对象有44个class、132个目标Token载体与36个精确头像URL端口差异，两URL经独立HTTP读取为相同PNG bytes。原严格失败保留。根／本地spacing、zero、initial／inherit／unset及祖先Token覆盖已按所列交替宽度覆盖，不冒称完整笛卡尔矩阵。 |
+| 字段标签字重198 | 字段组labelWeight Token默认500，由Field.Label读取。三个固定Login标签保留本地medium变量及私有writer；21个Login／QR正式整图全同，含380、initial400及inherit／unset500；原QR font-normal仍为400。Root融合后25个UI文件／313测试及两包类型通过。 | 两个默认Gallery对的原控件ROI同；新增实际测量500／620两行使高度明确增加172px，与产品等价单列。两个同元素font-semibold负控物理600同，但私有writer600→500；一张dark光标图18像素OPEN保留。reduced即时读值过渡证据保留，settled及实际normal0s行为同，不宣称全部自然中间帧一致。 |
 | Spinner透明度192与queued pulse | 两opacity候选拒绝：4个direct控制同，4个真实零特异性祖先使0.7→1，共721原始像素；Root源码未改。 | 旧named默认在utilities中凭特异性胜出，普通StyleX则早于caller utility层，直接替换不能保合同。另完整animation变量简写在锁定compiler模式下不产CSS；默认keyframes不能替代元素本地变量合同。未采用compiler模式、新primitive API或特异性补丁。 |
 | Native编译试验188 | 三个真实arbitrary-property调用方使strip598→16px、viewport598→840px、裁切／命中改变，默认与named控制仍同。 | 十三试集成路径全恢复，六新增文件及三临时依赖link已移除，cache包未删。九默认仍Tailwind。此前66对成功与实际App312原始OPEN只保留为证据，不作接受结论。 |
 

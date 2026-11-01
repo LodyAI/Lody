@@ -48,7 +48,7 @@ const styles = stylex.create({
     color: field.label,
     fontSize: field.labelSize,
     lineHeight: field.labelLeading,
-    fontWeight: 500,
+    fontWeight: field.labelWeight,
     letterSpacing: text.controlTracking,
     userSelect: 'none',
   },

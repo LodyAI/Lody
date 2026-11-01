@@ -561,6 +561,7 @@ const styles = stylex.create({
     fontWeight: 500,
     letterSpacing: text.controlTracking,
   },
+  fieldLabelWeightExample: { [field.labelWeight]: '620' },
   focusReplica: {
     display: 'flex',
     alignItems: 'center',
@@ -1259,6 +1260,27 @@ function FieldRow({
         {readout ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
       </div>
     </Row>
+  );
+}
+
+function FieldLabelWeightRow({ custom = false }: { custom?: boolean }) {
+  const { ref, value } = useMeasured<HTMLLabelElement>('font-weight');
+  return (
+    <FieldRow
+      legend={custom ? 'field.labelWeight · local override' : 'field.labelWeight'}
+      readout={value}
+    >
+      <Field.Root>
+        <Field.Label
+          ref={ref}
+          className={custom ? stylex.props(styles.fieldLabelWeightExample).className : undefined}
+          data-field-label-weight={custom ? 'custom' : 'default'}
+        >
+          Session title
+        </Field.Label>
+        <Input placeholder="Describe the task" />
+      </Field.Root>
+    </FieldRow>
   );
 }
 
@@ -4452,6 +4474,8 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Field.Root>
             </FieldRow>
             <FocusRingRow />
+            <FieldLabelWeightRow />
+            <FieldLabelWeightRow custom />
           </Rows>
           <Grid>
             {FIELD_COLORS.map((token) => (

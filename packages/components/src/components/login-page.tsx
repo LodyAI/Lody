@@ -1557,7 +1557,7 @@ export function LoginPage({
             <div {...stylex.props(styles.nameField)}>
               <UiField.Label
                 htmlFor="email-auth-name"
-                className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+                className={stylex.props(styles.authFieldLabel).className}
               >
                 {t('login.nameLabel', 'Name')}
               </UiField.Label>
@@ -1580,7 +1580,7 @@ export function LoginPage({
           <div {...stylex.props(styles.emailField)}>
             <UiField.Label
               htmlFor="email-auth-email"
-              className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+              className={stylex.props(styles.authFieldLabel).className}
             >
               {t('login.emailLabel', 'Email address')}
             </UiField.Label>
@@ -1607,7 +1607,7 @@ export function LoginPage({
               <div {...stylex.props(styles.passwordHead)}>
                 <UiField.Label
                   htmlFor="email-auth-password"
-                  className={`font-medium ${stylex.props(styles.authFieldLabel).className}`}
+                  className={stylex.props(styles.authFieldLabel).className}
                 >
                   {t('login.passwordLabel', 'Password')}
                 </UiField.Label>
@@ -2022,6 +2022,8 @@ const styles = stylex.create({
   authFieldLabel: {
     [field.labelSize]: 'var(--text-xs)',
     [field.labelLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [field.labelWeight]: 'var(--font-weight-medium)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
   },
   providerIcon: {
     display: 'flex',

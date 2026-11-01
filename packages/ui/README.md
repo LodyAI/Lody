@@ -89,7 +89,11 @@ Product integration and terminal preference behavior are specified in
 A field is a composition rather than one component: `Field.Root` owns the name,
 the disabled flag and validity, and `Field.Label`, `Input`, `Textarea`,
 `Checkbox`, `Radio`, `Switch`, `Field.Description` and `Field.Error` read that
-state from it.
+state from it. `Field.Label` reads `field.labelSize`, `field.labelLeading` and
+`field.labelWeight` from the existing field group. The default weight is 500;
+an override on the label itself can keep a local theme’s weight without changing
+the input or other field parts. The Gallery measures both default and local
+label weights on the rendered label.
 
 ```tsx
 <Field.Root name="title" invalid={!title}>

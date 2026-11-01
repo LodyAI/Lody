@@ -23,6 +23,7 @@ export const field = stylex.defineVars({
   text: text.subheadlineSize,
   labelSize: text.footnoteSize,
   labelLeading: text.footnoteLeading,
+  labelWeight: '500',
   gap: space[1.5],
   ringWidth: '2px',
   textareaMinHeight: '72px',

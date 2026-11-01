@@ -89,6 +89,7 @@ describe('UiGallery', () => {
       'field.background',
       'field.value',
       'field.label',
+      'field.labelWeight',
       'field.placeholder',
       'field.hint',
       'field.error',
