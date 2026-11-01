@@ -1231,7 +1231,20 @@ it.each([false, true])(
         };
       },
     });
-    expect(text()).not.toContain('Preview quality');
+    // Quality lives in the controls' More menu, never as its own row.
+    const openQualityMenu = async () => {
+      const more = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="More controls"]'
+      );
+      if (!more) return null;
+      await act(async () => {
+        more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        more.click();
+      });
+      await flush();
+      return [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    };
+    expect(await openQualityMenu()).toBeNull();
     await click('Preview');
     expect(started).toEqual({
       action: 'start',
@@ -1239,22 +1252,20 @@ it.each([false, true])(
       ...(supported ? { quality: 'balanced' } : {}),
     });
     expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
+    expect(text()).not.toContain('Preview quality');
     if (supported) {
-      await click('Preview quality');
-      const option = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find(
-        (item) => item.textContent === 'Data saver'
-      ) as HTMLElement;
+      const option = (await openQualityMenu())?.find((item) => item.textContent === 'Data saver');
       expect(option).toBeDefined();
-      await act(async () => option.click());
+      expect(document.body.textContent).toContain('Preview quality');
+      await act(async () => option?.click());
       await flush();
       expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'saver' });
-      expect(text()).toContain('Preview quality');
       await click('Stop preview');
-      expect(text()).not.toContain('Preview quality');
+      expect(await openQualityMenu()).toBeNull();
       await click('Preview');
       expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'balanced' });
     } else {
-      expect(text()).not.toContain('Preview quality');
+      expect(await openQualityMenu()).toBeNull();
     }
   }
 );

@@ -66,6 +66,6 @@ Decision and rationale:
   supported controls. Android IDs are exact AVD names on the wire.
 
 - Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
-  the current operation. Android starts Balanced and exposes quality switching while ready; switching
+  the current operation. Android starts Balanced and exposes quality switching while ready, inside the controls' More menu; switching
   replaces the capture operation, not the AVD. Send quality only to hosts advertising
   `androidEmulatorQuality: 1`; old hosts receive no new field.
