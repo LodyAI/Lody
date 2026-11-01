@@ -168,6 +168,9 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   The composer owns its bottom edge; a global bottom inset would double-pad it.
   [`workspace-layout-utils.ts`](workspace-layout-utils.ts) owns the shared StyleX
   root/content classes and the element-local safe-area and native-keyboard readers.
+  The root helper defaults to the page surface; the main workspace explicitly
+  selects `surface: 'sidebar'`, choosing one background in the same StyleX
+  composition. Settings and existing default callers keep the page surface.
   Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
   it is not an unused utility.
   The persistent

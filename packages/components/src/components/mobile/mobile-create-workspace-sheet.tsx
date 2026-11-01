@@ -33,7 +33,11 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
-  fieldLabel: { [field.labelSize]: '0.78rem' },
+  fieldLabel: {
+    [field.labelSize]: '0.78rem',
+    [field.labelWeight]: 'var(--font-weight-medium)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+  },
   /** The sheet's description, under the header. */
   description: {
     whiteSpace: 'pre-line',
@@ -219,7 +223,7 @@ export function MobileCreateWorkspaceSheet({
                 <div className="space-y-1.5">
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
-                    className={`font-medium ${stylex.props(styles.fieldLabel).className}`}
+                    className={stylex.props(styles.fieldLabel).className}
                   >
                     {t('organization.workspaceName', 'Workspace name')}
                   </UiField.Label>
@@ -238,7 +242,7 @@ export function MobileCreateWorkspaceSheet({
                   <div {...stylex.props(styles.slugHead)}>
                     <UiField.Label
                       htmlFor="mobile-create-workspace-slug"
-                      className={`font-medium ${stylex.props(styles.fieldLabel).className}`}
+                      className={stylex.props(styles.fieldLabel).className}
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
                     </UiField.Label>

@@ -4,6 +4,7 @@ const styles = stylex.create({
   root: { display: 'flex', width: '100%', overflow: 'hidden' },
   mobileHeight: { height: '100%' },
   webSurface: { backgroundColor: 'hsl(var(--background) / 1)' },
+  sidebarSurface: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
   positioned: { position: 'relative' },
   safeAreaInset: {
     paddingTop: 'var(--safe-area-top)',
@@ -89,9 +90,14 @@ export const LAYOUT_SAFE_AREA_INSET_CLASS = stylex.props(styles.safeAreaInset).c
  */
 export function getWebWorkspaceLayoutRootClassName({
   settingsRoute,
-}: { settingsRoute?: boolean } = {}): string {
+  surface = 'page',
+}: { settingsRoute?: boolean; surface?: 'page' | 'sidebar' } = {}): string {
   return [
-    stylex.props(styles.root, styles.webSurface, settingsRoute && styles.positioned).className,
+    stylex.props(
+      styles.root,
+      surface === 'sidebar' ? styles.sidebarSurface : styles.webSurface,
+      settingsRoute && styles.positioned
+    ).className,
     // Old-browser viewport fallbacks and Electron's devbar both select this hook.
     'h-svh',
     LAYOUT_SAFE_AREA_INSET_CLASS,

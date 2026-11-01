@@ -2608,24 +2608,24 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Accepted scoped migrations since147 remove138 source utilities, including the six private
+Accepted scoped migrations since147 remove143 source utilities, including the six private
 spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
 The helper's accepted196 cut contains245/8/21 across30 production sources,
 with the private Checkbox as its only change from189. Its actual670-input
 build resolves audited immutable dependencies rather than the live Root tree.
-The accepted198 full non-story components cut contains1,345 occurrences in150
-files and726 unresolved expressions across1,397 sources. Its three core roots
-contain1,336/148/722 across791 sources: components907/134/629, legacy UI429/14/93,
+The accepted201 full non-story components cut contains1,340 occurrences in149
+files and723 unresolved expressions across1,397 sources. Its three core roots
+contain1,331/147/719 across791 sources: components902/133/626, legacy UI429/14/93,
 and53 route files0/0/0. The other nine occurrences are eight shared conversation
 column classes and one keyboard-sheet important bottom override. These are
 source lower bounds, not completion rates or whole-branch visual approval.
 
-`inventory-source-through198-accepted-proof.json` freezes those inputs; relative
-to197 only the private Login label owner changes. Helper196 is frozen
-separately. Together these inputs give a static lower bound of1,590 occurrences
-in158 files with747 unresolved expressions; it is not an exact total or completion percentage.
+`inventory-source-through201-accepted-proof.json` freezes those inputs; relative
+to198 the three private label consumers and two workspace surface owners change. Helper196 is frozen
+separately. Together these inputs give a static lower bound of1,585 occurrences
+in157 files with744 unresolved expressions; it is not an exact total or completion percentage.
 The helper remains a separate frozen196 input; its exact scan and source hashes
 are in `inventory-helper-source-through196-proof.json` and
 `inventory-helper-v2-after196.json`. Scope185
@@ -2687,6 +2687,8 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Private review Checkbox196 | Seven utilities move to local input/glyph styles, preserving exact zero-spacing expressions and native state/events. Original20 default-dark pairs have18 exact PNGs; two CSS-wide and two genuinely5px pairs are exact. Real pointer/Tab/Space, directory indeterminate and reload reset remain unchanged. | Two original single-pixel OPENs and17 raw difference entries, including a mismatched whole-node list, remain. Same-source native scrolling proves a112px placeholder becomes a534px diff host, accounting for422px; historical observer timing is unproved. The one loaded-scroll pair has equal pixels,45 target records and560 geometry records. Old phoneSpacing5 identifiers were actually default Vesperdark; a correction sidecar and true5px supplement preserve this distinction. Light is untested because the existing provider is fixed-dark. |
 | Join-request Textarea197 | One private minimum-height utility uses the existing element-local field Token, with the exact spacing expression. All44 PNG/RGBA pairs and644 node records match in physical CSS, other variables, state and geometry; actual controlled typing,1000-character limit and submitting disability match. | Full raw objects differ by44 classes,132 target Token carriers and36 exact avatar URL port changes; both URLs serve identical independently fetched PNG bytes. The original strict failure is retained. Root/local spacing, zero, initial/inherit/unset and ancestor Token overrides are covered at stated alternating widths, not a complete Cartesian matrix. |
 | Field label weight198 | A field-group labelWeight Token defaults to500 and is read by Field.Label. Three fixed Login labels retain their local medium variable and private writer. All21 Login/QR formal whole PNGs match, including380, initial400 and inherit/unset500; the existing QR font-normal remains400. Root integration passes25 UI files/313 tests and both package types. | Two default Gallery pairs keep the original control ROI; two new measured500/620 rows intentionally add172px. These are separate from product equivalence. The two same-element font-semibold negatives keep physical600 but change private600→500; one dark caret image retains18 pixels OPEN. Immediate-read reduced-motion transition evidence is preserved; settled and actual normal0s behavior match, without a natural-all-frames claim. |
+| Mobile/QR label weights200 | Four fixed labels reuse the canonical field Token and exact medium/normal writers. All48 strict pre/post states retain198 target records,11,798 dialog geometry records, actual fonts, Range and legacy writer values;45 whole PNGs are exact. | Three Share820 OPENs total30 raw/zero threshold pixels outside recorded target boxes, with unknown paint cause. Only66 class and102 Token carrier changes are excluded explicitly. The actual states use default4px spacing; no5px coverage is claimed or required for these weight-only calls. |
+| Workspace ground201 | One private background utility moves into a finite page/sidebar option on the existing helper. Its default page/settings output stays byte-identical; the actual non-settings root chooses the sidebar atom exclusively. Twelve real Electron states keep the same backgrounds and layout across74 root observations and3,406 geometry records;11 PNG/RGBA pairs match. | One original Logo OPEN retains239raw/zero threshold pixels; cause is unknown. Startup viewport640/1280, real boot flag/elapsed readers, twelve CSS URLs and ten exact ID/ARIA paths are kept separate; startup-history equality is not claimed. Renderer1222 and335 guards are restored after owned App exit. Original8598 rules/802 at-rules retain order with one added background atom and no root-class hook. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 
@@ -2852,8 +2854,8 @@ and site-docs still need independent baselines. Component screenshots do not
 implicitly accept either host. Isolated ACP demo/editor apps are excluded
 from this migration; no submodule operation is needed.
 
-WebWorkspaceLayout still retains its shared-helper background override and Sidebar
-control compatibility. Actual Electron content/layout and the healthy layout browser test
+WebWorkspaceLayout now owns its background through the shared helper’s finite
+surface choice; Sidebar control compatibility remains. Actual Electron content/layout and the healthy layout browser test
 have bounded evidence above; they do not validate every retained rule.
 The helper gutter Button’s size utility also remains: the existing real hover,
 line-comment and Split paths did not render that Button in the tested Before.

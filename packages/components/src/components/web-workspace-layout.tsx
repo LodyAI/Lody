@@ -104,11 +104,13 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   );
   const rootProps = stylex.props(styles.root);
   return (
-    // `bg-sidebar` after the base class: the sidebar's colour is the window's ground.
     <div
       ref={setLayoutRoot}
       {...rootProps}
-      className={cn(getWebWorkspaceLayoutRootClassName(), rootProps.className, 'bg-sidebar')}
+      className={cn(
+        getWebWorkspaceLayoutRootClassName({ surface: 'sidebar' }),
+        rootProps.className
+      )}
     >
       {compact ? (
         <CompactNavigationDialog

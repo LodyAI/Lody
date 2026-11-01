@@ -28,7 +28,11 @@ export type MobileDeleteWorkspaceSheetProps = {
 };
 
 const styles = stylex.create({
-  fieldLabel: { [field.labelSize]: '0.78rem' },
+  fieldLabel: {
+    [field.labelSize]: '0.78rem',
+    [field.labelWeight]: 'var(--font-weight-medium)',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+  },
   /** The title, with the warning mark in front of it. */
   titleRow: {
     display: 'inline-flex',
@@ -199,7 +203,7 @@ export function MobileDeleteWorkspaceSheet({
             <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
-                className={`font-medium text-foreground ${stylex.props(styles.fieldLabel).className}`}
+                className={`text-foreground ${stylex.props(styles.fieldLabel).className}`}
               >
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: workspaceName,

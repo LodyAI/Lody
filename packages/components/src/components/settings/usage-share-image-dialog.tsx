@@ -46,7 +46,11 @@ const styles = stylex.create({
     [dialog.descriptionLeading]: 'calc(var(--spacing) * 5)',
     '--tw-leading': 'calc(var(--spacing) * 5)',
   },
-  qrLabelInk: { [fieldTokens.label]: 'hsl(var(--muted-foreground) / 1)' },
+  qrLabelInk: {
+    [fieldTokens.label]: 'hsl(var(--muted-foreground) / 1)',
+    [fieldTokens.labelWeight]: 'var(--font-weight-normal)',
+    '--tw-font-weight': 'var(--font-weight-normal)',
+  },
   header: {
     borderBottomWidth: '1px',
     borderBottomStyle: 'var(--tw-border-style)',
@@ -638,7 +642,7 @@ export function UsageShareImageDialog({
               <div {...stylex.props(styles.qrRow)}>
                 <UiField.Label
                   htmlFor="usage-share-qr"
-                  className={`font-normal ${stylex.props(styles.qrLabelInk).className}`}
+                  className={stylex.props(styles.qrLabelInk).className}
                 >
                   {t('workspace.usage.shareImage.showQr')}
                 </UiField.Label>
