@@ -45,7 +45,11 @@ import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
 import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
-import type { E2eeMemberOffer, E2eeWorkspaceHistoryPage } from '@lody/cloud-api'
+import type {
+  E2eeMemberOffer,
+  E2eeWorkspaceHistoryPage,
+  E2eeWorkspaceHistoryRequest
+} from '@lody/cloud-api'
 import { MemberOfferSchema, decodeMemberKeyPackage } from '../../services/e2ee-member-join.mjs'
 
 /** Only the typed, credential-authenticated cloud results are terminal access loss. */
@@ -107,6 +111,13 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
     accountIdentity: () => Effect.flatMap(current, (client) => client.accountIdentity()),
     history: (request) => Effect.flatMap(current, (client) => client.history(request)),
     appendRecord: (request) => Effect.flatMap(current, (client) => client.appendRecord(request)),
+    keyServices: (access) =>
+      Effect.map(current, (client) => ({
+        mailbox: (signal: AbortSignal) => client.mailbox(access, signal),
+        staging: (signal: AbortSignal) => client.staging(access, signal),
+        history: (signal: AbortSignal) => (request: E2eeWorkspaceHistoryRequest) =>
+          client.history(request, signal)
+      })),
     pairingSubmit: (request) => Effect.flatMap(current, (client) => client.pairingSubmit(request)),
     pairingRead: (request) => Effect.flatMap(current, (client) => client.pairingRead(request)),
     pairingDecline: (request) =>

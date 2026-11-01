@@ -2715,7 +2715,7 @@ void test('passive cache inspection stays account/product-window bound without o
   await assert.rejects(f.ipc.inspectCachedState('', 'machine'), /e2ee_invalid-input/)
 })
 
-void test('account-wide pairing runs from the new device request to an installed invitation on real hosts', async (t) => {
+async function accountPairingFixture(t) {
   // Real custody, bootstrap, ledger hosts and SQLite journals on both devices; the
   // cloud is an in-memory relay plus the approver's own ledger as the history source.
   const f = await personalJoinFixture(t)
@@ -2723,25 +2723,46 @@ void test('account-wide pairing runs from the new device request to an installed
   await approver.create()
   const newDevice = await f.open('new-device')
   const { genesisHash } = await Effect.runPromise(approver.host.status(f.workspaceId))
-  const ledgerPage = async () => {
+  // Like the service: a request `after` a position returns only the later records.
+  const ledgerPage = async (request = {}) => {
     const ledger = await Effect.runPromise(approver.host.ledgerView(f.workspaceId))
+    const start = request.after ? Number(request.after.split(':')[2]) : 0
     return {
       workspaceId: f.workspaceId,
       genesisHash,
-      startIndex: 0,
-      recordsHex: ledger.recordsHex,
+      startIndex: start,
+      recordsHex: ledger.recordsHex.slice(start),
       checkpoint: { length: ledger.status.length, headHash: ledger.status.headHash },
-      position: `p1:${f.workspaceId}:${ledger.status.length}:source:0`,
+      position: `p1:${f.workspaceId}:${ledger.status.length}:source-${ledger.status.length}:0`,
       nextCursor: null
     }
   }
   const requests = new Map()
   const approvals = new Map()
   const appended = []
+  const mailboxRequests = []
   const cloud = {
+    // Key delivery is not modelled: the mailbox records who asked, then refuses.
+    keyServices: (access) =>
+      Effect.sync(() => {
+        mailboxRequests.push({ ...access })
+        const refuse = () => Effect.fail(new Error('synthetic mailbox unavailable'))
+        return {
+          mailbox: () => ({
+            put: refuse,
+            read: refuse,
+            fetch: refuse,
+            status: refuse,
+            report: refuse,
+            repair: refuse
+          }),
+          staging: () => ({ stageGroup: refuse, readGroup: refuse, deleteGroup: refuse }),
+          history: () => (request) => Effect.promise(() => ledgerPage(request))
+        }
+      }),
     accountIdentity: () =>
       Effect.succeed({ accountId: approver.accountId, cryptoUserId: 'aa'.repeat(32) }),
-    history: () => Effect.promise(ledgerPage),
+    history: (request) => Effect.promise(() => ledgerPage(request)),
     appendRecord: (request) =>
       Effect.promise(async () => {
         appended.push(request)
@@ -2823,6 +2844,22 @@ void test('account-wide pairing runs from the new device request to an installed
   const requester = hostFor(newDevice, 'account-pairing.sqlite')
   const approving = hostFor(approver, 'account-pairing.sqlite')
 
+  return {
+    f,
+    approver,
+    newDevice,
+    genesisHash,
+    cloud,
+    requester,
+    approving,
+    mailboxRequests,
+    appended
+  }
+}
+
+void test('account-wide pairing runs from the new device request to an installed invitation on real hosts', async (t) => {
+  const { f, approver, newDevice, genesisHash, requester, approving, appended } =
+    await accountPairingFixture(t)
   const request = await Effect.runPromise(requester.requestAccountPairing({}))
   assert.equal(request.status, 'waiting')
   assert.deepEqual(
@@ -2860,4 +2897,82 @@ void test('account-wide pairing runs from the new device request to an installed
     Effect.runPromise(approving.inspectAccountPairing(request.pairingString)),
     (error) => error.code === 'pairing-used'
   )
+})
+
+void test('the new device opens the paired workspace and asks for its keys right after installing', async (t) => {
+  const { f, newDevice, requester, approving, mailboxRequests } = await accountPairingFixture(t)
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  mailboxRequests.length = 0
+  assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
+  // Like the per-workspace claim: open, refresh and run a key round with this
+  // device's own credential, without waiting for the workspace to be opened later.
+  const credential = await Effect.runPromise(newDevice.bootstrap.deviceCredential(f.workspaceId))
+  assert.deepEqual(
+    mailboxRequests.map((item) => [item.workspaceId, item.credential]),
+    [[f.workspaceId, credential]]
+  )
+})
+
+void test('pairing leaves no runtime entry open for a workspace no window is reading', async (t) => {
+  const { f, newDevice, genesisHash, requester, approving } = await accountPairingFixture(t)
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  await Effect.runPromise(requester.accountPairingRequest())
+  // An open entry would accept this page; a closed one refuses it.
+  await assert.rejects(
+    Effect.runPromise(
+      newDevice.host.ingestLedgerRecords(f.workspaceId, {
+        workspaceId: f.workspaceId,
+        genesisHash,
+        checkpoint: { length: 1, headHash: genesisHash },
+        startIndex: 0,
+        recordsHex: [],
+        position: `p1:${f.workspaceId}:1:source:0`,
+        nextCursor: null
+      })
+    ),
+    (error) => error.code === 'closed'
+  )
+})
+
+void test('an unrelated unfinished per-workspace pairing blocks only that workspace, with a clear state', async (t) => {
+  const { f, approver, newDevice, genesisHash, requester, approving } =
+    await accountPairingFixture(t)
+  // The new device already started the per-workspace exchange from another offer.
+  const offer = await Effect.runPromise(approver.host.personalPairingOffer(f.workspaceId))
+  await Effect.runPromise(newDevice.bootstrap.preparePersonalJoin(offer))
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  const state = await Effect.runPromise(requester.accountPairingRequest())
+  assert.equal(state.status, 'waiting')
+  assert.deepEqual(
+    state.workspaces.map((item) => [item.workspaceId, item.state]),
+    [[f.workspaceId, 'blocked']]
+  )
+  // The unfinished exchange is kept, not overwritten.
+  const pending = await Effect.runPromise(newDevice.bootstrap.pendingPersonalJoin(f.workspaceId))
+  assert.equal(pending.offer.pairingSessionId, offer.pairingSessionId)
+  void genesisHash
 })

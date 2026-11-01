@@ -114,9 +114,9 @@ describe('new device request', () => {
       )
     );
     expect(host.started).toEqual([{ pairingString: undefined }]);
-    expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
-      CODE
-    );
+    expect(
+      container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent
+    ).toBe(CODE);
     expect(qr.payloads.at(-1)).toBe('lody://pair/50M6HA7955MTKTHADANEPAVBNF38');
     expect(text()).toContain('e2ee.accountPair.request.private');
     // Still waiting: polling changes nothing.
@@ -149,7 +149,9 @@ describe('new device request', () => {
     await host.runtime.requestAccountPairing!({});
     host.started = [];
     await act(async () =>
-      root.render(<E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />)
+      root.render(
+        <E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />
+      )
     );
     expect(host.started).toEqual([]);
     expect(text()).toContain(CODE);
@@ -185,6 +187,33 @@ describe('new device request', () => {
     await click('e2ee.accountPair.request.useCode');
     expect(host.started).toEqual([{ pairingString: CODE.toLowerCase() }]);
     expect(text()).toContain('e2ee.accountPair.request.answered');
+  });
+
+  it('names workspaces blocked by an unfinished per-workspace pairing', async () => {
+    const host = requesterHost({
+      direction: 'requester-shows',
+      pairingString: CODE,
+      expiresAt: NOW + 600_000,
+      status: 'waiting',
+      workspaces: [
+        { workspaceId: 'w1', name: 'Alpha', state: 'joined' },
+        { workspaceId: 'w2', name: 'Beta', state: 'blocked' },
+      ],
+    });
+    await host.runtime.requestAccountPairing!({});
+    host.state = {
+      ...host.state!,
+      workspaces: [
+        { workspaceId: 'w1', name: 'Alpha', state: 'joined' },
+        { workspaceId: 'w2', name: 'Beta', state: 'blocked' },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />
+      )
+    );
+    expect(text()).toContain('e2ee.accountPair.request.blocked {"names":"Beta"}');
   });
 
   it('starting again abandons the old request before creating a new one', async () => {
@@ -269,9 +298,9 @@ describe('approving device', () => {
     expect(text()).toContain('e2ee.accountPair.approve.device');
     expect(text()).toContain('e2ee.accountPair.approve.location');
     expect(text()).toContain('e2ee.accountPair.approve.locationUnknown');
-    expect(container.querySelector('[data-testid="e2ee-account-pairing-device"]')?.textContent).toBe(
-      'Synthetic phone'
-    );
+    expect(
+      container.querySelector('[data-testid="e2ee-account-pairing-device"]')?.textContent
+    ).toBe('Synthetic phone');
     expect(text()).toContain('"names":"Gamma"');
     expect(text()).toContain('"count":2,"total":2');
     // Deselect Alpha: only Beta is signed.

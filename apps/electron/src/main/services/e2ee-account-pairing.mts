@@ -154,7 +154,7 @@ export interface AccountPairingState {
   pairingString: string | null
   expiresAt: number
   status: 'waiting' | 'joined' | 'declined' | 'expired'
-  workspaces: { workspaceId: string; name: string; state: 'pending' | 'joined' }[]
+  workspaces: { workspaceId: string; name: string; state: 'pending' | 'joined' | 'blocked' }[]
 }
 export interface AccountPairingPreview {
   requestId: string
@@ -195,6 +195,9 @@ export function makeDesktopAccountPairing(input: {
   `)
   /** Secrets of this device's own open requests, in memory only. */
   const secrets = new Map<string, Uint8Array>()
+  /** Workspaces whose last install attempt found an unrelated unfinished
+   * per-workspace pairing on this device; recomputed on every poll. */
+  const blocked = new Map<string, Set<string>>()
   /** One pairing operation at a time, so sign-then-journal and accept stay atomic. */
   const serial = Semaphore.makeUnsafe(1)
   /** A parsed code is wiped however the work ends, including failure and interruption. */
@@ -268,7 +271,11 @@ export function makeDesktopAccountPairing(input: {
         return {
           workspaceId,
           name: workspace?.name ?? workspaceId,
-          state: joined.has(workspaceId) ? ('joined' as const) : ('pending' as const)
+          state: joined.has(workspaceId)
+            ? ('joined' as const)
+            : blocked.get(row.lookup_id)?.has(workspaceId)
+              ? ('blocked' as const)
+              : ('pending' as const)
         }
       })
     } satisfies AccountPairingState
@@ -421,8 +428,20 @@ export function makeDesktopAccountPairing(input: {
             )
             if (Result.isFailure(accepted)) {
               rememberDesktopE2eeFailure('account-pairing-accept', accepted.failure)
+              const code =
+                accepted.failure &&
+                typeof accepted.failure === 'object' &&
+                'code' in accepted.failure
+                  ? accepted.failure.code
+                  : undefined
+              if (code === 'pairing-journal-busy') {
+                const set = blocked.get(row.lookup_id) ?? new Set<string>()
+                set.add(workspace.workspaceId)
+                blocked.set(row.lookup_id, set)
+              }
               continue
             }
+            blocked.get(row.lookup_id)?.delete(workspace.workspaceId)
             yield* sql(() =>
               db
                 .prepare(
