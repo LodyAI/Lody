@@ -1,6 +1,16 @@
 import { mkdirSync, symlinkSync, realpathSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
+import { assertTestBuildOutput, cleanTestBuildOutput } from './test-output-boundary.mjs'
+
+const checkout = fileURLToPath(new URL('../../../', import.meta.url))
+const output = resolve(checkout, '.test-build/electron/out')
+// Validate every section before the single cleanup of this build's output.
+for (const name of ['main', 'preload', 'renderer']) {
+  await assertTestBuildOutput(checkout, resolve(output, name))
+}
+await cleanTestBuildOutput(checkout, output)
 
 const inherited = process.env.NODE_OPTIONS?.trim() ?? ''
 const result = spawnSync(

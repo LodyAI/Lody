@@ -51,7 +51,7 @@ void test('real Vite refuses every linked boundary and invalid output without de
           plugins: [testOutputBoundary(checkout)],
           build: {
             outDir: output,
-            emptyOutDir: true,
+            emptyOutDir: false,
             rollupOptions: { input: join(source, 'entry.js') }
           }
         }),
@@ -64,5 +64,22 @@ void test('real Vite refuses every linked boundary and invalid output without de
       await fs.rm(checkout, { recursive: true, force: true })
       await fs.rm(outside, { recursive: true, force: true })
     }
+  }
+})
+
+void test('configuration and prerender resolution only validate and never clean output', async () => {
+  const checkout = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'readonly-test-config-')))
+  try {
+    const output = join(checkout, '.test-build', 'app')
+    await fs.mkdir(output, { recursive: true })
+    await fs.writeFile(join(output, 'sentinel'), 'keep')
+    const guard = testOutputBoundary(checkout)
+    for (const command of ['build', 'serve', 'build']) {
+      await guard.configResolved({ command, root: checkout, build: { outDir: output } })
+      await guard.buildStart()
+      assert.equal(await fs.readFile(join(output, 'sentinel'), 'utf8'), 'keep')
+    }
+  } finally {
+    await fs.rm(checkout, { recursive: true, force: true })
   }
 })

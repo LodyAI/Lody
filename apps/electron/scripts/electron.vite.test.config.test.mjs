@@ -1,5 +1,5 @@
 import './test-output-boundary.test.mjs'
-import { testOutputBoundary } from './test-output-boundary.mjs'
+import { testOutputBoundary, cleanTestBuildOutput } from './test-output-boundary.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -42,6 +42,7 @@ void test('test config retains main externalization, native probes and renderer 
   for (const name of ['main', 'preload', 'renderer']) {
     const options = profile[name].build
     assert.ok(options.outDir.endsWith(join('.test-build', 'electron', 'out', name)))
+    assert.equal(options.emptyOutDir, false)
     assert.equal(options.minify, false)
     assert.equal(options.cssMinify, false)
     assert.equal(options.sourcemap, false)
@@ -102,8 +103,9 @@ void test('each isolated section removes a deleted entry on the next build', asy
     for (const name of ['main', 'preload', 'renderer']) {
       const section = loaded.config[name]
       const output = join(root, '.test-build', name)
-      const compile = (input) =>
-        build({
+      const compile = async (input) => {
+        await cleanTestBuildOutput(root, output)
+        return build({
           configFile: false,
           root: source,
           logLevel: 'silent',
@@ -118,6 +120,7 @@ void test('each isolated section removes a deleted entry on the next build', asy
             rollupOptions: { input, output: { entryFileNames: '[name].js' } }
           }
         })
+      }
       await compile({ current, 'native-storage-smoke': probe })
       await readFile(join(output, 'native-storage-smoke.js'))
       await compile({ current })

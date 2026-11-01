@@ -55,7 +55,7 @@ export async function cleanTestBuildOutput(checkout, output) {
   await fs.rm(target, { recursive: true, force: true })
 }
 
-// configResolved runs before Vite empties output. Validation is read-only,
+// Vite never empties test output. Configuration resolution is read-only,
 // including when a prerender preview resolves the build configuration again.
 export function testOutputBoundary(checkout) {
   let output
@@ -64,7 +64,7 @@ export function testOutputBoundary(checkout) {
     enforce: 'pre',
     async configResolved(config) {
       output = resolve(config.root, config.build.outDir)
-      await cleanTestBuildOutput(checkout, output)
+      await assertTestBuildOutput(checkout, output)
     },
     async buildStart() {
       await assertTestBuildOutput(checkout, output)

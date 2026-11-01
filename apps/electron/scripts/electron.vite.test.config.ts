@@ -16,7 +16,7 @@ export default defineConfig(async (env) => {
       ...section.build,
       outDir,
       ...(name === 'renderer' ? { target: 'esnext' } : {}),
-      emptyOutDir: true,
+      emptyOutDir: false,
       minify: false,
       cssMinify: false,
       sourcemap: false,
