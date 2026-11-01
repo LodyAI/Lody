@@ -45,7 +45,9 @@ export function ForgotPasswordPage({
             <Card.Title
               id="forgot-password-title"
               as="h1"
-              className={`font-semibold tracking-tight ${stylex.props(surface.stack1, surface.authTitle).className}`}
+              fontWeight="var(--font-weight-semibold)"
+              letterSpacing="var(--tracking-tight)"
+              {...stylex.props(surface.stack1, surface.authTitle, styles.titleLegacy)}
             >
               {t('forgotPassword.title', 'Reset your password')}
             </Card.Title>
@@ -121,3 +123,10 @@ export function ForgotPasswordPage({
     </div>
   );
 }
+
+const styles = stylex.create({
+  titleLegacy: {
+    '--tw-font-weight': 'var(--font-weight-semibold)',
+    '--tw-tracking': 'var(--tracking-tight)',
+  },
+});

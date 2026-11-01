@@ -39,6 +39,13 @@ Tabs, Accordion and Collapsible share the existing group exported at
 `@lody/ui/disclosure/disclosure.tokens.stylex`.
 Card's existing surface and title tokens are available at
 `@lody/ui/card/card.tokens.stylex`.
+
+`Card.Title` accepts optional `fontWeight` and `letterSpacing` for owned title
+typography. Omission keeps weight600 and the live `text.controlTracking` reader.
+Explicit values write those physical CSS fields with inline priority; CSS-wide
+keywords and invalid variable references keep their browser inheritance behavior.
+The Gallery measures550 and0.04em without changing other card titles.
+
 For a verified layout outside the named props, a surface can write the specific
 public token through a computed key in `stylex.create`; the other tokens keep
 inheriting. Keep those overrides local to the owned part and verify portals,

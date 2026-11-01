@@ -251,6 +251,14 @@ rule writes `--tw-tracking`, but `letter-spacing` directly reads `--tracking-wid
 Check token retention in a complete production build with diagnostic fixture
 utilities removed before adding any static theme declaration.
 
+An optional token fallback is not equivalent to an explicit physical declaration.
+For `Card.Title`, aliasing tracking at the root loses a child's semantic override;
+a nested token fallback fixes that default but changes an explicit invalid
+`--tracking-tight` value from parent physical2px to semantic2.6px. The title's
+optional `fontWeight` and `letterSpacing` props preserve the original expressions
+as physical fields while omission keeps its live default reader. Keep the legacy
+private writers local and test invalid, missing and inherited variables too.
+
 A `stylex.defineVars` value that references an app CSS variable resolves that
 reference where the StyleX variable is defined. An inherited alias does not
 re-read a descendant override. For a migrated declaration that previously read

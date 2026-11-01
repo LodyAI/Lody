@@ -3366,6 +3366,26 @@ function CardRow() {
   );
 }
 
+function CardTypographyRow() {
+  return (
+    <Row>
+      <LegendKey>title type</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <Card.Root>
+          <Card.Header>
+            <Card.Title as="h4" fontWeight={550} letterSpacing="0.04em">
+              Custom title typography
+            </Card.Title>
+            <Card.Description>
+              Explicit type belongs to this title; other cards keep their defaults.
+            </Card.Description>
+          </Card.Header>
+        </Card.Root>
+      </div>
+    </Row>
+  );
+}
+
 /**
  * A card that is the pressable thing. The button is the board's, because the
  * primitive marks the card and leaves what a press does to the surface.
@@ -5154,6 +5174,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         <PaletteSplit palettes={palettes}>
           <Rows>
             <CardRow />
+            <CardTypographyRow />
             <InteractiveCardRow />
             <CardDimensions />
           </Rows>

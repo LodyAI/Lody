@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { corner, duration, ease, text } from '../tokens/scales.stylex';
 import { card } from './card.tokens.stylex';
@@ -33,6 +33,9 @@ export interface CardTitleProps extends Omit<ComponentProps<'h3'>, 'className'> 
    * above it. Defaults to `h3`.
    */
   as?: CardTitleLevel;
+  /** Explicit title typography. Omission keeps the card's weight and live tracking token. */
+  fontWeight?: CSSProperties['fontWeight'];
+  letterSpacing?: CSSProperties['letterSpacing'];
   className?: string;
 }
 
@@ -152,16 +155,24 @@ export function CardHeader({ children, className }: CardSectionProps) {
  * nine — so the level is the caller's and the step is not.
  */
 export const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(function CardTitle(
-  { as: Heading = 'h3', className, ...rest },
+  { as: Heading = 'h3', fontWeight, letterSpacing, className, ...rest },
   ref
 ) {
   const sx = stylex.props(styles.title);
+  const titleStyle =
+    fontWeight == null && letterSpacing == null
+      ? sx.style
+      : {
+          ...sx.style,
+          ...(fontWeight != null && { fontWeight }),
+          ...(letterSpacing != null && { letterSpacing }),
+        };
   return (
     <Heading
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={titleStyle}
     />
   );
 });
