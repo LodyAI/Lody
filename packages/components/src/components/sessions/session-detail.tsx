@@ -5736,6 +5736,8 @@ const SessionDetail = ({
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
         onCopyConversationHistory: exportAllowed ? handleCopyConversationHistory : undefined,
+        // A draft tab is not a Session yet; the menu then keeps the root link.
+        onCopyUrl: !activeDraftTab ? handleCopyUrl : undefined,
         onRequestRename: canRenameCurrentSession ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
@@ -5777,6 +5779,7 @@ const SessionDetail = ({
     handleOpenSearch,
     exportAllowed,
     handleCopyConversationHistory,
+    handleCopyUrl,
     activeDraftTab,
     canRenameCurrentSession,
     handleRenameCurrentSession,
