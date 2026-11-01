@@ -5,7 +5,6 @@ import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Menu } from '@lody/ui/menu';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -419,6 +418,10 @@ export function IosSimulatorPanelView({
   const busy = pendingAction !== null;
   const buttonLabel = useIosSimulatorButtonLabel();
   const bezel = (controls?.viewMode ?? 'device') === 'device';
+  const controlsWithQuality =
+    controls && quality && status.phase === 'ready'
+      ? { ...controls, quality: { onChange: quality.onChange, disabled: busy } }
+      : controls;
 
   const copyDiagnosticsButton = (
     <Button type="button" variant="ghost" size="small" onClick={onCopyDiagnostics}>
@@ -742,32 +745,12 @@ export function IosSimulatorPanelView({
             {t('sessions.iosSimulator.action.stop', 'Stop preview')}
           </Button>
         ) : null}
-        {controls && controlsLayout === 'menu' ? (
-          <IosSimulatorControls layout="menu" {...controls} />
+        {controlsWithQuality && controlsLayout === 'menu' ? (
+          <IosSimulatorControls layout="menu" {...controlsWithQuality} />
         ) : null}
       </div>
-      {controls && controlsLayout === 'toolbar' ? (
-        <IosSimulatorControls layout="toolbar" {...controls} />
-      ) : null}
-      {quality && status.phase === 'ready' ? (
-        <Menu.Root>
-          <Menu.Trigger
-            render={<Button type="button" variant="ghost" size="small" disabled={busy} />}
-          >
-            {t('sessions.androidEmulator.quality.label', 'Preview quality')}
-          </Menu.Trigger>
-          <Menu.Content>
-            <Menu.Item onClick={() => quality.onChange('saver')}>
-              {t('sessions.androidEmulator.quality.saver', 'Data saver')}
-            </Menu.Item>
-            <Menu.Item onClick={() => quality.onChange('balanced')}>
-              {t('sessions.androidEmulator.quality.balanced', 'Balanced')}
-            </Menu.Item>
-            <Menu.Item onClick={() => quality.onChange('clear')}>
-              {t('sessions.androidEmulator.quality.clear', 'Clear')}
-            </Menu.Item>
-          </Menu.Content>
-        </Menu.Root>
+      {controlsWithQuality && controlsLayout === 'toolbar' ? (
+        <IosSimulatorControls layout="toolbar" {...controlsWithQuality} />
       ) : null}
       <div {...stylex.props(styles.stage)}>{renderStage()}</div>
     </div>

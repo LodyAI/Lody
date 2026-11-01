@@ -2934,6 +2934,7 @@
   "sessions.sidebar.hide": "隐藏侧边栏",
   "sessions.sidebar.my": "我的任务",
   "sessions.sidebar.noRepo": "无仓库",
+  "sessions.sidebar.resizeSplit": "调整并排视图宽度",
   "sessions.sidebar.show": "显示侧边栏",
   "sessions.sidebar.team": "全部任务",
   "sessions.sideSession.closeFailed": "无法关闭侧边对话",

@@ -2934,6 +2934,7 @@
   "sessions.sidebar.hide": "Hide sidebar",
   "sessions.sidebar.my": "My Tasks",
   "sessions.sidebar.noRepo": "No Repo",
+  "sessions.sidebar.resizeSplit": "Resize split view",
   "sessions.sidebar.show": "Show sidebar",
   "sessions.sidebar.team": "All Tasks",
   "sessions.sideSession.closeFailed": "Unable to close side chat",

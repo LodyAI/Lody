@@ -26,7 +26,9 @@ this page is the full text of the rules summarised there.
   "previous sibling" as soon as a new tab kind lands between the existing ones.
   Device previews (iOS Simulator, Android Emulator) can be dragged onto each other to form a
   split: the tab bar draws the pair as one tray-and-key group, and selecting either member shows
-  both side by side (`getFixedPanelPlacement`). Dragging a member clear of its group, or closing
+  both side by side (`getFixedPanelPlacement`). A `SidePanelSplitHandle` between them resizes the
+  halves within 25–75% (arrows step, double-click resets, a swap keeps each screen's width); the
+  ratio is session-local, not persisted. Dragging a member clear of its group, or closing
   either member, dissolves the split; it persists with the open tabs as `sidePanel.split` and is
   dropped on restore unless both members are still open. Only device kinds pair, because a single
   fixed-aspect screen wastes most of a wide panel and comparing platforms is the use case; the drop

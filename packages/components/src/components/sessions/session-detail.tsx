@@ -125,6 +125,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { useNativeSideRail } from '../mobile/native-side-rail';
@@ -168,6 +169,11 @@ import {
   type SidePanelTabSplit,
 } from './session-side-panel-tab-bar';
 import { getSessionTabCloseTarget, type SessionTabFocusRegion } from './session-tab-close-target';
+import {
+  SIDE_PANEL_SPLIT_RATIO_DEFAULT,
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from './side-panel-split-handle';
 import {
   MobileSessionTabButton,
   MobileSessionTabSheet,
@@ -693,10 +699,10 @@ const detailStyles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
   },
   splitStart: {
-    right: '50%',
+    right: `calc((1 - var(${SIDE_PANEL_SPLIT_RATIO_VAR}, 0.5)) * 100%)`,
   },
   splitEnd: {
-    left: '50%',
+    left: `calc(var(${SIDE_PANEL_SPLIT_RATIO_VAR}, 0.5) * 100%)`,
     borderInlineStartWidth: '1px',
     borderInlineStartStyle: 'solid',
     borderInlineStartColor: 'hsl(var(--border) / 0.7)',
@@ -1203,6 +1209,9 @@ const SessionDetail = ({
   const [sidePanelSplit, setSidePanelSplit] = useState<readonly [SidebarTab, SidebarTab] | null>(
     () => initialTabState.sidePanel.split
   );
+  /** The start half's share of a split; kept per member pair, not persisted. */
+  const [sidePanelSplitRatio, setSidePanelSplitRatio] = useState(SIDE_PANEL_SPLIT_RATIO_DEFAULT);
+  const [sidePanelSplitResizing, setSidePanelSplitResizing] = useState(false);
   /* One-shot request for DesktopSessionDetailLayout to widen the sidebar for
      the PR tab or a device split; `seq` bumps per request so repeats are not
      dropped. */
@@ -1481,6 +1490,7 @@ const SessionDetail = ({
     setActiveSideSessionId(nextInitialTabState.sidePanel.sideSessionId);
     setOpenedSidebarTabs(nextInitialTabState.sidePanel.tabs);
     setSidePanelSplit(nextInitialTabState.sidePanel.split);
+    setSidePanelSplitRatio(SIDE_PANEL_SPLIT_RATIO_DEFAULT);
     setDraftTabsState(readPersistedDraftTabs(sessionId));
     setPendingDraftChildSessionIds({});
     setPendingForks(readPendingWorktreeForks(sessionId));
@@ -4671,6 +4681,10 @@ const SessionDetail = ({
   );
   const handleSidePanelTabsSplit = useCallback(
     (split: SidePanelTabSplit, draggedTabId: string) => {
+      // A swap keeps each screen's width; a new pair starts even.
+      const swapped =
+        effectiveSidePanelSplit?.[0] === split[1] && effectiveSidePanelSplit[1] === split[0];
+      setSidePanelSplitRatio((ratio) => (swapped ? 1 - ratio : SIDE_PANEL_SPLIT_RATIO_DEFAULT));
       setSidePanelSplit(split as readonly [SidebarTab, SidebarTab]);
       handleSidebarTabSelect(draggedTabId as SidebarTab);
       setSidebarWidthRequest((current) => ({
@@ -4678,7 +4692,7 @@ const SessionDetail = ({
         minWidthPx: DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX,
       }));
     },
-    [handleSidebarTabSelect]
+    [effectiveSidePanelSplit, handleSidebarTabSelect]
   );
   const handleSidePanelTabUnsplit = useCallback(
     (tabId: string) => {
@@ -7078,7 +7092,7 @@ const SessionDetail = ({
   const getFixedPanelFillClassName = (placement: ReturnType<typeof getFixedPanelPlacement>) =>
     stylex.props(
       detailStyles.absoluteFill,
-      detailStyles.splitSlide,
+      !sidePanelSplitResizing && detailStyles.splitSlide,
       placement === 'start' && detailStyles.splitStart,
       placement === 'end' && detailStyles.splitEnd,
       placement === 'hidden' && detailStyles.invisibleFill
@@ -7088,7 +7102,18 @@ const SessionDetail = ({
   // pages retain DOM state and Electron's native view is only hidden, so tab
   // switching behaves like a browser rather than rebuilding the page.
   const sidebarContent = (
-    <div {...stylex.props(detailStyles.sidebarContentRoot)}>
+    <div
+      {...stylex.props(detailStyles.sidebarContentRoot)}
+      style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: sidePanelSplitRatio } as CSSProperties}
+    >
+      {fixedPanelSplitVisible ? (
+        <SidePanelSplitHandle
+          ratio={sidePanelSplitRatio}
+          label={t('sessions.sidebar.resizeSplit', 'Resize split view')}
+          onRatioChange={setSidePanelSplitRatio}
+          onDraggingChange={setSidePanelSplitResizing}
+        />
+      ) : null}
       {previewAllowed && activeBrowserSession && openedSidebarTabs.includes('browser') ? (
         <div
           className={

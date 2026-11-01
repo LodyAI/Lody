@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
 import {
@@ -10,6 +10,10 @@ import {
   type SidePanelTabSplit,
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { Button } from '@lody/ui/button';
+import {
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from '@/components/sessions/side-panel-split-handle';
 
 const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'side-session', label: 'Side Chat', kind: 'session' },
@@ -119,7 +123,9 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
   const [tabs, setTabs] = useState(DEVICE_TABS);
   const [activeTabId, setActiveTabId] = useState<string | null>('ios-simulator');
   const [split, setSplit] = useState<SidePanelTabSplit | null>(initialSplit);
-  const shownIds = split?.includes(activeTabId ?? '') ? split : [activeTabId];
+  const [ratio, setRatio] = useState(0.5);
+  const splitShown = split?.includes(activeTabId ?? '') ?? false;
+  const shownIds = splitShown && split ? split : [activeTabId];
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
@@ -152,12 +158,29 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
           }}
           className="border-b border-border/60"
         />
-        <div className="flex flex-1 divide-x divide-border/70 text-sm text-muted-foreground">
-          {shownIds.map((id) => (
-            <div key={id} className="flex flex-1 items-center justify-center">
+        <div
+          className="relative flex flex-1 divide-x divide-border/70 text-sm text-muted-foreground"
+          style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: ratio } as CSSProperties}
+        >
+          {shownIds.map((id, index) => (
+            <div
+              key={id}
+              className="flex items-center justify-center"
+              style={{
+                flexBasis:
+                  shownIds.length > 1 ? `${(index === 0 ? ratio : 1 - ratio) * 100}%` : '100%',
+              }}
+            >
               {tabs.find((tab) => tab.id === id)?.label}
             </div>
           ))}
+          {splitShown ? (
+            <SidePanelSplitHandle
+              ratio={ratio}
+              label="Resize split view"
+              onRatioChange={setRatio}
+            />
+          ) : null}
         </div>
       </div>
     </div>

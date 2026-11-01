@@ -15,6 +15,7 @@ import {
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
 } from '../src/components/sessions/session-side-panel-tab-bar';
+import { SidePanelSplitHandle } from '../src/components/sessions/side-panel-split-handle';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -365,5 +366,81 @@ describe('SessionSidePanelTabBar', () => {
     );
     await act(async () => sideSessionButton?.click());
     expect(onPanelOpen).toHaveBeenCalledWith('side-session');
+  });
+});
+
+describe('SidePanelSplitHandle', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    container?.remove();
+    root = undefined;
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  async function renderHandle(initialRatio: number) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      width: 400,
+    } as DOMRect);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+    const ratios: number[] = [];
+    let ratio = initialRatio;
+    root = createRoot(container);
+    const render = async () =>
+      act(async () => {
+        root?.render(
+          createElement(SidePanelSplitHandle, {
+            ratio,
+            label: 'Resize split view',
+            onRatioChange: (next: number) => {
+              ratio = next;
+              ratios.push(next);
+              void render();
+            },
+          })
+        );
+      });
+    await render();
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!;
+    return { handle, ratios };
+  }
+
+  const pointer = (type: string, clientX: number) =>
+    Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientX }), { pointerId: 1 });
+
+  it('follows the pointer across the panel within the quarter bounds, behind a drag shield', async () => {
+    const { handle, ratios } = await renderHandle(0.5);
+    await act(async () => handle.dispatchEvent(pointer('pointerdown', 300)));
+    expect(container?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
+    await act(async () => handle.dispatchEvent(pointer('pointermove', 220)));
+    await act(async () => handle.dispatchEvent(pointer('pointermove', 120)));
+    await act(async () => handle.dispatchEvent(pointer('pointerup', 120)));
+    await act(async () => handle.dispatchEvent(pointer('pointermove', 480)));
+
+    expect(ratios).toEqual([0.3, 0.25]);
+    expect(handle.getAttribute('aria-valuenow')).toBe('25');
+    expect(container?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
+  });
+
+  it('steps with the arrow keys and resets on double click', async () => {
+    const { handle, ratios } = await renderHandle(0.7);
+    const key = (name: string) =>
+      act(async () => {
+        handle.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+      });
+    await key('ArrowRight');
+    await key('ArrowRight');
+    await key('Home');
+    await act(async () => handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+
+    expect(ratios.map((value) => Math.round(value * 100))).toEqual([75, 75, 25, 50]);
   });
 });
