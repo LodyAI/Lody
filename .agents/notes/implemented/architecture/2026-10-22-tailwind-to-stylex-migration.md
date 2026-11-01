@@ -2608,12 +2608,12 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Accepted scoped migrations since147 remove150 source utilities, including the six private
+Accepted scoped migrations since147 remove165 source utilities, including the six private
 spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
-The helper's accepted196 cut contains245/8/21 across30 production sources,
-with the private Checkbox as its only change from189. Its actual670-input
+The helper's accepted207 cut contains230/8/21 across30 production sources.
+It adds fifteen private ReviewCheck base declarations to196; its actual671-input
 build resolves audited immutable dependencies rather than the live Root tree.
 The accepted204 full non-story components cut contains1,333 occurrences in145
 files and720 unresolved expressions across1,397 sources. Its three core roots
@@ -2625,11 +2625,11 @@ source lower bounds, not completion rates or whole-branch visual approval.
 `inventory-source-through204-accepted-proof.json` freezes those inputs; relative
 to203 only three accepted authentication title owners change. The three former
 template-class expressions also leave the unresolved count; they were not three
-additional utility removals. Helper196 is frozen separately. Together these inputs
-give a static lower bound of1,578 occurrences in153 files with741 unresolved expressions; it is not an exact total or completion percentage.
-The helper remains a separate frozen196 input; its exact scan and source hashes
-are in `inventory-helper-source-through196-proof.json` and
-`inventory-helper-v2-after196.json`. Scope185
+additional utility removals. Helper207 is frozen separately. Together these inputs
+give a static lower bound of1,563 occurrences in153 files with741 unresolved expressions; it is not an exact total or completion percentage.
+The helper remains a separate frozen207 input; its exact scan and source hashes
+are in `inventory-helper-source-through207-proof.json` and
+`inventory-helper-v2-after207.json`. Scope185
 removes twenty manually audited literals but only seven were in v2 resolution;
 its retained `h-svh` hook is also outside that lower bound. The earlier147 dictionary
 gap remains separate. The fresh198 `@lody/ui` scan recognizes zero utilities
@@ -2692,6 +2692,7 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Workspace ground201 | One private background utility moves into a finite page/sidebar option on the existing helper. Its default page/settings output stays byte-identical; the actual non-settings root chooses the sidebar atom exclusively. Twelve real Electron states keep the same backgrounds and layout across74 root observations and3,406 geometry records;11 PNG/RGBA pairs match. | One original Logo OPEN retains239raw/zero threshold pixels; cause is unknown. Startup viewport640/1280, real boot flag/elapsed readers, twelve CSS URLs and ten exact ID/ARIA paths are kept separate; startup-history equality is not claimed. Renderer1222 and335 guards are restored after owned App exit. Original8598 rules/802 at-rules retain order with one added background atom and no root-class hook. |
 | Login margin/glyph202–203 | One private submit margin and one fixed descendant-size occurrence move to local StyleX. Twelve submit-state pairs and ten SVG pairs are PNG/RGBA exact; six fixed glyph calls retain18px boxes, original display/shrink and Lucide presentation attributes. Production and natural DEV cover the sixth Mail, with provider click/disabled and email focus/Back behavior verified. The integrated203 working tree passes619 component files/6,199 tests; its pre-existing user edits remain part of those test inputs, not a pristine renderer qualification. | Submit records contain24 exact class and72 rule-routing changes; glyph records contain84 class, two fixed DEV debug-source attributes,42 matched-rule projections and24 CSS URL carriers, with no other raw differences. The original misreached Unverified pair and collector failures remain rejected; Resend lacks its fixture error code and is not covered. The glyph build only removes the old important descendant rule and reuses existing atoms. |
 | Card title typography204 | Two optional physical owner props retain the default600/live semantic tracking reader; three authentication titles remove five utilities while preserving their legacy variable writers. Fifteen real-browser consumer cases reject the alias/fallback design in five cases and support the physical declaration. All51 actual/variable page viewports and four original Gallery Card ROIs are PNG/RGBA exact;471 records and1,468 geometry records differ only at102 exact title class/inline carriers. | Four new Gallery rows are After-only. Both collectors exit1 on the same48 pre-existing styleq logs plus four broken-avatar console errors/four aborted requests in Gallery; page cells have none. Normal final cleanup succeeds; the first rejected selector run retains its unknown cleanup boundary. No token group, global CSS retention rule or fallback patch is added. |
+| Private review label207 | Fifteen native label base utilities become local StyleX with the same variables and medium-weight writer. All16 original PNG/RGBA pairs and112 target records match outside exact class/CSS URL carriers. A separate real wheel/scrollend/return sequence in the two affected profiles matches all six paired stages, geometry, extents, hits and original PNGs. Source inverse and737 retained CSS rules/182 at-rule nodes match exactly. Actual inline-only standalone files add eight native-state pairs; desktop four are PNG/RGBA exact, and two extra real navigation scenes retain matching final nav/scroll fields and PNGs. | Phone standalone four retain34 raw/zero-threshold pixels and their original reader lacks nav attributes; new fresh lazy/observer histories and equal horizontal-pan boundaries remain recorded. Two original initial states retain348 document-extent/later-position differences of446.5px; all original8,562 geometry records remain available. The offscreen600/153.5 states match the existing content-visibility intrinsic-size mechanism, but old cache/fixture history was not recorded and its cause remains unproved. Adopted private declarations do not establish all initial whole-page states equivalent; no14-state code subset or lazy/content-visibility fix is claimed. Actual theme is fixed Vesper dark. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 

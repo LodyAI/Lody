@@ -30,7 +30,11 @@ tracking, leading and weight read their original element-local theme/literal;
 numeric variants read all five numeric variables with empty fallbacks. A writer
 alone is not a substitute for that reader. Full Storybook and standalone CSS
 verification includes token pruning, actual fonts and visible numeric states;
-public Slot contracts stay on their audited paths. Reviewed responsive headings
+public Slot contracts stay on their audited paths. The private Viewed label uses
+local StyleX for base layout, typography and material, preserving its medium
+writer. Its native checked, hover, focus-ring and transition utilities retain
+those state contracts; the Checkbox and lazy diff layout are separate owners.
+Reviewed responsive headings
 keep the original rem media condition, local text token and private-leading reader.
 Numeric and length line-height owners preserve all five numeric variables and
 inherited lengths, including smaller table cells. During coexistence, Tailwind

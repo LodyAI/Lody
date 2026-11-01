@@ -2669,6 +2669,28 @@ function Checkbox({
   );
 }
 
+const reviewCheckStyles = stylex.create({
+  base: {
+    display: 'flex',
+    flexShrink: 0,
+    cursor: 'pointer',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
 function ReviewCheck({
   state,
   onChange,
@@ -2679,7 +2701,12 @@ function ReviewCheck({
   readonly label: string;
 }) {
   return (
-    <label className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border border-border bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground has-[:checked]:border-foreground/30 has-[:checked]:bg-foreground/10 has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45">
+    <label
+      className={cn(
+        stylex.props(reviewCheckStyles.base).className,
+        'transition-colors hover:bg-foreground/5 hover:text-foreground has-[:checked]:border-foreground/30 has-[:checked]:bg-foreground/10 has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45'
+      )}
+    >
       <Checkbox state={state} onChange={onChange} ariaLabel={label} />
       {label}
     </label>
