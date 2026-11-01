@@ -209,6 +209,7 @@ describe('MessageHandler machine registration', () => {
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
+      acpAuthenticationMethodSelection: 1,
       previewControl: 1,
       androidEmulator: 1,
       androidEmulatorQuality: 1,

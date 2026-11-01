@@ -3070,7 +3070,7 @@ export class LoroStreamsMachineRpcClient {
       onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
       timeoutMs?: number;
     } & (
-      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'start'; configId: AgentConfigId; methodId?: string }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
           action: 'submit-code';
@@ -3153,6 +3153,10 @@ export class LoroStreamsMachineRpcClient {
               requestId: options.requestId,
               action: options.action,
               configId: options.configId,
+              // Omitted unless the reader picked a method: the daemon schema is
+              // strict, so an older Machine rejects the whole start when the
+              // field is present at all.
+              ...(options.methodId ? { methodId: options.methodId } : {}),
             } as const;
           case 'cancel':
             return {
