@@ -30,3 +30,48 @@ describe('account pairing tab ownership', () => {
     await Effect.runPromise(second.release());
   });
 });
+
+describe('handing the account pairing to another tab', () => {
+  it('waits for an operation already running in this tab before releasing the lock', async () => {
+    const name = `lody-e2ee-account-pairing:test-${crypto.randomUUID()}`;
+    const a = makeAccountPairingTabOwnership({ name });
+    const b = makeAccountPairingTabOwnership({ name });
+    const events: string[] = [];
+    // Tab A's signing step blocks on an explicit gate.
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const tabA = withAccountPairingTabOwnership(
+      {
+        approveAccountPairing: () =>
+          Effect.promise(async () => {
+            events.push('a:start');
+            entered();
+            await gate;
+            events.push('a:done');
+          }),
+      },
+      a
+    );
+    const tabB = withAccountPairingTabOwnership(
+      { approveAccountPairing: () => Effect.sync(() => void events.push('b:start')) },
+      b
+    );
+    const running = Effect.runPromise(tabA.approveAccountPairing());
+    await started;
+    const released = Effect.runPromise(a.release());
+    // While A is still inside its operation, B is refused and never starts.
+    const early = await Effect.runPromiseExit(tabB.approveAccountPairing());
+    expect(Exit.isFailure(early)).toBe(true);
+    // Released tab A takes no new operations.
+    const refusedA = await Effect.runPromiseExit(tabA.approveAccountPairing());
+    expect(Exit.isFailure(refusedA)).toBe(true);
+    open();
+    await running;
+    await released;
+    await Effect.runPromise(tabB.approveAccountPairing());
+    expect(events).toEqual(['a:start', 'a:done', 'b:start']);
+    await Effect.runPromise(b.release());
+  });
+});

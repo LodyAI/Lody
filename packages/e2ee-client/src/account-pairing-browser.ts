@@ -15,6 +15,60 @@ import type {
 const DATABASE_VERSION = 1;
 const STORES = ['terminal', 'requests', 'joined', 'approved', 'admissions'] as const;
 type StoreName = (typeof STORES)[number];
+/** The one current layout: created on upgrade and checked in full on every open. */
+const LAYOUT: Record<
+  StoreName,
+  {
+    keyPath: string | string[];
+    autoIncrement: boolean;
+    indexes: Record<string, { keyPath: string; unique: boolean }>;
+  }
+> = {
+  terminal: { keyPath: 'lookupId', autoIncrement: false, indexes: {} },
+  requests: {
+    keyPath: 'seq',
+    autoIncrement: true,
+    indexes: { lookupId: { keyPath: 'lookupId', unique: true } },
+  },
+  joined: { keyPath: ['lookupId', 'workspaceId'], autoIncrement: false, indexes: {} },
+  approved: { keyPath: 'lookupId', autoIncrement: false, indexes: {} },
+  admissions: {
+    keyPath: ['workspaceId', 'signingKey'],
+    autoIncrement: false,
+    indexes: { lookupId: { keyPath: 'lookupId', unique: false } },
+  },
+};
+const sameKeyPath = (actual: string | string[] | null, expected: string | string[]) =>
+  JSON.stringify(actual) === JSON.stringify(expected);
+/** True only when every store, key, auto-increment flag and index matches exactly. */
+function matchesLayout(db: IDBDatabase): boolean {
+  if (db.objectStoreNames.length !== STORES.length) return false;
+  if (STORES.some((store) => !db.objectStoreNames.contains(store))) return false;
+  const tx = db.transaction(STORES, 'readonly');
+  try {
+    return STORES.every((name) => {
+      const store = tx.objectStore(name);
+      const expected = LAYOUT[name];
+      const indexes = Object.entries(expected.indexes);
+      return (
+        sameKeyPath(store.keyPath, expected.keyPath) &&
+        store.autoIncrement === expected.autoIncrement &&
+        store.indexNames.length === indexes.length &&
+        indexes.every(([indexName, spec]) => {
+          if (!store.indexNames.contains(indexName)) return false;
+          const index = store.index(indexName);
+          return (
+            sameKeyPath(index.keyPath, spec.keyPath) &&
+            index.unique === spec.unique &&
+            !index.multiEntry
+          );
+        })
+      );
+    });
+  } finally {
+    tx.abort();
+  }
+}
 
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
 const copy = (value: Uint8Array) => new Uint8Array(value);
@@ -27,31 +81,35 @@ export function makeIndexedDbAccountPairingStore(options: {
   indexedDB?: IDBFactory;
 }): AccountPairingStore & { close(): void } {
   const factory = options.indexedDB ?? globalThis.indexedDB;
-  const name = `lody-e2ee-account-pairing:${options.accountId}`;
+  const databaseName = `lody-e2ee-account-pairing:${options.accountId}`;
   let connection: Promise<IDBDatabase> | undefined;
   let closed = false;
   const open = () =>
     (connection ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = factory.open(name, DATABASE_VERSION);
+      const request = factory.open(databaseName, DATABASE_VERSION);
       request.onupgradeneeded = () => {
         const db = request.result;
-        db.createObjectStore('terminal', { keyPath: 'lookupId' });
-        db.createObjectStore('requests', { keyPath: 'seq', autoIncrement: true }).createIndex(
-          'lookupId',
-          'lookupId',
-          { unique: true }
-        );
-        db.createObjectStore('joined', { keyPath: ['lookupId', 'workspaceId'] });
-        db.createObjectStore('approved', { keyPath: 'lookupId' });
-        db.createObjectStore('admissions', { keyPath: ['workspaceId', 'signingKey'] }).createIndex(
-          'lookupId',
-          'lookupId'
-        );
+        for (const name of STORES) {
+          const spec = LAYOUT[name];
+          const store = db.createObjectStore(name, {
+            keyPath: spec.keyPath,
+            autoIncrement: spec.autoIncrement,
+          });
+          for (const [indexName, index] of Object.entries(spec.indexes))
+            store.createIndex(indexName, index.keyPath, { unique: index.unique });
+        }
       };
       request.onsuccess = () => {
         const db = request.result;
-        // A current-only layout: anything else is a different database, never repaired.
-        if (STORES.some((store) => !db.objectStoreNames.contains(store))) {
+        // A current-only layout: any other store, key, flag or index is a different
+        // database. It is refused as corrupt and never repaired or used.
+        let valid = false;
+        try {
+          valid = matchesLayout(db);
+        } catch {
+          valid = false;
+        }
+        if (!valid) {
           db.close();
           reject(fail('corrupt'));
           return;
@@ -231,32 +289,68 @@ export function makeIndexedDbAccountPairingStore(options: {
 }
 
 /** Which tab owns this account's pairing. One request belongs to one tab: its
- * secret lives only in that tab's memory. A closed tab releases its Web Lock. */
+ * secret lives only in that tab's memory. A closed tab releases its Web Lock.
+ * Release first closes the entry, then waits for operations already running here,
+ * so check, sign and journal never interleave between two tabs. */
 export function makeAccountPairingTabOwnership(options: { name: string; locks?: LockManager }) {
   const locks = options.locks ?? globalThis.navigator.locks;
   let release: (() => void) | undefined;
   let settled: Promise<unknown> | undefined;
+  let releasing = false;
+  let running = 0;
+  let idle: (() => void) | undefined;
+  const claim = () =>
+    new Promise<boolean>((resolve) => {
+      if (releasing) return resolve(false);
+      if (release) return resolve(true);
+      settled = locks.request(options.name, { ifAvailable: true }, (lock) => {
+        if (!lock) return resolve(false);
+        resolve(true);
+        return new Promise<void>((done) => (release = done));
+      });
+    });
   return {
-    /** True when this tab owns the pairing, claiming it if no other tab holds it. */
-    claim: () =>
-      Effect.promise(
-        () =>
-          new Promise<boolean>((resolve) => {
-            if (release) return resolve(true);
-            settled = locks.request(options.name, { ifAvailable: true }, (lock) => {
-              if (!lock) return resolve(false);
-              resolve(true);
-              return new Promise<void>((done) => (release = done));
-            });
-          })
+    /** Runs `work` only while this tab owns the pairing; `false` means another tab
+     * owns it, or this tab is handing it over. */
+    run: <A, E>(
+      work: Effect.Effect<A, E>
+    ): Effect.Effect<{ owned: true; value: A } | { owned: false }, E> =>
+      Effect.flatMap<boolean, never, never, { owned: true; value: A } | { owned: false }, E, never>(
+        Effect.promise(async () => {
+          const owned = await claim();
+          // A release that started while claiming wins: take nothing new.
+          if (owned && !releasing) running++;
+          return owned && !releasing;
+        }),
+        (owned) =>
+          owned
+            ? Effect.map(
+                Effect.ensuring(
+                  work,
+                  Effect.sync(() => {
+                    running--;
+                    if (running === 0) idle?.();
+                  })
+                ),
+                (value) => ({ owned: true as const, value })
+              )
+            : Effect.succeed({ owned: false as const })
       ),
-    /** Gives the pairing up so another tab can take it. */
+    /** Gives the pairing up so another tab can take it, after operations already
+     * running in this tab finish. */
     release: () =>
       Effect.promise(async () => {
-        const done = release;
-        release = undefined;
-        done?.();
-        await settled;
+        releasing = true;
+        try {
+          if (running > 0) await new Promise<void>((resolve) => (idle = resolve));
+          idle = undefined;
+          const done = release;
+          release = undefined;
+          done?.();
+          await settled;
+        } finally {
+          releasing = false;
+        }
       }),
   };
 }
@@ -269,8 +363,8 @@ export function withAccountPairingTabOwnership<
   const wrapped: Record<string, unknown> = {};
   for (const [key, method] of Object.entries(pairing))
     wrapped[key] = (...args: never[]) =>
-      Effect.flatMap(ownership.claim(), (owned) =>
-        owned ? method(...args) : Effect.fail(fail('pairing-elsewhere'))
+      Effect.flatMap(ownership.run(method(...args)), (result) =>
+        result.owned ? Effect.succeed(result.value) : Effect.fail(fail('pairing-elsewhere'))
       );
   return wrapped as T;
 }

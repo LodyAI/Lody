@@ -40,6 +40,11 @@ it.each(['chromium', 'webkit'] as const)(
           (globalThis as ContractGlobal).AccountPairingStoreFixture.persists()
         )
       ).toBe('declined');
+      expect(
+        await page.evaluate(() =>
+          (globalThis as ContractGlobal).AccountPairingStoreFixture.refusesWrongLayout()
+        )
+      ).toEqual([]);
     } finally {
       await browser.close();
       await rm(dir, { recursive: true, force: true });
