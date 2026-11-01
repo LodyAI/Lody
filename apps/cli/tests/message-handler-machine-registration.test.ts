@@ -225,6 +225,7 @@ describe('MessageHandler machine registration', () => {
       subagentEvents: 1,
       schedules: 3,
       preparedSessionInput: 1,
+      messageQuotes: 1,
       sessionInputAttachments: 1,
       sessionCollaborationControl: 1,
       bugReportClientLog: 1,

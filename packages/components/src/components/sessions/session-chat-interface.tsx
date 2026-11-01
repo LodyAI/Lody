@@ -1,3 +1,4 @@
+import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
@@ -146,6 +147,7 @@ import {
   isSessionGoalCleared,
   isSessionGoalActive,
   machineSupportsScheduledMessagesProtocol,
+  machineSupportsMessageQuotes,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
@@ -3693,6 +3695,7 @@ export const SessionChatInterface = memo(
       sessionHistory,
       sessionMachine?.acpCapabilities,
     ]);
+    const messageQuotesSupported = machineSupportsMessageQuotes(sessionMachine);
     const handleEditLastUser = useCallback(
       async (
         message: SessionHistoryParsed,
@@ -3703,6 +3706,18 @@ export const SessionChatInterface = memo(
         // records where each mention landed so the transcript paints the user's
         // own wording back over it — identical to a fresh send.
         const nextText = submission.text;
+        if (
+          submission.spans?.some((span) => span.kind === 'message_quote') &&
+          !messageQuotesSupported
+        ) {
+          toast.error(
+            t(
+              'composer.messageQuotesUpgrade',
+              'Update the target machine to use message quotes. Your draft is preserved.'
+            )
+          );
+          return false;
+        }
         const requesterUserId =
           (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
           currentUser?.id ??
@@ -3793,6 +3808,7 @@ export const SessionChatInterface = memo(
         session.id,
         session.machineId,
         session.userId,
+        messageQuotesSupported,
         t,
       ]
     );
@@ -7248,6 +7264,16 @@ export const SessionChatInterface = memo(
                 <SessionSearchProvider value={searchContextValue}>
                   <SessionPinContext.Provider value={pinContextValue}>
                     {/* Message area */}
+                    <MessageQuoteAction
+                      root={foldMessageArea}
+                      enabled={
+                        isVisible &&
+                        !session.isArchived &&
+                        !shareSelection.active &&
+                        !shouldReplaceComposerWithPermission
+                      }
+                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
+                    />
                     <div
                       ref={setMessageArea}
                       {...stylex.props(styles.messageArea)}

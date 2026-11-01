@@ -140,11 +140,17 @@ export const SessionImagePayloadSchema = z
     height: OptionalPositiveIntegerSchema,
     storageSessionId: SessionIdSchema.optional(),
   })
-  .strict().superRefine((image, ctx) => {
+  .strict()
+  .superRefine((image, ctx) => {
     const manifest = image.encryption;
-    if (manifest && (manifest.kind !== 'image' || manifest.parts[0] !== image.imageId ||
-      manifest.sizeBytes !== image.sizeBytes || manifest.mimeType !== image.mimeType ||
-      manifest.fileName !== (image.fileName ?? ''))) {
+    if (
+      manifest &&
+      (manifest.kind !== 'image' ||
+        manifest.parts[0] !== image.imageId ||
+        manifest.sizeBytes !== image.sizeBytes ||
+        manifest.mimeType !== image.mimeType ||
+        manifest.fileName !== (image.fileName ?? ''))
+    ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Encrypted image reference mismatch' });
     }
   });
@@ -187,10 +193,20 @@ const refineSessionFileBlock = (
   ctx: z.RefinementCtx,
   basePath: PropertyKey[] = []
 ): void => {
-  if (block.encryption && (block.encryption.kind !== 'file' || block.fileId !== block.encryption.parts[0] ||
-    block.sizeBytes !== block.encryption.sizeBytes || block.fileName !== block.encryption.fileName ||
-    block.mimeType !== block.encryption.mimeType || block.transport !== 'r2')) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: basePath, message: 'Encrypted attachment reference mismatch' });
+  if (
+    block.encryption &&
+    (block.encryption.kind !== 'file' ||
+      block.fileId !== block.encryption.parts[0] ||
+      block.sizeBytes !== block.encryption.sizeBytes ||
+      block.fileName !== block.encryption.fileName ||
+      block.mimeType !== block.encryption.mimeType ||
+      block.transport !== 'r2')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: basePath,
+      message: 'Encrypted attachment reference mismatch',
+    });
   }
   // transport='local' means the bytes only exist on a specific machine pending
   // backfill; without machineId other devices can't render the honest
@@ -215,6 +231,7 @@ const MessageTextSpanSchema = z
     kind: z.enum(MESSAGE_TEXT_SPAN_KINDS),
     label: z.string().min(1),
     target: z.string().optional(),
+    quoteVersion: z.literal(1).optional(),
     // The same bar `sanitizeMessageTextSpans` applies. This object is `.strict()`,
     // and a rejected span fails the whole block list — which surfaces as an empty
     // prompt, not as a missing chip — so a field one side knows must be declared
