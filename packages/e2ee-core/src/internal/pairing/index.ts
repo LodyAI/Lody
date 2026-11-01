@@ -198,7 +198,10 @@ export interface PairingApproval {
   readonly rows: readonly PairingApprovalRow[];
 }
 
-const MAX_ROWS = 256;
+/** Most workspaces one request or approval may cover. The relay and every client
+ * enforce this same value; it bounds request size and one approval's invitations. */
+export const PAIRING_MAX_WORKSPACES = 64;
+const MAX_ROWS = PAIRING_MAX_WORKSPACES;
 const compareBytes = (a: Uint8Array, b: Uint8Array) => {
   for (let index = 0; index < Math.min(a.length, b.length); index++)
     if (a[index] !== b[index]) return a[index]! - b[index]!;

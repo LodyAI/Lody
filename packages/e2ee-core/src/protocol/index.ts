@@ -194,6 +194,7 @@ export {
   PAIRING_URL_PREFIX,
   PAIRING_REQUEST_MAX_LIFETIME_MS,
   PAIRING_CLOCK_SKEW_MS,
+  PAIRING_MAX_WORKSPACES,
   PairingError,
   encodePairingSecret,
   formatPairingString,
