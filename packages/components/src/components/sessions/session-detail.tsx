@@ -699,10 +699,13 @@ const detailStyles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
   },
   splitStart: {
-    right: `calc((1 - var(${SIDE_PANEL_SPLIT_RATIO_VAR}, 0.5)) * 100%)`,
+    // StyleX evaluates this at build time and cannot resolve a constant
+    // imported from a non-`.stylex` module, so the variable name is spelled
+    // out; it must match SIDE_PANEL_SPLIT_RATIO_VAR.
+    right: 'calc((1 - var(--side-panel-split, 0.5)) * 100%)',
   },
   splitEnd: {
-    left: `calc(var(${SIDE_PANEL_SPLIT_RATIO_VAR}, 0.5) * 100%)`,
+    left: 'calc(var(--side-panel-split, 0.5) * 100%)',
     borderInlineStartWidth: '1px',
     borderInlineStartStyle: 'solid',
     borderInlineStartColor: 'hsl(var(--border) / 0.7)',
