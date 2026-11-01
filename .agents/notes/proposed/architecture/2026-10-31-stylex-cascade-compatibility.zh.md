@@ -116,9 +116,32 @@ Chrome验证十二个静态控制，含零特异性opacity0.7、普通后代opac
 另行真正重编译的opacity0.6被严格等价oracle拒绝。
 
 这只证明小范围声明所有权边界，仍需Tailwind保留／排序候选、显式metadata到selector／context及
-class绑定、自定义构建变换；不是StyleX现成选项或已完成产品迁移。动态值、variants、Slot、生产
-consumers、开发更新和完整source maps均未验证。probe未改产品／配置／依赖／lockfile，真实浏览器
+class绑定、自定义构建变换；不是StyleX现成选项或已完成产品迁移。该双绑定probe未验证动态值、variants、Slot、生产
+consumers、开发更新和完整source maps；下述206仅限定验证一个静态opacity绑定。probe未改产品／配置／依赖／lockfile，真实浏览器
 检查没有应用截图；精确compile／binding／browser记录位于root-native-exact-slot-probe/。
+
+## 实际单一owner的生产与开发管线
+
+隔离206后续验证针对MobileInlinePicker原有opacity-70调用；旧Spinner自身没有该默认值。
+独立StyleX模块拥有静态声明，folded绑定保留原class字符串。bridge先detach原Tailwind声明，
+再把真实compiler metadata的clone放入相同selector、layer与规则位置；普通StyleX收集器独立。
+这是兼容selector下的声明所有权，不代表移除Tailwind候选排序依赖。
+
+初版七个生产状态的完整raw对象及PNG／RGBA字节同；修正版两个真实DEV状态仅有80个明确的
+debug-source行号属性变化，共505节点、九对整图同。DEV产70%，生产产.7；初版数值oracle
+拒绝百分比。修正版只接受有界静态数字／百分比，并严格比较数值。其真实生产构建保留106份CSS
+及绑定74字节JavaScript，但七个生产截图未在修正版重采。Before／After真实绑定测试及修正版
+components类型通过。visual目录leaves206-delivery.json与leaves206-acceptance.html保留
+source bank、九对原图及三个初始失败。
+
+真实重编译为.6被生产CSS转换oracle及真实Vite update拒绝；负控没有执行完整生产build。热更新产生vite:error与CSS404，但Chromium
+保留最后成功的.7样式，且没有错误overlay。这证明不发布不等价CSS，不证明整页fail closed。
+原producer更强的标签保留，并由准确qualification限定，没有悄然改写。
+
+此硬编码实验尚不是可生产采用的compiler设施：仍借用传递compiler解析及实验proof目录；正式
+配置、直接锁版依赖、通用绑定所有权、完整source-map组合与真实配对Electron仍需审查。
+动态值、其它属性、variants及Slot未证明。四个自有DEV进程组均退出，Root产品／配置／锁文件
+未变，生产迁移信用仍为零。
 
 ## 提议的下一边界
 

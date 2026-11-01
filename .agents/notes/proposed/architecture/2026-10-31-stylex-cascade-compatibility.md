@@ -157,11 +157,49 @@ recompiled opacity0.6 declaration is rejected by the strict equivalence oracle.
 This proves only a small declaration-ownership boundary. It still needs Tailwind
 to retain and order candidates, explicit metadata-to-selector/context and class
 bindings, and a custom build transform. It is not an existing StyleX option or a
-completed product migration. Dynamic values, variants, Slot composition,
-production consumers, development updates and complete source maps remain
-unverified. The probe changes no product, configuration, dependency or lockfile;
+completed product migration. That two-binding probe did not verify dynamic values, variants, Slot composition,
+production consumers, development updates or complete source maps. The bounded
+206 follow-up below qualifies one static opacity binding only. The probe changes no product, configuration, dependency or lockfile;
 its real browser checks produce no application screenshots. The exact compile,
 binding and browser records live under `root-native-exact-slot-probe/`.
+
+## One actual owner through production and development
+
+The isolated206 follow-up targets the existing `opacity-70` caller in
+`MobileInlinePicker`; the legacy Spinner itself has no such default. One separate
+StyleX module owns the static declaration. Its folded binding keeps the original
+class string, and the bridge detaches Tailwind's declaration before inserting a
+clone of the real compiler metadata at the same selector, layer and rule slot.
+Ordinary StyleX collection remains separate. This is declaration ownership with a
+compatibility selector, not removal of the Tailwind candidate-ordering dependency.
+
+Seven production pairs from the original prototype match complete recorded raw
+objects and PNG/RGBA bytes; two real development pairs from the corrected version
+match outside80 explicit debug-source line attributes. Together they cover505
+nodes and nine exact images. Development emits `70%`, whereas production emits
+`.7`: the first strict numeric oracle rejected the percentage. The corrected
+oracle accepts only bounded static numbers or percentages and compares their
+exact numerical values. Its actual production build preserves all106 CSS files
+and the binding's74 JavaScript bytes; the seven production screenshots were not
+recaptured with that correction. Real binding tests pass before and after, and
+the corrected source passes component types. `leaves206-delivery.json` and
+`leaves206-acceptance.html` retain the source banks, nine original pairs and three
+initial failures under the visual artifact directory.
+
+Recompiling the declaration as`.6` is rejected by the production-CSS transform
+oracle and a real Vite update. The negative does not run a complete production build. The update produces `vite:error` and a CSS404 response, but Chromium
+retains the last successful`.7` stylesheet with no error overlay. This rejects
+publication of unequal CSS; it does not prove the whole page fails closed. The
+original stronger producer label is retained and explicitly qualified rather
+than silently rewritten.
+
+This hard-coded experiment is not a production-ready compiler facility. It uses
+transitive compiler resolution and an experiment-only proof directory; public
+configuration, direct pinned dependencies, general binding ownership, complete
+source-map composition and an actual paired Electron run still need review.
+Dynamic values, other properties, variants and Slot composition remain unproved.
+All four owned development process groups exited, Root product/configuration/lock
+bytes stayed unchanged, and production migration credit remains zero.
 
 ## Proposed next boundary
 
