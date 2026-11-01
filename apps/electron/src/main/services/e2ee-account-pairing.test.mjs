@@ -756,3 +756,25 @@ void test('a workspace whose refresh or signature fails is not admitted while th
     ['w2', 'w1']
   )
 })
+
+void test('an account mismatch during the pre-signing refresh refuses the whole approval', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts()
+  // The live cloud proxy reports a different signed-in account for w1.
+  a.hosts[0].refresh = () => Effect.fail(new Error('e2ee_account_mismatch'))
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const refused = await refusal(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.match(refused, /account_mismatch/)
+  assert.deepEqual(a.log.signed, [])
+  assert.deepEqual(a.log.appended, [])
+  assert.equal(relay.approvals.size, 0)
+})

@@ -52,8 +52,19 @@ const sha256 = (value: Uint8Array): Uint8Array =>
 export type AccountPairingRefusal = 'pairing-tampered' | 'pairing-expired' | 'pairing-used'
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
   Object.assign(new Error(`e2ee_${code}`), { code })
-const isAccountMismatch = (error: unknown) =>
-  error instanceof Error && /\be2ee_account_mismatch\b/.test(error.message)
+/** Failures that refuse the whole approval rather than one workspace: the signed-in
+ * account changed, the request was tampered with, or it expired. Shared by every
+ * per-workspace step so refresh and signing classify the same way. */
+const refusesApproval = (error: unknown) => {
+  const code =
+    error && typeof error === 'object' && 'code' in error ? (error as { code: unknown }).code : null
+  return (
+    code === 'account_mismatch' ||
+    code === 'pairing-tampered' ||
+    code === 'pairing-expired' ||
+    (error instanceof Error && /\be2ee_account_mismatch\b/.test(error.message))
+  )
+}
 function sql<A>(work: () => A): Effect.Effect<A, Error> {
   return Effect.try({
     try: work,
@@ -602,6 +613,7 @@ export function makeDesktopAccountPairing(input: {
             if (workspace.refresh) {
               const refreshed = yield* Effect.result(workspace.refresh())
               if (Result.isFailure(refreshed)) {
+                if (refusesApproval(refreshed.failure)) return yield* Effect.fail(refreshed.failure)
                 rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure)
                 outcomes.set(workspace.workspaceId, 'not-admitted')
                 continue
@@ -620,7 +632,7 @@ export function makeDesktopAccountPairing(input: {
             }
             const signed = yield* Effect.result(workspace.sign(row))
             if (Result.isFailure(signed)) {
-              if (isAccountMismatch(signed.failure)) return yield* Effect.fail(signed.failure)
+              if (refusesApproval(signed.failure)) return yield* Effect.fail(signed.failure)
               rememberDesktopE2eeFailure('account-pairing-sign', signed.failure)
               outcomes.set(workspace.workspaceId, 'not-admitted')
               continue
