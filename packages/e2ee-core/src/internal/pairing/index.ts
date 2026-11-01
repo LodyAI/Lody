@@ -1,4 +1,4 @@
-import { encode } from '@ipld/dag-cbor';
+import { decode, encode } from '@ipld/dag-cbor';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Data, Result } from 'effect';
@@ -295,6 +295,86 @@ export function encodePairingApproval(
     ])
   );
 }
+
+/** Upper bound checked before any decoding; a full 256-row request stays far below it. */
+const MAX_ENCODED_BYTES = 256 * 1024;
+/** Decode bounded bytes and accept them only if they are exactly the canonical
+ * encoding of what they decode to. Anything else fails with `invalid-input`. */
+function decodeCanonical<A>(
+  input: Uint8Array,
+  read: (value: unknown) => A | undefined,
+  encodeValue: (value: A) => Result.Result<Uint8Array, PairingError>
+): Result.Result<A, PairingError> {
+  if (!(input instanceof Uint8Array) || input.length === 0 || input.length > MAX_ENCODED_BYTES)
+    return fail('invalid-input');
+  const bytes = new Uint8Array(input);
+  let value: A | undefined;
+  try {
+    value = read(decode(bytes));
+  } catch {
+    return fail('invalid-input');
+  }
+  if (value === undefined) return fail('invalid-input');
+  const again = encodeValue(value);
+  if (Result.isFailure(again) || !constantTimeEqual(again.success, bytes))
+    return fail('invalid-input');
+  return Result.succeed(value);
+}
+const tuple = (value: unknown, domain: string, size: number) =>
+  Array.isArray(value) && value.length === size && value[0] === domain ? value : undefined;
+
+/** Parse canonical request bytes, such as those relayed by the service. The bytes
+ * prove nothing by themselves: verify the request tag before trusting any field. */
+export const decodePairingRequest = (bytes: Uint8Array) =>
+  decodeCanonical<PairingRequest>(
+    bytes,
+    (value) => {
+      const fields = tuple(value, REQUEST_DOMAIN, 7);
+      if (!fields || !Array.isArray(fields[6])) return undefined;
+      const [, account, lookupId, direction, deviceName, expiresAt, rows] = fields;
+      return {
+        account,
+        lookupId,
+        direction,
+        deviceName,
+        expiresAt,
+        rows: (rows as unknown[]).map((row) => {
+          if (!Array.isArray(row) || row.length !== 5) throw new Error('row');
+          const [genesis, signingPublicKey, encryptionPublicKey, possessionProof, credentialHash] =
+            row;
+          return {
+            genesis,
+            signingPublicKey,
+            encryptionPublicKey,
+            possessionProof,
+            credentialHash,
+          };
+        }),
+      };
+    },
+    encodePairingRequest
+  );
+
+/** Parse canonical approval bytes. Verify the approval tag before trusting any field. */
+export const decodePairingApproval = (bytes: Uint8Array) =>
+  decodeCanonical<PairingApproval>(
+    bytes,
+    (value) => {
+      const fields = tuple(value, APPROVAL_DOMAIN, 4);
+      if (!fields || !Array.isArray(fields[3])) return undefined;
+      const [, requestDigest, approverSigningPublicKey, rows] = fields;
+      return {
+        requestDigest,
+        approverSigningPublicKey,
+        rows: (rows as unknown[]).map((row) => {
+          if (!Array.isArray(row) || row.length !== 3) throw new Error('row');
+          const [genesis, admissionRecordHash, invitationDigest] = row;
+          return { genesis, admissionRecordHash, invitationDigest };
+        }),
+      };
+    },
+    encodePairingApproval
+  );
 
 const tag = (key: Uint8Array, bytes: Uint8Array) => hmac(sha256, key, bytes);
 const verifyTag = (expected: Uint8Array, actual: Uint8Array) =>
