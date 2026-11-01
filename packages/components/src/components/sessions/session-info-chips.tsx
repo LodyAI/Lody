@@ -634,7 +634,15 @@ export function ContextChip({
     : trimmedBranch || projectName || t('sessions.infoBar.context', 'Work context');
 
   if (itemMode.mode === 'cluster') {
-    return <ClusterChip icon={LocationIcon} label={label} onPromote={itemMode.onPromote} />;
+    return (
+      <ClusterChip
+        icon={pr ? StatusIcon : LocationIcon}
+        label={label}
+        value={value}
+        textClassName={pr && statusMeta ? statusMeta.iconColorClassName : undefined}
+        onPromote={itemMode.onPromote}
+      />
+    );
   }
 
   const copyBranchLabel = t('sessions.copyBranchName', 'Copy branch name');
@@ -647,28 +655,44 @@ export function ContextChip({
     });
   };
 
+  const statusLabel = statusMeta ? t(statusMeta.labelKey, statusMeta.labelFallback) : '';
+  const prTitle = statusLabel && value ? `${statusLabel} ${value}` : label;
+
   const prControl = pr ? (
     onOpenPr ? (
       <button
         type="button"
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
-        title={t('sessions.pr.openTab', 'Open pull request')}
+        title={prTitle}
         className={cn(
-          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
-          INFO_BAR_TEXT_CLASS
+          'flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md px-1.5 font-medium transition-colors',
+          INFO_BAR_TEXT_CLASS,
+          statusMeta?.className ??
+            'bg-foreground/[0.06] text-muted-foreground hover:bg-foreground/[0.1]'
         )}
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
+        {value ? <span className="shrink-0 tabular-nums">{value}</span> : null}
+        {statusLabel ? (
+          <span className="hidden shrink-0 @[480px]:inline text-[11px] font-normal opacity-90">
+            {statusLabel}
+          </span>
         ) : null}
       </button>
     ) : (
-      <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
+      <span
+        className={cn(
+          'flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium',
+          statusMeta?.className ?? 'bg-foreground/[0.06] text-muted-foreground'
+        )}
+      >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
+        {value ? <span className="shrink-0 tabular-nums">{value}</span> : null}
+        {statusLabel ? (
+          <span className="hidden shrink-0 @[480px]:inline text-[11px] font-normal opacity-90">
+            {statusLabel}
+          </span>
         ) : null}
       </span>
     )
