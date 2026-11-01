@@ -12,6 +12,6 @@ Agent 已能通过 MCP 使用 Automation，但 Session 控件曾要求开发者�
 
 ## 边界
 
-Electron 管理本机及符合条件的远端机器 Automation owner，并在请求前检查共享 Workspace 内容能力。Agent 的 MCP 服务和 Host 继续遵循既有归属与授权规则。移除旧的纯界面偏好不会启用 Session 策略，也不需要迁移持久化的 Automation。远端控制使用[远端控制设计](../../proposed/architecture/2026-10-30-remote-session-automation-control.zh.md)；加密 Automation 仍不受支持。
+Electron 管理本机及符合条件的远端机器 Automation owner，并在请求前检查共享 Workspace 内容能力。界面还要求目标 daemon 声明本机 IPC 的 `sessionAutomations` 或远端控制的 `remoteAutomationControl` 能力；缺少能力时不查询、不显示控件，也不报告连接失败。Agent 的 MCP 服务和 Host 继续遵循既有归属与授权规则。移除旧的纯界面偏好不会启用 Session 策略，也不需要迁移持久化的 Automation。远端控制使用[远端控制设计](../../proposed/architecture/2026-10-30-remote-session-automation-control.zh.md)；加密 Automation 仍不受支持。
 
 组件测试覆盖普通模式下的等待、设置和取消。真实跨设备和加密交付仍未验证。
