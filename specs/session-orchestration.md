@@ -35,6 +35,23 @@ replaces this scope. Known Agent sender provenance is required; legacy inputs
 without it remain readable and retain existing behavior. This change does not add
 note tools or change result delivery timing.
 
+## Agent chat to a busy Session
+
+An orchestrating Agent sends corrections or new information to a Session that is
+still working. `lody_session_chat` and `lody_session_chat_many` steer that input
+into the running turn whenever the target runs on the calling Machine and its
+agent accepts steering, regardless of the human's queue or guide preference and
+of who started the running turn. The steered input gets its own reply, which
+becomes the Operation result; an earlier turn it interrupts ends at that point.
+
+A steer that is provably not delivered becomes the next ordinary turn, as it
+does for a human. An uncertain delivery is never replayed: the item fails with
+non-retryable `STEER_DELIVERY_UNKNOWN`, and the requesting Agent decides whether
+to resend. Idle targets, targets on other Machines and recovery replay keep
+ordinary dispatch. Evidence: `sendSessionChatResult` in
+`apps/cli/src/commands/session.ts`, its suite `session-default-fallback.test.ts`,
+and item reconciliation in `apps/cli/src/orchestration/coordinator-workflow.ts`.
+
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on
@@ -144,12 +161,22 @@ Every target machine must advertise the control capability before the UI writes
 metadata. Offline machines enforce the barrier after receiving it; the UI must
 not promise simultaneous cancellation or rollback of already performed work.
 
+## Inbox database unavailable at startup
+
+Failure to open or activate Inbox must not prevent workspace startup or ordinary
+human conversations. Report degraded availability through the existing runtime
+warning channel; Inbox-dependent Agent tasks and automatic continuations return
+an explicit unavailable error without accessing the database. The coordinator owns
+bounded-backoff recovery, canceled on shutdown; incompatible schema/protocol errors
+do not auto-retry. Recovery preserves existing submission evidence and never replays
+unknown input. Authentication, E2EE and local/cloud boundaries remain unchanged.
+
 ## Idempotent message consumption
 
 Operation completion receipts enter the durable Inbox with wake eligibility. If a
-Session is idle, unpaused and has no unreleased resources or accepted queued input,
+Session is idle, unpaused and has no active execution or accepted queued input,
 one wakeable receipt grants a persistent automatic intent. Busy Sessions defer
-consumption until normal completion and actual release. Stop blocks receipt-driven
+consumption until the current execution returns its slot. Stop blocks receipt-driven
 wakes until fresh human or Agent-chat input. Result persistence and wake intent creation
 share the completion transaction; reopen recovers an unsubmitted intent without a new event.
 Suppressing user-facing completion notifications for Agent-initiated turns does not
@@ -168,17 +195,15 @@ while retaining history. The pause blocks only automatic completion wakes. Input
 after Stop by a human or by another Session's Agent chat ranks the same: it is admitted,
 clears the pause and carries saved results; old instructions require a new send.
 Receipts still decide only whether an input is recorded as human. Failed exits
-never auto-continue; unreleased resources block all successors. Normal future human
-turns resume the same receipt-driven scheduling rule. A failed exit alone grants no
-wake, but a later wakeable receipt may grant one after physical resource release.
+never auto-continue. Normal future turns resume receipt-driven scheduling. A failed exit
+alone grants no wake, but later wakeable receipts may grant one after slot retirement.
 
-Missing or incomplete recovery journals must remain visible and recoverable. A local
-operator may explicitly attest that all old resources, including unrecorded ones,
-have been released while holding exclusive Host ownership; known live resources or
-uncertain probes still block recovery. Atomically retire the exact old execution and
-pause the session. Do not replay unknown submissions or manufacture a normal-release
-intent. Only fresh human or Agent-chat input resumes work afterward. A dead daemon PID alone
-is not release evidence. This maintenance action is not available through Agent/MCP tools.
+Unconfirmed resource release never blocks later input. Retire interrupted executions,
+finish their inputs as unknown without replay, clear legacy blocks and preserve queued
+work. Report uncertainty and attempt bounded background cleanup; cleanup failure cannot
+prevent input or shutdown. Never reuse an Agent whose termination failed: detach the old
+Session and create a new ACP. Restart retirement may log a warning when history is not
+available. Cleanup state never gates admission, and no offline attestation is required.
 
 An automatic batch yields atomically to pre-submission human acceptance. A human input
 already being prepared survives later queued human input. Keep admission from the
@@ -195,7 +220,7 @@ individual members use ordered JSON fragments, not additional model turns.
 Post-fence uncertainty is permanent unknown submission, never replay. Human-plus-batch
 inputs also disable whole-input stale-ACP replay. Retry settlement writes only. Raw
 request/resource release differs from waiter cancellation or Scope close: retain full
-failures, shared shutdown receipts and independent recovery owners until actual release.
+failures and shared shutdown receipts; recovery uses old handles without blocking successors.
 
 Preserve released Operation rows, author/input snapshots, recovery state and retired
 IDs across upgrade; active Operations continue reconciliation. Delete only per-Delivery

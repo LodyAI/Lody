@@ -1,5 +1,6 @@
 import { logoutPush } from './push-notifications';
 import { createAuthClient } from 'better-auth/react';
+import { withSessionGatedOrganizationQueries } from './organization-session-queries';
 import { organizationClient } from 'better-auth/client/plugins';
 import { convexClient, crossDomainClient } from '@convex-dev/better-auth/client/plugins';
 import {
@@ -22,7 +23,7 @@ type CreateLodyAuthClientOptions<Plugins extends BetterAuthClientPlugin[]> = {
   disableDefaultFetchPlugins?: boolean;
 };
 
-export const createLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
+const createBaseLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
   options: CreateLodyAuthClientOptions<Plugins> = {}
 ) => {
   const additionalPlugins = options.additionalPlugins ?? [];
@@ -37,13 +38,26 @@ export const createLodyAuthClient = <const Plugins extends BetterAuthClientPlugi
     ] as const,
     disableDefaultFetchPlugins: options.disableDefaultFetchPlugins || false,
   });
+  return client;
+};
+
+export const createLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
+  options: CreateLodyAuthClientOptions<Plugins> = {}
+) => {
+  const base = createBaseLodyAuthClient(options);
+  // Better Auth cannot reduce conditional plugin types for generic extra plugins.
+  // The wrapper replaces base methods only; preserve the concrete plugin API.
+  const client = withSessionGatedOrganizationQueries(
+    base as unknown as LodyAuthClient,
+    subscribeLocalAuthStateCleared
+  ) as unknown as typeof base;
   // The singleton needs only the base client. Better Auth cannot reduce its
   // conditional plugin types until the caller supplies the concrete extra plugins.
   registerAuthClient(client as unknown as LodyAuthClient);
   return client;
 };
 
-export type LodyAuthClient = ReturnType<typeof createLodyAuthClient<[]>>;
+export type LodyAuthClient = ReturnType<typeof createBaseLodyAuthClient<[]>>;
 
 const AUTH_SESSION_INTENT_GENERATIONS = new WeakMap<object, number>();
 
@@ -57,12 +71,12 @@ const invalidateAuthSessionIntent = (authClient: LodyAuthClient): void => {
 const localAuthStateClearedListeners = new Set<() => void>();
 
 /** App-store owners subscribe for logout intent, before async auth state catches up. */
-export const subscribeLocalAuthStateCleared = (listener: () => void): (() => void) => {
+export function subscribeLocalAuthStateCleared(listener: () => void): () => void {
   localAuthStateClearedListeners.add(listener);
   return () => {
     localAuthStateClearedListeners.delete(listener);
   };
-};
+}
 
 export const clearLocalAuthState = () => {
   clearStoredAuthToken();

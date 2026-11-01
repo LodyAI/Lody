@@ -19,6 +19,7 @@ import { StorageGuardIpc } from './services/storage-guard-ipc'
 import { TerminalIpc } from './services/terminal-ipc'
 import { UpdaterIpc } from './services/updater-ipc'
 import { setIpcServiceDeps, type IpcServiceDeps } from './ipc-service-deps'
+import { registerClientLossProbe } from '../services/e2ee-client-loss-probe'
 
 type TerminalFireAndForgetType = 'attach' | 'input' | 'resize' | 'close' | 'close_session'
 
@@ -49,6 +50,7 @@ export type ElectronIpcServices = MergeIpcService<ReturnType<typeof createRegist
 export function registerIpcServices(deps: IpcServiceDeps) {
   setIpcServiceDeps(deps)
   installNativeThemeWatch()
+  registerClientLossProbe()
 
   ipcMain.on(IPC_SEND_CHANNELS.cliSubscribe, (event) => {
     deps.cliService.attachCliStateSender(event.sender)

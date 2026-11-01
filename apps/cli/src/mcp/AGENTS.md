@@ -32,7 +32,8 @@ Parent instructions apply. Background: [README.md](README.md).
   Before accepting an Operation, freeze the Role target, Prompt prefix, revision and run
   config. Recovery uses the frozen canonical Prompt and dispatch config, never rereading
   the Role. Roles may target any reachable Machine; Local
-  Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
+  Projects default to child Sessions only for same-Machine Roles; a remote Role
+  defaults to the Local Project's linked GitHub repository only when the workspace enables it. `readDelegatedMachineAccess`
   requires access for both executing Machine owner and driving human (owned, or shared with
   shared project), never trusting synced `MachineMeta.ownerUserId`.
 - Operation identity comes only from active Host dispatch; reject absent runtime/userId.
@@ -52,12 +53,17 @@ Parent instructions apply. Background: [README.md](README.md).
   and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
   rejected batch items.
 
+- Single and batch chats pass `steerActiveTurn`, steering a turn running on the calling
+  daemon; recovery replay never steers. Never activate a steered or existing `pending_apply`
+  turn. Uncertain delivery fails the item with `STEER_DELIVERY_UNKNOWN`, never a replay.
+  [Contract](../../../../specs/session-orchestration.md#agent-chat-to-a-busy-session).
+
 - Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
-  Default-only calls allow no cache. Internal inferred defaults
+  Agent capability defaults require fresh catalogs. Internal inferred defaults
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
-- `lody_ios_simulator_preview` is the native-app tool; web previews remain
+- `lody_ios_simulator_preview` and `lody_android_emulator_preview` are the native-app tools; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
@@ -67,6 +73,12 @@ Parent instructions apply. Background: [README.md](README.md).
   syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
   explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
   three-state presence and credential allowlists.
+- MCP defaults first wait up to one second for the daemon reader's baseline. On timeout,
+  only a persisted remote checkpoint for that workspace Flock permits cached defaults;
+  business rows alone are insufficient because they can be authored locally. Without
+  evidence, return retryable `SYNC_UNAVAILABLE` before accepting an Operation. Freeze
+  accepted IDs. Explicit selections bypass defaults. Session startup keeps complete
+  local selected rows with a warning; cold missing rows fail. Waits never stop the reader.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See
@@ -86,6 +98,9 @@ Parent instructions apply. Background: [README.md](README.md).
   never current values. Stay sparse by default (online Machines, one agent config, the current
   local project, no GitHub fetch), expanding only through explicit query inputs.
   Explicit permissions may exceed the parent; follow the caller's user authorization.
+  Daemon-hosted reads use the daemon replica and do not start Streams sync.
+  Retryable `SYNC_UNAVAILABLE` means that replica cannot validate the selection.
+  [Freshness](README.md#machine-catalog-retry-guidance).
 - Machine presence is online/offline/unknown. `getOnlineMachineIds() === null` means
   unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline, never on
   an RPC timeout. Unknown proceeds under its own deadline. Expose three-state liveness,
@@ -95,7 +110,7 @@ Parent instructions apply. Background: [README.md](README.md).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
-  Machine RPC snapshot. Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
+  Machine RPC snapshot, and do not start Streams sync. Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a

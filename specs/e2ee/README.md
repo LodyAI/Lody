@@ -3,10 +3,10 @@
 - [Security whitepaper](whitepaper.md) · [中文](whitepaper.zh.md)
 - [Permission ledger and interactions (Chinese)](permission-ledger.zh.md)
 - [Implemented public foundation contract](../e2ee-foundations.md) · [中文](../e2ee-foundations.zh.md)
+- [Web/mobile custody](client-custody.md) · [中文](client-custody.zh.md): platform trust, installation and original-byte ownership; not product activation.
 - [Migration ownership and validation](../../.agents/docs/e2ee-migration.md) · [中文](../../.agents/docs/e2ee-migration.zh.md)
 
-These drafts describe intended architecture and retain explicit unresolved decisions.
+These Specs describe intended architecture and retain explicit unresolved decisions.
 They do not enable product E2EE or approve unfinished protocol formats.
 
-Unapproved interoperability/recovery proposals: [atomic removal](atomic-removal.md),
-[recovery vault](recovery-vault.md), [publisher key recoverability](publisher-key-recoverability.md).
+Unapproved recovery proposal: [recovery vault](recovery-vault.md). The [permission ledger](permission-ledger.zh.md) has a limited approval scope.

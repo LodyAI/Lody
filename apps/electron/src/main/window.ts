@@ -34,7 +34,8 @@ import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { createRendererHangWatchdog } from './renderer-hang-watchdog'
 import { recordRendererHang, registerRendererHangDocument } from './renderer-hang-diagnostics'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
-import { type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { E2EE_CLIENT_LOSS_PROBE, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { clientLossProbeEnabled } from './services/e2ee-client-loss-gate'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
 import { devbarRendererEntry } from './services/devbar/control'
@@ -409,7 +410,9 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       // Carry Electron's OS-level preference into preload so first-run product
       // language detection does not mistake the available .pak for user intent.
       additionalArguments: [
-        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages()),
+        // Preload admits the probe channels only when main registered them.
+        ...(clientLossProbeEnabled() ? [E2EE_CLIENT_LOSS_PROBE.argument] : [])
       ],
       sandbox: false,
       nodeIntegration: false,

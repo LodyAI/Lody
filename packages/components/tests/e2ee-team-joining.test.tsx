@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 import React, { act } from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { Result } from 'effect';
+import { exportVerifiedState } from '@lody/e2ee-core/protocol';
+import { appendLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { E2eeMemberJoin } from '../src/components/pages/e2ee-member-join';
-import { E2eeTeamSettings } from '../src/components/settings/e2ee-team-settings';
+import {
+  E2eeTeamSettings,
+  E2eeTeamSettingsHost,
+} from '../src/components/settings/e2ee-team-settings';
 import {
   E2eeTeamInboxHost,
   startEmailAdmissionWorker,
@@ -319,6 +327,101 @@ describe('encrypted team joining', () => {
     expect(role).toBe('admin');
     expect(container.textContent).toContain('e2ee.team.promoted');
   });
+  it.each([
+    ['personal', 'owner', true, true],
+    ['personal', 'admin', true, true],
+    ['personal', 'member', true, false],
+    ['personal', 'guest', true, false],
+    ['recovery', 'owner', true, false],
+    ['machine', 'owner', true, false],
+    ['personal', 'owner', false, false],
+  ] as const)(
+    'uses verified personal management facts without a local agent: %s / %s / credential %s',
+    async (deviceKind, memberRole, hasDeviceCredential, allowed) => {
+      const vector = JSON.parse(
+        readFileSync(
+          join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'),
+          'utf8'
+        )
+      ) as { anchor: string; records: { hex: string; hash: string }[] };
+      const history = appendLedgerHistory(
+        null,
+        {
+          workspaceId: 'team',
+          genesisHash: vector.anchor,
+          checkpoint: { length: 1, headHash: vector.anchor },
+          startIndex: 0,
+          nextCursor: null,
+          recordsHex: [vector.records[0]!.hex],
+        },
+        { workspaceId: 'team', genesisHash: vector.anchor, localPin: vector.anchor }
+      );
+      const snapshot = Result.getOrThrow(exportVerifiedState(history.view));
+      const ledger = {
+        stateHex: bytesToHex(snapshot.bytes),
+        recordsHex: [vector.records[0]!.hex],
+        status: {
+          workspaceId: 'team',
+          genesisHash: vector.anchor,
+          length: 1,
+          headHash: vector.anchor,
+          stateDigest: bytesToHex(snapshot.stateDigest.toBytes()),
+          epoch: 0,
+          rotationRequired: false,
+          deviceKind,
+          memberRole,
+          hasDeviceCredential,
+          hasCurrentKey: true,
+          continuityPending: false,
+        },
+      };
+      const invitations: unknown[] = [];
+      const runtime = {
+        ledgerView: async () => ledger,
+        createMemberInvitation: async (input: unknown) => {
+          invitations.push(input);
+          return offer;
+        },
+        memberJoinRequests: async () => empty,
+        approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+        rejectMemberJoin: async () => ({ state: 'rejected' }),
+        revokeMemberInvitation: async () => ({ revoked: true }),
+      } as unknown as E2eeWorkspaceRuntime;
+      await render(
+        <E2eeTeamSettingsHost runtime={runtime} workspaceId="team" accountId="account" />
+      );
+      const create = () =>
+        [...container.querySelectorAll('button')].find(
+          (node) => node.textContent === 'e2ee.team.createLink'
+        );
+      if (!allowed) {
+        expect(create()).toBeUndefined();
+        expect(invitations).toEqual([]);
+        return;
+      }
+      expect(create()).toBeDefined();
+      await act(async () => create()!.click());
+      expect(invitations).toEqual([{ workspaceId: 'team', mode: 'link' }]);
+      expect(container.querySelector<HTMLInputElement>('input[readonly]')?.value).toContain(
+        offer.token
+      );
+      const pending = deferred<typeof ledger>();
+      await render(
+        <E2eeTeamSettingsHost
+          runtime={{ ...runtime, ledgerView: () => pending.promise }}
+          workspaceId="team"
+          accountId="account"
+        />
+      );
+      expect(create()).toBeUndefined();
+      pending.resolve({
+        ...ledger,
+        status: { ...ledger.status, memberRole: 'guest' },
+      } as typeof ledger);
+      await settle();
+      expect(create()).toBeUndefined();
+    }
+  );
   it('preserves independent genesis pins through desktop handoff and rejects a different token', () => {
     const path = resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(offer));
     expect(path).toBe(memberJoinPath(offer));

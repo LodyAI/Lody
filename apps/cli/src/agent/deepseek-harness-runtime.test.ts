@@ -127,6 +127,7 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     ]);
     expect(first.env.DSH_HOME).not.toBe(second.env.DSH_HOME);
     expect(first.env.ACP_EXTENSION_DSH_SESSION_ROOT).toBe(sessionsRoot);
+    expect(first.env.ACP_EXTENSION_DSH_LEGACY_HOME).toBe(rootDir);
     const configPath = getDeepSeekHarnessProviderConfigPath(dataRoot, 'provider-a');
     const edited = '- id: agent-default-model\n  config:\n    model: custom-model\n';
     await writeFile(configPath, edited);

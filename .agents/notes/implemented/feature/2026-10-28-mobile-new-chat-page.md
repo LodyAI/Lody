@@ -12,7 +12,8 @@ composer, with machine and project choices in the page above the input. This
 replaces the separate sheet and crowded footer rail, while retaining the shared
 run-configuration Sheet for Role, Agent, Model and Mode. Accepted first sends keep
 the new-chat page visible until the resolved session surface commits, suppressing
-its entrance animation through delayed mounts and URL corrections. Real-component
+its entrance animation through delayed mounts and URL corrections. The page itself
+slides in from the right, and in the native app follows a left-edge drag back. Real-component
 browser checks pass and an iOS development build is installed; native keyboard
 and perceived transition acceptance remain with the user.
 
@@ -41,6 +42,14 @@ That work adapted [#491](https://github.com/LodyAI/Lody/pull/491) by
   recently used first, then name and stable identity. Unused folders do not gain
   priority from creation time. Search filters without re-ranking the list;
   no-project/add/connect actions keep their fixed positions.
+
+## GitHub owner icon alignment
+
+The shared owner-avatar frame uses block flex layout, avoiding an inline baseline
+line box in the mobile project trigger. Before the correction, Chromium and WebKit
+both measured the loaded avatar center 2.5px above the project label in either
+theme; afterward the centers coincide. The existing browser coverage checks the
+loading fallback, loaded avatar and expanded option against the text center.
 
 ## First-send ownership
 
@@ -105,6 +114,34 @@ is canceled if the user changes machine/project or closes the page. Exact visibl
 identity is required: a deleted or unavailable target becomes no project. An
 explicit last-used no-project choice remains none. On older installs without this
 field, the existing recent-use ordering supplies an available fallback.
+
+## Page motion and edge back
+
+The page previously appeared and disappeared without motion. It now pushes in
+from the right with the drill pages' `.mobile-drill-in` keyframe, and Back slides
+it out before notifying the host. The host hiding the page after first-send
+presentation still removes it at once, so the session surface is never covered
+by a leaving page.
+
+In the native app a rightward drag beginning within `EDGE_ZONE_PX` of the left
+edge moves the page with the finger over the still-mounted home or project
+screen, committing past the drill-page distance/velocity thresholds or snapping
+back. A Vaul drawer was not adopted: the page already shares the session drawer's
+first-send handoff, and a second drawer would reopen that ownership. An overlay
+strip like `MobileEdgeBackSwipeZone` was rejected because it would swallow taps
+on the machine/project rows and composer controls along the left edge; the drag
+is bound on the page itself and ignores touches that start in the composer
+shell. With `axis` locking, use-gesture reports `first` on the first intentional
+move, so the edge test reads the touch-down `initial` position. Web mounts no
+gesture, matching other edge-back surfaces.
+
+First-send browser geometry checks wait for the entrance animation to finish
+before measuring the composer, then retain exact geometry assertions throughout
+sending. The entrance motion and send handoff are separate interactions.
+
+Evidence is limited to jsdom tests driving touch events through use-gesture
+(entrance, Back exit, follow-and-commit, snap-back, composer/mid-screen/web
+exclusions, host removal) plus package typecheck. Native feel is unverified.
 
 ## Verification and limits
 

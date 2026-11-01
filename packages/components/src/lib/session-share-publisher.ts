@@ -26,6 +26,8 @@ export async function captureSessionShare(options: {
   previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
   signal: AbortSignal;
 }) {
+  await options.runtime.waitForContentAdmission?.(options.signal);
+  options.signal.throwIfAborted();
   requireWorkspaceFeature(
     { mode: options.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
     'sharing'

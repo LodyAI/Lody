@@ -206,6 +206,8 @@ export async function applyAcpSessionRunConfig(args: {
     acpSessionId,
     agentClient.getConfigOptions()
   );
+  const availableCommands = agentClient.getAvailableCommands();
+  if (availableCommands !== undefined) runtimeConfigPatch.availableCommands = availableCommands;
   if (confirmedLegacyModeId) {
     runtimeConfigPatch.modeId = confirmedLegacyModeId;
     if (

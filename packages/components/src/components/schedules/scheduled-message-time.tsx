@@ -2,14 +2,12 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { Clock } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Dialog } from '@/ui/dialog';
 import { getServerNow, instantToZonedLocalInput, zonedLocalInputToInstant } from '@lody/shared';
 import { formatInstant } from './schedule-format';
-import { PopoverActionChip } from '../sessions/info-chip';
 
 const styles = stylex.create({
   fields: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -155,49 +153,5 @@ export function ScheduledMessageTimeDialog({
         </Dialog.Footer>
       </Dialog.Content>
     </Dialog.Root>
-  );
-}
-
-export function ScheduledMessageInfoChip({
-  at,
-  timeZone,
-  onEdit,
-  disabled,
-  defaultOpen,
-}: {
-  at: string;
-  timeZone: string;
-  onEdit: () => void;
-  disabled?: boolean;
-  defaultOpen?: boolean;
-}) {
-  const { t, i18n } = useTranslation();
-  return (
-    <PopoverActionChip
-      icon={Clock}
-      label={t('scheduledMessage.infoLabel')}
-      defaultOpen={defaultOpen}
-      content={(close) => (
-        <div {...stylex.props(styles.popover)}>
-          <span>
-            {t('scheduledMessage.willSend', {
-              time: formatInstant(Date.parse(at), timeZone, i18n.language),
-            })}
-          </span>
-          <Button
-            variant="secondary"
-            shape="pill"
-            size="small"
-            disabled={disabled}
-            onClick={() => {
-              close();
-              onEdit();
-            }}
-          >
-            {t('common.edit')}
-          </Button>
-        </div>
-      )}
-    />
   );
 }

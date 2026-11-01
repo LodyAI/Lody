@@ -39,7 +39,7 @@ export const remarkCodexFileCitations = () => (tree: unknown) => {
         type: 'link',
         url: href,
         children: [{ type: 'text', value: normalizedPath.split('/').pop() ?? path }],
-        data: { hProperties: { 'data-codex-file-citation': true } },
+        data: { hProperties: { 'data-codex-file-citation': true, 'data-file-path-source': path } },
       });
       cursor = match.index + match[0].length;
     }

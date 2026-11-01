@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -22,7 +24,7 @@ import {
   type VisibleMachineIndex,
 } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useEncryptedSharedMachines } from './use-encrypted-shared-machines';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { MachineVisibilityAccess };
@@ -57,33 +59,64 @@ export function useVisibleMachineMetas(
   const syncMachineFlock = options.syncMachineFlock ?? true;
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const canQuery =
+    enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const currentUserId = useWorkspaceLocalAccountId();
-  const queriedAccessRows = useCloudQuery(
+  const queriedAccessRows = useLegacyWorkspaceQuery(
     cloudOperations.machines.listVisibleMachines,
-    enabled && workspaceId ? { workspaceId } : 'skip'
+    enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
-  const rawAccessRows = enabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
+  const rawAccessRows =
+    enabled && legacyQueriesEnabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
   const isLoading =
     !enabled ||
-    isAuthedWorkspaceQueryLoading({
-      workspaceId,
-      isConvexAuthLoading,
-      canQuery,
-      queryResult: queriedAccessRows,
-    });
+    legacyQueryStatus === 'pending' ||
+    (legacyQueriesEnabled &&
+      isAuthedWorkspaceQueryLoading({
+        workspaceId,
+        isConvexAuthLoading,
+        canQuery,
+        queryResult: queriedAccessRows,
+      }));
+
+  // Encrypted workspaces skip ordinary access rows. Other members' machines come only
+  // from verified owner-signed policy views; they never enter the Convex-backed set.
+  const encryptedShared = useEncryptedSharedMachines({
+    workspaceId: workspaceId ?? null,
+    currentUserId: enabled ? currentUserId : null,
+    rawMachines,
+    enabled: enabled && !legacyQueriesEnabled,
+  });
+  const accessRows = useMemo(() => {
+    if (encryptedShared.size === 0) return rawAccessRows;
+    const shared: MachineVisibilityAccess[] = [];
+    for (const machineId of encryptedShared.keys()) {
+      const ownerUserId = rawMachines.get(machineId)?.ownerUserId;
+      if (ownerUserId) shared.push({ machineId, ownerUserId, sharedWithTeam: true, updatedAt: 1 });
+    }
+    return [...rawAccessRows, ...shared];
+  }, [encryptedShared, rawAccessRows, rawMachines]);
+  const sharedProjectIdsByMachineId = useMemo(
+    () =>
+      new Map(
+        [...encryptedShared].map(([machineId, value]) => [machineId, value.projects] as const)
+      ),
+    [encryptedShared]
+  );
 
   const baseVisibleIndex = useMemo(
     () =>
       buildVisibleMachineIndex({
         rawMachines,
-        convexAccessRows: rawAccessRows,
+        convexAccessRows: accessRows,
         currentUserId: enabled ? currentUserId : null,
         isLoading,
       }),
-    [enabled, rawMachines, rawAccessRows, currentUserId, isLoading]
+    [enabled, rawMachines, accessRows, currentUserId, isLoading]
   );
   const convexAuthorizedMachineIds = useMemo(
     () => new Set(rawAccessRows.map((row) => row.machineId as MachineId)),
@@ -122,11 +155,13 @@ export function useVisibleMachineMetas(
       convexAuthorizedMachineIds,
       machines: visibleMachinesWithFlockMeta,
       machineFlockRemoteSyncedMachineIds,
+      sharedProjectIdsByMachineId,
     }),
     [
       baseVisibleIndex,
       convexAuthorizedMachineIds,
       machineFlockRemoteSyncedMachineIds,
+      sharedProjectIdsByMachineId,
       visibleMachinesWithFlockMeta,
     ]
   );

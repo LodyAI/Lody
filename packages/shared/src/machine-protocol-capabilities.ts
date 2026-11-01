@@ -18,16 +18,20 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
+  mcpLocalAuthentication: 'mcpLocalAuthentication',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
+  acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
+  sessionAutomations: 'sessionAutomations',
+  remoteAutomationControl: 'remoteAutomationControl',
   preparedSessionInput: 'preparedSessionInput',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
@@ -35,6 +39,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  androidEmulator: 'androidEmulator',
+  androidEmulatorQuality: 'androidEmulatorQuality',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
@@ -57,9 +63,12 @@ export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
+export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+/** `start` accepts the `methodId` the reader picked from the agent's advertised methods. */
+export const ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
@@ -154,6 +163,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication]: MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:
     LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.subagentEvents]: SUBAGENT_EVENTS_PROTOCOL_VERSION,
@@ -161,12 +171,15 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection]:
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
@@ -175,6 +188,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
@@ -297,6 +312,22 @@ export function machineSupportsAcpAuthenticationInteractionsProtocol(
   );
 }
 
+/**
+ * Whether `machine/acp-authenticate` accepts a `methodId` the reader picked
+ * before starting. Its request schema is strict, so an older daemon rejects the
+ * whole start when the field is present; callers omit it there and let the
+ * daemon show its own picker after the sign-in has started.
+ */
+export function machineSupportsAcpAuthenticationMethodSelectionProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection,
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION
+  );
+}
+
 /** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
 export function machineSupportsLocalProjectRemovalProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
@@ -359,7 +390,9 @@ export function machineSupportsPiExtensions(
 export function machineSupportsSchedulesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
     SCHEDULES_PROMPT_PROTOCOL_VERSION
   );
 }
@@ -513,7 +546,29 @@ export function machineSupportsSessionHistoryPatches(
 export function machineSupportsScheduledMessagesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules,
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
     SCHEDULED_MESSAGES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsAndroidEmulatorProtocol(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulator,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorQuality(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
   );
 }

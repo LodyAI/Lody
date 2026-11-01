@@ -4,7 +4,11 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsAcpAuthenticationInteractionsProtocol,
+  machineSupportsAcpAuthenticationMethodSelectionProtocol,
+  getAcpCapabilityCacheKey,
   getManagedBuiltinRuntimeByRuntimeName,
+  getReadableAcpCapabilityCacheEntry,
+  usesAcpProtocolAuthentication,
   type AgentConfigCliType,
   type AgentConfigId,
   type BuiltinRuntimeOverrides,
@@ -12,6 +16,7 @@ import {
   type MachineAcpAuthenticationForm,
   type MachineAcpAuthenticationProgressMessage,
   type MachineAcpAuthMethodSummary,
+  type AcpAuthMethodSummary,
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -38,6 +43,9 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const SM = '@media (min-width: 640px)';
+
+/** The advertised-method rows carry no form values; they start a flow instead. */
+const EMPTY_FORM_VALUES: Record<string, string> = {};
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
@@ -218,6 +226,9 @@ export function AcpAuthenticationPanel({
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
   const interactiveProtocolSupported =
     machineSupportsAcpAuthenticationInteractionsProtocol(machine);
+  /** The agent's `initialize` response owns the list; a pick is only a hint. */
+  const canSelectAuthMethod = machineSupportsAcpAuthenticationMethodSelectionProtocol(machine);
+  const protocolAuthProvider = usesAcpProtocolAuthentication(cliType, agentType);
   const {
     startAuthentication,
     cancelAuthentication,
@@ -235,6 +246,15 @@ export function AcpAuthenticationPanel({
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
   const [runtimeDownload, setRuntimeDownload] = useState<RuntimeDownloadProgress | null>(null);
+  /**
+   * Methods returned by this panel's own discovery probe. `undefined` means the
+   * probe has not answered yet, so the cached capability entry is used instead;
+   * an empty array records that the agent advertises no agent-driven method.
+   */
+  const [discoveredAuthMethods, setDiscoveredAuthMethods] = useState<
+    MachineAcpAuthMethodSummary[] | undefined
+  >(undefined);
+  const discoveryTargetRef = useRef<string | null>(null);
   const pendingAuthorizationWindowRef = useRef<Window | null>(null);
   const openedAuthorizationUrlRef = useRef<string | null>(null);
   const interactionIdRef = useRef<string | null>(null);
@@ -247,6 +267,43 @@ export function AcpAuthenticationPanel({
       machineId && configId && (cliType !== 'custom' || customAcp) ? { machineId, configId } : null,
     [cliType, configId, customAcp, machineId]
   );
+
+  /**
+   * What the last probe recorded for this Provider. The capability cache is the
+   * durable home of the agent's advertised sign-in methods, so both the
+   * settings dialog and the in-conversation auth notice can render the list
+   * without starting an authentication attempt.
+   */
+  const cachedAuthMethods = useMemo(() => {
+    if (!configId) return undefined;
+    const entry = getReadableAcpCapabilityCacheEntry(
+      machine?.acpCapabilities?.[getAcpCapabilityCacheKey(configId)]
+    );
+    return entry?.authMethods;
+  }, [configId, machine]);
+
+  /**
+   * A capability row that predates advertised-method recording. Its freshness
+   * would otherwise answer the discovery probe without any method list, so the
+   * probe is forced past that cache once.
+   */
+  const cachedCapabilityPredatesAuthMethods = useMemo(() => {
+    if (!configId) return false;
+    const entry = getReadableAcpCapabilityCacheEntry(
+      machine?.acpCapabilities?.[getAcpCapabilityCacheKey(configId)]
+    );
+    return entry !== undefined && entry.authMethods === undefined;
+  }, [configId, machine]);
+
+  // Terminal methods need a real interactive terminal, and `env_var` is
+  // deprecated: only agent-driven methods can run over Machine RPC.
+  const advertisedMethods = useMemo(() => {
+    const methods: AcpAuthMethodSummary[] = discoveredAuthMethods ?? cachedAuthMethods ?? [];
+    return methods.filter(
+      (method): method is AcpAuthMethodSummary & { id: string } =>
+        method.type === 'agent' && !!method.id
+    );
+  }, [cachedAuthMethods, discoveredAuthMethods]);
 
   const closePendingAuthorizationWindow = (): void => {
     const pendingWindow = pendingAuthorizationWindowRef.current;
@@ -295,8 +352,53 @@ export function AcpAuthenticationPanel({
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
     setSubmittingAuthorizationCode(false);
+    discoveryTargetRef.current = null;
+    setDiscoveredAuthMethods(undefined);
     setPhase('idle');
   }, [authArgs, runtime, workspaceId]);
+
+  // Discovery is what makes the advertised methods visible before anyone
+  // starts signing in: the agent publishes them in its `initialize` response,
+  // which only a probe can read. A cached capability entry already answers for
+  // this Provider, so the probe runs at most once per target per mount.
+  useEffect(() => {
+    if (!runtime || workspaceId == null || !machineId || !configId) return undefined;
+    if (!protocolAuthProvider || !interactiveProtocolSupported) return undefined;
+    if (discoveredAuthMethods !== undefined || cachedAuthMethods !== undefined) return undefined;
+    const target = `${machineId}:${configId}`;
+    if (discoveryTargetRef.current === target) return undefined;
+    discoveryTargetRef.current = target;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await runtime.requestMachineAcpCapabilitiesRefresh({
+          type: 'machine/acp-capabilities-refresh',
+          machineId,
+          workspaceId,
+          configId,
+          ...(cachedCapabilityPredatesAuthMethods ? { force: true } : {}),
+        });
+        if (cancelled || !response?.authMethods) return;
+        setDiscoveredAuthMethods(response.authMethods);
+      } catch {
+        // The list is advisory: when the Machine cannot answer right now, the
+        // plain sign-in action below still starts the daemon's own flow.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    cachedAuthMethods,
+    cachedCapabilityPredatesAuthMethods,
+    configId,
+    discoveredAuthMethods,
+    interactiveProtocolSupported,
+    machineId,
+    protocolAuthProvider,
+    runtime,
+    workspaceId,
+  ]);
 
   const openProviderAuthorization = async (authorizationUrl: string): Promise<boolean> => {
     if (!isAllowedAcpAuthorizationUrl(authorizationUrl)) {
@@ -324,7 +426,7 @@ export function AcpAuthenticationPanel({
     void startAuthenticationFromPersistedConfig();
   };
 
-  const startAuthenticationFromPersistedConfig = async (): Promise<void> => {
+  const startAuthenticationFromPersistedConfig = async (methodId?: string): Promise<void> => {
     if (!authArgs || phase === 'running' || !interactiveProtocolSupported) {
       return;
     }
@@ -361,6 +463,9 @@ export function AcpAuthenticationPanel({
     let startedRequestId: string | null = null;
     const operation = startAuthentication({
       ...authArgs,
+      // An older Machine rejects the whole start when it sees this field, so it
+      // is only sent to daemons that advertised the negotiation.
+      ...(methodId && canSelectAuthMethod ? { methodId } : {}),
       onProgress: (progress) => {
         if (!startedRequestId || activeAuthenticationRef.current?.requestId !== startedRequestId) {
           return;
@@ -708,6 +813,12 @@ export function AcpAuthenticationPanel({
     }
   }
 
+  // The advertised list replaces the single sign-in button: each row is the
+  // action, so the reader picks the method instead of discovering the choice
+  // only after a sign-in attempt has already started.
+  const showAdvertisedMethods =
+    advertisedMethods.length > 0 && codexAuthMode !== 'api-key' && phase !== 'running';
+
   return (
     <div {...stylex.props(styles.root, !compact && surface.formBlock)}>
       <div {...stylex.props(styles.actions)}>
@@ -726,7 +837,7 @@ export function AcpAuthenticationPanel({
               {t('common.cancel', 'Cancel')}
             </Button>
           </>
-        ) : (
+        ) : showAdvertisedMethods ? null : (
           <Button
             type="button"
             size="small"
@@ -764,6 +875,22 @@ export function AcpAuthenticationPanel({
       ) : null}
       {runtimeDownloadText ? (
         <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
+      ) : null}
+      {showAdvertisedMethods ? (
+        <AcpAuthenticationInteractionView
+          interaction={{
+            type: 'methods',
+            interactionId: 'advertised-methods',
+            methods: advertisedMethods,
+          }}
+          values={EMPTY_FORM_VALUES}
+          submitting={false}
+          onValuesChange={() => {}}
+          onSubmit={(input) => {
+            if (input.action === 'accept')
+              void startAuthenticationFromPersistedConfig(input.methodId);
+          }}
+        />
       ) : null}
       {phase === 'running' && authorization ? (
         <AcpAuthenticationAuthorizationView

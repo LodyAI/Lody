@@ -9,6 +9,7 @@ import { totalmem } from 'node:os'
 import { basename, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
+import type { AutomationControlRequest } from '@lody/shared/automations'
 import {
   signalChildTreeNowLegacy,
   startProcessLegacy,
@@ -89,9 +90,8 @@ import { resolveLocalSessionControlTimeoutMs } from './local-session-control-bud
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
-// force-killing it. Kept short so Command+Q feels responsive; with the CLI's own
-// fast socket teardown a clean exit normally lands well under this.
-const CLI_QUIT_GRACE_MS = 3000
+// force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
+const CLI_QUIT_GRACE_MS = 10_000
 // How long a SIGKILLed embedded CLI may take to be reaped before quit reports it.
 const CLI_FORCE_KILL_WAIT_MS = 5000
 // The embedded CLI shares Electron's process group: it is not spawned detached,
@@ -840,6 +840,10 @@ export class CliService {
     )
   }
 
+  async sendLocalAutomationControl(message: AutomationControlRequest) {
+    return await Effect.runPromise(this.localControlClient.automationControl(message))
+  }
+
   async activateLocalE2eeDevice(message: LocalE2eeActivateRequest) {
     if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
     return Effect.runPromise(
@@ -1008,15 +1012,19 @@ export class CliService {
    * after that bounded wait fails quit instead of being orphaned.
    */
   async shutdownForQuit(graceMs = CLI_QUIT_GRACE_MS): Promise<void> {
+    let supervisorFailure: unknown
     if (this.supervisor) {
       // Stop polling/retry first so the supervisor does not relaunch the child
       // after we signal it. (This also asks its active child to shut down.)
+      // A failed stop keeps the supervisor: it still owns the child and host
+      // lease, so quit fails and recovery retries this same owner.
       try {
         await this.supervisor.stop({ terminationGraceMs: graceMs })
+        this.supervisor = null
       } catch (error) {
         console.error('[Electron] Supervisor shutdown barrier failed', error)
+        supervisorFailure = error
       }
-      this.supervisor = null
     }
     this.clearMachineIdCache()
 
@@ -1026,6 +1034,7 @@ export class CliService {
     })
     this.updatePowerSaveBlocker()
     this.publishCliState()
+    if (supervisorFailure !== undefined) throw supervisorFailure
     if (survivors.length > 0) {
       const error = new Error(
         `Embedded CLI did not confirm exit after SIGKILL (${survivors.join('; ')})`

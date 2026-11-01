@@ -101,7 +101,7 @@ export function verifySignature(
   });
 }
 
-/** Fixed WebCrypto only. Native settlement and scratch cleanup precede interruption. */
+/** Fixed strict backends only. Native settlement and scratch cleanup precede interruption. */
 export function verifySignatureEffect(
   publicKey: unknown,
   message: Uint8Array,
@@ -126,13 +126,23 @@ export function verifySignatureEffect(
               Effect.tryPromise({
                 try: async () => {
                   const subtle = globalThis.crypto?.subtle;
-                  if (!subtle) throw new NativeSignatureError({ code: 'native-unavailable' });
+                  const verifyJs = () => {
+                    const result = verifySignature(owned.key, owned.message, owned.sig);
+                    if (Result.isFailure(result)) throw result.failure;
+                  };
+                  if (!subtle) return verifyJs();
                   const importKey = subtle.importKey.bind(subtle),
                     verifyNative = subtle.verify.bind(subtle);
-                  const key = await importKey('raw', owned.key, 'Ed25519', false, ['verify']);
-                  if ((await verifyNative('Ed25519', key, owned.sig, owned.message)) !== true)
-                    throw new ValidationError({ code: 'bad-signature' });
-                  rememberVerification(id);
+                  try {
+                    const key = await importKey('raw', owned.key, 'Ed25519', false, ['verify']);
+                    if ((await verifyNative('Ed25519', key, owned.sig, owned.message)) !== true)
+                      throw new ValidationError({ code: 'bad-signature' });
+                    rememberVerification(id);
+                  } catch (cause) {
+                    if (cause instanceof DOMException && cause.name === 'NotSupportedError')
+                      return verifyJs();
+                    throw cause;
+                  }
                 },
                 catch: (error) =>
                   error instanceof ValidationError || error instanceof NativeSignatureError

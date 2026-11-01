@@ -1,4 +1,6 @@
+import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
+import { automationOriginSchema } from './automations/contracts';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
@@ -131,6 +133,7 @@ const OptionalStringSchema = z.preprocess(
 export const SessionImagePayloadSchema = z
   .object({
     imageId: z.string(),
+    encryption: EncryptedAttachmentSchema.optional(),
     mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
     fileName: OptionalStringSchema,
     sizeBytes: z.number().int().positive().max(SESSION_IMAGE_MAX_SIZE_BYTES),
@@ -138,9 +141,16 @@ export const SessionImagePayloadSchema = z
     height: OptionalPositiveIntegerSchema,
     storageSessionId: SessionIdSchema.optional(),
   })
-  .strict();
+  .strict().superRefine((image, ctx) => {
+    const manifest = image.encryption;
+    if (manifest && (manifest.kind !== 'image' || manifest.parts[0] !== image.imageId ||
+      manifest.sizeBytes !== image.sizeBytes || manifest.mimeType !== image.mimeType ||
+      manifest.fileName !== (image.fileName ?? ''))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Encrypted image reference mismatch' });
+    }
+  });
 
-const SessionImageInputBlockSchema = SessionImagePayloadSchema.extend({
+const SessionImageInputBlockSchema = SessionImagePayloadSchema.safeExtend({
   type: z.literal('image'),
 }).strict();
 
@@ -159,6 +169,7 @@ const SessionFileBlockObjectSchema = z
   .object({
     type: z.literal('file'),
     fileId: z.string(),
+    encryption: EncryptedAttachmentSchema.optional(),
     fileName: z.string(),
     mimeType: z.string(),
     sizeBytes: z.number().int().nonnegative().max(SESSION_FILE_MAX_SIZE_BYTES),
@@ -177,6 +188,11 @@ const refineSessionFileBlock = (
   ctx: z.RefinementCtx,
   basePath: PropertyKey[] = []
 ): void => {
+  if (block.encryption && (block.encryption.kind !== 'file' || block.fileId !== block.encryption.parts[0] ||
+    block.sizeBytes !== block.encryption.sizeBytes || block.fileName !== block.encryption.fileName ||
+    block.mimeType !== block.encryption.mimeType || block.transport !== 'r2')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: basePath, message: 'Encrypted attachment reference mismatch' });
+  }
   // transport='local' means the bytes only exist on a specific machine pending
   // backfill; without machineId other devices can't render the honest
   // "uploading from <machine>" pending state.
@@ -410,7 +426,10 @@ export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
 export const SessionHistoryInputConfigSchema = ACPTurnConfigSchema.partial()
-  .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
+  .extend({
+    _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional(),
+    _lodyAutomation: automationOriginSchema.optional(),
+  })
   .strip();
 
 const LooseSessionTurnInputConfigSchema = SessionHistoryInputConfigSchema.passthrough();
@@ -447,6 +466,8 @@ export const normalizeSessionTurnInputConfig = (
 
   const record = value as Record<string, unknown>;
   const normalized: SessionTurnInputConfig = {};
+  if (record._lodyAutomation !== undefined)
+    normalized._lodyAutomation = automationOriginSchema.parse(record._lodyAutomation);
 
   const prompt = trimOptionalString(record.prompt);
   if (prompt) {
@@ -1253,6 +1274,16 @@ const AcpConfigOptionSummarySchema = z
   })
   .strict();
 
+const MachineAcpAuthMethodSummarySchema = z
+  .object({
+    type: z.enum(['agent', 'env_var', 'terminal']),
+    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
+  })
+  .strict();
+
 const AcpCapabilityCacheEntrySchema = z
   .object({
     cliType: AgentConfigCliTypeSchema,
@@ -1274,6 +1305,10 @@ const AcpCapabilityCacheEntrySchema = z
           .strict()
       )
       .optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
@@ -1281,16 +1316,6 @@ const AcpCapabilityCacheEntrySchema = z
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
-  })
-  .strict();
-
-const MachineAcpAuthMethodSummarySchema = z
-  .object({
-    type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
-    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
-    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
   })
   .strict();
 
@@ -1462,6 +1487,8 @@ export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action'
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('start'),
     configId: AgentConfigIdSchema,
+    /** Sign-in method picked from the agent's advertised list. */
+    methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
   }).strict(),
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('cancel'),
@@ -1767,7 +1794,7 @@ export const SessionImageUploadResponseSchema = z
     content: SessionImageGroupContentSchema.optional(),
     images: z
       .array(
-        SessionImagePayloadSchema.extend({
+        SessionImagePayloadSchema.safeExtend({
           downloadUrl: z.string().url(),
         }).strict()
       )

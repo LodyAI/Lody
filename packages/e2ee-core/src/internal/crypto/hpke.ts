@@ -1,10 +1,12 @@
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256, OpenError } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
+import { DhkemX25519HkdfSha256 as JsX25519 } from '@hpke/dhkem-x25519';
 import { Data, Effect, Result } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { encodeCbor } from '../foundation/cbor';
 import { copyEpochKeyBytes } from '../foundation/epoch-key';
 import { ValidationError } from '../foundation/errors';
+import { borrowBrowserEncryption } from '../foundation/browser-device';
 
 /** The fixed epoch-key HPKE primitive failed; carries no secret detail.
  * `open-failed` identifies AEAD rejection; ambiguous native setup/decapsulation
@@ -58,9 +60,24 @@ export function epochHpkeAad(
   );
 }
 
-function suite() {
+// The pinned JS KEM exposes its own secret backing buffer through this internal
+// method. Retain it only for one seal and wipe after actual HPKE settlement.
+class OwnedJsX25519 extends JsX25519 {
+  readonly privateBytes = new Set<Uint8Array>();
+  override async deriveKeyPair(ikm: Parameters<JsX25519['deriveKeyPair']>[0]) {
+    const pair = await super.deriveKeyPair(ikm);
+    this.privateBytes.add(new Uint8Array(await super.serializePrivateKey(pair.privateKey)));
+    return pair;
+  }
+  dispose() {
+    for (const bytes of this.privateBytes) bytes.fill(0);
+    this.privateBytes.clear();
+  }
+}
+
+function suite(js = false) {
   return new CipherSuite({
-    kem: new DhkemX25519HkdfSha256(),
+    kem: js ? new OwnedJsX25519() : new DhkemX25519HkdfSha256(),
     kdf: new HkdfSha256(),
     aead: new Chacha20Poly1305(),
   });
@@ -95,6 +112,7 @@ export function sealEpochKeyHpke(
         Effect.tryPromise({
           try: async () => {
             const ikm = new Uint8Array(32);
+            let ownedKem: OwnedJsX25519 | undefined;
             let plaintext: Uint8Array | undefined;
             try {
               try {
@@ -108,7 +126,8 @@ export function sealEpochKeyHpke(
               } catch {
                 throw error('random-unavailable');
               }
-              const cipher = suite();
+              const cipher = suite(true);
+              if (cipher.kem instanceof OwnedJsX25519) ownedKem = cipher.kem;
               const recipientPublicKey = await cipher.kem.deserializePublicKey(recipient);
               const sealed = await cipher.seal(
                 { recipientPublicKey, info: info(), ekm: ikm },
@@ -121,6 +140,7 @@ export function sealEpochKeyHpke(
             } finally {
               plaintext?.fill(0);
               ikm.fill(0);
+              ownedKem?.dispose();
             }
           },
           catch: (cause) => (cause instanceof HpkePrimitiveError ? cause : error('seal-failed')),
@@ -166,13 +186,18 @@ export function openEpochKeyHpke(
         Effect.tryPromise({
           try: async () => {
             let plaintext: Uint8Array | undefined;
+            let lease: ReturnType<typeof borrowBrowserEncryption>;
             try {
-              const cipher = suite();
-              const actual = new Uint8Array(await cipher.kem.serializePublicKey(keyPair.publicKey));
+              lease = borrowBrowserEncryption(keyPair);
+              const cipher = suite(lease !== undefined);
+              const activePair = lease?.pair ?? keyPair;
+              const actual = new Uint8Array(
+                await cipher.kem.serializePublicKey(activePair.publicKey)
+              );
               if (actual.byteLength !== 32 || actual.some((byte, i) => byte !== recipient[i]))
                 throw error('recipient-mismatch');
               plaintext = new Uint8Array(
-                await cipher.open({ recipientKey: keyPair, enc, info: info() }, ct, aad)
+                await cipher.open({ recipientKey: activePair, enc, info: info() }, ct, aad)
               );
               if (plaintext.byteLength !== 32) throw error('open-failed');
               const result = Bytes.epochKey(plaintext);
@@ -180,6 +205,7 @@ export function openEpochKeyHpke(
               return result.success;
             } finally {
               plaintext?.fill(0);
+              lease?.release();
             }
           },
           catch: (cause) =>

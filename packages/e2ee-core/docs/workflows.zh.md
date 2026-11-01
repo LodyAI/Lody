@@ -17,6 +17,8 @@ _需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。_
 
 然后推进钉；检查点不变时不写入。钉写入失败时，较新的视图仍记在内存中，旧视图继续被拒绝。`ensureCurrent(view)` 对较早获得的视图重复进程内检查。新鲜度只相对于本设备自己的历史；全局新鲜度仍依赖日志不隐藏记录。
 
+`canWriteRetainedEpoch(epoch)` 只检查可选的持久本地观察日志，不读取 source。产品内容绑定仅在当前 key 真实缺失时使用。十五分钟首次观察截止时间、保守的时钟连续性和提示规则见 [owner 取舍](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.zh.md)；该方法不授予设备或角色权限。缺少日志支持时仍要求当前 key。
+
 ## LedgerFeed
 
 _需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。_
@@ -130,6 +132,16 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 `runWorkspaceKeyRound(limit, cursors)`（_需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`_）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
 
+
+收钥（包括已提交的暂存组）与发钥是分别尝试的有限阶段。收钥失败不能阻止协调和投递。
+`WorkspaceKeyRoundFailure` 分别保留 `receive`、`distribution` 的 Result、发钥后报告的 Result
+和重试 `cursors`；成功阶段可前进，失败阶段保留输入游标。整轮成功时沿用原结果字段。
+
+邮箱获取会跳过非当前 sender，不安装或保存其密钥。只有精确路由上的严格签名和真实账本中
+已退出当前成员状态的历史身份，才能产生 `retiredDigests`，由轮次提交按摘要绑定的修复。
+未知 sender 只设置 `refreshRequired`，不拒绝摘要。宿主必须刷新已验证账本后重试；工作区
+门面已有账本源刷新，桌面维护则在独立发钥之后，通过现有已验证历史摄入路径每次最多刷新一次。
+
 ## E2eeWorkspace
 
 以上一切之上的应用门面。`WorkspacePlatform` 为每个工作区提供端口 Layer（`WorkspacePorts`）、每个资源的原生文档状态，以及可选的恢复配置。`E2eeWorkspace.open()` 在工作区 Scope 中构建 `E2eeWorkflows` 与 `WorkspaceControl`，返回一个句柄：账本命令、换代与移除、密钥轮次、文档（`document(resource, model)` 返回 Streams 绑定和原生状态）、结果与确认、恢复。
@@ -138,7 +150,7 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 

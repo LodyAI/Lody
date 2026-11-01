@@ -1,3 +1,8 @@
+import {
+  makeLazyMachineSharingHost,
+  MachineSharingError,
+  type SharingRemote
+} from '@lody/e2ee-machine-sharing'
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
@@ -10,7 +15,7 @@ import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
-import { makeDesktopMemberApprovals } from './e2ee-member-join.mjs'
+import { makeDesktopMemberApprovals, verifyMemberHistory } from './e2ee-member-join.mjs'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
 import type { LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing'
 import { mkdir, unlink } from 'node:fs/promises'
@@ -33,6 +38,7 @@ import {
   decodeRecord,
   exportVerifiedState,
   hashRecordBytes,
+  ledgerStateDigest,
   prepareLedgerCommand,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
@@ -63,7 +69,12 @@ import {
   sqliteLedgerPinStore
 } from '@lody/e2ee-core/adapters/node-sqlite'
 import type { E2eeWorkspaceRuntime, E2eeContentSeal, E2eeContentOpen } from '@lody/platform'
-import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams'
+import {
+  makeStreamsUpdateBinding,
+  makeRealtimeContentBinding
+} from '@lody/e2ee-core/adapters/loro-streams'
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native'
+import type { E2eeDispatchInput } from '@lody/shared/e2ee-rpc'
 import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content'
 type E2eeWorkspaceHistoryPage = Parameters<E2eeWorkspaceRuntime['ingestLedgerRecords']>[1]
 import type { E2eeRuntimeLedgerView, E2eeRuntimeStatus } from '@lody/platform'
@@ -79,14 +90,23 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'closed'
     | 'invalid-input'
     | 'corrupt'
+    | 'snapshot-history-required'
+    | 'key-update-required'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
     | 'management_unauthorized'
     | 'management_operator_required'
     | 'management_retry'
+    | 'machine_not_owned'
+    | 'machine_not_shared'
+    | 'sharing_conflict'
+    | 'sharing_unavailable'
+    | 'sharing_invalid'
+    | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
 }> {}
@@ -133,11 +153,24 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(
     Effect.mapError((error) => {
       if (error instanceof DesktopE2eeRuntimeError) return error
+      if (error instanceof MachineSharingError) return fail(error.code)
+      if (
+        error instanceof Error &&
+        ['e2ee_machine_not_owned', 'e2ee_machine_not_shared'].includes(error.message)
+      )
+        return fail(
+          error.message === 'e2ee_machine_not_owned' ? 'machine_not_owned' : 'machine_not_shared'
+        )
+      // An unverifiable sharing policy is not a ledger failure.
+      if (error instanceof Error && error.message === 'e2ee_machine_sharing_unavailable')
+        return fail('sharing_unavailable')
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
+      if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
           ? 'local-evidence-conflict'
@@ -202,25 +235,35 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
-        observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
+        observe: (
+          checkpoint: ObservedCheckpoint,
+          proof?: readonly E2eeWorkspaceHistoryPage[]
+        ) => Effect.Effect<void, unknown>
         stop: () => void
         isClosing: () => boolean
         close: Effect.Effect<void, DesktopE2eeRuntimeError>
         restartRequired: () => boolean
         keyRound: (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
         ) => Effect.Effect<{ header: Uint8Array; sealed: Uint8Array }, unknown>
         openContent: (input: E2eeContentOpen) => Effect.Effect<Uint8Array, unknown>
+        refreshSharingLedger: (
+          readHistory: DesktopE2eeManagementRemote['history']
+        ) => Effect.Effect<void, unknown>
+        sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>>
+        rpc: ReturnType<typeof makeE2eeRpcNative>
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
     >()
     const openWorkspace = Effect.fnUntraced(function* (
       workspaceId: string,
-      observed?: ObservedCheckpoint
+      observed?: ObservedCheckpoint,
+      proof?: readonly E2eeWorkspaceHistoryPage[]
     ) {
       if (typeof workspaceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId))
         return yield* fail('invalid-input')
@@ -228,13 +271,29 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       if (openedEntry) {
         if (openedEntry.isClosing())
           return yield* fail(openedEntry.restartRequired() ? 'restart-required' : 'closed')
-        if (observed) yield* openedEntry.observe(observed)
+        if (observed) yield* openedEntry.observe(observed, proof)
         return openedEntry
       }
-      if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
-        return yield* fail('member_removed')
+      const removed = yield* options.bootstrap.removedReason(workspaceId)
+      if (removed) return yield* fail(removed)
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
+      const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
+        if (
+          !expected ||
+          expected.genesisHash !== creation.genesisHash ||
+          !Number.isSafeInteger(expected.length) ||
+          expected.length < 1 ||
+          !/^[0-9a-f]{64}$/.test(expected.headHash)
+        )
+          return yield* fail('local-evidence-conflict')
+        const point = {
+          head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
+          length: expected.length
+        }
+        return point
+      })
+      const openingObservation = observed ? yield* readObservation(observed) : undefined
       const invitation = creation.invitation
       const initialOrigin: Parameters<typeof LedgerFeed.layer>[0]['origin'] = invitation
         ? { kind: 'snapshot', snapshot: invitation.snapshot }
@@ -331,8 +390,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         )
         const pins = Context.get(storeContext, LedgerPinStore)
         const installedStore = Context.get(storeContext, InstalledKeyStore)
-        const pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
+        let pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
         let minimumPin = pin
+        // Reject contradictions already known locally before requesting any prefix proof.
+        if (
+          openingObservation &&
+          [pin, initialPoint].some(
+            (known) =>
+              known?.length === openingObservation.length &&
+              !known.head.equals(openingObservation.head)
+          )
+        )
+          return yield* fail('local-evidence-conflict')
         const rows = () =>
           db
             .prepare('SELECT position,record,locator FROM records ORDER BY position')
@@ -344,6 +413,107 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const endpoint = suffix.length
           ? { head: hashRecordBytes(suffix.at(-1)!.record), length: suffix.at(-1)!.position + 1 }
           : initialPoint
+        // A compact invitation cannot prove any checkpoint before its origin. Fetching
+        // history belongs to IPC outside the account lock; authenticate and retain it here.
+        let prefixProof: import('@lody/e2ee-core/protocol').LedgerView | undefined
+        const proveSnapshotPrefix = Effect.fnUntraced(function* (
+          point: { head: ReturnType<typeof hashRecordBytes>; length: number },
+          pages?: readonly E2eeWorkspaceHistoryPage[],
+          additionalPoint?: typeof point
+        ) {
+          if (!invitation) return yield* fail('local-evidence-conflict')
+          if (!prefixProof) {
+            let prefix = (yield* sql(rows)).filter((row) => row.position < initialCount)
+            if (prefix.length !== initialCount || prefix.some((row, i) => row.position !== i)) {
+              if (!pages) return yield* fail('snapshot-history-required')
+              // Validate the entire paginated response, including any newer suffix.
+              yield* verifyMemberHistory(
+                {
+                  workspaceId,
+                  genesisHash: creation.genesisHash,
+                  genesisRecordHex: hex(creation.record)
+                },
+                pages
+              )
+              prefix = pages
+                .flatMap((page) =>
+                  page.recordsHex.map((record, i) => ({
+                    position: page.startIndex + i,
+                    record: unhex(record),
+                    locator: null
+                  }))
+                )
+                .slice(0, initialCount)
+            }
+            const replayed = yield* verifyLedgerEffect({
+              anchor: genesis,
+              records: prefix.map((row) => row.record),
+              checkpoint: initialPoint
+            }).pipe(
+              Effect.mapError((error) =>
+                error.code === 'checkpoint-mismatch' ? fail('local-evidence-conflict') : error
+              )
+            )
+            if (
+              !Result.getOrThrow(ledgerStateDigest(replayed)).equals(
+                Result.getOrThrow(ledgerStateDigest(invitation.view))
+              )
+            )
+              return yield* fail('local-evidence-conflict')
+            if (!Result.getOrThrow(hasVerifiedCheckpoint(replayed, point)))
+              return yield* fail('local-evidence-conflict')
+            // Validate the caller's observation as well as the original native pin before
+            // committing anything. A newer observation beyond local history remains a
+            // pending restriction, as in observe(); it grants no current authority.
+            if (additionalPoint && additionalPoint.length <= endpoint.length) {
+              const evidence =
+                additionalPoint.length <= replayed.length
+                  ? replayed
+                  : yield* extendLedgerEffect(
+                      replayed,
+                      suffix.map((row) => row.record),
+                      endpoint
+                    )
+              if (!Result.getOrThrow(hasVerifiedCheckpoint(evidence, additionalPoint)))
+                return yield* fail('local-evidence-conflict')
+            }
+            // No proof or conflicting evidence may mutate originals or the durable pin.
+            yield* sql(() => {
+              db.exec('BEGIN IMMEDIATE')
+              try {
+                for (const row of prefix) {
+                  const prior = db
+                    .prepare('SELECT record FROM records WHERE position=?')
+                    .get(row.position)
+                  if (
+                    prior &&
+                    (!(prior.record instanceof Uint8Array) ||
+                      !Buffer.from(prior.record).equals(row.record))
+                  )
+                    throw fail('local-evidence-conflict')
+                  db.prepare('INSERT OR IGNORE INTO records(position,record) VALUES(?,?)').run(
+                    row.position,
+                    row.record
+                  )
+                }
+                db.exec('COMMIT')
+              } catch (error) {
+                db.exec('ROLLBACK')
+                throw error
+              }
+            })
+            prefixProof = replayed
+          }
+          if (!Result.getOrThrow(hasVerifiedCheckpoint(prefixProof, point)))
+            return yield* fail('local-evidence-conflict')
+          return undefined
+        })
+        if (pin && pin.length < initialCount) {
+          yield* proveSnapshotPrefix(pin, proof, openingObservation)
+          // Originals are durable before the guard advances across the proved prefix.
+          yield* pins.write(initialPoint)
+          pin = minimumPin = initialPoint
+        }
         const replayOriginals = (): Effect.Effect<
           import('@lody/e2ee-core/protocol').LedgerView,
           unknown
@@ -547,24 +717,20 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             })
           }
         }
-        const observe = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
-          if (
-            !expected ||
-            expected.genesisHash !== creation.genesisHash ||
-            !Number.isSafeInteger(expected.length) ||
-            expected.length < 1 ||
-            !/^[0-9a-f]{64}$/.test(expected.headHash)
-          )
-            return yield* fail('local-evidence-conflict')
-          const point = {
-            head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
-            length: expected.length
-          }
+        const observe = Effect.fnUntraced(function* (
+          expected: ObservedCheckpoint,
+          pages?: readonly E2eeWorkspaceHistoryPage[]
+        ) {
+          const point = yield* readObservation(expected)
           if (minimumPin?.length === point.length && !minimumPin.head.equals(point.head))
             return yield* fail('local-evidence-conflict')
           const current = (yield* feed.current()).view
           if (current.length >= point.length) {
             let contains = Result.getOrThrow(hasVerifiedCheckpoint(current, point))
+            if (!contains && invitation && point.length < initialCount) {
+              yield* proveSnapshotPrefix(point, pages)
+              contains = true
+            }
             if (!contains) {
               const proofRecords = yield* sql(rows)
               const replayed = yield* invitation
@@ -586,12 +752,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
           // This is a prior local verifier's restriction, never a source of permission.
           if (!minimumPin || minimumPin.length < point.length) {
-            yield* pins.write(point)
-            minimumPin = point
+            const nextPin = invitation && point.length < initialCount ? initialPoint : point
+            yield* pins.write(nextPin)
+            minimumPin = nextPin
           }
           return undefined
         })
-        if (observed) yield* observe(observed)
+        if (observed) yield* observe(observed, proof)
         const pending = (view: { length: number }) =>
           Boolean(minimumPin && view.length < minimumPin.length)
         const verifiedLayer = VerifiedLedger.layer.pipe(
@@ -690,9 +857,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
         let roundAgain = false
         let closing = false
+        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const networkAbort = new AbortController()
         const stop = () => {
           closing = true
+          sharingOwner?.stop()
           roundAgain = false
           networkAbort.abort()
         }
@@ -723,7 +892,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const isClosing = () => closing
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
         ) {
           if (closing) return yield* fail('closed')
           roundAgain = true
@@ -796,32 +966,44 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   )
                 }
                 let passes = 0
+                let refreshedUnknown = false
                 do {
                   roundAgain = false
                   const view = yield* verified.current()
                   const epoch = view.inspectState().epoch.number
-                  const checked = yield* Effect.result(keys.check(epoch))
-                  if (staging && epoch > 0 && Result.isFailure(checked)) {
-                    const located = getCommittedEpochStagingKey(view, epoch)
-                    // A snapshot-joined device without this publication original uses mailbox/history.
-                    if (Result.isSuccess(located)) {
-                      // Staging denial or I/O failure must not gate verified mailbox receipt.
-                      const group = yield* staging(networkAbort.signal)
-                        .readGroup(located.success)
-                        .pipe(Effect.catch(() => Effect.succeed(null)))
-                      if (
-                        group?.envelopes.some(
-                          (row) => row.recipient === hex(device.publicKey.toBytes())
+                  const currentReceiver = Context.get(maintenance, KeyReceiver)
+                  const beforeReceive = Effect.gen(function* () {
+                    const checked = yield* Effect.result(keys.check(epoch))
+                    if (staging && epoch > 0 && Result.isFailure(checked)) {
+                      const located = getCommittedEpochStagingKey(view, epoch)
+                      // A snapshot-joined device without this publication original uses mailbox/history.
+                      if (Result.isSuccess(located)) {
+                        // Staging denial or I/O failure must not gate verified mailbox receipt.
+                        const group = yield* staging(networkAbort.signal)
+                          .readGroup(located.success)
+                          .pipe(Effect.catch(() => Effect.succeed(null)))
+                        if (
+                          group?.envelopes.some(
+                            (row) => row.recipient === hex(device.publicKey.toBytes())
+                          )
                         )
-                      )
-                        yield* Context.get(maintenance, KeyReceiver).receiveStagedGroup(group)
-                    } else if (view.verification !== 'endorsed-snapshot')
-                      return yield* located.failure
-                  }
+                          yield* currentReceiver.receiveStagedGroup(group)
+                      } else if (view.verification !== 'endorsed-snapshot')
+                        return yield* located.failure
+                    }
+                    return undefined
+                  })
                   maintainKeys ??= yield* makeDesktopKeyMaintenance().pipe(
                     Effect.provide(maintenance)
                   )
-                  yield* maintainKeys(epoch)
+                  const needsRefresh = yield* maintainKeys(epoch, beforeReceive)
+                  if (needsRefresh && refreshLedger && !refreshedUnknown) {
+                    refreshedUnknown = true
+                    // Delivery already ran. Refresh only this workspace through the
+                    // existing verified ingest, outside native/account locks.
+                    yield* refreshManagementHistory(refreshLedger(networkAbort.signal))
+                    roundAgain = true
+                  }
                 } while (roundAgain && ++passes < 4 && !isClosing())
                 return undefined
               })
@@ -832,29 +1014,61 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* result
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
+        const sharing = yield* makeLazyMachineSharingHost({
+          filename: join(directory, 'machine-sharing.sqlite'),
+          admissionHistory: (view) =>
+            sql(() =>
+              rows()
+                .filter((row) => row.position < view.length)
+                .map((row) => ({ length: row.position + 1, record: new Uint8Array(row.record) }))
+            ),
+          workspaceId,
+          genesisHash: hex(genesis.toBytes()),
+          signer: device,
+          ledger: () => verified.current(),
+          readEpochKey: (epoch) => history.read(epoch),
+          credential: () => options.bootstrap.deviceCredential(workspaceId),
+          // Public methods refresh through their captured device-authenticated history before calling this host.
+          refreshLedger: () => Effect.void
+        })
+        sharingOwner = sharing
+        const rpc = makeE2eeRpcNative({
+          workspaceId,
+          requesterDevice: hex(device.publicKey.toBytes()),
+          originals: new E2eeRpcOriginals(join(directory, 'rpc-originals.sqlite')),
+          ledger: () => verified.current(),
+          binding: (resource) =>
+            makeRealtimeContentBinding({
+              genesis,
+              resource,
+              signer: device,
+              ledger: () => verified.current(),
+              readEpochKey: (epoch) => history.read(epoch)
+            })
+        })
+        yield* Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie))
         const bindings = new Map<
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
         >()
-        const binding = Effect.fnUntraced(function* (
-          room: E2eeContentSeal['room'],
-          writeEpoch: number
-        ) {
+        const binding = Effect.fnUntraced(function* (room: E2eeContentSeal['room']) {
           const descriptor = yield* Effect.try({
             try: () => encryptedWorkspaceRoom(workspaceId, room),
             catch: () => fail('invalid-input')
           })
-          let value = bindings.get(`${descriptor.resource}:${writeEpoch}`)
+          let value = bindings.get(descriptor.resource)
           if (!value) {
             value = yield* makeStreamsUpdateBinding({
               ...descriptor,
               genesis,
-              writeEpoch,
+              // Renderer epochs are stale hints, never encryption authority.
+              // Core captures the verified current epoch when each seal starts.
+              writeEpoch: 'current',
               signer: device,
               ledger: () => verified.current(),
               readEpochKey: (epoch) => history.read(epoch)
-            }).pipe(Scope.provide(scope))
-            bindings.set(`${descriptor.resource}:${writeEpoch}`, value)
+            }).pipe(Effect.provideService(VerifiedLedger, verified), Scope.provide(scope))
+            bindings.set(descriptor.resource, value)
           }
           return value
         })
@@ -870,7 +1084,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const provider = yield* binding(input.room, input.epoch)
+          // A future hint must fail for catch-up, never silently downgrade.
+          const view = yield* verified.current()
+          if (input.epoch > view.inspectState().epoch.number) return yield* fail('invalid-ledger')
+          const provider = yield* binding(input.room)
           return yield* provider.seal({ ...input, additionalData: () => input.additionalData })
         })
         const openContent = Effect.fnUntraced(function* (input: E2eeContentOpen) {
@@ -881,8 +1098,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !checkBytes(input.additionalData, 65536)
           )
             return yield* fail('invalid-input')
-          const view = yield* verified.current()
-          const provider = yield* binding(input.room, view.inspectState().epoch.number)
+          const provider = yield* binding(input.room)
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined
@@ -974,6 +1190,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
         })
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
+          sharing.invalidate()
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
           if (
@@ -1191,7 +1408,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                             if (Result.isFailure(installedCurrent))
                               yield* keyRound(
                                 () => upstream.mailbox(),
-                                () => upstream.staging()
+                                () => upstream.staging(),
+                                () => upstream.history
                               )
                             // A later installed epoch can restore an older pending publication key.
                             yield* Context.get(historyContext, InstalledEpochHistory).recover()
@@ -1224,6 +1442,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           observe,
           seal,
           openContent,
+          rpc,
+          sharing,
+          refreshSharingLedger: refreshManagementHistory,
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1304,6 +1525,28 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
       )
     }
+    const withSharingHistory = (
+      entry: {
+        refreshSharingLedger: (
+          read: DesktopE2eeManagementRemote['history']
+        ) => Effect.Effect<void, unknown>
+      },
+      workspaceId: string,
+      remote: SharingRemote,
+      readHistory?: DesktopE2eeManagementRemote['history']
+    ): SharingRemote => ({
+      ...remote,
+      ...(readHistory
+        ? {
+            refreshLedger: () =>
+              entry.refreshSharingLedger((request) =>
+                Effect.flatMap(options.bootstrap.deviceCredential(workspaceId), (credential) =>
+                  readHistory({ ...request, credential })
+                )
+              )
+          }
+        : {})
+    })
     return {
       remoteMachineOffer: (
         workspaceId: string,
@@ -1351,6 +1594,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           Effect.mapError((error) => {
             rememberDesktopE2eeFailure('workspace-management', error)
             if (error instanceof DesktopE2eeRuntimeError) return error
+            if (error instanceof MachineSharingError) return fail(error.code)
+            if (
+              error instanceof Error &&
+              ['e2ee_machine_not_owned', 'e2ee_machine_not_shared'].includes(error.message)
+            )
+              return fail(
+                error.message === 'e2ee_machine_not_owned'
+                  ? 'machine_not_owned'
+                  : 'machine_not_shared'
+              )
             const cause = (error as { cause?: unknown })?.cause ?? error
             const code = (cause as { code?: string })?.code
             if (
@@ -1440,8 +1693,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         withPairing(workspaceId, (pairing) => pairing.approve(session)),
       confirmLocalPairing: (workspaceId: string, session: string) =>
         withPairing(workspaceId, (pairing) => pairing.confirmed(session)),
-      open: (workspaceId: string, observed?: ObservedCheckpoint) =>
-        run(Effect.flatMap(openWorkspace(workspaceId, observed), (entry) => entry.status())),
+      open: (
+        workspaceId: string,
+        observed?: ObservedCheckpoint,
+        proof?: readonly E2eeWorkspaceHistoryPage[]
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId, observed, proof), (entry) => entry.status())),
       status: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.status())),
       // The lookup is serialized locally; mailbox/network work deliberately
@@ -1449,7 +1706,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       keyRound: (
         workspaceId: string,
         mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-        staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+        staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
       ) =>
         Effect.flatMap(
           run(
@@ -1459,12 +1717,121 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox, staging)
+          (entry) => entry.keyRound(mailbox, staging, refreshLedger)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
       openContent: (workspaceId: string, input: E2eeContentOpen) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.openContent(input))),
+      // Read only an existing entry. Unlike status/readMachineSharing this never
+      // calls openWorkspace, opens storage, refreshes grants or discovers a target.
+      inspectCachedState: (workspaceId: string, machineId: string) =>
+        run(
+          Effect.sync(() => {
+            const entry = entries.get(workspaceId)
+            return {
+              workspaceId,
+              machineId,
+              entryPresent: Boolean(entry),
+              ...(entry?.sharing.inspectCache(machineId) ?? {
+                cachedPolicies: 0,
+                cachedExecutionGrants: 0
+              })
+            }
+          })
+        ),
+      readMachineSharing: (
+        workspaceId: string,
+        machineId: string,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.sharing.read(machineId, withSharingHistory(entry, workspaceId, remote, readHistory))
+        ).pipe(boundary),
+      updateMachineSharing: (
+        workspaceId: string,
+        machineId: string,
+        generation: string,
+        requestId: string,
+        change: import('@lody/platform').E2eeMachineSharingChange,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.sharing.write(
+            machineId,
+            generation,
+            requestId,
+            change,
+            withSharingHistory(entry, workspaceId, remote, readHistory)
+          )
+        ).pipe(boundary),
+      prepareDispatch: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: E2eeDispatchInput,
+        remote?: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.rpc.prepareDispatch(
+            targetMachineId,
+            input,
+            remote
+              ? (machineId) =>
+                  Effect.gen(function* () {
+                    const status = yield* entry.status()
+                    // A retained verified withdrawal answers locally; only a newer
+                    // verified read (machine-sharing views) can release it.
+                    if (
+                      yield* entry.sharing.knownDenial(
+                        machineId,
+                        status.signingPublicKey ?? '',
+                        undefined
+                      )
+                    )
+                      return false
+                    const decision = yield* entry.sharing.authorize(
+                      machineId,
+                      status.signingPublicKey ?? '',
+                      undefined,
+                      withSharingHistory(entry, workspaceId, remote, readHistory)
+                    )
+                    // An unverifiable policy is not a known withdrawal.
+                    if (!decision.allowed && decision.reason === 'policy-unavailable')
+                      return yield* Effect.fail(new Error('e2ee_machine_sharing_unavailable'))
+                    return decision.allowed
+                  })
+              : undefined
+          )
+        ).pipe(boundary),
+      prepareFeatureRpc: (
+        workspaceId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.rpc.prepareFeature(input))),
+      acceptFeatureRpcResponse: (
+        workspaceId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+        frame: string
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.acceptFeatureResponse(input, frame)
+          )
+        ),
+      acceptDispatchResponse: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: E2eeDispatchInput,
+        frameHex: string
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.acceptResponse(targetMachineId, input, frameHex)
+          )
+        ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
       ingestLedgerRecords: (workspaceId: string, page: E2eeWorkspaceHistoryPage) =>

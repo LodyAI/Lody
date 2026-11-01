@@ -37,8 +37,10 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
-- Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
-  or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
+- Never hide a Session through nesting: missing, cross-section, cycling, or
+  deeper-than-one-level openers render top-level. In Workspace mode,
+  `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
+  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
@@ -56,6 +58,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Entry points, drafts, and layout
 
+- iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
   window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
@@ -109,3 +112,17 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
+
+
+## Automation markers
+
+- Key workspace, machine, invitation, membership and composer controls expose
+  stable `data-testid` values independent of translated labels. Repeated rows keep
+  the existing full identity attribute (`data-settings-machine-id`,
+  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
+  `data-agent-config-id`).
+  These are public identifiers, never invitation tokens, credentials or key bytes.
+- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
+  it is not execution permission. Tests must still bind the workspace and observe
+  the required content or control surface. Preserve existing semantic/identity
+  attributes so older harnesses continue to work.

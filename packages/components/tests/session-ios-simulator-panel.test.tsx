@@ -27,7 +27,7 @@ import {
   IOS_SIMULATOR_PREPARING_MAX_POLLS,
   writeIosSimulatorSelectedDevice,
 } from '../src/lib/ios-simulator/ios-simulator-model';
-import { SessionIosSimulatorPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
+import { SessionDevicePreviewPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -163,6 +163,8 @@ afterEach(() => {
 
 async function renderPanel(options: {
   machine: ReturnType<typeof createFakeMachine>;
+  platform?: 'ios' | 'android';
+  androidControl?: WorkspaceRuntime['requestAndroidEmulatorControl'];
   meta?: MachineMeta;
   presence?: 'synced' | 'idle';
   localMachine?: boolean;
@@ -175,6 +177,7 @@ async function renderPanel(options: {
     workspaceId: WORKSPACE,
     workspaceSlug: 'sim',
     requestIosSimulatorControl: options.machine.requestIosSimulatorControl,
+    requestAndroidEmulatorControl: options.androidControl,
   } as unknown as WorkspaceRuntime);
   store.set(machineMetaCacheAtom, {
     [getMachineRoomId(MACHINE)]: options.meta ?? macMeta({ iosSimulator: 1 }),
@@ -190,7 +193,8 @@ async function renderPanel(options: {
         createElement(
           Provider,
           { store },
-          createElement(SessionIosSimulatorPanel, {
+          createElement(SessionDevicePreviewPanel, {
+            platform: options.platform,
             session: SESSION,
             active,
             onAttachScreenshot: options.onAttachScreenshot,
@@ -469,6 +473,21 @@ describe('SessionIosSimulatorPanel', () => {
     expect(machine.commands.length).toBe(reads);
     expect(button('Stop preview').disabled).toBe(false);
   });
+
+  it.each(['toolbar', 'menu'] as const)(
+    'exposes Stop preview directly and releases the current operation (%s)',
+    async (controlsLayout) => {
+      const machine = createFakeMachine({
+        devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+        preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL }),
+      });
+      await renderPanel({ machine, controlsLayout });
+      await click('Stop preview');
+      expect(machine.commands).toContainEqual({ action: 'stop', operationId: 'op-1' });
+      await machine.answerNext(answer({ preview: preview({ phase: 'closed' }) }));
+      expect(button('Preview').disabled).toBe(false);
+    }
+  );
 
   it('offers Restore after the preview closed, as a new start', async () => {
     const machine = createFakeMachine({
@@ -1134,5 +1153,119 @@ it.each(['null', 'file://'])(
     act(() => root?.unmount());
     root = undefined;
     expect(fresh.peer?.closed).toBe(true);
+  }
+);
+
+it('uses Android capability on Linux and renders configured AVDs without touching the iOS lifecycle', async () => {
+  const machine = createFakeMachine({ devices: [] });
+  await renderPanel({
+    machine,
+    platform: 'android',
+    localMachine: true,
+    meta: { ...macMeta({ androidEmulator: 1 }), os: 'linux' },
+    androidControl: async ({ command }) => ({
+      type: 'android-emulator/control_response',
+      sessionId: SESSION.id,
+      success: true,
+      devices:
+        command.action === 'list'
+          ? [
+              {
+                id: 'Pixel_A',
+                name: 'Pixel A',
+                runtime: 'Android',
+                deviceType: 'AVD',
+                state: 'Shutdown',
+                available: true,
+                occupancy: 'available',
+              },
+            ]
+          : undefined,
+    }),
+  });
+  expect(text()).toContain('Pixel A');
+  expect(text()).not.toContain('Xcode');
+  expect(machine.commands).toEqual([]);
+});
+
+it.each([false, true])(
+  'starts balanced and switches quality while previewing only on capable hosts (supported=%s)',
+  async (supported) => {
+    const machine = createFakeMachine({ devices: [] });
+    let started: unknown;
+    await renderPanel({
+      machine,
+      platform: 'android',
+      localMachine: true,
+      meta: macMeta({ androidEmulator: 1, ...(supported ? { androidEmulatorQuality: 1 } : {}) }),
+      androidControl: async ({ command }) => {
+        if (command.action === 'start') started = command;
+        return {
+          type: 'android-emulator/control_response',
+          sessionId: SESSION.id,
+          success: true,
+          devices:
+            command.action === 'list'
+              ? [
+                  {
+                    id: 'Pixel_A',
+                    name: 'Pixel A',
+                    runtime: 'Android',
+                    deviceType: 'AVD',
+                    state: 'Booted',
+                    available: true,
+                    occupancy: 'available',
+                  },
+                ]
+              : undefined,
+          preview:
+            command.action === 'start'
+              ? {
+                  operationId: 'android-op',
+                  id: 'Pixel_A',
+                  phase: 'ready',
+                  transport: 'local',
+                  viewerUrl: VIEWER_URL,
+                }
+              : undefined,
+        };
+      },
+    });
+    // Quality lives in the controls' More menu, never as its own row.
+    const openQualityMenu = async () => {
+      const more = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="More controls"]'
+      );
+      if (!more) return null;
+      await act(async () => {
+        more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        more.click();
+      });
+      await flush();
+      return [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    };
+    expect(await openQualityMenu()).toBeNull();
+    await click('Preview');
+    expect(started).toEqual({
+      action: 'start',
+      id: 'Pixel_A',
+      ...(supported ? { quality: 'balanced' } : {}),
+    });
+    expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
+    expect(text()).not.toContain('Preview quality');
+    if (supported) {
+      const option = (await openQualityMenu())?.find((item) => item.textContent === 'Data saver');
+      expect(option).toBeDefined();
+      expect(document.body.textContent).toContain('Preview quality');
+      await act(async () => option?.click());
+      await flush();
+      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'saver' });
+      await click('Stop preview');
+      expect(await openQualityMenu()).toBeNull();
+      await click('Preview');
+      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'balanced' });
+    } else {
+      expect(await openQualityMenu()).toBeNull();
+    }
   }
 );

@@ -2,6 +2,7 @@ import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { usePlatform } from '@lody/platform/react';
 import { BootNavigate } from '@/components/boot-navigate';
@@ -79,6 +80,7 @@ export function WorkspaceAdmissionGate({
   const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
   const encryptedCreationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const recoveryScope = JSON.stringify([accountId, workspaceName, failure]);
   const currentScope = useRef<string | null>(recoveryScope);
   currentScope.current = recoveryScope;
@@ -89,10 +91,31 @@ export function WorkspaceAdmissionGate({
       if (currentScope.current === recoveryScope) currentScope.current = null;
     };
   }, [recoveryScope]);
+  if (
+    failure?.workspaceSlug === workspaceName &&
+    failure.errorType === 'e2ee_device_revoked' &&
+    failure.workspaceId
+  ) {
+    const workspaceId = failure.workspaceId;
+    // Membership remains: this device may be paired again from the control page.
+    return (
+      <RouteMessage
+        gate={null}
+        testId="workspace-device-revoked"
+        title={t('e2ee.devices.revokedTitle')}
+        description={t('e2ee.devices.revoked')}
+        actionLabel={t('e2ee.devices.pairAgain')}
+        onRetry={() =>
+          void navigate({ to: '/workspace/e2ee/$workspaceId', params: { workspaceId } })
+        }
+      />
+    );
+  }
   if (failure?.workspaceSlug === workspaceName && failure.errorType === 'e2ee_member_removed')
     return (
       <RouteMessage
         gate={null}
+        testId="workspace-access-removed"
         title={t('e2ee.members.removedTitle')}
         description={t('e2ee.members.removed')}
       />
@@ -170,15 +193,6 @@ export function WorkspaceAdmissionGate({
           variant="boot"
           title={t('workspace.route.loadingTitle')}
           description={t('workspace.route.loadingDescription')}
-        />
-      );
-    if (platform.e2eeWorkspaces.runtime)
-      return (
-        <RouteMessage
-          gate={null}
-          title={t('e2ee.access.waitingKey.title')}
-          description={t('e2ee.access.waitingKey.description')}
-          onRetry={() => retryAdmission((value) => value + 1)}
         />
       );
     return (

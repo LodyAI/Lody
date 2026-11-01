@@ -260,6 +260,52 @@ describe('DesktopRunConfigMenu role face', () => {
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
+  it('binds same-name Agent options to the IDs used by their selection action', async () => {
+    const second: AgentConfigMeta = {
+      ...agentConfig,
+      id: 'config-2' as AgentConfigId,
+      machineId: 'machine-2' as MachineId,
+    };
+    let chosen: { agentId: AgentConfigId; machineId: MachineId } | undefined;
+    const view = await render({
+      availableAgentConfigs: [agentConfig, second],
+      onAgentConfigChange: (selection) => {
+        chosen = selection;
+      },
+    });
+    await act(async () => {
+      view.querySelector('button[aria-label="Run configuration"]')?.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, button: 0 })
+      );
+    });
+    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (element) => element.textContent?.startsWith('Agent')
+    );
+    expect(agent).toBeDefined();
+    await act(async () => {
+      agent!.focus();
+      agent!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true })
+      );
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('[data-testid="chat-agent-option"]')).toHaveLength(2)
+    );
+    const options = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-agent-option"]')];
+    expect(options.map((element) => [element.dataset.agentConfigId, element.dataset.machineId])).toEqual([
+      [agentConfig.id, agentConfig.machineId],
+      [second.id, second.machineId],
+    ]);
+    const target = options.find((element) => element.dataset.agentConfigId === second.id)!;
+    await act(async () => target.click());
+    expect(chosen).toEqual({ agentId: second.id, machineId: second.machineId });
+    await render({ availableAgentConfigs: [agentConfig, second], agentSelection: chosen });
+    const actualSelection = view.querySelector<HTMLElement>('[data-run-config-trigger]');
+    expect(actualSelection?.dataset.agentConfigId).toBe(second.id);
+    expect(actualSelection?.dataset.machineId).toBe(second.machineId);
+  });
+
   it('leads the menu with the Role row, above the rows a Role answers', async () => {
     const view = await render({
       agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },

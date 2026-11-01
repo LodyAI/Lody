@@ -35,7 +35,7 @@ type Story = StoryObj<typeof meta>;
 
 const sessionId = 'agent-warning-session' as SessionId;
 
-const warningMessage = (message: string): SessionHistoryParsed => ({
+const warningMessage = (message: string, source = 'acp'): SessionHistoryParsed => ({
   id: `agent-warning-${message.length}`,
   role: 'system',
   timestamp: '2026-09-20T22:41:00.000Z',
@@ -44,7 +44,7 @@ const warningMessage = (message: string): SessionHistoryParsed => ({
     {
       type: 'system_notice',
       name: 'agent_warning',
-      meta: { message, source: 'acp' },
+      meta: { message, source },
     },
   ],
 });
@@ -53,6 +53,30 @@ const warningMessage = (message: string): SessionHistoryParsed => ({
 export const Short: Story = {
   args: {
     message: warningMessage('Context is nearly full; older turns may be dropped.'),
+    sessionId,
+  },
+};
+
+export const StopRequestFailed: Story = {
+  args: {
+    message: warningMessage('The agent connection rejected cancellation.', 'sessionCancelFailed'),
+    sessionId,
+  },
+};
+
+export const StopTerminationFailed: Story = {
+  args: {
+    message: warningMessage(
+      'Process termination failed: the process is still alive.',
+      'sessionTerminationFailed'
+    ),
+    sessionId,
+  },
+};
+
+export const StopTimedOut: Story = {
+  args: {
+    message: warningMessage('ACP prompt cancellation timed out', 'sessionStopTimedOut'),
     sessionId,
   },
 };

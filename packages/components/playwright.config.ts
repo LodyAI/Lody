@@ -8,6 +8,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   use: {
+    browserName: process.env.LODY_E2E_BROWSER === 'webkit' ? 'webkit' : 'chromium',
     baseURL: storybookUrl,
     trace: 'on-first-retry',
   },

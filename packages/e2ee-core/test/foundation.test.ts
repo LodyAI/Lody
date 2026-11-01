@@ -329,6 +329,22 @@ describe('fixed native Ed25519 verification', () => {
       );
     }
   });
+  it('uses the fixed strict JS verifier when neither WASM nor native Ed25519 is available', async () => {
+    const message = Uint8Array.of(173, 27, 31);
+    const sig = new Uint8Array(sign(null, message, privateKey));
+    const spy = vi
+      .spyOn(globalThis.crypto.subtle, 'importKey')
+      .mockRejectedValue(new DOMException('Ed25519 unsupported', 'NotSupportedError'));
+    try {
+      expect(Result.isSuccess(await native(key.toBytes(), message, sig))).toBe(true);
+      expect(Result.isFailure(await native(key.toBytes(), Uint8Array.of(173, 27, 32), sig))).toBe(
+        true
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('owns all inputs before awaiting native import, reuses exact successes and rejects changed messages', async () => {
     const pk = key.toBytes(),
       message = Uint8Array.of(173, 2, 3),

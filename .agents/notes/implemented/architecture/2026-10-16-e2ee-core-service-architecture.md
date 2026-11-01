@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053) · [Browser custody/key journals #2060](https://github.com/LodyAI/Lody/pull/2060)
 
 [中文](2026-10-16-e2ee-core-service-architecture.zh.md)
 
@@ -12,12 +13,12 @@ own SQLite files, took raw callbacks for remote systems and kept a private
 rollback pin. That made the library hard to reuse outside Lody, hard to read,
 and impossible to run against another backend or store. The core is now split
 into ports (Effect services the application provides), workflows (services the
-library implements as Layers on those ports only) and adapters (SQLite and Loro
-Streams implementations), behind six role-based entries plus an unstable
-`./internal`. Protocol bytes, file formats' guarantees and workflow behavior
-are preserved; every existing behavioral test still runs against the real
-Layers, and the main remaining limit is that only Node SQLite and Loro Streams
-adapters exist.
+library implements as Layers on those ports only) and adapters, behind role-based
+entries plus an unstable `./internal`. Node SQLite, browser ledger/original
+IndexedDB, JS curves and Loro Streams adapters implement separate capabilities;
+storage never grants authority. Protocol bytes and workflow guarantees stay with
+the existing core. Product composition remains
+separate from these storage and crypto adapters.
 
 ## Problem
 
@@ -46,10 +47,10 @@ adapters exist.
    that depends only on ports and protocol code. `E2eeWorkflows` composes them.
 3. **One rollback guard.** `VerifiedLedger` with a single `LedgerPinStore`
    replaces the per-store pins. Pin-fault coverage moved to one owning suite.
-4. **Adapters** (`./adapters/node-sqlite`, `./adapters/loro-streams`). Each
-   store mutation verifies its own write and the file's workspace/device
-   binding inside its transaction, so a tampered or ignored write rolls back,
-   as the old stores did.
+4. **Adapters** implement ports behind separate entries. Store mutations verify
+   their own write and captured binding inside the same transaction, so an ignored
+   or mismatched write aborts. SQLite remains the reference for all local ports;
+   IndexedDB also supplies installation, key and snapshot journals; browser custody is a separate opt-in adapter.
 5. **Backend contract** (`./host`): staging DTOs as Effect Schemas, request
    signing bytes and stage-request checks, plus the mailbox rule functions.
    Platform-neutral; `@lody/cloud-api` re-exports the staging contract instead
@@ -130,26 +131,194 @@ adapters exist.
 - The Lab projects service errors by `reason` and protocol errors by `code`;
   the staging adapter keeps a backend refusal's reason.
 
+## Browser storage boundary
+
+A per-device database was rejected: replacing a lost identity would also lose its
+workspace rollback knowledge and unresolved originals. The IndexedDB adapter keeps
+one stable account/workspace/genesis database. Pairing rows add the local device,
+installation, session and purpose; replacement retains old exchanges. Its pin
+revision token is a local CAS precondition, never an authority or mode cache.
+
+The adapter uses native short callback transactions rather than awaiting crypto
+or network inside IDB. Strict durability is a browser hint; `complete`, after
+readback and binding checks, is the observable success boundary. Closing fences
+new work and drains actual transaction promises; unknown results reconcile from
+retained first bytes. No fallback database or implicit reset restores availability.
+The host must independently requalify retained ledger state and verify approval,
+protect secret pairing material before storage, and handle loss of persistent
+protection under the [custody contract](../../../../specs/e2ee/client-custody.md).
+The separate stable client layout now retains installation, receive/report, installed/candidate, distribution/outbox/repair and snapshot publication journals. No store performs remote mailbox operations or approval verification.
+
 ## Verification
 
-Core: 20 test files (356 tests), including composition and public-docs tests, on real
-SQLite, Ed25519, HPKE and child processes. `test/composition.test.ts` delivers a key between two devices
-through `E2eeWorkflows`. `test/public-docs.test.ts` requires JSDoc on every
-public export, namespace export and service member and that `docs/surface*.md`
-match the exports. Contract-completion tests also check typed source failure
-without pin advancement and completed query/acknowledgement spans. The follow-up
-passed core typecheck, type-aware lint (existing warnings), Effect lint (advisory
-warnings) and root format. Full root `check`, public-boundary and docs checks
-could not finish cleanly in the isolated worktree: other package dependencies
-and ACP submodules are absent. No E2EE documentation errors were reported.
+`packages/e2ee-core/test/composition.test.ts` uses real workflow Layers and crypto
+for device key delivery. `packages/e2ee-core/test/public-docs.test.ts` checks JSDoc
+and entry surfaces. `packages/e2ee-core/test/indexeddb.browser.test.ts` uses real
+Chromium/WebKit persistent profiles, process reopen, competing tabs, native abort/
+quota/mismatched-write faults and close. It pins exact original retention, atomic
+record/cursor rollback and qualified retained-state reopen. These synthetic
+browser-engine checks do not establish minimum-OS, real-device or production
+acceptance. The package remains private at `0.0.0`; reusable boundaries do not
+publish a standalone SDK or enable a product host.
 
-The assembled five-layer stack also passes core typecheck, Lab typecheck, all
-401 core tests and all 201 Lab tests. The workspace maps refresh failures into
-`LedgerViewSourceError`, and the Lab's relocated component harness preserves the
-same port contract. Workspace/recovery service members are covered by the stricter
-documentation check. These local synthetic results are not production acceptance.
+## Browser custody rationale
 
-Limits: Lab and desktop consumers are migrated in the later PRs of the stack;
-no IndexedDB or mobile storage adapters exist; production composition is still
-not wired. The package is still private at version `0.0.0`; reusable service
-boundaries do not mean that a standalone SDK or backend has been published.
+A lifetime tab lock was rejected because idle protected work must not block other
+windows. The host instead enters a scope-wide finite Web Lock before identity
+allocation, holds it through real local/native settlement, then releases before
+network waits. Database/device-specific locks would admit competing installations;
+stealing on cancellation would let unfinished native work overlap its successor.
+Reentry therefore checks the actual holding fiber, not just inherited Context. A
+child must acquire its own lease; counting arbitrary descendant borrows adds
+ownership machinery where the finite local sequence needs no parallel writer.
+
+A nonextractable key alone is insufficient: a retained creation intent, key/probe
+readback, actual decrypt and transactional write/readback/restore establish usable
+persistent protection. Missing marker/key cannot establish first use while any
+scoped original, nonce or journal remains; the creation transaction checks all
+incarnation partitions. Fallible availability probes precede wrapping intent, so
+a transient quota fault before encryption can retry. Once intent commits, native
+encryption and ciphertext retention remain uninterruptible: a crash or genuinely
+unknown result still cannot safely be retried as a new encryption. Nonce reservation/count precedes native encryption, so an
+unknown result cannot trigger a second encryption. Completed originals reconcile
+exactly; ambiguous partials stay blocked. The scope-wide installation pointer and
+retired archive remain atomic, retaining old journals across desktop-approved
+replacement. The first wrapped candidate belongs to the pending request receipt;
+that local completion is never desktop approval. Browser-engine tests cover these
+boundaries and all fixed purposes, but do not prove minimum-OS hardware or power-loss
+acceptance. The approved Spec and ledger v1 remain unchanged.
+
+## Personal-device product composition
+
+[`@lody/e2ee-client`](../../../../packages/e2ee-client/README.md) owns optional
+personal pairing/open/key/management/RPC composition outside core. Desktop
+consumes its unchanged pairing codecs, fixed full-history verifier and finite
+key-maintenance owner; native storage is an adapter, not a second protocol tree.
+The portable RPC implementation likewise has one effectful immutable store port
+and a thin SQLite compatibility wrapper. No product transport is enabled here.
+
+Receipts cannot authenticate an independently transferred endorser after cold
+reopen. The existing device-credential purpose therefore protects a current-only
+local CBOR payload `[1, credential32, pinDigest32]`. Its SHA-256 digest covers the
+JSON array of domain `lody-e2ee/client-credential-pin/v1\0` (one NUL), account,
+workspace, genesis/device hex, installation ID, original genesis record hex,
+endorser and membership. Session is excluded so a terminal retry can preserve the
+same credential/identity; pending/admitting/unknown attempts cannot change session.
+This is local protected payload, not a new wrapping, signature or ledger format.
+
+Full-history proofs may exceed the fixed single-message pairing limit. A separate
+bounded immutable paged public evidence port commits every page plus count/size/
+digests atomically; no checksum or saved approval label becomes authority. A
+replacement carries the first snapshot original rather than recursively embedding
+prior approvals. Fresh full signed history requalifies that snapshot's historical
+manager, signature and exact state before the existing origin/pin can reopen.
+Using a self-signed cache or a fresh per-device feed namespace would hide lost
+trust or rollback evidence, so neither is supported.
+
+Ledger owners precede lazy key owners. Independent key/repair failures remain
+retryable; a valid retained admitted epoch remains usable when the current key is
+absent. Replacement qualifies new approval and pins before draining healthy old
+owners, then uses the approved archive/current atomic switch. Scope close fences
+and joins operations before key/credential/store release, without deleting any
+identity or uncertain original. Secret and RPC plaintext acquisition uses
+`acquireRelease`/`acquireUseRelease` through wipe registration: joining native work
+alone can still abandon its returned buffer when cancellation reaches the caller.
+The operation Scope owns cleanup on success, failure and interruption; close joins
+that Scope before releasing custody. This masks only finite local acquisition,
+without moving remote policy or network waits into custody ownership.
+Browser engines and desktop regressions exercise
+these contracts; minimum-OS devices, native plugins and power-loss durability
+remain separate acceptance.
+
+The scoped host constructor remains the actual drain primitive. Product assembly
+uses `makeOwnedPersonalDeviceHost(ports)`, which acquires the whole resource-owning
+port Layer in a retained Scope independent of its consumer. Host, session and
+parent-Scope close share a five-second waiter budget; timeout reports
+`PersonalCloseIncomplete` with a narrow recovery owner. Keep that full failure and
+its owner, including the physical lock, borrowed buffers and unresolved originals,
+until actual settlement or confirmed native termination. A deadline never proves
+successful close or permits same-binding runtime handoff.
+
+Only finite ticket creation is serialized. Native drains run outside that critical
+section, concurrent callers observe the same ticket, and independent readers remain
+usable while another session drains. Replacement drains every matching owned reader before the supplied external
+owner drain and atomic identity switch. Parent retirement joins every child ticket
+before releasing the complete port Layer; it cannot rely on a second `Scope.close`
+to join an already closing child. Late successful settlement permits explicit close
+confirmation; a closed handle never revives. Plaintext transfer also tracks whether
+the waiting consumer has disappeared, so a worker result cannot lose wipe ownership
+before publication or between publication and receipt.
+
+The shared `makePersonalWorkspaceRuntime` consumes that owned constructor and the
+existing `E2eeWorkspaceRuntime`/content bridge rather than creating another transport
+or mode cache. Application ports pin account/workspace/genesis independently and
+provide local originals plus the execution entry. Read-open refuses missing ready
+identity; only explicit preparation can create it. Current-key absence does not
+block admitted retained epochs, including one that arrives after a no-key lease.
+Per-operation core admission still checks the exact device and current ledger.
+
+A compatible optional preallocated-reader contract lets the provider reserve its
+own label before cold open. Shutdown can call bounded native close while unwrap
+is pending; a late open cannot record identity or publish content. Closing a queued
+label does not retire the distinct opener holding custody. Legacy desktop hosts do
+not advertise this optional contract. Labels are ephemeral ownership, not persisted
+pins or authority. An incomplete renderer/host close retains its owner for retry;
+empty failed initializations do not build an ever-growing chain of recovery owners.
+
+Reader lifetime and underlying host lifetime differ: one reader may close while
+another remains. Last-reader close fences that session and retains an incomplete
+ticket for confirmation; account change or close during initial acquisition retires
+the bound assembly. A new account observation cannot revive it. Provider cleanup
+starts native fencing alongside independent renderer cleanup, retaining full failures
+and the precise account/reader lease. Retained owners are selected by actual resource
+overlap, not a global predecessor: native custody uses account/workspace/genesis
+across device replacements; a protected Repo adds signing identity, while an ordinary
+Repo uses its renderer/workspace namespace. Matching acquisition confirms unresolved
+close before publishing a successor; independent workspaces do not retry or wait
+on that owner. Serializing a new open behind the entire native
+operation, swallowing a close failure, or memoizing a timeout as permanent failure
+would respectively hide the close deadline, permit overlap, or block safe reuse.
+
+Device grants remain inside the captured approved session; only dedicated short-lived
+content/attachment tokens leave it. Optional RPC/policy factories advertise real
+capabilities, not empty successful handlers. A machine-sharing Layer is trusted host
+composition and must retain the existing crypto/original/generation/freshness policy;
+the bridge supplies fixed services and ownership, not a substitute policy verifier.
+Ordinary management uses core original submission/ACK, atomic member removal and
+resumed rotation. Relay history pages confirm the one verified feed and local display
+rows are checked against its genuine absolute-position hashes.
+
+The shared content bridge fences late grant/RPC/token results even when a distinct
+reader keeps the underlying runtime alive. Its epoch tracker wipes plaintext before
+rejecting a late closed-reader result. Cancellation checks do not require the native
+combined-signal API; a simulated absent API exercises the existing token entry.
+Plaintext input captures own cleanup before executor dispatch. A disposed executor
+or failed application Layer may never enter the Effect bracket, so the caller wipes
+only an unclaimed capture. Program entry atomically claims it with bracket cleanup;
+a waiter failure cannot wipe an active native borrow. A delayed execution after
+caller cleanup is refused. Other pre-dispatch copies contain ciphertext or public
+metadata; returned secrets are still acquired with cleanup registration.
+These are local ownership/compatibility rules, not new signed bytes or authority.
+
+Hosted router composition accepts a pure synchronous `E2eeRuntimeFactory` returning
+an application-owned runtime port. It receives a read-only live session, not authority
+or a captured account snapshot. Resource acquisition stays outside render; React may
+repeat the factory call, and memoization is not resource ownership. Anonymous
+standalone login skips it; local and Electron retain their existing owners.
+
+Ordinary cache recovery deletes only known rebuildable IDB families. Adapter database
+names are caller-selected, so a `lody*` sweep cannot distinguish identity/originals
+from caches. An in-memory protection registration also loses that distinction on the
+reload before cache recovery runs. Unknown stores therefore survive both enumeration
+and explicit extra-name passes; full reset remains explicitly destructive. The
+browser regression reopens real wrapped identity/keys after logout, cache recovery
+and process restart, and compares retained original bytes through a synthetic digest.
+
+This is opt-in public assembly, not Web/mobile activation. Browser tests use real
+custody, IDB, mailbox crypto, signed RPC and paused native work; policy-Layer tests
+establish composition and scope, not a new policy-storage implementation. Renderer
+regressions exercise precise leases, incomplete-close retry, ordinary admission and
+retained-key wakeup. These checks do not establish mobile-device, native-plugin,
+power-loss or native-process termination qualification. [#2075](https://github.com/LodyAI/Lody/issues/2075)
+tracks owned close plus bridge adoption; product composition must retain any
+unfinished native owner before enabling mobile custody.

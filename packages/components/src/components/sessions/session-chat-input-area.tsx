@@ -1,13 +1,15 @@
+import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
-import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { formatUpcoming } from '../schedules/schedule-format';
 import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { useResolvedMachineMeta } from '@/hooks/use-resolved-machine-meta';
+import { useSessionPromptSuggestion } from '@/hooks/use-session-prompt-suggestion';
 import { snapshotAgentRole } from '@lody/shared';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
@@ -28,7 +30,7 @@ import {
   useImperativeHandle,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp, Clock } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -446,6 +448,8 @@ export interface SessionChatInputAreaProps {
   durableAgentRoleReady?: boolean;
   /** False while the MCP selection still waits on project defaults that are not read. */
   mcpSelectionReady?: boolean;
+  mcpDefaultsFailed?: boolean;
+  onRetryMcpDefaults?: () => void;
   /** True when the composer run config differs through an unsent user edit. */
   runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
@@ -531,6 +535,8 @@ export type SessionSendMessageOptions = {
    * later dispatches this, not whatever the selection became in between.
    */
   mcpServerIds?: readonly McpServerId[];
+  /** Local UI intent; never part of the durable input config. */
+  skipMcpOnce?: boolean;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -580,6 +586,8 @@ export const SessionChatInputArea = memo(
       durableAgentRoleKnownTurnKeys,
       durableAgentRoleReady,
       mcpSelectionReady,
+      mcpDefaultsFailed,
+      onRetryMcpDefaults,
       runConfigHasUserEdits,
       modeOptions,
       modelOptions,
@@ -630,6 +638,9 @@ export const SessionChatInputArea = memo(
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
+    // Scoped by this composer's session id; the hook resolves its machine and
+    // workspace and returns null when there is nothing displayable.
+    const promptSuggestion = useSessionPromptSuggestion(session.id);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const cancelNavigationDismissal = useRef<(() => void) | undefined>(undefined);
     useLayoutEffect(() => () => cancelNavigationDismissal.current?.(), [session.id]);
@@ -1655,7 +1666,10 @@ export const SessionChatInputArea = memo(
           });
           return;
         }
-        if (durableAgentRoleReady === false || mcpSelectionReady === false) {
+        if (
+          durableAgentRoleReady === false ||
+          (mcpSelectionReady === false && options?.mcpServerIds === undefined)
+        ) {
           return;
         }
         if (isMachineRemoved) {
@@ -1706,7 +1720,8 @@ export const SessionChatInputArea = memo(
             ]
           : [];
         const attachments = snapshotAttachmentDrafts(pendingImages, pendingFiles);
-        const mcpServerIds = mcp ? [...mcp.selectedIds] : undefined;
+        const selectedMcpIds = options?.mcpServerIds ?? mcp?.selectedIds;
+        const mcpServerIds = selectedMcpIds ? [...selectedMcpIds] : undefined;
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -2270,7 +2285,7 @@ export const SessionChatInputArea = memo(
         />
       </Button>
     ) : (
-      <Button
+      <Button data-testid="composer-send"
         type="button"
         icon
         variant="ghost"
@@ -2284,21 +2299,33 @@ export const SessionChatInputArea = memo(
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel
-            : scheduled.at
-              ? t('scheduledMessage.title')
-              : t('sessions.send')
+            : t('sessions.send')
         }
         className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner size={isMobile ? 'medium' : 'small'} />
-        ) : scheduled.at ? (
-          <Clock {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         ) : (
           <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         )}
       </Button>
     );
+
+    const scheduledAction =
+      scheduled.at && scheduled.available && !isArchived && !submissionPending
+        ? {
+            label: t('scheduledMessage.composerAction', {
+              time: formatUpcoming(
+                Date.parse(scheduled.at),
+                scheduled.timeZone,
+                Date.now(),
+                i18n.language
+              ),
+            }),
+            onClick: scheduled.openPicker,
+            disabled: scheduled.saving,
+          }
+        : undefined;
 
     /* Mobile no longer inlines run-config pickers into the composer
        footer — that footer now holds a single `MobileSessionRunConfig`
@@ -2317,6 +2344,7 @@ export const SessionChatInputArea = memo(
         promptValue={submissionPending ? '' : userInput}
         onPromptChange={handleInputChange}
         onPromptKeyDown={handleKeyDown}
+        promptSuggestion={submissionPending || isArchived ? null : promptSuggestion}
         onPromptPaste={handlePaste}
         onImageDrop={!submissionPending && attachmentAddEnabled ? handleImageDrop : undefined}
         onDirectoryDrop={handleDirectoryDrop}
@@ -2379,10 +2407,13 @@ export const SessionChatInputArea = memo(
             : undefined
         }
         scheduleDisabledReason={scheduled.disabledReason}
+        secondaryAction={scheduledAction}
         statusMessage={
           submissionPending && scheduled.progress !== null
             ? t('scheduledMessage.preparing', { progress: scheduled.progress })
-            : undefined
+            : mcpSelectionReady === false && !mcpDefaultsFailed
+              ? t('chat.validation.mcpDefaultsLoading')
+              : undefined
         }
         onFileRemove={submissionPending || isArchived ? undefined : handleRemoveFile}
         onFileRetry={submissionPending || isArchived ? undefined : handleRetryFile}
@@ -2397,7 +2428,10 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
-        className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile })}
+        className={getSessionChatInputAreaShellClassName({
+          protectFromEdgeBackZone: isMobile,
+          liftAboveKeyboard: isMobile,
+        })}
         onMouseDown={(event) => {
           // Keep the restored shell-owned bottom spacing focusable without
           // stealing focus from selectors, attachments, or the prompt itself.
@@ -2434,7 +2468,6 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
-          <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (
@@ -2444,6 +2477,13 @@ export const SessionChatInputArea = memo(
               multiple
               {...stylex.props(styles.hiddenInput)}
               onChange={handleAttachmentInputChange}
+            />
+          ) : null}
+          {mcpDefaultsFailed && onRetryMcpDefaults ? (
+            <McpDefaultsRecovery
+              onRetry={onRetryMcpDefaults}
+              onSendWithoutMcp={() => void sendMessage({ mcpServerIds: [], skipMcpOnce: true })}
+              disabled={submissionPending || isArchived || isMachineRemoved}
             />
           ) : null}
           {composerNode}

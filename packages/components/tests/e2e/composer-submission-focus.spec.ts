@@ -1002,6 +1002,94 @@ test.describe('mobile first-send continuity', () => {
   }
 });
 
+test('wide native landing applies the keyboard offset once', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/iframe.html?id=chat-homedashboard--landing-native-keyboard&viewMode=story');
+  const draft = page.getByRole('textbox', { name: 'Draft' });
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  const before = (await draft.boundingBox())!;
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    for (const animation of document.getAnimations()) animation.finish();
+  });
+  await expect.poll(async () => Math.round(before.y - (await draft.boundingBox())!.y)).toBe(300);
+});
+
+test('ordinary native iPhone PR drawer keeps an unsent comment above repeated keyboard changes', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 852 });
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __LODY_NATIVE__: true,
+      Capacitor: { getPlatform: () => 'ios', isNativePlatform: () => true },
+    });
+  });
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.goto(
+    '/iframe.html?id=sessions-prtabview--mobile-native-keyboard-drawer&viewMode=story'
+  );
+  const drawer = page.locator('[data-slot="drawer-content"]');
+  const draft = drawer.locator('[data-pr-comment-composer] textarea');
+  await expect(draft).toBeVisible({ timeout: 60_000 });
+  await draft.fill('Unsent ordinary-phone PR draft');
+  await expect(draft).toBeFocused();
+  expect(await page.evaluate(() => window.__LODY_HORIZONTAL_DIVISION__ ?? null)).toBeNull();
+
+  for (const height of [300, 0, 300, 0]) {
+    await page.evaluate((keyboardHeight) => {
+      document.documentElement.style.setProperty('--native-keyboard-height', `${keyboardHeight}px`);
+      Object.defineProperty(window.visualViewport, 'height', {
+        configurable: true,
+        value: 852 - keyboardHeight,
+      });
+      window.visualViewport?.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(
+        new CustomEvent('lody:keyboard-resize', { detail: { height: keyboardHeight } })
+      );
+    }, height);
+    await expect
+      .poll(async () => {
+        const box = (await drawer.boundingBox())!;
+        return Math.round(box.y + box.height);
+      })
+      .toBe(852 - height);
+    const box = (await draft.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(852 - height);
+    await expect(draft).toHaveValue('Unsent ordinary-phone PR draft');
+    await expect(draft).toBeFocused();
+  }
+});
+
+test('mobile new-chat composer stays below a fold and retains its draft', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-long-draft&viewMode=story'
+  );
+  const lower = page.locator('[data-new-chat-fold-lower]');
+  const draft = lower.getByRole('combobox', { name: 'Message' });
+  await expect(draft).toBeVisible({ timeout: 30_000 });
+  const text = await draft.inputValue();
+  await page.evaluate(() => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 422, height: 30, viewportHeight: 844 };
+    window.dispatchEvent(new Event('lody:division-change'));
+  });
+  await expect.poll(async () => (await lower.boundingBox())?.y).toBe(452);
+  const draftBox = await draft.boundingBox();
+  expect(draftBox!.y).toBeGreaterThanOrEqual(452);
+  expect(draftBox!.y + draftBox!.height).toBeLessThanOrEqual(844);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    window.dispatchEvent(new Event('lody:keyboard-resize'));
+  });
+  await expect(lower).toHaveCSS('display', 'contents');
+  await expect(draft).toHaveValue(text);
+});
+
 test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
   await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1042,40 +1130,66 @@ test('mobile project choices mix sources by recency and render their icons', asy
   );
 });
 
-test('mobile GitHub projects show owner avatars after loading with a GitHub fallback meanwhile', async ({
-  page,
-}) => {
-  let release!: () => void;
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route('https://avatars.githubusercontent.com/**', async (route) => {
-    await ready;
-    await route.fulfill({
-      contentType: 'image/svg+xml',
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+for (const theme of ['light', 'dark']) {
+  test(`mobile GitHub project avatars remain centered while loading and after loading in ${theme}`, async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+      await ready;
+      await route.fulfill({
+        contentType: 'image/svg+xml',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+      });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story&globals=theme:${theme}`
+    );
+    const project = page.getByRole('button', { name: 'Project', exact: true });
+    const expectCentered = async (row: typeof project, name: string, icon: string) => {
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element, { name: labelName, icon: iconSelector }) => {
+              const image = element.querySelector(iconSelector);
+              const label = Array.from(element.querySelectorAll('span')).find(
+                (span) => span.childElementCount === 0 && span.textContent === labelName
+              );
+              if (!image || !label) return Number.POSITIVE_INFINITY;
+              const imageBox = image.getBoundingClientRect();
+              const labelBox = label.getBoundingClientRect();
+              return Math.abs(
+                imageBox.top + imageBox.height / 2 - labelBox.top - labelBox.height / 2
+              );
+            },
+            { name, icon }
+          )
+        )
+        .toBeLessThanOrEqual(0.5);
+    };
+    await expect(project.locator('svg.lucide-github')).toBeVisible();
+    await expectCentered(project, 'loro-dev/loro', 'svg.lucide-github');
+    release();
+    await expect(project.locator('img')).toBeVisible();
+    await expect(project.locator('img')).toHaveCSS('opacity', '1');
+    await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(project, 'loro-dev/loro', 'img');
+    await project.click();
+    const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+    await expect(repo.locator('img')).toHaveAttribute(
+      'src',
+      /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+    );
+    await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+    await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(repo, 'loro-dev/loro', 'img');
   });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(
-    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
-  );
-  const project = page.getByRole('button', { name: 'Project', exact: true });
-  await expect(project.locator('svg.lucide-github')).toBeVisible();
-  release();
-  await expect(project.locator('img')).toBeVisible();
-  await expect(project.locator('img')).toHaveCSS('opacity', '1');
-  await expect(project.locator('svg.lucide-github')).toHaveCount(0);
-  await project.click();
-  const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
-  await expect(repo.locator('img')).toHaveAttribute(
-    'src',
-    /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
-  );
-  await expect(repo.locator('img')).toHaveCSS('opacity', '1');
-  await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
-});
+}
 
 test('mobile send retains its page through delayed presentation and later URL corrections', async ({
   page,
@@ -1086,6 +1200,20 @@ test('mobile send retains its page through delayed presentation and later URL co
   );
   const composer = page.locator('[class~="@container/composer-box"]');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  // Opening new chat now slides the page in. Measure sending from its settled
+  // position so the entrance is not mistaken for first-send layout movement.
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => {
+        for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+          if (parent.getAnimations().some((animation) => animation.playState === 'running')) {
+            return false;
+          }
+        }
+        return true;
+      })
+    )
+    .toBe(true);
   const before = await composer.boundingBox();
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   // Let Vaul's first-frame shortcut expire before the real surface can mount.
@@ -1272,3 +1400,28 @@ for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project select
     await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
   });
 }
+
+test('mobile local branch shows a readable ref across worktree toggles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-many-branches&viewMode=story'
+  );
+  const branch = page.getByRole('button', { name: 'Branch', exact: true });
+  const worktree = page.getByRole('checkbox');
+  await expect(branch).toHaveText('main (local)');
+  await expect(worktree).toBeChecked();
+  await branch.click();
+  await page
+    .getByRole('listbox', { name: 'Branch', exact: true })
+    .getByRole('option')
+    .filter({ hasText: 'feat/audit-mobile-coupling (local)' })
+    .getByRole('button')
+    .click();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+  await worktree.click();
+  await expect(branch).toBeDisabled();
+  await expect(branch).toHaveText('main (local)');
+  await worktree.click();
+  await expect(branch).toBeEnabled();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+});

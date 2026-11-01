@@ -23,6 +23,8 @@ older view stays refused. `ensureCurrent(view)` repeats the in-process check
 for a view obtained earlier. Freshness is relative to this device's own
 history; global freshness still depends on the log not hiding records.
 
+`canWriteRetainedEpoch(epoch)` checks only the optional durable local observation journal, without reading the source. Product content bindings use it only after a genuinely missing current key. The fifteen-minute first-observation deadline, conservative clock continuity and notice policy are defined in the [owner decision](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md); this method grants no device or role permission. Missing journal support keeps strict current-key writes.
+
 ## LedgerFeed
 
 _Requires `WorkspaceScope`, `LedgerFeedStore`. Options: origin, expected
@@ -193,6 +195,21 @@ acknowledged only after the local feed contains the checkpoint it observed.
 installs, fetch one mailbox page, send reports, reconcile and send deliveries,
 send reports again, list results. Each queue keeps its own cursor hint.
 
+
+Receive (including committed staging) and distribution run as separate finite phases.
+A failed receive cannot prevent reconciliation/delivery. `WorkspaceKeyRoundFailure`
+reports both `receive` and `distribution` Results, a separate post-send report Result,
+and retry `cursors`; successful phases advance independently and failed phases keep
+their input hints. Successful rounds retain the existing result fields.
+
+Mailbox fetch skips non-current senders without installing or journaling their keys.
+A strict signature bound to exact routing plus a genuine historical identity absent
+from current membership yields `retiredDigests`; the round queues digest-bound repair.
+Unknown senders only set `refreshRequired`, never reject their digest. Hosts must
+refresh their verified ledger and retry; the workspace facade already refreshes its
+ledger source, and desktop maintenance uses the existing verified history-ingest path
+at most once per call. This refresh occurs after independent distribution.
+
 ## E2eeWorkspace
 
 The application facade over everything above. A `WorkspacePlatform` supplies,
@@ -214,7 +231,15 @@ opens the new personal device's workspace with the recovered keys installed.
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
 passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
 current (setup, test, replace, skip) and performs a restore. A recovery device
-admits a new personal device, then that device installs every epoch key. The
+admits a new personal device, then that device installs every epoch key.
+Each private package is canonical CBOR with `formatVersion: 1`; a missing or
+other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
+Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read.
+`deriveRecoveryAccessCredential` derives R's service access credential (HKDF-SHA256
+over R's seed, salt genesis, info `lody-e2ee/recovery-credential/v1\0` plus R's
+public key). Setup passes its SHA-256 to `submitOriginal` with R's admission and
+`null` with every other record; `E2eeWorkspace` hands it to the platform's
+`registerRecoveryCredential` before submitting, because its ledger port carries no credential. The
 scheme is specified in the whitepaper's backup and recovery section and
 [recovery vault](../../../specs/e2ee/recovery-vault.md).
 

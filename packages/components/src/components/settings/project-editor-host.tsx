@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { WorkspaceProject } from '@lody/shared';
@@ -37,9 +37,12 @@ export function ProjectEditorHost() {
   const [editor, setEditor] = useState<ProjectGroupEditorState | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceProject | null>(null);
   const [removing, setRemoving] = useState(false);
+  // Belongs to the open create editor; a later request replaces or clears it.
+  const onCreatedRef = useRef<((projectId: string) => void) | undefined>(undefined);
 
   useEffect(() => {
     if (!request) return;
+    onCreatedRef.current = request.kind === 'create' ? request.onCreated : undefined;
     if (request.kind === 'edit' || request.kind === 'delete') {
       const project = projects.find((candidate) => candidate.id === request.projectId);
       if (!project) {
@@ -91,6 +94,9 @@ export function ProjectEditorHost() {
         editor={editor}
         onChange={setEditor}
         onClose={() => setEditor(null)}
+        onSaved={(project, { created }) => {
+          if (created) onCreatedRef.current?.(project.id);
+        }}
       />
       <AlertDialog.Root
         open={pendingRemoval !== null}

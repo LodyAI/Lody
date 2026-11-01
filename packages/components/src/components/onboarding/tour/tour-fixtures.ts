@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { createStore } from 'jotai';
 import {
   getAgentConfigRoomId,
@@ -769,6 +770,11 @@ const tourRuntime = {
   // the read-only stand-in for that plane, the way `TourCloudBoundary` is the
   // stand-in for the cloud one.
   repo: createTourRepo(),
+  // The real composer subscribes here; this read-only tour has no suggestions.
+  subscribePromptSuggestion: ((_machineId, _sessionId, listener) => {
+    listener(null);
+    return () => {};
+  }) satisfies WorkspaceRuntime['subscribePromptSuggestion'],
   // Nothing in the tour writes. A runtime that threw on read would take the
   // whole overlay down; one that silently accepted writes would let a scripted
   // surface believe it had persisted something.
@@ -779,6 +785,12 @@ export function createTourStore(identity: TourIdentity) {
   const store = createStore();
   const session = buildTourSession(identity);
   const agentConfig = buildTourAgentConfig(identity);
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceId: TOUR_WORKSPACE_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    descriptor: { workspaceId: TOUR_WORKSPACE_ID, contentMode: 'plaintext', contentModeVersion: 1 },
+  });
   store.set(currentWorkspaceIdAtom, TOUR_WORKSPACE_ID);
   store.set(currentWorkspaceSlugAtom, TOUR_WORKSPACE_SLUG);
   store.set(authTokenAtom, 'onboarding-tour-token');

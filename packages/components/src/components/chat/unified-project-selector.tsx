@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -33,6 +34,19 @@ import { withClassName } from '@/lib/stylex';
 import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Button } from '@lody/ui/button';
+
+const ownerAvatarStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+});
 
 export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
@@ -44,7 +58,7 @@ export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }
   }
 
   return (
-    <span className="relative inline-flex h-4 w-4 shrink-0">
+    <span {...stylex.props(ownerAvatarStyles.frame)}>
       {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
       <CachedAvatarImg
         key={ownerHandle}
@@ -266,6 +280,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
   renderLimit?: number;
   /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
   onCreateProject?: () => void;
+  /** Opens a project group in the editor; the group rows offer it on hover. */
+  onEditProjectGroup?: (projectId: string) => void;
 }
 
 function ProjectAccessStatus({
@@ -412,6 +428,7 @@ export function UnifiedProjectSelectorView({
   contentStyle,
   renderLimit,
   onCreateProject,
+  onEditProjectGroup,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -662,6 +679,10 @@ export function UnifiedProjectSelectorView({
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
                     option.selection.kind === 'group' ? option.description : undefined;
+                  const editProjectId =
+                    option.selection.kind === 'group' && onEditProjectGroup
+                      ? option.selection.projectId
+                      : undefined;
                   const labelNode = (
                     <span
                       className={cn('truncate', option.value === selectedValue && 'font-medium')}
@@ -676,14 +697,37 @@ export function UnifiedProjectSelectorView({
                       disabled={option.disabledReason !== undefined}
                       indicator="check"
                       indicatorSide="end"
-                      className={cn(
-                        'gap-2 py-1.5',
-                        inlineDescription ? 'items-start' : 'items-center'
-                      )}
+                      className="group/option items-center gap-2 py-1.5"
+                      endContent={
+                        editProjectId !== undefined ? (
+                          <Button
+                            variant="ghost"
+                            size="mini"
+                            tabIndex={-1}
+                            aria-label={t('chat.projectPicker.editGroup', 'Edit {{name}}', {
+                              name: option.label,
+                            })}
+                            className={cn(
+                              'opacity-0 focus-visible:opacity-100',
+                              'group-hover/option:opacity-100 group-data-[highlighted]/option:opacity-100'
+                            )}
+                            // The row selects on press; the button only edits.
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onMouseUp={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setOpen(false);
+                              onEditProjectGroup?.(editProjectId);
+                            }}
+                          >
+                            {t('common.edit', 'Edit')}
+                          </Button>
+                        ) : null
+                      }
                     >
-                      <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
-                        {option.icon}
-                      </span>
+                      <span className="shrink-0">{option.icon}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         {localPath ? (
                           <Tooltip.Root>

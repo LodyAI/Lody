@@ -3,13 +3,26 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Repo-wide guidelines live in the root `AGENTS.md`.
 
-Workspace/machine-level JSON RPC over Loro Streams. File responsibilities, the
-Web/CLI Code Collab seam, and the reasons behind the watchdog, shard selection,
-and the `file/preview` namespace are in
-[the Loro Streams Machine RPC map](../../.agents/docs/rpc-loro-streams-rpc.md).
+Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.md).
 
 ## Invariants
 
+- `./e2ee-client` is the shared Node-free implementation. Its effectful immutable
+  original store retains/readbacks before success; whole response batches are
+  atomic. `./e2ee-native` only supplies the SQLite adapter. Keep finite local
+  sealing/retention owned through completion and wipe plaintext on failure as well
+  as success. Acquire returned plaintext and owned decoded buffers atomically
+  with wipe registration; never put remote policy waits under that uninterruptible section.
+
+- Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
+  The closed pure-read list uses fresh read authority, never execution journals; other admitted
+  Code Collab/preview actions require write authority and execution claims. Keep same-member
+  machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+- Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
+  returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
+  senders withhold input only for a known withdrawal.
+- Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
+  completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:
   `getLoroMachineRpcRequestStreamId(workspaceId, machineId)` returns
   `<workspaceId>:rpc:req:<machineId>`.
@@ -55,6 +68,7 @@ and the `file/preview` namespace are in
   request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
+  Automation controls require target-verified operation-bound proof.
   `session/live-status` reads the target
   daemon's active-presence controller and must not infer liveness from durable
   `SessionMeta.status` or message pointers.

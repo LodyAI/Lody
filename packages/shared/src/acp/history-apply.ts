@@ -1492,7 +1492,7 @@ export const buildMessageContentFromNotification = (
         },
       ];
     case 'available_commands_update':
-      // Slash commands are already cached in ACP capabilities metadata and consumed from there.
+      // Commands belong to session control state, outside the transcript.
       // Persisting them into chat history only creates empty assistant rows in the UI.
       return [];
     case 'current_mode_update':

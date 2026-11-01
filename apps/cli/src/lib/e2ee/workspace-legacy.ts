@@ -1,11 +1,44 @@
-import { isCloudE2eeMemberRemoved } from '../cloud-e2ee-errors';
-import type { LoroStreamsTokenAuth } from '@lody/shared';
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
+import {
+  daemonLossObserver,
+  daemonLossProbeEnabled,
+  readDaemonLossAuthority,
+} from './client-loss-observer';
+import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
+import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
+import {
+  getScheduleRoomId,
+  getScheduleIdFromRoomId,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
+import { makeExecutionOriginRecovery } from './execution-origin-recovery';
+import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
+import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import { getLogger } from '../../utils/logger';
+import { lazyExecutionJournal } from './agent-execution';
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
+import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
+import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
+import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
+import { isDeepStrictEqual } from 'node:util';
+import { ExecutionOrigins } from './execution-origins';
+import type { EncryptedExecutionIntent } from './agent-execution';
+import type { LoroDoc } from 'loro-crdt';
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
+import {
+  getSessionRoomId,
+  isSessionDocRoomId,
+  type SessionId,
+  type LoroStreamsTokenAuth,
+} from '@lody/shared';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Effect, Exit, Scope, Result } from 'effect';
+import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
@@ -21,6 +54,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
 import { makeCliE2eeRuntime } from './runtime';
+import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
 const Binding = z
@@ -63,6 +97,73 @@ async function readRemoval(directory: string) {
     throw cause;
   }
 }
+const RevokedDevice = Removed.omit({ membershipId: true });
+const machineDevicePath = (directory: string, genesisHash: string) =>
+  join(directory, 'custody', `${genesisHash}.machine.device`);
+/**
+ * The verified ledger keeps a revoked device's keys in its history, and core never
+ * readmits them. Before a new offer, retire this workspace's identity when it is
+ * known revoked: a device-bound receipt from the daemon, or the service's exact
+ * `e2ee_device_revoked` answer to this identity's own credential. Any other outcome
+ * is unknown and keeps the identity. The original is archived for historical
+ * evidence, never deleted or reused; other workspaces and membership are untouched.
+ */
+async function retireRevokedMachineIdentity(options: {
+  accountId: string;
+  workspaceId: string;
+  genesisHash: string;
+  keyring?: MachineKeyring;
+  cloud?: Pick<CloudE2eePort, 'getContentToken'>;
+}) {
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
+  const device = machineDevicePath(directory, options.genesisHash);
+  if (!existsSync(device)) return;
+  const cloud = options.cloud;
+  const revoked = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(directory, 'custody'),
+          requireOsProtection: existsSync(`${directory}.require-os`),
+          keyring: options.keyring,
+        });
+        const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
+        const current = yield* custody.openDevice(genesis);
+        const key = hex(current.publicKey.toBytes());
+        const receipt = yield* Effect.promise(async () => {
+          try {
+            return RevokedDevice.parse(
+              JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
+            );
+          } catch {
+            return null;
+          }
+        });
+        if (receipt?.genesisHash === options.genesisHash && receipt.signingPublicKey === key)
+          return key;
+        if (!cloud) return undefined;
+        const credential = yield* custody.deviceCredential(genesis, current.publicKey);
+        const exact = yield* Effect.tryPromise({
+          try: () => cloud.getContentToken({ workspaceId: options.workspaceId, credential }),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.match({
+            onSuccess: () => false,
+            onFailure: (cause) => isCloudE2eeDeviceRevoked(cause),
+          })
+        );
+        return exact ? key : undefined;
+      })
+    ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  );
+  if (!revoked) return;
+  await rename(
+    device,
+    join(directory, 'custody', `${options.genesisHash}-${revoked}.machine-revoked.device`)
+  );
+}
+
 /** Only after the caller's workspace owners drain. The pairing mutex excludes a
  * replacement identity during the exact-key check and deletion. Keep a public
  * terminal receipt so interrupted erasure retries before any later attachment. */
@@ -235,7 +336,12 @@ function mailbox(
 }
 
 /** @deprecated Promise entry for the existing same-user control consumer. */
-export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof prepareMachine>[0]) {
+export async function prepareCliE2eeMachineLegacy(
+  options: Parameters<typeof prepareMachine>[0] & {
+    /** Lets a new offer learn this identity's exact revocation; absent stays offline. */
+    cloud?: Pick<CloudE2eePort, 'getContentToken'>;
+  }
+) {
   const priorRemoval = await readRemoval(
     cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
   );
@@ -251,7 +357,10 @@ export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof pre
       Effect.gen(function* () {
         yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
         return yield* Effect.tryPromise({
-          try: () => prepareMachine(options),
+          try: async () => {
+            await retireRevokedMachineIdentity(options);
+            return prepareMachine(options);
+          },
           catch: (error) => error,
         });
       })
@@ -337,7 +446,7 @@ type CliE2eeWorkspaceOptions = {
   cloud: CloudE2eePort;
   onUnavailable: () => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight. */
-  onRemoved?: () => Promise<void>;
+  onRemoved?: (reason: 'member-removed' | 'device-revoked') => Promise<void>;
   keyring?: MachineKeyring;
 };
 const Activation = z
@@ -487,6 +596,7 @@ async function openWorkspaceOwned(
   requireActivation: boolean,
   pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
 ) {
+  let credentialFailureHandler: (cause: unknown) => void = () => {};
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
   if (requireActivation) {
@@ -536,7 +646,10 @@ async function openWorkspaceOwned(
   });
   await original.close();
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
-    Effect.runPromise(work.pipe(Scope.provide(scope)));
+    Effect.runPromise(withE2eeTestClock(work.pipe(Scope.provide(scope))));
+  let clientLossAuthority:
+    | { view: import('@lody/e2ee-core/protocol').LedgerView; generation: number }
+    | undefined;
   const opened = await run(
     Effect.gen(function* () {
       const custody = yield* makeCliE2eeCustody({
@@ -562,6 +675,17 @@ async function openWorkspaceOwned(
         custody,
         device,
         genesisRecord: bytes(binding.genesisRecordHex),
+        ...(daemonLossProbeEnabled
+          ? {
+              onVerifiedLedger: (
+                view: import('@lody/e2ee-core/protocol').LedgerView,
+                generation: number
+              ) => {
+                clientLossAuthority = { view, generation };
+                daemonLossObserver.changed();
+              },
+            }
+          : {}),
         mailbox: mailbox(options.cloud, options.workspaceId, credential),
         staging: readEpochGroup
           ? {
@@ -588,7 +712,57 @@ async function openWorkspaceOwned(
             }
           : undefined,
       });
-      return { runtime, credential, custody, signingPublicKey: hex(device.publicKey.toBytes()) };
+      let sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined;
+      const sharingRemote = options.cloud.machineSharing
+        ? sharingRemoteFromTransport(options.cloud.machineSharing)
+        : undefined;
+      const executionAuthorization = yield* makeCliE2eeExecutionAuthorization({
+        workspaceId: options.workspaceId,
+        credential,
+        cloud: options.cloud,
+        onCredentialFailure: (cause) => credentialFailureHandler(cause),
+        runtime,
+        sharing: sharingRemote
+          ? (requester, localProjectId) =>
+              Effect.gen(function* () {
+                const state = (yield* runtime.executionLedger()).inspectState();
+                const machine = state.devices.get(hex(device.publicKey.toBytes()));
+                if (!sharing || machine?.kind !== 'machine' || !machine.machineId)
+                  return { allowed: false };
+                return yield* sharing.authorize(
+                  machine.machineId,
+                  requester,
+                  localProjectId,
+                  sharingRemote
+                );
+              })
+          : undefined,
+      });
+      sharing = yield* makeLazyMachineSharingHost({
+        filename: join(
+          directory,
+          'runtime',
+          hex(device.publicKey.toBytes()),
+          'machine-sharing.sqlite'
+        ),
+        workspaceId: options.workspaceId,
+        genesisHash: binding.genesisHash,
+        signer: device,
+        ledger: () => runtime.executionLedger(),
+        admissionHistory: runtime.sharingAdmissionHistory,
+        readEpochKey: runtime.readSharingEpochKey,
+        credential,
+        refreshLedger: () => executionAuthorization.refreshLedger,
+      });
+      return {
+        sharing,
+        sharingRemote,
+        runtime,
+        executionAuthorization,
+        credential,
+        custody,
+        signingPublicKey: hex(device.publicKey.toBytes()),
+      };
     })
   ).catch(async (error) => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -634,14 +808,81 @@ async function openWorkspaceOwned(
       () => snapshotFlights.delete(flight),
       (cause) => {
         snapshotFlights.delete(flight);
-        if (isCloudE2eeMemberRemoved(cause)) {
-          startMemberRemoval();
+        if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) {
+          credentialFailureHandler(cause);
           return;
         }
         console.warn('[e2ee] snapshot repair request failed; will retry');
       }
     );
   };
+  let originWriteFailed = false;
+  const executionOrigins = new ExecutionOrigins(
+    join(
+      repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+      'execution-origins.sqlite'
+    )
+  );
+  const rpc = makeE2eeRpcNative({
+    workspaceId: options.workspaceId,
+    requesterDevice: opened.signingPublicKey,
+    authorizeTarget: (machineId) =>
+      opened.sharingRemote
+        ? opened.sharing
+            .authorize(machineId, opened.signingPublicKey, undefined, opened.sharingRemote)
+            .pipe(Effect.map((result) => result.allowed))
+        : Effect.succeed(false),
+    originals: new E2eeRpcOriginals(
+      join(
+        repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+        'rpc-originals.sqlite'
+      )
+    ),
+    ledger: () => opened.runtime.executionLedger(),
+    binding: (resource) => opened.runtime.realtimeBinding(resource),
+  });
+  const rpcJournal = lazyExecutionJournal(
+    join(
+      repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+      'rpc-receipts.sqlite'
+    ),
+    Date.now
+  );
+  await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
+  // Realtime dispatch, the durable execution origin and feature requests reopen frames.
+  const catchUpLedger = makeLedgerCatchUp({
+    genesis: binding.genesisHash,
+    resource: e2eeRpcResource,
+    ledger: () => opened.runtime.executionLedger(),
+    catchUp: async () => {
+      // An older round may finish after an independent authority read advances
+      // the ledger. Join it without extending it, then receive the current key
+      // through the same refresh owner if it is still missing. Never reset retries.
+      await (refresh ?? refreshInBackground(false));
+      if (closed) return;
+      const status = await run(opened.runtime.status());
+      if (!closed && !status.hasCurrentKey) await refreshInBackground(false);
+    },
+    // Two epoch integers and an outcome only; never the frame or its plaintext.
+    observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
+  });
+  const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
+  let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
+  const stopRpc = () =>
+    rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
+  const readExecutionOriginPage = options.cloud.readExecutionOriginPage?.bind(options.cloud);
+  const originRecovery = readExecutionOriginPage
+    ? makeExecutionOriginRecovery(
+        executionOrigins,
+        (input, signal) =>
+          readExecutionOriginPage(input, signal).catch((cause: unknown) => {
+            credentialFailureHandler(cause);
+            throw cause;
+          }),
+        { workspaceId: options.workspaceId, credential: opened.credential },
+        encryptedWorkspaceNamespace(binding.genesisHash)
+      )
+    : undefined;
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
@@ -674,7 +915,33 @@ async function openWorkspaceOwned(
         return {
           maxSealOverheadBytes: 4096,
           seal: async (input) => run((await getForEpoch()).seal(input)),
-          open: async (input) => run((await getForEpoch()).open(input)),
+          open: async (input) => {
+            const originalFrame = {
+              ...input,
+              context: { ...input.context },
+              sealed: Uint8Array.from(input.sealed),
+              header: Uint8Array.from(input.header),
+              additionalData: Uint8Array.from(input.additionalData),
+            };
+            const result = await run((await getForEpoch()).openAuthenticated(originalFrame));
+            if (
+              descriptor.model === 'loro' &&
+              descriptor.resource.startsWith('doc:') &&
+              (isSessionDocRoomId(descriptor.resource.slice(4)) ||
+                getScheduleIdFromRoomId(descriptor.resource.slice(4))) &&
+              originalFrame.context.kind === 'update_batch'
+            ) {
+              try {
+                executionOrigins.retain(descriptor.resource, originalFrame, result.plaintext);
+                originWriteFailed = false;
+              } catch {
+                if (!originWriteFailed)
+                  console.warn('[e2ee] execution origin unavailable; affected turns cannot start');
+                originWriteFailed = true;
+              }
+            }
+            return result.plaintext;
+          },
         } satisfies PayloadProtectionProvider;
       });
       return {
@@ -691,52 +958,51 @@ async function openWorkspaceOwned(
       };
     }),
   };
+  const createTokenProvider = (rpcOnly?: true) =>
+    Effect.gen(function* () {
+      if (closed) throw new Error('e2ee_closed');
+      if (!options.cloud.createContentTokenProvider) throw new Error('e2ee_content_unavailable');
+      const provider = yield* options.cloud.createContentTokenProvider({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+        ...(rpcOnly ? { rpcOnly } : {}),
+      });
+      bucket = provider.getBucketId;
+      const observe =
+        (auth: LoroStreamsTokenAuth): LoroStreamsTokenAuth =>
+        (context) =>
+          auth(context).pipe(
+            Effect.tapCause((cause) =>
+              Effect.sync(() => {
+                for (const reason of cause.reasons) {
+                  if (reason._tag === 'Fail') credentialFailureHandler(reason.error);
+                  if (reason._tag === 'Die') credentialFailureHandler(reason.defect);
+                }
+              })
+            )
+          );
+      const observed = {
+        ...provider,
+        getToken: observe(provider.getToken),
+        createAuthCallback: () => observe(provider.createAuthCallback()),
+      };
+      tokensInUse.add(observed);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          tokensInUse.delete(observed);
+        })
+      );
+      return observed;
+    });
   const tokens: CloudStreamsTokenPort = {
-    createTokenProvider: () =>
-      Effect.gen(function* () {
-        if (closed) throw new Error('e2ee_closed');
-        if (!options.cloud.createContentTokenProvider) throw new Error('e2ee_content_unavailable');
-        const provider = yield* options.cloud.createContentTokenProvider({
-          workspaceId: options.workspaceId,
-          credential: opened.credential,
-        });
-        bucket = provider.getBucketId;
-        const observe =
-          (auth: LoroStreamsTokenAuth): LoroStreamsTokenAuth =>
-          (context) =>
-            auth(context).pipe(
-              Effect.tapCause((cause) =>
-                Effect.sync(() => {
-                  if (
-                    cause.reasons.some((reason) =>
-                      reason._tag === 'Fail'
-                        ? isCloudE2eeMemberRemoved(reason.error)
-                        : reason._tag === 'Die' && isCloudE2eeMemberRemoved(reason.defect)
-                    )
-                  )
-                    startMemberRemoval();
-                })
-              )
-            );
-        const observed = {
-          ...provider,
-          getToken: observe(provider.getToken),
-          createAuthCallback: () => observe(provider.createAuthCallback()),
-        };
-        tokensInUse.add(observed);
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            tokensInUse.delete(observed);
-          })
-        );
-        return observed;
-      }),
+    createTokenProvider: () => createTokenProvider(),
     // E2EE never attaches the old Machine RPC or presence token consumers.
     createTokenProviderLegacy: () => {
       throw new Error('e2ee_plaintext_channel_disabled');
     },
   };
   let memberRemoved = false;
+  let deviceRevoked = false;
   let removalReceipt: Promise<void> | undefined;
   let removalRecorded: Promise<void> | undefined;
   const isClosed = () => closed;
@@ -784,14 +1050,18 @@ async function openWorkspaceOwned(
     }, [250, 1_000, 4_000][ledgerRetryAttempts]);
     ledgerRetryTimer.unref?.();
   };
-  const startMemberRemoval = () => {
+  const startMemberRemoval = (reason: 'member-removed' | 'device-revoked' = 'member-removed') => {
     if (removalReceipt) return;
-    memberRemoved = true;
+    memberRemoved = reason === 'member-removed';
+    deviceRevoked = reason === 'device-revoked';
     closed = true;
+    opened.executionAuthorization.invalidate();
+    opened.sharing.stop();
     ledgerBlocked = true;
     clearLedgerRetry();
     removalRecorded = (async () => {
-      const removedStatus = await run(opened.runtime.status());
+      if (!memberRemoved && !deviceRevoked) return;
+      const removedStatus = memberRemoved ? await run(opened.runtime.status()) : undefined;
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
@@ -805,11 +1075,18 @@ async function openWorkspaceOwned(
                 opened.credential
             )
               return;
-            const receipt = Removed.parse({
-              genesisHash: options.genesisHash,
-              signingPublicKey: opened.signingPublicKey,
-              membershipId: removedStatus.membershipId,
-            });
+            // A revoked device keeps membership: its receipt only retires this identity
+            // so the next pairing creates a new one; it never erases the workspace.
+            const receipt = removedStatus
+              ? Removed.parse({
+                  genesisHash: options.genesisHash,
+                  signingPublicKey: opened.signingPublicKey,
+                  membershipId: removedStatus.membershipId,
+                })
+              : RevokedDevice.parse({
+                  genesisHash: options.genesisHash,
+                  signingPublicKey: opened.signingPublicKey,
+                });
             yield* Effect.promise(async () => {
               const temporary = join(
                 directory,
@@ -820,7 +1097,10 @@ async function openWorkspaceOwned(
                 await file.writeFile(JSON.stringify(receipt));
                 await file.sync();
                 await file.close();
-                await rename(temporary, join(directory, 'removed.json'));
+                await rename(
+                  temporary,
+                  join(directory, removedStatus ? 'removed.json' : 'revoked-device.json')
+                );
               } finally {
                 await file.close().catch(() => undefined);
                 await unlink(temporary).catch(() => undefined);
@@ -839,7 +1119,7 @@ async function openWorkspaceOwned(
       }
       try {
         // Even a local persistence failure must stop the execution owner.
-        await options.onRemoved?.();
+        await options.onRemoved?.(reason);
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
@@ -850,16 +1130,21 @@ async function openWorkspaceOwned(
       }
       if (failures.length === 1) throw failures[0];
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
-      await eraseRemovedWorkspace({
-        ...options,
-        expectedSigningPublicKey: opened.signingPublicKey,
-      });
+      if (memberRemoved)
+        await eraseRemovedWorkspace({
+          ...options,
+          expectedSigningPublicKey: opened.signingPublicKey,
+        });
     })();
     void removalReceipt.catch(() => {
       try {
         options.onUnavailable();
       } catch {}
     });
+  };
+  credentialFailureHandler = (cause) => {
+    if (isCloudE2eeMemberRemoved(cause)) startMemberRemoval('member-removed');
+    else if (isCloudE2eeDeviceRevoked(cause)) startMemberRemoval('device-revoked');
   };
   const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
@@ -894,7 +1179,7 @@ async function openWorkspaceOwned(
                   credential: opened.credential,
                 });
               } catch (cause) {
-                if (isCloudE2eeMemberRemoved(cause)) throw cause;
+                if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) throw cause;
               }
               throw historyError;
             });
@@ -935,7 +1220,7 @@ async function openWorkspaceOwned(
     })()
       .catch(async (error: unknown) => {
         if (pairing) pairingFailure = error;
-        if (isCloudE2eeMemberRemoved(error)) startMemberRemoval();
+        credentialFailureHandler(error);
         try {
           options.onUnavailable();
         } catch {
@@ -950,11 +1235,15 @@ async function openWorkspaceOwned(
   };
   const close = () => {
     closed = true;
+    opened.executionAuthorization.invalidate();
+    opened.sharing.stop();
     clearLedgerRetry();
     return (closeReceipt ??= (async () => {
+      await stopRpc();
       await epochTransition.close();
       await refresh;
       await Promise.allSettled([...snapshotFlights]);
+      originRecovery?.clear();
       // History/snapshot diagnosis may start while close drains those flights.
       // Keep custody alive through identity verification and the durable receipt,
       // never await the parent drain/full erasure that calls back into close.
@@ -975,12 +1264,241 @@ async function openWorkspaceOwned(
   };
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
+  const authorizeScheduleExecution = (
+    request: ScheduleAuthorizationRequest,
+    doc: LoroDoc,
+    executionTarget?: { localProjectId?: string }
+  ) =>
+    Effect.scoped(
+      authorizeEncryptedSchedule({
+        workspaceId: options.workspaceId,
+        request,
+        doc,
+        executionTarget,
+        origins: executionOrigins,
+        open: (input) =>
+          Effect.gen(function* () {
+            const native = yield* opened.runtime.binding(
+              `doc:${getScheduleRoomId(request.scheduleId)}`,
+              'loro',
+              'current'
+            );
+            return yield* native.openAuthenticated(input);
+          }),
+        recover: originRecovery?.recover,
+        authorizeExecution: opened.executionAuthorization.authorizeExecution,
+        isExecutionOpen: () => !closed,
+      })
+    );
   return {
+    attachmentToken: async () => {
+      if (closed) throw new Error('e2ee_closed');
+      const result = await options.cloud.getContentToken({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+      });
+      if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+      return result.attachmentToken;
+    },
+    inspectClientLossAuthority: (requesterDevice: string, membershipId?: string) =>
+      daemonLossProbeEnabled
+        ? readDaemonLossAuthority(
+            clientLossAuthority,
+            opened.signingPublicKey,
+            requesterDevice,
+            membershipId
+          )
+        : null,
+    /** This machine's signing key: the only author of derived inputs. */
+    signingPublicKey: opened.signingPublicKey,
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,
       opened.signingPublicKey
     ),
+    authorizeScheduleExecution,
+    authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
+      run(authorizeScheduleExecution(request, doc)),
+    resolveVerifiedExecutionOriginal: (
+      intent: EncryptedExecutionIntent,
+      doc?: LoroDoc,
+      lookup: { readonly origin?: boolean } = {}
+    ) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          if (closed || intent.workspaceId !== options.workspaceId) return undefined;
+          // Origin lookups and this machine's own inputs always use the signed row,
+          // whose `derivedFrom` the dispatch fast path cannot carry.
+          const fromDoc = lookup.origin
+            ? undefined
+            : doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
+          // This original cache is an accelerator, never the actual-start journal.
+          // Its local I/O fault cannot block the independently signed durable origin.
+          const cached = yield* rpc
+            .readIncoming(intent)
+            .pipe(Effect.catch(() => Effect.succeed(undefined)));
+          const rpcOriginal =
+            typeof fromDoc === 'string' ? fromDoc : cached ? hex(cached.frame) : undefined;
+          if (rpcOriginal !== undefined) {
+            if (cached && hex(cached.frame) !== rpcOriginal) return undefined;
+            const view = yield* opened.runtime.executionLedger();
+            const state = view.inspectState();
+            const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
+            if (!machineId) return undefined;
+            const verified = yield* dispatchNative.openDispatch(machineId, rpcOriginal);
+            if (
+              verified.args.sessionId !== intent.sessionId ||
+              verified.args.userTurnId !== intent.userTurnId ||
+              !isDeepStrictEqual(verified.args.inputConfig ?? {}, intent.inputConfig ?? {})
+            )
+              return undefined;
+            // A self-authored input may be derived; only its signed row says so.
+            if (verified.requesterDevice !== opened.signingPublicKey) {
+              const device = state.devices.get(verified.requesterDevice);
+              const member = device && state.members.get(hex(device.membershipId.toBytes()));
+              if (!member) return undefined;
+              return {
+                requesterDevice: verified.requesterDevice,
+                requesterCryptoUserId: hex(member.userId.toBytes()),
+                expiresAt: verified.expiresAt,
+              };
+            }
+          }
+          if (!doc) return undefined;
+          return yield* executionOrigins.resolve(
+            intent,
+            doc,
+            (request) =>
+              Effect.gen(function* () {
+                if (closed || intent.workspaceId !== options.workspaceId)
+                  return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
+                const contentBinding = yield* opened.runtime.binding(
+                  `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
+                  'loro',
+                  'current'
+                );
+                return yield* contentBinding.openAuthenticated(request);
+              }),
+            originRecovery?.recover,
+            lookup
+          );
+        })
+      ),
+    startRpc: (
+      machineId: string,
+      offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
+      trace?: (event: E2eeRpcTiming) => void,
+      handleFeature?: EncryptedFeatureHandler
+    ) =>
+      run(
+        Effect.gen(function* () {
+          if (rpcFiber || closed) return;
+          rpcFiber = yield* Effect.forkIn(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const provider = yield* createTokenProvider(true);
+                yield* provider.getToken();
+                const bucketId = provider.getBucketId();
+                if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
+                  return yield* Effect.fail(new Error('e2ee_content_configuration'));
+                const controller = new AbortController();
+                yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()));
+                const client = createLoroStreamsJsonStreamClient({
+                  bucketId,
+                  getBaseUrl: provider.getGatewayBaseUrl,
+                  getToken: () => Effect.runPromise(provider.getToken()),
+                  fetchImpl: (url, init) =>
+                    fetch(url, {
+                      ...init,
+                      signal: init?.signal
+                        ? AbortSignal.any([controller.signal, init.signal])
+                        : controller.signal,
+                    }),
+                });
+                const receive = makeEncryptedRpcReceiver({
+                  workspaceId: options.workspaceId,
+                  genesis: binding.genesisHash,
+                  machineId,
+                  native: dispatchNative,
+                  journal: rpcJournal,
+                  authorize: opened.executionAuthorization.authorizeExecution,
+                  isOpen: () => !closed,
+                  offer,
+                  client,
+                  trace,
+                });
+                const receiveFeature = handleFeature
+                  ? yield* makeEncryptedFeatureReceiver({
+                      workspaceId: options.workspaceId,
+                      genesis: binding.genesisHash,
+                      machineId,
+                      native: dispatchNative,
+                      journal: rpcJournal,
+                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
+                      authorizeRead: opened.executionAuthorization.authorizeRead,
+                      isOpen: () => !closed,
+                      handle: handleFeature,
+                      client,
+                    })
+                  : undefined;
+                let failureReported = false;
+                yield* makeEncryptedRpcListener({
+                  workspaceId: options.workspaceId,
+                  machineId,
+                  client,
+                  trace,
+                  receive: (envelope) =>
+                    Effect.gen(function* () {
+                      if (receiveFeature && (yield* receiveFeature(envelope))) return;
+                      yield* receive(envelope);
+                    }).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          failureReported = false;
+                        })
+                      )
+                    ),
+                  onFailure: () => {
+                    if (!failureReported) {
+                      failureReported = true;
+                      console.debug(
+                        '[e2ee] encrypted RPC request unavailable; durable dispatch remains active'
+                      );
+                    }
+                  },
+                });
+                return yield* Effect.never;
+              })
+            ).pipe(Effect.retry(Schedule.spaced('1 second'))),
+            scope
+          );
+        })
+      ),
+    stopRpc,
+    isExecutionOpen: () => !closed,
+    readMachineSharing: (machineId: string) =>
+      opened.sharingRemote
+        ? run(opened.sharing.read(machineId, opened.sharingRemote))
+        : Promise.reject(new Error('e2ee_sharing_unavailable')),
+    updateMachineSharing: (
+      machineId: string,
+      generation: string,
+      requestId: string,
+      change: import('@lody/platform').E2eeMachineSharingChange
+    ) =>
+      opened.sharingRemote
+        ? run(opened.sharing.write(machineId, generation, requestId, change, opened.sharingRemote))
+        : Promise.reject(new Error('e2ee_sharing_unavailable')),
+    authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
+      Effect.suspend(() =>
+        closed
+          ? Effect.succeed({ _tag: 'Denied' as const, reason: 'closed' as const })
+          : opened.executionAuthorization.authorizeExecution(
+              workspaceId,
+              requesterDevice,
+              localProjectId
+            )
+      ),
     assertPairingConfirmed: () => {
       if (!pairing || !pairingConfirmed)
         throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });
@@ -997,7 +1515,15 @@ async function openWorkspaceOwned(
     bucketId: () => bucket?.(),
     status: () =>
       closed
-        ? Promise.reject(new Error(memberRemoved ? 'e2ee_member_removed' : 'e2ee_closed'))
+        ? Promise.reject(
+            new Error(
+              memberRemoved
+                ? 'e2ee_member_removed'
+                : deviceRevoked
+                  ? 'e2ee_device_revoked'
+                  : 'e2ee_closed'
+            )
+          )
         : run(opened.runtime.status()).then((status) => ({
             ...status,
             epochPhase: epochTransition.phase(),

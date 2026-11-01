@@ -16,10 +16,18 @@ session's workspace root; absolute/home paths need no root. Remote targets retai
 bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 [implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
 
-Relative Markdown links first resolve candidates across the session root and its
-nested Git worktrees: a unique match opens directly, several show a picker, and the
-chosen canonical path becomes the viewer identity. Old daemons and failed Git
-discovery fall back to the session root. Tree/Diff and explicit paths skip this.
+Conversation Markdown treats relative paths as candidates until the owning Session's
+index confirms an exact file; absolute paths need no index. Clicking opens the
+known target directly, without Git worktree discovery. Invalid targets copy the
+original path and show copy feedback. The context-menu Copy Path action also copies
+the authored path directly, independent of index/daemon availability. Line anchors
+are navigation metadata, not part of the copied path. The
+[nested-worktree discovery protocol](../notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md)
+remains available to explicit protocol callers; conversation clicks and menus do
+not invoke it. A failed conversation index attempt records the original error and
+releases its optional cache lease, so the next Files/Changes acquire can rebuild
+the failed resource. Link confirmation resumes when the conversation is shown
+again; it does not run a background retry loop.
 
 Rendered Markdown file previews enable Session links only when their caller supplies
 the navigation switch. SessionDetail derives it from the same callback used by chat.

@@ -9,6 +9,17 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
+import type { ReadonlyStore } from './store';
+import type { PlatformSessionState } from './provider';
+
+/** Synchronous, pure assembly of a borrowed runtime port. The application owns
+ * resource acquisition, its executor and retirement (including unfinished close).
+ * Do not acquire custody or perform I/O during this factory call. The live session
+ * supplies account routing only; the runtime must verify every operation itself. */
+export type E2eeRuntimeFactory = (input: {
+  readonly session: ReadonlyStore<PlatformSessionState>;
+}) => E2eeWorkspaceRuntime | undefined;
+
 /** Public creation intent. The host verifies accountId against its signed-in account. */
 export interface E2eeWorkspacePrepareInput {
   readonly accountId: string;
@@ -68,7 +79,7 @@ export interface E2eeRuntimeStatus {
   readonly position: string | null;
   readonly epoch: number;
   readonly rotationRequired: boolean;
-  /** Ephemeral main-process reader owner; never persisted or an authorization credential. */
+  /** Ephemeral host reader owner; never persisted or an authorization credential. */
   readonly readerOwner?: string;
   /** Current self membership, derived only from the host's verified ledger. */
   readonly signingPublicKey?: string;
@@ -76,14 +87,15 @@ export interface E2eeRuntimeStatus {
   readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
-  /** Confirmed retained key usable for sends while current-key reception retries. */
+  /** Confirmed retained key for local history/admission; not authority for new seals.
+   * Native sealing always selects the current verified epoch. */
   readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
   readonly hasDeviceCredential?: boolean;
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The main process's own public export, for ledger display without another replay. */
+/** The host's own public export, for ledger display without another replay. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
@@ -106,8 +118,22 @@ export interface E2eeManagementState {
     mayRevoke: boolean;
   }[];
 }
-/** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
+/** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
+  readonly readerLeases?: 'preallocated-v1';
+  readMachineSharing?(
+    workspaceId: string,
+    machineId: string
+  ): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingView>;
+  updateMachineSharing?(
+    workspaceId: string,
+    machineId: string,
+    generation: string,
+    requestId: string,
+    change: import('./e2ee-machine-sharing').E2eeMachineSharingChange
+  ): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingWriteResult>;
+
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
   revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
@@ -164,7 +190,7 @@ export interface E2eeWorkspaceRuntime {
     signingPublicKey: string;
     encryptionPublicKey: string;
     credentialHash: string;
-    protection: 'os-keystore';
+    protection: 'os-keystore' | 'web-crypto';
   }>;
   approvePersonalJoin?(
     workspaceId: string,
@@ -214,13 +240,36 @@ export interface E2eeWorkspaceRuntime {
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareFeatureRpc?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
+  prepareDispatch?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
+  acceptDispatchResponse?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frameHex: string
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;
@@ -237,7 +286,8 @@ export interface E2eeWorkspaceRuntime {
   open(
     workspaceId: string,
     observed?: { genesisHash: string; headHash: string; length: number },
-    expectedAccountId?: string
+    expectedAccountId?: string,
+    readerOwner?: string
   ): Promise<E2eeRuntimeStatus>;
   close(workspaceId: string, expectedAccountId?: string, readerOwner?: string): Promise<void>;
   /** Read retained verified identity without granting this window a reader.
@@ -267,6 +317,7 @@ export type E2eeContentContext = {
   continuationOffset?: string;
 };
 export type E2eeContentSeal = {
+  /** Minimum expected verified epoch. Hosts seal at their current epoch and reject future hints. */
   epoch: number;
   room: E2eeContentRoom;
   context: E2eeContentContext;

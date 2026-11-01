@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-为目标机器为 macOS 的会话增加独立 iOS 模拟器侧栏，机器 RPC 负责设备列表和准备，远端媒体复用 Quick Tunnel。同机直连、无分享、每个设备只允许一个会话控制；Lody 自有 viewer 只接收画面和受限输入。首版采用 MJPEG，没有增加前端依赖。真实本机服务冒烟已收到画面并完成清理；完整远端/移动端验收及 H.264 仍不在已验证范围内。
+为目标机器为 macOS 的会话增加独立 iOS 模拟器侧栏，机器 RPC 负责设备列表和准备，远端媒体复用 Quick Tunnel。同机直连、无分享、每个设备只允许一个会话控制；Lody 自有 viewer 只接收画面和受限输入。共享 device-preview 内核通过 WebSocket 或 WebRTC DataChannel 将 H.264 交给 WebCodecs，iOS 保留 MJPEG 回退。Android 使用独立 ADB/scrcpy 适配器并复用生命周期和 viewer。本机 Android H.264 与停止清理已验证；Android 托管组件发布、外部签名服务升级及远端/移动端验收仍是独立发布要求。
 
 ## 已确认需求与待审阅默认值
 
@@ -469,3 +469,27 @@ Device Hub 始终接管且 SpringBoard／backboardd PID 不变。常驻后 App �
 不在此次验证范围内。
 
 验证：独立公共仓库完整检查通过（CLI 3,453 项通过、4 项跳过；组件 4,709 项通过），CLI 构建、格式化与文档检查通过。外层 affected 检查仍受既有 ACP 适配器类型／依赖错误阻塞。无需更换原生运行时或部署 Cloud；更新前端与模拟器所在 Mac 的 CLI。
+
+## Android 共享适配器边界
+
+生命周期、网关、WebRTC DataChannel、流控和 WebCodecs viewer 归属
+`apps/cli/src/device-preview`；平台适配器保留设备发现、原生采集和控制。
+选择官方 scrcpy-server 与 Tango，避免引入 serve-avd 的第二套传输/租约所有者
+和通用 Web/ADB 服务。Android 使用区分大小写的 AVD 名称，独立
+`android-emulator/control`、签名操作、响应加密上下文及 `androidEmulator: 1`
+能力。旧 iOS DTO 和 viewer 消息名称保持兼容。
+
+一个会话可以分别持有 iOS、Android 预览。编码转换在适配器发生：Baguette 的
+VideoToolbox 参考帧校验不适用于 scrcpy Annex-B。Android 使用固定编码预算和
+每个 viewer 独立流控，避免多个 viewer 争相改变同一编码器；代价是不按每个
+viewer 调整原生分辨率。Android 要求 H.264，不静默回退 JPEG。
+
+Tango TCP 连接器销毁 socket 时不会结束挂起读取，Lody 自有连接器让 close、
+error、abort 都结束读取。原生控制 ACK 有时限，取消先结束所属 socket，再等待
+命令完成，避免网关清理等待尚未关闭的设备。采集关闭无法确认时，仅该设备的
+租约保持隔离直至 worker 重启；已撤销端点的清理失败不阻挡安全复用。
+
+React 面板复用生命周期轮询、媒体、输入和截图，Android 独立保存状态和偏好，
+仅提供支持的控制。Android 旋转为原生方向切换，不承诺左右四分之一转。
+SDK 和 AVD 由用户安装。仓库生成已验证的服务端组件，公共源代码不负责部署
+外部下载渠道，也不能升级外部证明签发服务。

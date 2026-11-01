@@ -198,7 +198,7 @@ function JoinSession({
   else if (!pinMatches) message = 'e2ee.team.unavailable';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   return (
-    <main {...stylex.props(styles.page)}>
+    <main data-testid="e2ee-invitation" {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.card)}>
         <Card.Root>
           <Card.Header>
@@ -233,7 +233,7 @@ function JoinSession({
                 pinMatches &&
                 available?.matchesRecipient !== false &&
                 !request && (
-                  <Button disabled={busy} onClick={() => void accept()}>
+                  <Button data-testid="e2ee-invitation-submit" disabled={busy} onClick={() => void accept()}>
                     {t(offer.mode === 'email' ? 'e2ee.team.accept' : 'e2ee.team.submit')}
                   </Button>
                 )}

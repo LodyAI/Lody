@@ -42,7 +42,10 @@ import {
   sqliteReceiveJournal,
   sqliteRepairJournal,
 } from '@lody/e2ee-core/adapters/node-sqlite';
-import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import {
+  makeStreamsUpdateBinding,
+  makeRealtimeContentBinding,
+} from '@lody/e2ee-core/adapters/loro-streams';
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
@@ -129,6 +132,10 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  onVerifiedLedger?: (
+    view: import('@lody/e2ee-core/protocol').LedgerView,
+    generation: number
+  ) => void;
   staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
@@ -142,6 +149,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const scope = yield* Effect.scope;
   const serial = yield* Semaphore.make(1);
   let closed = false;
+  let executionGeneration = 0;
 
   const db = yield* Effect.acquireRelease(
     sql(() => {
@@ -359,7 +367,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const verified = Context.get(context, VerifiedLedger);
   const installed = Context.get(context, InstalledEpochKeys);
   const history = Context.get(context, InstalledEpochHistory);
-  yield* verified.current();
+  const initialVerifiedView = yield* verified.current();
+  options.onVerifiedLedger?.(initialVerifiedView, executionGeneration);
   const receiving = options.mailbox
     ? yield* Layer.buildWithScope(
         Layer.mergeAll(KeyReceiver.layer, KeyRepair.layer).pipe(
@@ -433,6 +442,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   );
   return {
     status: () => serial.withPermit(status()),
+    /** Current verified authority only; execution freshness must come from an authenticated read. */
+    executionLedger: () =>
+      serial.withPermit(
+        Effect.gen(function* () {
+          yield* guard();
+          return yield* verified.current();
+        })
+      ),
     pairingEvidence: () =>
       serial.withPermit(
         Effect.gen(function* () {
@@ -470,6 +487,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
           )
             return yield* failure('invalid-input');
+          executionGeneration++;
           const records = yield* sql(() => page.recordsHex.map(unhex));
           const length = page.startIndex + records.length;
           if (
@@ -524,7 +542,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             },
             { length, head }
           );
-          yield* verified.current();
+          const updatedVerifiedView = yield* verified.current();
+          options.onVerifiedLedger?.(updatedVerifiedView, executionGeneration);
           if (length - compactedAt >= 64) {
             const origin = yield* feed
               .rebase()
@@ -537,14 +556,50 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return yield* status();
         })
       ),
-    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number) =>
+    sharingAdmissionHistory: (view: import('@lody/e2ee-core/protocol').LedgerView) =>
+      serial.withPermit(
+        guard().pipe(
+          Effect.andThen(
+            sql(() =>
+              db
+                .prepare('SELECT position,record FROM records WHERE position < ? ORDER BY position')
+                .all(view.length)
+                .map((row) => ({
+                  length: Number(row.position) + 1,
+                  record: new Uint8Array(row.record as Uint8Array),
+                }))
+            )
+          )
+        )
+      ),
+    executionGeneration: () => executionGeneration,
+    readSharingEpochKey: (epoch: number) => history.read(epoch),
+    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({
         genesis,
         resource,
         model,
-        writeEpoch,
+        // A cached provider selection cannot authorize new writes at an old epoch.
+        writeEpoch: 'current',
         signer: options.device,
-        ledger: () => verified.current(),
+        ledger: () =>
+          verified
+            .current()
+            .pipe(
+              Effect.flatMap((view) =>
+                typeof writeEpoch === 'number' && writeEpoch > view.inspectState().epoch.number
+                  ? Effect.fail(failure('invalid-input'))
+                  : Effect.succeed(view)
+              )
+            ),
+        readEpochKey: (epoch) => history.read(epoch),
+      }).pipe(Effect.provideService(VerifiedLedger, verified)),
+    realtimeBinding: (resource: string) =>
+      makeRealtimeContentBinding({
+        genesis,
+        resource,
+        signer: options.device,
+        ledger: () => guard().pipe(Effect.andThen(verified.current())),
         readEpochKey: (epoch) => history.read(epoch),
       }),
     /** Coalescing belongs to the caller's single background refresh owner. */

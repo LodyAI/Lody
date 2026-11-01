@@ -1,4 +1,6 @@
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
+import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
+import type { SharingRemote } from '@lody/e2ee-machine-sharing'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
 import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
@@ -56,6 +58,10 @@ const envelopes = z.object({
 })
 const contentToken = z.object({
   token: z.string().min(1),
+  attachmentToken: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   bucketId: z.string().min(1),
   gatewayBaseUrl: z.string().url(),
   expiresIn: z.number().int().positive().max(900),
@@ -159,6 +165,7 @@ function requestFailure(error: unknown): BackendError {
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   if (code === 'e2ee_member_removed') return new E2eeMemberRemovedError()
+  if (code === 'e2ee_device_revoked') return new E2eeDeviceRevokedError()
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -609,6 +616,32 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...requestInput }
       return request((client) => client.action(api.e2eeWorkspaces.appendRecord, original), appended)
     },
+    machineSharing: (signal?: AbortSignal): SharingRemote => ({
+      readHead: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readHead, sharingInput),
+          sharingReplySchemas.readHead,
+          signal
+        ),
+      readVersion: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readVersion, sharingInput),
+          sharingReplySchemas.readVersion,
+          signal
+        ),
+      readRequest: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readRequest, sharingInput),
+          sharingReplySchemas.readRequest,
+          signal
+        ),
+      commit: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.commit, sharingInput),
+          sharingReplySchemas.commit,
+          signal
+        )
+    }),
     contentStreamsToken: (access: E2eeContentTokenRequest) =>
       request(
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),

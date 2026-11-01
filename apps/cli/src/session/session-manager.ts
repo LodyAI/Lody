@@ -23,6 +23,8 @@ import {
 } from '@/lib/git-credential-helper-script';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
+import { randomUUID } from 'node:crypto';
+import { McpAuthenticationLegacy } from '@/mcp/authentication/legacy';
 
 import {
   SessionId,
@@ -86,7 +88,11 @@ import {
 } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type {
+  LodyPromptSuggestion,
+  RateLimitsSnapshot,
+  SessionUsageUpdate,
+} from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -121,6 +127,7 @@ import {
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import {
   claimLegacySpeculativeWorktree,
   completeLegacySpeculativeWorktreeSetup,
@@ -206,6 +213,7 @@ export interface ISession {
   createAgent(config: CreateAgentConfig): Promise<string>;
   getAcpCapabilities?(): AcpCapabilitiesResult | null;
   getAcpCapabilitySourceVersion?(): string | null;
+  getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
   getWorkdir(): string;
   /**
@@ -214,12 +222,13 @@ export interface ISession {
    * Returns null if the session has no host path mapping.
    */
   getHostWorkdir(): string | null;
+  /** Existing host path only; never creates a directory or prepares a runtime. */
+  peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
+  /** Machine-held inputs that chose this process's directories; synced metadata may differ. */
+  getExecutionScope?(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'>;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
-  watchInboxRecoveryResources?(
-    persist: (identity: import('./session-sandbox').SessionRecoveryResources) => void
-  ): Promise<() => void>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
   terminate(force?: boolean): Promise<void>;
   /**
@@ -247,6 +256,7 @@ export interface ISession {
    */
   updateEnv(env: Record<string, string | undefined>): void;
   getGitHubCredentials(): SessionCredentials;
+  validateMcpRequester?(userId: string): Promise<void>;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -289,12 +299,14 @@ export interface CreateAgentConfig {
   ) => Promise<RequestPermissionResponse>;
   onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (limits: RateLimit) => void;
+  onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => void;
+  onPromptSuggestion?: (suggestion: LodyPromptSuggestion) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
   onSessionTitleUpdate: (title: string) => void;
   onAgentWarning: (warning: AgentSessionWarning) => void;
   loadExternalMcpServers: NonNullable<AgentClientOptions['loadExternalMcpServers']>;
+  releaseExternalMcpServers?: () => Promise<void>;
   onImageGenerationBegin: (event: ImageGenerationBeginEvent) => void;
   onImageGenerationEnd: (event: ImageGenerationEndEvent) => void;
   onWriteTextFile: (event: AcpWriteTextFileEvidence) => void | Promise<void>;
@@ -312,6 +324,8 @@ export type AgentStartConfig = {
   forkSessionTurnId?: string;
   /** Let a higher-level saga publish the ACP id with the complete target meta. */
   deferAcpSessionIdPersistence?: boolean;
+  /** A native continuation cannot adopt a replacement conversation or replay history. */
+  requireExactResume?: boolean;
 };
 
 export type SessionTerminatedEvent = {
@@ -334,11 +348,13 @@ interface SessionManagerEvents {
     accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
+  onPromptSuggestion: (sessionId: SessionId, suggestion: LodyPromptSuggestion) => void;
   onRateLimitUpdate: (
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
     cliType: string,
-    limits: RateLimit
+    snapshot: RateLimitsSnapshot,
+    binding: import('./automation-observations').ProviderBinding | undefined
   ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
@@ -370,6 +386,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly cloudPort: CloudPort;
   private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
   private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
+  readonly mcpAuthentication: McpAuthenticationLegacy;
   /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
   private speculativeWorktreeRecoveryQueued = false;
   private speculativeWorktreeRecoveryGeneration = 0;
@@ -404,6 +421,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.mcpAuthentication = new McpAuthenticationLegacy({
+      machineId,
+      workspaceId,
+      userId: options.cloudPort.identity.userId,
+    });
     this.sessionSandboxFactory =
       options.sessionSandboxFactory ?? createSessionSandboxFactory({ logger: this.logger });
   }
@@ -652,6 +674,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
+    const mcpOwner = randomUUID();
+    const mcpRequesterUserId = config.requesterUserId;
     const localProjectId =
       config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
@@ -669,6 +693,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             });
             let directories: string[] = [];
             await owner.updateProjectRun(ownerId, async (snapshot) => {
+              await config.authorizeExecutionInputs?.({ projectRun: snapshot });
               const roots = await resolveProjectFileRoots(
                 session.getWorkdir(),
                 snapshot,
@@ -744,7 +769,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {
         this.emit('onContextWindowUsageUpdate', sessionId, usage);
       },
-      onRateLimitUpdate: (limits: RateLimit) => {
+      onPromptSuggestion: (suggestion) => {
+        this.emit('onPromptSuggestion', sessionId, suggestion);
+      },
+      onRateLimitUpdate: (snapshot: RateLimitsSnapshot) => {
         if (
           config.agentConfigId ||
           (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType))
@@ -754,7 +782,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             this.machineId,
             config.agentConfigId,
             config.agentType,
-            limits
+            snapshot,
+            session.getProviderBinding?.()
           );
         }
       },
@@ -765,16 +794,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
           repo: this.workspaceDocument.repo,
-          syncFlockDoc: (docId, { timeoutMs }) =>
-            this.workspaceDocument.syncFlockDocOrThrow(docId, {
-              timeoutMs,
-              reason: 'session-mcp-catalog-start',
-            }),
+          waitForCatalogBaseline: () =>
+            waitForMcpCatalogBaseline(this.workspaceDocument, this.workspaceId),
           workspaceId: this.workspaceId,
           sessionId,
           selectedIds: config.mcpServerIds,
           logger: this.logger,
+          env: mcpRequesterUserId === this.cloudPort.identity.userId ? process.env : {},
+          prepare: (entry, resolved) =>
+            this.mcpAuthentication.prepare(entry, resolved, mcpOwner, mcpRequesterUserId),
         }),
+      releaseExternalMcpServers: () => this.mcpAuthentication.release(mcpOwner),
       onImageGenerationBegin: (event) => this.emit('onImageGenerationBegin', sessionId, event),
       onImageGenerationEnd: (event) => this.emit('onImageGenerationEnd', sessionId, event),
       onWriteTextFile: (event) => {
@@ -845,6 +875,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const launchResolutionStartedAt = performance.now();
       let managedRuntimeReadyLogged = false;
       const launch = await resolveACPProcessLaunchAsync({
+        signal,
         agentConfigId: config.agentConfigId,
         magpieGatewayUrl: config.magpieGatewayUrl,
         cliType: config.agentCliType,
@@ -972,6 +1003,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
       }
 
+      if (
+        agentStart?.requireExactResume &&
+        (!requestedResumeSessionId || acpSessionId !== requestedResumeSessionId)
+      )
+        throw new Error('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
       this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
       if (!agentStart?.deferAcpSessionIdPersistence) {
         await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1033,9 +1069,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!config.codexAuth) {
       if (
         config.agentConfigId &&
-        (await store.list(this.workspaceId)).some(
-          (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
-        )
+        (await store.isAccountBound({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          configId: config.agentConfigId,
+        }))
       ) {
         throw new Error(
           'This Codex provider account reference is missing; restore its configuration'
@@ -1089,6 +1127,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.parentSessionId ?? config.sessionId
       );
       config.projectRun = (await ownerDoc.getMetaState())?.projectRun;
+      if (config.projectRun)
+        await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     }
     // Resolve each repository before enrolling a managed credential lease. The same
     // pinned receipt is used by materialization, refresh, PR observation and restore.
@@ -1100,6 +1140,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         logger: this.logger,
       });
       await owner.updateProjectRun(config.parentSessionId ?? config.sessionId!, async (run) => {
+        await config.authorizeExecutionInputs?.({ projectRun: run });
         const resolved = await resolveProjectGroupRepositories(run, {
           machineId: this.machineId,
           resolveLocalRoot: (id) => this.resolveLocalProjectRootPath(id),
@@ -1239,6 +1280,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+    await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
     const { lease } = credentials;
@@ -1394,6 +1436,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     const parentMeta = await parentSessionDoc.getMetaState();
     const parentProject = parentMeta?.project ?? config.project;
+    await config.authorizeExecutionInputs?.({ project: parentProject });
     const localParentWorktreeSource = this.resolveLocalWorktreeSource(
       parentProject,
       config.workdir
@@ -1617,6 +1660,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
     config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    if (config.projectRun)
+      await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)
       await sessionDoc.setRepoFullName(config.githubRepo);
 
@@ -1637,6 +1682,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             )
           ),
         allowManagedClone: this.cloudPort.githubTokens !== null,
+        authorizeRun: async (run) => {
+          await config.authorizeExecutionInputs?.({ projectRun: run });
+        },
         brokerAuth: (source) => this.resolveHostGitBrokerAuth(source, config, credentials),
         setup: async (member, memberWorkdir) => {
           const localProjectId =
@@ -1831,20 +1879,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.speculativeWorktreeRecoveryGeneration += 1;
     this.detachSpeculativeWorktreeRecovery?.();
     this.detachSpeculativeWorktreeRecovery = null;
-    await this.speculativeWorktreeRecoveryChain;
-    await this.cleanupSessions();
-    // MessageHandler owns the final ACP/Code Collab drain. It first stops all
-    // session producers through this phase, persists their last callbacks while
-    // the document manager is still usable, then calls cleanUp() again for the
-    // remaining shared-resource teardown.
-    if (options.keepWorkspaceDocumentOpen) {
-      return;
+    const failures: unknown[] = [];
+    const attempt = async (step: () => Promise<unknown>) => {
+      try {
+        await step();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    await attempt(() => this.speculativeWorktreeRecoveryChain);
+    await attempt(() => this.cleanupSessions());
+    // MessageHandler drains final callbacks between these two cleanup phases.
+    if (!options.keepWorkspaceDocumentOpen) {
+      await attempt(() => this.mcpAuthentication.close());
+      await attempt(() => this.workspaceDocument.cleanUp());
+      await attempt(async () => {
+        await this.gitCredentialBroker?.shutdown();
+        this.gitCredentialBroker = null;
+      });
+      await attempt(async () => {
+        await this.githubTokenManager?.shutdown();
+        this.githubTokenManager = null;
+      });
     }
-    await this.workspaceDocument.cleanUp();
-    await this.gitCredentialBroker?.shutdown();
-    this.gitCredentialBroker = null;
-    await this.githubTokenManager?.shutdown();
-    this.githubTokenManager = null;
+    if (failures.length) throw new AggregateError(failures, 'Session manager cleanup failed');
   }
 
   private async cleanupSessions(): Promise<void> {
@@ -1892,6 +1950,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           this.machineId,
           localProjectId,
           {
+            verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
                 reason: 'session-fork-workdir-resolve',
@@ -1909,6 +1968,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.machineId,
       localProjectId,
       {
+        verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
             reason: 'session-fork-local-project-resolve',
@@ -2035,16 +2095,18 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /**
    * Stop publishing a Session instance's lifecycle events and drop it from the
    * live map. Only for an instance that was registered by `createSessionInner`
-   * but never reached a caller, or retired between prompts for reconfiguration.
+   * but never reached a caller, or retired between prompts for reconfiguration or failed release.
    * The owning execution path handles replacement and failures. Keyed by instance, not session id, because a
    * recovery path may already be creating the replacement under the same id.
    */
-  private detachSession(session: ISession): void {
+  detachSession(session: ISession): void {
     this.sessionEventDetachers.get(session)?.();
     this.sessionEventDetachers.delete(session);
     if (this.sessions.get(session.sessionId) === session) {
       this.sessions.delete(session.sessionId);
-      void this.rebalanceSessionSandboxes();
+      void this.rebalanceSessionSandboxes().catch((cause: unknown) =>
+        this.logger.warn(`Sandbox rebalance after detach failed: ${formatErrorMessage(cause)}`)
+      );
     }
   }
 

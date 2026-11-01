@@ -2,6 +2,8 @@ import * as React from 'react';
 import { Dialog as UiDialog, AlertDialog as UiAlertDialog } from '@lody/ui';
 import { Button, type ButtonVariant } from '@lody/ui/button';
 
+import { useModalContainer } from '@lody/ui/popup-container';
+import { useHorizontalDivision } from '@/components/mobile/use-vertical-division';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
 /**
@@ -48,13 +50,52 @@ export const Dialog = {
 
 type AlertDialogContentProps = React.ComponentProps<typeof UiAlertDialog.Content>;
 
+/** Root alerts sit inside the lower panel; nested modal hosts own their geometry. */
+function useFoldAwareAlertLayout(enabled: boolean): React.CSSProperties | undefined {
+  const division = useHorizontalDivision();
+  const [keyboardVisible, setKeyboardVisible] = React.useState(
+    () =>
+      typeof document !== 'undefined' &&
+      (parseFloat(document.documentElement.style.getPropertyValue('--native-keyboard-height')) ||
+        0) > 0
+  );
+  React.useEffect(() => {
+    const update = () =>
+      setKeyboardVisible(
+        (parseFloat(document.documentElement.style.getPropertyValue('--native-keyboard-height')) ||
+          0) > 0
+      );
+    window.addEventListener('lody:keyboard-resize', update);
+    update();
+    return () => window.removeEventListener('lody:keyboard-resize', update);
+  }, []);
+  if (!enabled || !division || keyboardVisible) return undefined;
+  const lowerTop = division.top + division.height;
+  const lowerHeight = division.viewportHeight - lowerTop;
+  if (lowerHeight < 240) return undefined;
+  return {
+    insetBlockStart: `${lowerTop + lowerHeight / 2}px`,
+    maxHeight: `${lowerHeight - 32}px`,
+    overflowY: 'auto',
+  };
+}
+
 const AlertDialogContent = React.forwardRef<HTMLDivElement, AlertDialogContentProps>(
-  function AlertDialogContent({ backdropContent, ...props }, ref) {
+  function AlertDialogContent({ backdropContent, style, container, ...props }, ref) {
+    const modalContainer = useModalContainer();
+    const layout = useFoldAwareAlertLayout(container == null && modalContainer == null);
+    const panelStyle: AlertDialogContentProps['style'] = !layout
+      ? style
+      : typeof style === 'function'
+        ? (state) => ({ ...style(state), ...layout })
+        : { ...style, ...layout };
     return (
       <UiAlertDialog.Content
         ref={ref}
         data-lody-dialog-content=""
         backdropContent={backdropContent ?? <WindowDragStrip />}
+        container={container}
+        style={panelStyle}
         {...props}
       />
     );

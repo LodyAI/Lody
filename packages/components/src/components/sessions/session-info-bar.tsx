@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
 import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@lody/ui/button';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type {
   PendingScheduledTask,
   SessionGoalCommand,
@@ -15,7 +16,7 @@ import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
-import { ActionChip } from './info-chip';
+import { ActionChip, PopoverActionChip } from './info-chip';
 import {
   ContextChip,
   GoalChip,
@@ -79,8 +80,6 @@ export type SessionInfoBarProps = {
    *  cluster action with its own popover; never staged. Pass it only when a
    *  relation exists, so an otherwise empty bar still hides. */
   relations?: ReactNode;
-  /** Scheduled composer draft: icon-only action, never staged. */
-  scheduledMessage?: ReactNode;
   /** Repositories of a multi-repository conversation: a plain cluster action
    *  with its own popover, placed before Related sessions; never staged. */
   projectMembers?: ReactNode;
@@ -88,6 +87,7 @@ export type SessionInfoBarProps = {
    *  plain action chip in the cluster zone (no stage form). */
   onOpenBrowser?: () => void;
   onOpenIosSimulator?: () => void;
+  onOpenAndroidEmulator?: () => void;
   /** Mobile team workspace: persistent effective privacy status. */
   privateAccessStatus?: { label: string; description: string; onAction?: () => void };
   diffStat?: { add: number; del: number } | null;
@@ -141,14 +141,7 @@ export type SessionInfoBarProps = {
 const QUEUE_SHEET_INSET_CLASS = 'mx-3';
 
 const styles = stylex.create({
-  machineOnly: {
-    display: 'flex',
-    alignItems: 'center',
-    minWidth: 0,
-    height: space[8],
-    paddingInline: space[1.5],
-    containerType: 'inline-size',
-  },
+  simulatorChoices: { display: 'flex', flexDirection: 'column', gap: space[1], padding: space[2] },
   compactPrivateLabel: {
     display: {
       default: 'inline',
@@ -179,10 +172,10 @@ export function SessionInfoBar({
   contextActions,
   onOpenAllChanges,
   relations,
-  scheduledMessage,
   projectMembers,
   onOpenBrowser,
   onOpenIosSimulator,
+  onOpenAndroidEmulator,
   privateAccessStatus,
   diffStat,
   syncing = false,
@@ -272,11 +265,11 @@ export function SessionInfoBar({
   const hasMachine = !!machine?.name.trim();
   const hasSurfaceContent = !!(
     defaultKey ||
-    scheduledMessage ||
     projectMembers ||
     relations ||
     onOpenBrowser ||
     onOpenIosSimulator ||
+    onOpenAndroidEmulator ||
     ambientSync ||
     privateAccessStatus
   );
@@ -359,26 +352,24 @@ export function SessionInfoBar({
   const clusterNonEmpty =
     hasMachine ||
     clusterKeys.length > 0 ||
-    !!scheduledMessage ||
     !!projectMembers ||
     !!relations ||
     !!onOpenBrowser ||
-    !!onOpenIosSimulator;
+    !!onOpenIosSimulator ||
+    !!onOpenAndroidEmulator;
 
-  const surfaceProps = hasSurfaceContent
-    ? {
-        className: cn(
-          '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 dark:border-input-border/45 dark:bg-input/70',
-          INFO_BAR_TEXT_CLASS,
-          // The machine button carries its own 8px padding (chips carry 4px):
-          // trim the leading inset so the first glyph sits where a chip's would.
-          hasMachine && 'pl-1',
-          INFO_BAR_ELEVATION_CLASS,
-          // Keep the queue sheet's top seam free of upward shadow bleed.
-          queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
-        ),
-      }
-    : stylex.props(styles.machineOnly);
+  const surfaceProps = {
+    className: cn(
+      '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2 dark:border-input-border/45 dark:bg-input/70',
+      INFO_BAR_TEXT_CLASS,
+      // The machine button carries its own 8px padding (chips carry 4px):
+      // trim the leading inset so the first glyph sits where a chip's would.
+      hasMachine && 'pl-1',
+      INFO_BAR_ELEVATION_CLASS,
+      // Keep the queue sheet's top seam free of upward shadow bleed.
+      queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
+    ),
+  };
 
   return (
     // Light: same fill and lift as the session composer. Dark: recessed input.
@@ -425,17 +416,16 @@ export function SessionInfoBar({
           ) : null}
           {privateAccessStatus &&
           (clusterKeys.length > 0 ||
-            scheduledMessage ||
             projectMembers ||
             relations ||
             onOpenBrowser ||
             onOpenIosSimulator ||
+            onOpenAndroidEmulator ||
             stagedKey) ? (
             <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
           {/* Repositories, Relations and Browser are plain actions with no stage form. */}
-          {scheduledMessage}
           {projectMembers}
           {relations}
           {onOpenBrowser ? (
@@ -446,12 +436,43 @@ export function SessionInfoBar({
               onAction={onOpenBrowser}
             />
           ) : null}
-          {onOpenIosSimulator ? (
+          {onOpenIosSimulator && onOpenAndroidEmulator ? (
+            <PopoverActionChip
+              icon={Smartphone}
+              label={`${t('sessions.detailTabs.iosSimulator', 'iOS Simulator')} / ${t('sessions.detailTabs.androidEmulator', 'Android Emulator')}`}
+              content={(close) => (
+                <div {...stylex.props(styles.simulatorChoices)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      close();
+                      onOpenIosSimulator();
+                    }}
+                  >
+                    {t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      close();
+                      onOpenAndroidEmulator();
+                    }}
+                  >
+                    {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
+                  </Button>
+                </div>
+              )}
+            />
+          ) : onOpenIosSimulator || onOpenAndroidEmulator ? (
             <ActionChip
               icon={Smartphone}
-              label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+              label={
+                onOpenIosSimulator
+                  ? t('sessions.detailTabs.iosSimulator', 'iOS Simulator')
+                  : t('sessions.detailTabs.androidEmulator', 'Android Emulator')
+              }
               textClassName="text-emerald-600 dark:text-emerald-400"
-              onAction={onOpenIosSimulator}
+              onAction={(onOpenIosSimulator ?? onOpenAndroidEmulator)!}
             />
           ) : null}
           {/* The divider is what marks the staged item as active (the stage

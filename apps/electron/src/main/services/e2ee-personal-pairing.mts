@@ -2,12 +2,22 @@ import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
-import { z } from 'zod'
 import {
-  verifyWorkspaceInvitationSnapshot,
-  type WorkspaceInvitation,
-  type WorkspaceInvitationSnapshot
-} from '@lody/e2ee-core'
+  PersonalPairingOfferSchema,
+  decodePersonalRequest as decodeRequest,
+  encodePersonalInvitation,
+  decodePersonalInvitation,
+  personalInvitationPin as invitationPin,
+  type PersonalPairingOffer,
+  type PersonalPairingRequest
+} from '@lody/e2ee-client/pairing'
+export {
+  PersonalPairingOfferSchema,
+  encodePersonalInvitation,
+  decodePersonalInvitation
+} from '@lody/e2ee-client/pairing'
+export type { PersonalPairingOffer, PersonalPairingRequest } from '@lody/e2ee-client/pairing'
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core'
 import {
   Bytes,
   hashRecordBytes,
@@ -30,35 +40,6 @@ import { verifyMemberHistory } from './e2ee-member-join.mjs'
 
 const hex = (value: Uint8Array): string => Buffer.from(value).toString('hex')
 const raw = (value: string): Uint8Array => new Uint8Array(Buffer.from(value, 'hex'))
-const hash = z.string().regex(/^[0-9a-f]{64}$/)
-const session = z.string().regex(/^[0-9a-f]{32}$/)
-const signature = z.string().regex(/^[0-9a-f]{128}$/)
-const workspace = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
-export const PersonalPairingOfferSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    genesisHash: hash,
-    genesisRecordHex: z
-      .string()
-      .regex(/^(?:[0-9a-f]{2})+$/)
-      .max(16384),
-    endorser: hash,
-    membershipId: session,
-    pairingSessionId: session
-  })
-  .strict()
-/** Independently transferred by the approving desktop; mailbox data never chooses these pins. */
-export type PersonalPairingOffer = z.infer<typeof PersonalPairingOfferSchema>
-const requestSchema = PersonalPairingOfferSchema.extend({
-  signingPublicKey: hash,
-  encryptionPublicKey: hash,
-  credentialHash: hash,
-  possessionSignature: signature,
-  bindingSignature: signature,
-  protection: z.literal('os-keystore')
-}).strict()
-export type PersonalPairingRequest = z.infer<typeof requestSchema>
 const fail = (code: string): Error & { code: string } =>
   Object.assign(new Error(`e2ee_${code}`), { code })
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
@@ -69,76 +50,6 @@ function sql<A>(work: () => A): Effect.Effect<A, unknown> {
       return error instanceof Error && 'code' in error ? error : fail('storage')
     }
   })
-}
-function decodeRequest(value: string): PersonalPairingRequest {
-  if (typeof value !== 'string' || value.length > 16384 || !/^(?:[0-9a-f]{2})+$/.test(value))
-    throw fail('invalid-input')
-  const parsed = requestSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  return parsed.data
-}
-/** Versioned public transport bundle; signatures cover the original core bytes. */
-export function encodePersonalInvitation(
-  receipt: Parameters<typeof verifyWorkspaceInvitationSnapshot>[1]
-): string {
-  return hex(
-    new TextEncoder().encode(
-      JSON.stringify({
-        version: 1,
-        workspaceId: receipt.workspaceId,
-        snapshot: Buffer.from(receipt.snapshot).toString('base64'),
-        head: hex(receipt.head.toBytes()),
-        length: receipt.length,
-        headSignature: hex(receipt.headSignature.toBytes()),
-        offset: receipt.offset
-      })
-    )
-  )
-}
-const invitationSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: workspace,
-    snapshot: z
-      .string()
-      .min(4)
-      .max(2796204)
-      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
-    head: hash,
-    length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    headSignature: signature,
-    offset: z.string().min(1).max(1024)
-  })
-  .strict()
-export function decodePersonalInvitation(value: string): WorkspaceInvitationSnapshot {
-  if (
-    typeof value !== 'string' ||
-    value.length > 6 * 1024 * 1024 ||
-    value.length % 2 !== 0 ||
-    !/^[0-9a-f]+$/.test(value)
-  )
-    throw fail('invalid-input')
-  const parsed = invitationSchema.safeParse(JSON.parse(Buffer.from(value, 'hex').toString('utf8')))
-  if (!parsed.success) throw fail('invalid-input')
-  const data = parsed.data,
-    snapshot = Buffer.from(data.snapshot, 'base64')
-  if (snapshot.length > 2 * 1024 * 1024 || snapshot.toString('base64') !== data.snapshot)
-    throw fail('invalid-input')
-  return {
-    workspaceId: data.workspaceId,
-    snapshot: new Uint8Array(snapshot),
-    head: Result.getOrThrow(Bytes.recordHash(raw(data.head))),
-    length: data.length,
-    headSignature: Result.getOrThrow(Bytes.signature(raw(data.headSignature))),
-    offset: data.offset
-  }
-}
-function invitationPin(pin: PersonalPairingOffer): WorkspaceInvitation {
-  return {
-    workspaceId: pin.workspaceId,
-    genesis: Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash))),
-    endorser: Result.getOrThrow(Bytes.signingPublicKey(raw(pin.endorser)))
-  }
 }
 
 interface PersonalJoinPrepared {
@@ -184,7 +95,7 @@ interface PersonalPairing {
       signingPublicKey: string
       encryptionPublicKey: string
       credentialHash: string
-      protection: 'os-keystore'
+      protection: 'os-keystore' | 'web-crypto'
     },
     unknown
   >

@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
@@ -7,13 +8,12 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
-import { AlertTriangle } from 'lucide-react';
-import { useCloudQuery } from '@lody/platform/react';
+import { AlertTriangle, MessageSquare, Play, Square, Trash2 } from 'lucide-react';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
   getDeviceTimeZone,
@@ -41,15 +41,11 @@ import {
   userAtom,
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
-import { scheduleListColumnWidthsAtom, scheduleSplitListWidthAtom } from '@/atoms/schedules';
 import { mobileHomeReturnTabAtom } from '@/atoms/mobile-home-state';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
-import {
-  onlineMachineIdsAtom,
-  lodyPresenceSyncStateAtom,
-  sessionLiveStatusAtomFamily,
-} from '@/atoms/presence';
+import { onlineMachineIdsAtom, lodyPresenceSyncStateAtom } from '@/atoms/presence';
 import { useScheduleDocument, useSchedules } from '@/hooks/use-schedules';
+import { useScheduledMessageContents } from './use-scheduled-message-content';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useOpenSettings } from '@/hooks/use-open-settings';
@@ -63,9 +59,24 @@ import {
   matchingScheduleRuntime,
   newScheduleFormValue,
   type ScheduleFormValue,
+  type ScheduleRowContext,
 } from './schedule-view';
-import { scheduleCardProps } from './schedule-property-row';
-import { ScheduleDetailToolbar, ScheduleSplitView } from './schedule-split-view';
+import {
+  describeScheduleState,
+  formatUpcoming,
+  scheduleRowTimeZone,
+  triggerTimeZone,
+} from './schedule-format';
+import {
+  ScheduleDetailFrame,
+  ScheduleDetailHeader,
+  ScheduleDetailModal,
+  ScheduleDetailPage,
+  ScheduleRunList,
+  type ScheduleRunEntry,
+} from './schedule-detail';
+import { useScheduleChatRuns } from './use-schedule-chat-runs';
+import type { ScheduleAction } from './schedule-list';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
@@ -73,19 +84,7 @@ import { FieldIssueMark } from './schedule-field-issue-mark';
 import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
-const DARK =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
-
 const styles = stylex.create({
-  mobileDetail: {
-    display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box',
-    height: '100%',
-    minHeight: 0,
-    // Mobile detail owns its top edge; desktop insets belong to the workspace shell.
-    paddingTop: 'var(--safe-area-top, 0px)',
-  },
   loadingMessage: { padding: '20px' },
   readOnlyMessage: {
     width: '100%',
@@ -135,7 +134,6 @@ const styles = stylex.create({
     flexShrink: 0,
     color: 'hsl(var(--status-warning))',
   },
-  detailContent: { minHeight: 0, flex: '1 1 0%', overflow: 'auto' },
   page: {
     display: 'flex',
     height: '100%',
@@ -152,66 +150,6 @@ const styles = stylex.create({
     color: 'hsl(var(--destructive))',
   },
   content: { minHeight: 0, flex: '1 1 0%' },
-  history: {
-    width: '100%',
-    maxWidth: '672px',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    paddingLeft: {
-      default: '16px',
-      '@media (min-width: 640px)': '24px',
-    },
-    paddingRight: {
-      default: '16px',
-      '@media (min-width: 640px)': '24px',
-    },
-    paddingBottom: '32px',
-  },
-  historyTitle: {
-    marginBottom: '6px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-    fontSize: '0.8em',
-    fontWeight: 400,
-    color: 'hsl(var(--muted-foreground))',
-  },
-  noRuns: { padding: '12px', fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
-  historyRow: {
-    display: 'flex',
-    width: '100%',
-    alignItems: 'center',
-    columnGap: '12px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-    paddingTop: '8px',
-    paddingBottom: '8px',
-    textAlign: 'left',
-    fontSize: '0.9em',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': {
-        default: 'hsl(var(--foreground) / 0.03)',
-        [DARK]: 'hsl(0 0% 100% / 0.04)',
-      },
-    },
-  },
-  historyTitleText: {
-    minWidth: 0,
-    flex: '1 1 0%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  historyMeta: { flexShrink: 0, fontSize: '0.85em', color: 'hsl(var(--muted-foreground))' },
-  historyTime: {
-    flexShrink: 0,
-    fontSize: '0.85em',
-    fontVariantNumeric: 'tabular-nums',
-    color: 'hsl(var(--muted-foreground))',
-  },
 });
 
 function SupportedSchedulesWorkspace({
@@ -234,7 +172,7 @@ function SupportedSchedulesWorkspace({
   /** Home header plus button calls this. Assigned while this list is mounted. */
   createScheduleRef?: { current: (() => void) | null };
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
   const runtime =
@@ -244,6 +182,14 @@ function SupportedSchedulesWorkspace({
   const navigate = useNavigate();
   const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
   const registry = useSchedules();
+  const scheduledMessageRows = useMemo(
+    () => registry.rows.filter((row) => row.scheduledMessage),
+    [registry.rows]
+  );
+  const scheduledMessageContents = useScheduledMessageContents(scheduledMessageRows);
+  const displayTitle = (item: ScheduleRegistryRow) =>
+    (item.scheduledMessage ? scheduledMessageContents.get(item.scheduleId)?.trim() : undefined) ||
+    item.title;
   const agents = useAtomValue(getAllAgentConfigAtom);
   const localProjects = useVisibleLocalProjects({ includeMachineFlock: true });
   const onlineMachines = useAtomValue(onlineMachineIdsAtom);
@@ -268,7 +214,12 @@ function SupportedSchedulesWorkspace({
   }>();
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const repository = useMemo(
-    () => (runtime ? new ScheduleRepository(runtime.repo, runtime.workspaceId) : null),
+    () =>
+      runtime
+        ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          })
+        : null,
     [runtime]
   );
   // Phone list lives on the home schedules tab (workspace switch, search,
@@ -352,8 +303,21 @@ function SupportedSchedulesWorkspace({
     await runtime!.withScheduleStore(id, () => repository.delete(id, user.id, getServerNow()));
     if (scheduleId === id) open();
   };
+  const cancelMessage = (row: ScheduleRegistryRow) => async () => {
+    if (!repository || !user) return;
+    await runtime!.withScheduleStore(row.scheduleId, () =>
+      repository.setEnabled({
+        scheduleId: row.scheduleId,
+        actorId: user.id,
+        enabled: false,
+        now: getServerNow(),
+        activationId: uuid(),
+        requestId: uuid(),
+      })
+    );
+  };
   // From the list there are no unsaved edits to warn about, so Run starts at
-  // once and says so; the detail dialog still confirms (its edits may be unsaved).
+  // once and says so; the open schedule still confirms (its edits may be unsaved).
   const runFromList = (item: ScheduleRegistryRow) =>
     void mutate(async () => {
       await requestRun(item.scheduleId)();
@@ -363,21 +327,109 @@ function SupportedSchedulesWorkspace({
     });
   const confirmDelete = (item: ScheduleRegistryRow) =>
     setConfirmation({
-      title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: item.title }),
-      description: t(
-        'schedules.deleteHelp',
-        'Future runs stop and the schedule is removed. Chats it already started are kept.'
-      ),
+      title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: displayTitle(item) }),
+      description: item.scheduledMessage
+        ? t(
+            'schedules.deleteMessageHelp',
+            'The message is removed from this list. Anything already sent stays in the chat.'
+          )
+        : t(
+            'schedules.deleteHelp',
+            'Future runs stop and the schedule is removed. Chats it already started are kept.'
+          ),
       accept: deleteSchedule(item.scheduleId),
       destructive: true,
       confirmLabel: t('schedules.delete', 'Delete'),
     });
-  const [columnWidths, setColumnWidths] = useAtom(scheduleListColumnWidthsAtom);
-  const [splitListWidth, setSplitListWidth] = useAtom(scheduleSplitListWidthAtom);
+  const confirmClearEnded = (items: ScheduleRegistryRow[]) =>
+    setConfirmation({
+      title: t('schedules.clearEndedTitle', 'Clear {{count}} finished scheduled messages?', {
+        count: items.length,
+      }),
+      description: t(
+        'schedules.clearEndedHelp',
+        'They are removed from this list. Anything already sent stays in its chat.'
+      ),
+      // Each deletion stands alone: one failure keeps what was deleted and
+      // does not stop the rest. The first original error is reported.
+      accept: async () => {
+        const results = await Promise.allSettled(
+          items.map((item) => deleteSchedule(item.scheduleId)())
+        );
+        const failures = results.filter(
+          (result): result is PromiseRejectedResult => result.status === 'rejected'
+        );
+        if (failures.length)
+          throw new Error(
+            t('schedules.clearEndedFailed', '{{count}} could not be cleared: {{error}}', {
+              count: failures.length,
+              error:
+                failures[0]!.reason instanceof Error
+                  ? failures[0]!.reason.message
+                  : String(failures[0]!.reason),
+            })
+          );
+      },
+      destructive: true,
+      confirmLabel: t('schedules.clear', 'Clear'),
+    });
+  const sessions = useAtomValue(sessionListAtom);
+  const archivedSessions = useAtomValue(archivedSessionListAtom);
+  // Every row looks up its chat; index once rather than scanning per row.
+  const sessionsById = useMemo(
+    () => new Map([...sessions, ...archivedSessions].map((meta) => [meta.id as string, meta])),
+    [sessions, archivedSessions]
+  );
+  const chatFor = (item: ScheduleRegistryRow): ScheduleRowContext['chat'] => {
+    const id =
+      item.destination.kind === 'existing_session'
+        ? item.destination.sessionId
+        : item.destination.kind === 'own_session'
+          ? scheduleOwnSessionId(item.scheduleId, item.destination.epoch)
+          : undefined;
+    if (!id) return undefined;
+    const meta = sessionsById.get(id);
+    return {
+      title:
+        meta?.title ||
+        (item.destination.kind === 'own_session'
+          ? t('schedules.destination.ownSession', 'One chat for this task')
+          : t('schedules.destination.untitledChat', 'Untitled chat')),
+      // Its own chat exists once a first run created it.
+      sessionId: meta || item.destination.kind === 'existing_session' ? id : undefined,
+    };
+  };
+  const contextForRow = (item: ScheduleRegistryRow): ScheduleRowContext => ({
+    machine: machines.get(item.machineId as never)?.name ?? item.machineId,
+    timeZone: machines.get(item.machineId as never)?.timeZone,
+    agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
+    project: !item.projectKey
+      ? null
+      : item.projectKind === 'local'
+        ? ([...localProjects.projects.values()].find(
+            (entry) => entry.machineId === item.machineId && entry.project.id === item.projectKey
+          )?.project.name ?? item.projectKey)
+        : item.projectKey,
+    presence: onlineMachines.has(item.machineId as never)
+      ? 'online'
+      : presenceSync === 'synced'
+        ? 'offline'
+        : 'unknown',
+    canRun:
+      item.ownerId === user?.id &&
+      machineSupportsSchedulesProtocol(machines.get(item.machineId as never)),
+    canDelete: item.ownerId === user?.id,
+    canToggle:
+      item.ownerId === user?.id &&
+      (item.enabled || machineSupportsSchedulesProtocol(machines.get(item.machineId as never))),
+    chat: chatFor(item),
+  });
   const row = registry.rows.find((r) => r.scheduleId === scheduleId);
   const isOwner = !!row && row.ownerId === user?.id;
   const canManage =
     isOwner && machineSupportsSchedulesProtocol(machines.get(row.machineId as never));
+  const [tab, setTab] = useState<'settings' | 'history'>('settings');
+  useEffect(() => setTab('settings'), [scheduleId]);
   useCommand({
     id: 'schedules.pause',
     title: t('commands.schedules.pause', 'Pause Schedule'),
@@ -388,12 +440,93 @@ function SupportedSchedulesWorkspace({
       if (row) toggle(row);
     },
   });
-  // Saving or closing returns to the list: beside the editor on desktop, and
-  // the home schedules tab on a phone.
-  const content = !scheduleId ? null : scheduleId === 'new' ? (
+  const rowRuntime = row ? matchingScheduleRuntime(row, registry.runtimes) : undefined;
+  const rowContext = row ? contextForRow(row) : undefined;
+  const status =
+    row && rowContext
+      ? describeScheduleState(t, row, rowRuntime, {
+          timeZone: scheduleRowTimeZone(row, rowContext.timeZone),
+          now: getServerNow(),
+          locale: i18n.language,
+        })
+      : undefined;
+  const confirmRun = (item: ScheduleRegistryRow) =>
+    setConfirmation({
+      title: t('schedules.runNow', 'Run now'),
+      description: t(
+        'schedules.runNowHelp',
+        'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
+      ),
+      accept: requestRun(item.scheduleId),
+    });
+  const detailActions: ScheduleAction[] = [];
+  if (row && rowContext) {
+    if (!row.scheduledMessage && row.trigger.kind !== 'manual')
+      detailActions.push({
+        key: 'run',
+        label: t('schedules.runNow', 'Run now'),
+        icon: Play,
+        disabled: !canManage,
+        onClick: () => confirmRun(row),
+      });
+    const chatId = rowContext.chat?.sessionId;
+    if (chatId)
+      detailActions.push({
+        key: 'chat',
+        label: t('schedules.openChat', 'Open chat “{{title}}”', { title: rowContext.chat!.title }),
+        icon: MessageSquare,
+        onClick: () => openSession(chatId),
+      });
+    if (row.scheduledMessage && status && status.group !== 'ended' && row.enabled)
+      detailActions.push({
+        key: 'cancel',
+        label: t('scheduledMessage.cancel', 'Cancel scheduled message'),
+        icon: Square,
+        disabled: !isOwner,
+        onClick: () => void mutate(cancelMessage(row)),
+      });
+    detailActions.push({
+      key: 'delete',
+      label: t('schedules.delete', 'Delete'),
+      icon: Trash2,
+      destructive: true,
+      disabled: !isOwner,
+      onClick: () => confirmDelete(row),
+    });
+  }
+  const header = (
+    <ScheduleDetailHeader
+      kind={row?.scheduledMessage ? 'message' : 'task'}
+      title={
+        row ? displayTitle(row) : scheduleId === 'new' ? t('schedules.new', 'New schedule') : ''
+      }
+      status={status}
+      enabled={
+        !row || row.scheduledMessage || row.trigger.kind === 'manual'
+          ? undefined
+          : {
+              value: row.enabled,
+              disabled: !(row.enabled ? isOwner : canManage),
+              onChange: () => toggle(row),
+            }
+      }
+      run={
+        row && !row.scheduledMessage && row.trigger.kind === 'manual'
+          ? { disabled: !canManage, onRun: () => confirmRun(row) }
+          : undefined
+      }
+      actions={detailActions}
+      onClose={() => open()}
+      mobile={mobile}
+    />
+  );
+  const showTabs = !!row && !row.scheduledMessage;
+  // Saving and closing return to the full list.
+  const settings = !scheduleId ? null : scheduleId === 'new' ? (
     <ScheduleEditor
       key={`${runtime?.workspaceId}:new`}
       onSaved={() => open()}
+      onCancel={() => open()}
       onOpenSession={openSession}
     />
   ) : !detail.ready ? (
@@ -412,19 +545,17 @@ function SupportedSchedulesWorkspace({
           )}
         </p>
       ) : null}
-      {registry.runtimes
-        .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
-        .map((r) => (
-          <p {...stylex.props(styles.blockedMessage)} key={r.machineId}>
-            <AlertTriangle {...stylex.props(styles.warningIcon)} />
-            <span>
-              {t(
-                `schedules.errors.${r.blockedCode}`,
-                'Check the target machine, Agent and Project, then save the schedule again.'
-              )}
-            </span>
-          </p>
-        ))}
+      {rowRuntime?.blockedCode ? (
+        <p {...stylex.props(styles.blockedMessage)}>
+          <AlertTriangle {...stylex.props(styles.warningIcon)} />
+          <span>
+            {t(
+              `schedules.errors.${rowRuntime.blockedCode}`,
+              'Check the target machine, Agent and Project, then save the schedule again.'
+            )}
+          </span>
+        </p>
+      ) : null}
       {detail.document.message ? (
         <ScheduledMessageEditor
           key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
@@ -436,21 +567,9 @@ function SupportedSchedulesWorkspace({
                 ? t('scheduledMessage.upgrade')
                 : undefined
           }
-          sent={!!matchingScheduleRuntime(row, registry.runtimes)?.lastDispatch}
-          state={matchingScheduleRuntime(row, registry.runtimes)?.messageState}
-          onCancel={async () => {
-            if (!runtime || !user) return;
-            await runtime.withScheduleStore(row.scheduleId, () =>
-              new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
-                scheduleId: row.scheduleId,
-                actorId: user.id,
-                enabled: false,
-                now: getServerNow(),
-                activationId: uuid(),
-                requestId: uuid(),
-              })
-            );
-          }}
+          sent={!!rowRuntime?.lastDispatch}
+          state={rowRuntime?.messageState}
+          onCancel={cancelMessage(row)}
           onSaved={() => open()}
         />
       ) : (
@@ -465,98 +584,37 @@ function SupportedSchedulesWorkspace({
                 : undefined
           }
           onSaved={() => open()}
+          onCancel={() => open()}
           onOpenSession={openSession}
         />
       )}
-      <ScheduleSessionHistory scheduleId={scheduleId} />
     </>
   );
-  const detailPane = (
-    <>
-      <ScheduleDetailToolbar
-        onClose={() => open()}
-        paused={row ? !row.enabled : false}
-        actions={
-          row && !row.scheduledMessage && scheduleId !== 'new'
-            ? {
-                enabled: row.enabled,
-                canToggle: row.enabled ? isOwner : canManage,
-                canRun: canManage,
-                canDelete: isOwner,
-                onToggle: () => toggle(row),
-                onRun: () =>
-                  setConfirmation({
-                    title: t('schedules.runNow', 'Run now'),
-                    description: t(
-                      'schedules.runNowHelp',
-                      'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
-                    ),
-                    accept: requestRun(row.scheduleId),
-                  }),
-                onDelete: () => confirmDelete(row),
-              }
-            : undefined
-        }
-      />
-      <div data-settings-surface="" {...stylex.props(styles.detailContent)}>
-        {content}
-      </div>
-    </>
+  const body = (
+    <ScheduleDetailFrame header={header} tab={showTabs ? tab : undefined} onTabChange={setTab}>
+      {showTabs && tab === 'history' && row ? (
+        <ScheduleHistory row={row} chat={rowContext?.chat} onOpenSession={openSession} />
+      ) : (
+        settings
+      )}
+    </ScheduleDetailFrame>
   );
   const list = (
     <ScheduleListView
       {...registry}
-      onBlankClick={scheduleId && !mobile ? () => open() : undefined}
-      renderBody={
-        mobile
-          ? undefined
-          : (table) => (
-              <ScheduleSplitView
-                open={!!scheduleId}
-                list={table}
-                detail={detailPane}
-                listWidth={splitListWidth ?? undefined}
-                onListWidthChange={setSplitListWidth}
-              />
-            )
-      }
       selectedId={scheduleId}
       onOpen={open}
       onNew={() => open('new')}
       onToggle={toggle}
       onRun={runFromList}
       onDelete={confirmDelete}
-      columnWidths={columnWidths ?? undefined}
-      onColumnWidthsChange={setColumnWidths}
+      onClearEnded={confirmClearEnded}
       onOpenSession={openSession}
       insetSafeArea={mobile && insetSafeArea}
       hideHeader={hideHeader}
       query={query}
-      contextForRow={(item) => ({
-        machine: machines.get(item.machineId as never)?.name ?? item.machineId,
-        timeZone: machines.get(item.machineId as never)?.timeZone,
-        agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
-        project: !item.projectKey
-          ? null
-          : item.projectKind === 'local'
-            ? ([...localProjects.projects.values()].find(
-                (entry) =>
-                  entry.machineId === item.machineId && entry.project.id === item.projectKey
-              )?.project.name ?? item.projectKey)
-            : item.projectKey,
-        presence: onlineMachines.has(item.machineId as never)
-          ? 'online'
-          : presenceSync === 'synced'
-            ? 'offline'
-            : 'unknown',
-        canRun:
-          item.ownerId === user?.id &&
-          machineSupportsSchedulesProtocol(machines.get(item.machineId as never)),
-        canDelete: item.ownerId === user?.id,
-        canToggle:
-          item.ownerId === user?.id &&
-          (item.enabled || machineSupportsSchedulesProtocol(machines.get(item.machineId as never))),
-      })}
+      contextForRow={contextForRow}
+      contentForRow={(item) => scheduledMessageContents.get(item.scheduleId)}
     />
   );
   return (
@@ -592,12 +650,17 @@ function SupportedSchedulesWorkspace({
         </p>
       ) : null}
       <div {...stylex.props(styles.content)}>
-        {mobile && scheduleId ? (
-          <div {...stylex.props(styles.mobileDetail)}>{detailPane}</div>
-        ) : (
-          list
-        )}
+        {mobile && scheduleId ? <ScheduleDetailPage>{body}</ScheduleDetailPage> : list}
       </div>
+      {mobile ? null : (
+        <ScheduleDetailModal
+          open={!!scheduleId}
+          title={row ? displayTitle(row) : t('schedules.new', 'New schedule')}
+          onClose={() => open()}
+        >
+          {body}
+        </ScheduleDetailModal>
+      )}
     </div>
   );
 }
@@ -606,11 +669,13 @@ function ScheduleEditor({
   document,
   disabledReason,
   onSaved,
+  onCancel,
   onOpenSession,
 }: {
   document?: ScheduleDocument;
   disabledReason?: string;
   onSaved: (id: string) => void;
+  onCancel: () => void;
   onOpenSession: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -622,7 +687,7 @@ function ScheduleEditor({
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
-  const repos = useCloudQuery(
+  const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;
@@ -803,7 +868,9 @@ function ScheduleEditor({
       await runtime.withScheduleStore(
         identity.scheduleId,
         () =>
-          new ScheduleRepository(runtime.repo, runtime.workspaceId).save({
+          new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          }).save({
             ...identity,
             actorId: user.id,
             now: getServerNow(),
@@ -862,6 +929,8 @@ function ScheduleEditor({
           : undefined;
   return (
     <ScheduleForm
+      stickyFooter
+      onCancel={onCancel}
       initial={initial}
       saving={saving}
       error={error}
@@ -948,64 +1017,57 @@ function ScheduleEditor({
   );
 }
 
-function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
-  const { t } = useTranslation();
+/**
+ * Every run of the open schedule. A new chat per run lists those chats (they
+ * carry `SessionMeta.scheduleId`); a schedule that posts into one chat reads
+ * its runs from that chat, where each run's turn carries `scheduleRun`.
+ */
+function ScheduleHistory({
+  row,
+  chat,
+  onOpenSession,
+}: {
+  row: ScheduleRegistryRow;
+  chat?: ScheduleRowContext['chat'];
+  onOpenSession: (id: string) => void;
+}) {
+  const { t, i18n } = useTranslation();
   const sessions = useAtomValue(sessionListAtom);
   const archived = useAtomValue(archivedSessionListAtom);
-  const slug = useAtomValue(currentWorkspaceSlugAtom);
-  const navigate = useNavigate();
-  const linked = [...sessions, ...archived]
-    .filter((s) => s.scheduleId === scheduleId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  // Under the editor, at the bottom of the open schedule.
+  const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
+  const zone = triggerTimeZone(row.trigger, machines.get(row.machineId as never)?.timeZone);
+  const now = getServerNow();
+  const when = (at: number) => formatUpcoming(at, zone, now, i18n.language);
+  const inChat = row.destination.kind !== 'new_session';
+  const chatRuns = useScheduleChatRuns(chat?.sessionId, row.scheduleId, inChat);
+  const runs: ScheduleRunEntry[] = inChat
+    ? chatRuns.runs.map((run, index) => ({
+        id: run.turnId,
+        title: t('schedules.history.runNumber', 'Run {{count}}', {
+          count: chatRuns.runs.length - index,
+        }),
+        when: when(Date.parse(run.timestamp)),
+        state: run.state,
+        sessionId: chat!.sessionId!,
+      }))
+    : [...sessions, ...archived]
+        .filter((s) => s.scheduleId === row.scheduleId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 100)
+        .map((s) => ({
+          id: s.id,
+          title: s.title || t('schedules.openRun', 'Open run'),
+          when: when(Date.parse(s.createdAt)),
+          state: s.processingUserMsgId ? 'running' : 'done',
+          sessionId: s.id,
+        }));
   return (
-    <section {...stylex.props(styles.history)}>
-      <h2 {...stylex.props(styles.historyTitle)}>{t('schedules.history', 'Run history')}</h2>
-      {linked.length === 0 ? (
-        <p {...scheduleCardProps(stylex.props(styles.noRuns).className)}>
-          {t('schedules.noRuns', 'No Sessions have been created yet.')}
-        </p>
-      ) : (
-        <div {...scheduleCardProps()}>
-          {linked.slice(0, 100).map((s) => (
-            <ScheduleHistoryRow
-              key={s.id}
-              session={s}
-              onOpen={() => {
-                if (slug)
-                  void navigate({
-                    to: '/$workspaceName/sessions/$sessionId',
-                    params: { workspaceName: slug, sessionId: s.id },
-                  });
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOpen: () => void }) {
-  const { t } = useTranslation();
-  const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(s.id));
-  return (
-    <button key={s.id} {...stylex.props(styles.historyRow)} onClick={onOpen}>
-      <span {...stylex.props(styles.historyTitleText)}>
-        {s.title || t('schedules.openRun', 'Open run')}
-      </span>
-      <span {...stylex.props(styles.historyMeta)}>
-        {liveStatus
-          ? t(`schedules.sessionState.${liveStatus.type}`, liveStatus.type)
-          : t('schedules.sessionState.inactive', 'Inactive')}
-      </span>
-      <time {...stylex.props(styles.historyTime)}>
-        {new Date(s.createdAt).toLocaleString(undefined, {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        })}
-      </time>
-    </button>
+    <ScheduleRunList
+      runs={runs}
+      loading={inChat && chatRuns.loading}
+      chat={inChat ? chat : undefined}
+      onOpen={onOpenSession}
+    />
   );
 }
 

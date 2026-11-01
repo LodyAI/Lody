@@ -1,4 +1,49 @@
 import {
+  createDaemonLossRegistry,
+  readDaemonLossAuthority,
+} from '../src/lib/e2ee/client-loss-observer';
+import { authorizeEncryptedSchedule } from '../src/lib/e2ee/schedule-execution-authorization';
+import {
+  scheduleDefinitionFingerprint,
+  recordScheduleAuthorization,
+  manualScheduleRunKey,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
+import {
+  ScheduleRepository,
+  getScheduleRoomId,
+  getScheduleRegistryFlockDocId,
+  type WorkspaceId,
+  type ScheduleDocument,
+} from '@lody/shared';
+import { ScheduleEngine, type ScheduleEnginePorts } from '../src/lib/schedules/schedule-engine';
+import { ScheduleStore } from '../src/lib/schedules/schedule-store';
+import { LoroRepo } from 'loro-repo';
+import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
+import {
+  materializePreparedSessionInput,
+  commitPreparedSessionDispatch,
+} from '../src/lib/prepared-session-input';
+import {
+  buildScheduleRunTarget,
+  buildScheduleSessionCreateOptions,
+  withScheduledMessageInput,
+} from '../src/lib/schedules/schedule-run-preparation';
+import {
+  getSessionRoomId,
+  type SessionId,
+  type MachineMeta,
+  type AgentConfigMeta,
+} from '@lody/shared';
+import type { AuthContext } from '../src/lib/command-runtime';
+import type { WorkspaceSummary } from '../src/lib/workspace';
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { makeExecutionOriginRecovery } from '../src/lib/e2ee/execution-origin-recovery';
+import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
+import {
   createCliSqliteRepoStore,
   type CliSqliteRepoStore,
 } from '../src/lib/loro/sqlite-repo-store';
@@ -14,6 +59,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import {
   Context,
+  Clock,
   Effect,
   Fiber,
   Layer,
@@ -21,7 +67,9 @@ import {
   Scope as TokenScope,
   Exit as TokenExit,
 } from 'effect';
-import { LoroDoc } from 'loro-crdt';
+import { LoroDoc, LoroMap } from 'loro-crdt';
+import { z } from 'zod';
+import { createCloudE2eePort } from '../src/lib/cloud-cli-port';
 import {
   StreamsCrdt,
   createLoroDocAdapter,
@@ -37,6 +85,8 @@ import {
 import { encodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import { startProcessLegacy } from '@lody/shared/node/process';
 import { describe, expect, it, vi } from 'vitest';
+import { it as effectIt } from '@effect/vitest';
+import { TestClock } from 'effect/testing';
 import {
   Bytes,
   inspectContentFrame,
@@ -55,10 +105,15 @@ import {
   signGenesisRecord,
   signLedgerRecord,
   verifyLedger,
+  sealRpcRequestContent,
 } from '@lody/e2ee-core/protocol';
+import { encodeE2eeRpcRequestBody } from '../../../packages/loro-streams-rpc/src/e2ee-wire';
+import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
+import * as rpcLedgerCatchUp from '../src/lib/e2ee/rpc-ledger-catch-up';
 import { makeNodeE2eeCustody, type KekWrapper } from '@lody/e2ee-core/adapters/node-custody';
 import { makeCliE2eeCustody } from '../src/lib/e2ee/custody';
 import { makeCliE2eeRuntime } from '../src/lib/e2ee/runtime';
+import { makeCliE2eeExecutionAuthorization } from '../src/lib/e2ee/execution-authorization';
 import { openMachinePairingJournal } from '../src/lib/e2ee/pairing-journal';
 import { Lody } from '../src/lib/lody';
 import { makeDesktopLocalPairing } from '../../electron/src/main/services/e2ee-local-pairing.mts';
@@ -113,7 +168,8 @@ const setup = (
   count = 2,
   machineDirectory = join(directory, 'machine'),
   includeRotation = false,
-  publishRotation = false
+  publishRotation = false,
+  includeGuestMachine = false
 ) =>
   Effect.gen(function* () {
     const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'owner'), wrapper });
@@ -156,6 +212,9 @@ const setup = (
     let current = Result.getOrThrow(
       extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
     );
+    let guestMachine:
+      | { device: typeof machine; custody: typeof machineCustody; requester: string }
+      | undefined;
     if (count > 2) {
       const joining = yield* custody.prepareDevice();
       const member = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
@@ -184,6 +243,54 @@ const setup = (
         current = Result.getOrThrow(
           extendLedger(current, [next], { length: records.length, head: hashRecordBytes(next) })
         );
+      }
+      if (includeGuestMachine) {
+        const guestCustody = yield* makeCliE2eeCustody({
+          directory: join(directory, 'guest-machine'),
+          keyring: noKeyring,
+        });
+        const guestDevice = yield* guestCustody.createDevice(signed.genesis);
+        const command = yield* prepareDeviceAdmission({
+          genesis: signed.genesis,
+          membershipId: member,
+          signer: guestDevice,
+          encryptionPublicKey: guestDevice.enc,
+          kind: 'machine',
+          machineId: 'guest-machine',
+        });
+        const admitted = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerCommand(current, joining.publicKey, command)),
+          joining
+        );
+        records.push(admitted);
+        current = Result.getOrThrow(
+          extendLedger(current, [admitted], {
+            length: records.length,
+            head: hashRecordBytes(admitted),
+          })
+        );
+        const demoted = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(current, owner.publicKey, {
+              _tag: 'SetRole',
+              membershipId: member,
+              role: 'guest',
+            })
+          ),
+          owner
+        );
+        records.push(demoted);
+        current = Result.getOrThrow(
+          extendLedger(current, [demoted], {
+            length: records.length,
+            head: hashRecordBytes(demoted),
+          })
+        );
+        guestMachine = {
+          device: guestDevice,
+          custody: guestCustody,
+          requester: hex(joining.publicKey.toBytes()),
+        };
       }
       yield* custody.discardDevice(joining);
     }
@@ -296,6 +403,10 @@ const setup = (
       yield* custody.discardDevice(other);
     }
     return {
+      guestMachine,
+      owner,
+      current,
+      membershipId,
       rotationSuffix,
       stagedGroup,
       genesis: signed.genesis,
@@ -316,6 +427,564 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
+    'receives the current RPC key through the real workspace with %s',
+    async (mode) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rpc-key-catch-up-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+      let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      let oldRefresh: Promise<void> | undefined;
+      const receiveEntered = Promise.withResolvers<void>();
+      const releaseReceive = Promise.withResolvers<void>();
+      const joinedRefresh = Promise.withResolvers<void>();
+      let holdReceive = false;
+      let advanceDuringJoin: (() => Promise<void>) | undefined;
+      const originalCatchUp = rpcLedgerCatchUp.makeLedgerCatchUp;
+      const catchUpSpy =
+        mode === 'joined-refresh'
+          ? vi.spyOn(rpcLedgerCatchUp, 'makeLedgerCatchUp').mockImplementation((options) =>
+              originalCatchUp({
+                ...options,
+                catchUp: async () => {
+                  const result = options.catchUp();
+                  await advanceDuringJoin?.();
+                  joinedRefresh.resolve();
+                  return await result;
+                },
+              })
+            )
+          : undefined;
+      const doc = new LoroDoc();
+      try {
+        const accountId = 'synthetic-rpc-key-account';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          'workspace'
+        );
+        const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+        const stagedGroup = fixture.stagedGroup;
+        if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+        await retainCliE2eeWorkspaceBinding(accountId, {
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+        });
+        const devicePublicKey = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(root, 'custody'),
+              keyring: noKeyring,
+            });
+            return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+          })
+        );
+        await fs.writeFile(
+          join(root, 'activation.json'),
+          JSON.stringify({
+            genesisHash: hex(fixture.genesis.toBytes()),
+            signingPublicKey: devicePublicKey,
+          })
+        );
+        let history = page(fixture.records);
+        // The hosted readGroup boundary accepts precisely these four fields.
+        // Use the real HTTP adapter: the native locator also carries a local
+        // signer, which must not leak into this strict wire object.
+        const stagingKey = z.strictObject({
+          genesis: z.string(),
+          epoch: z.number(),
+          commitment: z.string(),
+          recordHash: z.string(),
+        });
+        vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+          const request = JSON.parse(init.body as string);
+          expect(request.path).toBe('e2eeEpochStaging:readGroup');
+          const parsed = stagingKey.safeParse(request.args[0].key);
+          return Response.json(
+            parsed.success
+              ? { status: 'success', value: encodeEpochStagedGroup(stagedGroup) }
+              : {
+                  status: 'error',
+                  errorMessage: 'ArgumentValidationError: extra staging key field',
+                }
+          );
+        });
+        const stagingPort = createCloudE2eePort({
+          authBaseUrl: 'https://synthetic-staging.convex.cloud',
+        });
+        const cloud = {
+          getHistory: async () => history,
+          readEpochGroup: stagingPort.readEpochGroup,
+          mailboxCall: async (
+            method: keyof E2eeMailboxRequests,
+            input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+          ) => {
+            if (method === 'fetch') {
+              if (holdReceive) {
+                holdReceive = false;
+                receiveEntered.resolve();
+                await releaseReceive.promise;
+              }
+              return {
+                items:
+                  (input as E2eeMailboxRequests['fetch']).epoch === 0
+                    ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                    : [],
+                next: null,
+              };
+            }
+            if (method === 'status')
+              return {
+                ...(input as E2eeMailboxRequests['status']).slot,
+                revision: 0,
+                status: 'EnvelopeStored',
+              };
+            if (method === 'report') return null;
+            throw new Error('unexpected mailbox operation');
+          },
+        } as CloudE2eePort;
+        host = await openCliE2eeWorkspaceLegacy({
+          accountId,
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          cloud,
+          keyring: noKeyring,
+          onUnavailable: () => {},
+        });
+        const active = host;
+        await host.refresh();
+        expect(await host.status()).toMatchObject({ epoch: 0, hasCurrentKey: true });
+        if (mode === 'joined-refresh') {
+          holdReceive = true;
+          oldRefresh = host.refresh();
+          await receiveEntered.promise;
+        }
+        history = page([...fixture.records, ...fixture.rotationSuffix]);
+        const advanceLedger = async () => {
+          expect(
+            await Effect.runPromise(active.authorizeExecution('workspace', fixture.sender))
+          ).toMatchObject({ _tag: 'Authorized' });
+          expect(await active.status()).toMatchObject({
+            epoch: 1,
+            writeEpoch: 0,
+            hasCurrentKey: false,
+          });
+        };
+        if (mode === 'fresh-ledger') await advanceLedger();
+        if (mode === 'joined-refresh') advanceDuringJoin = advanceLedger;
+        const input = {
+          sessionId: 'synthetic-session',
+          userTurnId: 'synthetic-turn-23',
+          userId: 'display-only',
+          timestamp: new Date(1000).toISOString(),
+          inputConfig: { prompt: 'SYNTHETIC_AFTER_ROTATION' },
+        };
+        const frame = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeNodeE2eeCustody({
+              directory: join(directory, 'owner'),
+              wrapper,
+            });
+            const signer = yield* custody.openDevice(fixture.genesis);
+            return yield* sealRpcRequestContent({
+              scope: {
+                genesis: hex(fixture.genesis.toBytes()),
+                resource: e2eeRpcResource('machine'),
+                epoch: 1,
+              },
+              epochKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72))),
+              signer,
+              plaintext: encodeE2eeRpcRequestBody({
+                requestId: new Uint8Array(16).fill(23),
+                expiresAt: 901000,
+                method: 'session/dispatch-turn',
+                params: new TextEncoder().encode(JSON.stringify(input)),
+              }),
+            });
+          })
+        );
+        doc.getMap('rpcDispatchOriginals').set(input.userTurnId, hex(frame));
+        doc.commit();
+        const original = Effect.runPromise(
+          host.resolveVerifiedExecutionOriginal(
+            {
+              workspaceId: 'workspace',
+              sessionId: input.sessionId,
+              userTurnId: input.userTurnId,
+              inputConfig: input.inputConfig,
+            },
+            doc
+          )
+        );
+        if (mode === 'joined-refresh') {
+          await joinedRefresh.promise;
+          releaseReceive.resolve();
+        }
+        expect(await original).toMatchObject({
+          requesterDevice: fixture.sender,
+          expiresAt: 901000,
+        });
+        expect(await host.status()).toMatchObject({ epoch: 1, writeEpoch: 1, hasCurrentKey: true });
+      } finally {
+        releaseReceive.resolve();
+        await oldRefresh;
+        await host?.close();
+        catchUpSpy?.mockRestore();
+        doc.free();
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  effectIt.effect('bounds missing-origin reads, aborts their I/O and allows another attempt', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-timeout-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        const entered = Promise.withResolvers<void>();
+        let aborted = false;
+        let stalled = true;
+        let retried = false;
+        const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+        const recovery = makeExecutionOriginRecovery(
+          origins,
+          async (_input, signal) => {
+            if (!stalled) {
+              retried = true;
+              return { messages: [], before: '0', atStart: true };
+            }
+            entered.resolve();
+            return await new Promise((_, reject) =>
+              signal.addEventListener(
+                'abort',
+                () => {
+                  aborted = true;
+                  reject(new Error('aborted'));
+                },
+                { once: true }
+              )
+            );
+          },
+          { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+          `lody-e2ee:${'ab'.repeat(32)}`
+        );
+        const request = yield* Effect.forkChild(
+          recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+            Effect.die('no frame')
+          )
+        );
+        yield* Effect.promise(() => entered.promise);
+        yield* TestClock.adjust(3000);
+        yield* Fiber.join(request);
+        expect(aborted).toBe(true);
+        stalled = false;
+        yield* recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+          Effect.die('no frame')
+        );
+        expect(retried).toBe(true);
+      })
+    )
+  );
+
+  it('binds signed history to its device and ledger actor, independently of display account IDs', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
+    const source = new LoroDoc();
+    const replica = new LoroDoc();
+    const user = '1e'.repeat(32);
+    const displayAccountId = 'another-display-account';
+    const originalsFile = join(directory, 'origins.sqlite');
+    const origins = new ExecutionOrigins(originalsFile);
+    const resource = 'doc:session-session';
+    const wrapUpdate = (update: Uint8Array) => {
+      const batch = new Uint8Array(update.length + 4);
+      new DataView(batch.buffer).setUint32(0, update.length, false);
+      batch.set(update, 4);
+      return batch;
+    };
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'custody'),
+            wrapper,
+          });
+          const prepared = yield* custody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10)));
+          const signed = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+            membershipId,
+          });
+          const owner = yield* custody.retainDevice(signed.genesis, prepared);
+          const other = yield* custody.prepareDevice();
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: signed.genesis,
+              records: [signed.record],
+              checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+            })
+          );
+          const admitted = yield* prepareDeviceAdmission({
+            genesis: signed.genesis,
+            membershipId,
+            signer: other,
+            encryptionPublicKey: other.enc,
+            kind: 'personal',
+          });
+          const addition = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admitted)),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [addition], { length: 2, head: hashRecordBytes(addition) })
+          );
+          const forSigner = (signer: typeof owner | typeof other) =>
+            makeStreamsUpdateBinding({
+              genesis: signed.genesis,
+              resource,
+              model: 'loro',
+              writeEpoch: 'current',
+              signer,
+              ledger: () => Effect.succeed(view),
+              readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            });
+          const ownerBinding = yield* forSigner(owner);
+          const otherBinding = yield* forSigner(other);
+          const addTurn = (
+            id: string,
+            userId: string,
+            peer: string,
+            binding: typeof ownerBinding,
+            derivedFrom?: { sessionId: string; userTurnId: string }
+          ) =>
+            Effect.gen(function* () {
+              source.setPeerId(peer as `${number}`);
+              const from = source.version();
+              const row = source
+                .getList('history')
+                .insertContainer(source.getList('history').length, new LoroMap());
+              row.set('id', id);
+              row.set('role', 'user');
+              row.set('userId', userId);
+              row.set('timestamp', '1970-01-01T00:00:00.100Z');
+              row.set('inputConfig', { prompt: id });
+              row.set('items', [{ type: 'text', text: id }]);
+              if (derivedFrom) {
+                const origin = row.setContainer('derivedFrom', new LoroMap());
+                origin.set('sessionId', derivedFrom.sessionId);
+                origin.set('userTurnId', derivedFrom.userTurnId);
+              }
+              source.commit();
+              const update = source.export({ mode: 'update', from });
+              const context = {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              } as const;
+              const sealed = yield* binding.seal({
+                context,
+                plaintext: wrapUpdate(update),
+                additionalData: (header) => Uint8Array.from([...header, 9]),
+              });
+              const request = {
+                ...sealed,
+                context,
+                additionalData: Uint8Array.from([...sealed.header, 9]),
+              };
+              const opened = yield* ownerBinding.openAuthenticated(request);
+              origins.retain(resource, request, opened.plaintext);
+              opened.plaintext.fill(0);
+              replica.import(update);
+              return { row, request };
+            });
+          yield* addTurn('active', user, '1', ownerBinding);
+          yield* addTurn('revoked', user, '2', otherBinding);
+          yield* addTurn('mismatch', displayAccountId, '1', ownerBinding);
+          yield* addTurn('edited', user, '1', ownerBinding);
+          yield* addTurn('derived', user, '1', ownerBinding, {
+            sessionId: 'session',
+            userTurnId: 'active',
+          });
+          // The derivation origin is part of the signed input: an origin lookup needs
+          // no dispatch config, and a later edit of the origin invalidates the input.
+          const resolveDerived = (lookup: { origin?: boolean }) =>
+            Effect.scoped(
+              new ExecutionOrigins(originalsFile).resolve(
+                {
+                  workspaceId: 'workspace',
+                  sessionId: 'session',
+                  userTurnId: 'derived',
+                  ...(lookup.origin ? {} : { inputConfig: { prompt: 'derived' } }),
+                },
+                replica,
+                ownerBinding.openAuthenticated,
+                undefined,
+                lookup
+              )
+            );
+          expect(yield* resolveDerived({})).toMatchObject({
+            requesterDevice: hex(owner.publicKey.toBytes()),
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
+          expect(yield* resolveDerived({ origin: true })).toMatchObject({
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
+          const derivedRow = replica.getList('history').get(4) as LoroMap;
+          (derivedRow.get('derivedFrom') as LoroMap).set('userTurnId', 'revoked');
+          replica.commit();
+          expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          derivedRow.delete('derivedFrom');
+          replica.commit();
+          expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          const revokedKey = hex(other.publicKey.toBytes());
+          const revocation = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(view, owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: other.publicKey,
+              })
+            ),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [revocation], { length: 3, head: hashRecordBytes(revocation) })
+          );
+          expect(view.inspectState().members.has(hex(membershipId.toBytes()))).toBe(true);
+          const forged = new LoroDoc();
+          try {
+            forged.setPeerId('2');
+            const row = forged.getList('history').insertContainer(0, new LoroMap());
+            row.set('id', 'different-turn');
+            row.set('role', 'user');
+            row.set('userId', user);
+            row.set('timestamp', '1970-01-01T00:00:00.100Z');
+            row.set('inputConfig', { prompt: 'different-turn' });
+            row.set('items', [{ type: 'text', text: 'different-turn' }]);
+            forged.commit();
+            const context = {
+              protocol: 'loro-streams-crdt-payload-protection',
+              version: 2,
+              kind: 'update_batch',
+            } as const;
+            const frame = yield* ownerBinding.seal({
+              context,
+              plaintext: wrapUpdate(forged.export({ mode: 'update' })),
+              additionalData: (header) => Uint8Array.from([...header, 9]),
+            });
+            const request = {
+              ...frame,
+              context,
+              additionalData: Uint8Array.from([...frame.header, 9]),
+            };
+            const verified = yield* ownerBinding.openAuthenticated(request);
+            const substituted = new ExecutionOrigins(join(directory, 'substituted.sqlite'));
+            substituted.retain(resource, request, verified.plaintext);
+            verified.plaintext.fill(0);
+            expect(
+              yield* Effect.scoped(
+                substituted.resolve(
+                  {
+                    workspaceId: 'workspace',
+                    sessionId: 'session',
+                    userTurnId: 'revoked',
+                    requesterUserId: user,
+                    inputConfig: { prompt: 'revoked' },
+                  },
+                  replica,
+                  ownerBinding.openAuthenticated
+                )
+              )
+            ).toBeUndefined();
+          } finally {
+            forged.free();
+          }
+          const relabeled = replica.getList('history').get(2) as LoroMap;
+          relabeled.set('userId', 'updated-display-account');
+          replica.commit();
+          const checkedDevices: string[] = [];
+          const gate = makeEncryptedAgentExecution({
+            genesis: hex(signed.genesis.toBytes()),
+            workspaceId: 'workspace',
+            targetMachineId: 'machine',
+            journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 100),
+            resolveVerifiedOriginal: (intent) =>
+              Effect.scoped(
+                new ExecutionOrigins(originalsFile).resolve(
+                  intent,
+                  replica,
+                  ownerBinding.openAuthenticated
+                )
+              ),
+            authorizeExecution: (_workspaceId, device) =>
+              Effect.sync(() => {
+                checkedDevices.push(device);
+                return view.inspectState().devices.has(device)
+                  ? { _tag: 'Authorized' as const }
+                  : { _tag: 'Denied' as const, reason: 'not-authorized' };
+              }),
+          });
+          const intent = (userTurnId: string, requesterUserId = user) => ({
+            workspaceId: 'workspace',
+            sessionId: 'session',
+            userTurnId,
+            requesterUserId,
+            inputConfig: { prompt: userTurnId },
+          });
+          expect((yield* gate.claim(intent('active'))).state).toBe('claimed');
+          expect((yield* gate.claim(intent('revoked'))).state).toBe('denied');
+          expect(checkedDevices).toEqual([hex(owner.publicKey.toBytes()), revokedKey]);
+          expect(
+            yield* Effect.scoped(
+              origins.resolve(
+                intent('mismatch', displayAccountId),
+                replica,
+                ownerBinding.openAuthenticated
+              )
+            )
+          ).toMatchObject({ requesterCryptoUserId: user });
+          expect((yield* gate.claim(intent('mismatch', displayAccountId))).state).toBe('claimed');
+          expect(checkedDevices).toEqual([
+            hex(owner.publicKey.toBytes()),
+            revokedKey,
+            hex(owner.publicKey.toBytes()),
+          ]);
+          const edited = replica.getList('history').get(3) as LoroMap;
+          edited.set('inputConfig', { prompt: 'substituted' });
+          replica.commit();
+          expect(
+            (yield* gate.claim({ ...intent('edited'), inputConfig: { prompt: 'substituted' } }))
+              .state
+          ).toBe('denied');
+          const noOriginal = new ExecutionOrigins(join(directory, 'missing-origins.sqlite'));
+          expect(
+            yield* Effect.scoped(
+              noOriginal.resolve(intent('active'), replica, ownerBinding.openAuthenticated)
+            )
+          ).toEqual({ state: 'pending-evidence', expiresAt: 900100 });
+          const corrupt = { ...(yield* addTurn('bad-signature', user, '1', ownerBinding)).request };
+          corrupt.sealed = Uint8Array.from(corrupt.sealed);
+          corrupt.sealed[corrupt.sealed.length - 1] ^= 1;
+          expect(
+            Result.isFailure(yield* Effect.result(ownerBinding.openAuthenticated(corrupt)))
+          ).toBe(true);
+        })
+      );
+      expect((await readFile(originalsFile)).includes(Buffer.from('bad-signature'))).toBe(false);
+    } finally {
+      source.free();
+      replica.free();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(['signature', 'conflict', 'defect'] as const)(
     'bounds background ledger recovery after %s rejection, preserves the verified view and supports explicit retry',
     async (failure) => {
@@ -676,10 +1345,21 @@ describe('machine E2EE local runtime', () => {
           },
         };
         expect(await host.content.snapshotUpload.canUpload()).toBe(true);
+        if (rotation === 'epoch') {
+          const graceSnapshot = await protection.config.provider.seal(snapshotInput);
+          expect(
+            Result.getOrThrow(inspectContentFrame(graceSnapshot.sealed, 'doc-snapshot')).epoch
+          ).toBe(0);
+          expect((await stream.appendWriteOnly()).ok).toBe(true);
+          expect(frames.length).toBeGreaterThan(0);
+          expect(doc.getText('draft').toString()).toBe('retained local edit');
+          releaseReceive.resolve();
+          await recovery;
+        }
         const retainedSnapshot = await protection.config.provider.seal(snapshotInput);
         expect(
           Result.getOrThrow(inspectContentFrame(retainedSnapshot.sealed, 'doc-snapshot')).epoch
-        ).toBe(0);
+        ).toBe(rotation === 'epoch' ? 1 : 0);
         expect(
           await protection.config.provider.open({
             ...retainedSnapshot,
@@ -772,6 +1452,49 @@ describe('machine E2EE local runtime', () => {
           ).toEqual(input.plaintext);
           expect((await host.status()).epochPhase).toBe('ready');
           return;
+        }
+        const turnDoc = new LoroDoc();
+        try {
+          const turn = turnDoc.getList('history').insertContainer(0, new LoroMap());
+          turn.set('id', 'original');
+          turn.set('role', 'user');
+          turn.set('userId', '1e'.repeat(32));
+          turn.set('timestamp', '1970-01-01T00:00:00.100Z');
+          turn.set('inputConfig', { prompt: 'original' });
+          turn.set('items', [{ type: 'text', text: 'original' }]);
+          turnDoc.commit();
+          const update = turnDoc.export({ mode: 'update' });
+          const plaintext = new Uint8Array(update.length + 4);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const turnProtection = host.content.resolve({ kind: 'doc', docId: 'session-origin' });
+          if (turnProtection.mode !== 'protected') throw new Error('missing turn protection');
+          const original = await turnProtection.config.provider.seal({ ...input, plaintext });
+          await turnProtection.config.provider.open({
+            ...original,
+            context: input.context,
+            additionalData: new Uint8Array([...original.header, 9]),
+          });
+          expect(
+            await Effect.runPromise(
+              host.resolveVerifiedExecutionOriginal(
+                {
+                  workspaceId: 'workspace',
+                  sessionId: 'origin',
+                  userTurnId: 'original',
+                  requesterUserId: '1e'.repeat(32),
+                  inputConfig: { prompt: 'original' },
+                },
+                turnDoc
+              )
+            )
+          ).toEqual({
+            requesterDevice: (await host.status()).devicePublicKey,
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 900100,
+          });
+        } finally {
+          turnDoc.free();
         }
         const sealed = await protection.config.provider.seal(input);
         expect(Buffer.from(sealed.sealed).includes(input.plaintext)).toBe(false);
@@ -3307,6 +4030,12 @@ describe('machine E2EE local runtime', () => {
 
   it('installs a committed staged epoch on a machine after the publisher scope is gone', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-staged-epoch-'));
+    let elapsed = 0;
+    const realClock = Effect.runSync(Clock.Clock);
+    const clock: Clock.Clock = Object.assign(Object.create(realClock), {
+      currentTimeMillisUnsafe: () => 1_800_000_000_000 + elapsed,
+      monotonicTimeNanosUnsafe: () => BigInt(elapsed) * 1_000_000n,
+    });
     try {
       const fixture = await execute(setup(directory, 2, join(directory, 'machine'), true, true));
       const stagedGroup = fixture.stagedGroup;
@@ -3324,6 +4053,16 @@ describe('machine E2EE local runtime', () => {
         repair: () => Effect.void,
       };
       const records = [...fixture.records, ...fixture.rotationSuffix];
+      const request = {
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch',
+        } as const,
+        plaintext: new Uint8Array([1, 2]),
+        additionalData: () => new Uint8Array([3]),
+      };
+      let retained: { header: Uint8Array; sealed: Uint8Array } | undefined;
       for (const reopened of [false, true])
         await execute(
           Effect.gen(function* () {
@@ -3344,6 +4083,8 @@ describe('machine E2EE local runtime', () => {
             if (!reopened) {
               yield* runtime.ingest(page(fixture.records));
               yield* runtime.receiveKeys();
+              const prior = yield* runtime.binding('doc:after-rotation', 'loro', 0);
+              retained = yield* prior.seal(request);
               yield* runtime.ingest(page(records, fixture.records.length));
             }
             expect((yield* runtime.status()).hasCurrentKey).toBe(false);
@@ -3352,21 +4093,25 @@ describe('machine E2EE local runtime', () => {
               0
             );
             const old = yield* runtime.binding('doc:after-rotation', 'loro', 0);
-            const retained = yield* old.seal({
-              context: {
-                protocol: 'loro-streams-crdt-payload-protection',
-                version: 2,
-                kind: 'update_batch',
-              },
-              plaintext: new Uint8Array([1, 2]),
-              additionalData: () => new Uint8Array([3]),
-            });
-            expect(retained.sealed.length).toBeGreaterThan(2);
+            elapsed = reopened ? 900_000 : 899_999;
+            const outcome = yield* Effect.result(old.seal(request));
+            if (reopened)
+              expect(outcome).toMatchObject({
+                _tag: 'Failure',
+                failure: { code: 'key-update-required' },
+              });
+            else
+              expect(
+                Result.getOrThrow(inspectContentFrame(Result.getOrThrow(outcome).sealed)).epoch
+              ).toBe(0);
+            if (!retained) throw new Error('missing pre-rotation original');
+            expect(
+              yield* old.open({ ...request, ...retained, additionalData: new Uint8Array([3]) })
+            ).toEqual(request.plaintext);
             if (!reopened) return;
             yield* runtime.receiveKeys();
             expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-            const binding = yield* runtime.binding('doc:after-rotation', 'loro', 1);
-            const sealed = yield* binding.seal({
+            const sealed = yield* old.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
                 version: 2,
@@ -3375,8 +4120,9 @@ describe('machine E2EE local runtime', () => {
               plaintext: new Uint8Array([1, 2]),
               additionalData: () => new Uint8Array([3]),
             });
+            expect(Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch).toBe(1);
             expect(sealed.sealed.length).toBeGreaterThan(2);
-          })
+          }).pipe(Effect.provideService(Clock.Clock, clock))
         );
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -3559,6 +4305,100 @@ describe('machine E2EE local runtime', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+it('records an exact device revocation so the next offer uses a fresh identity offline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-device-revoked-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
+  const accountId = 'revoked-account';
+  const root = join(
+    getLodyDataDir(),
+    'e2ee',
+    createHash('sha256').update(accountId).digest('hex'),
+    'workspace'
+  );
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  try {
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const key = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+    );
+    let revoked = false;
+    const removed: string[] = [];
+    host = await openCliE2eeWorkspaceLegacy({
+      accountId,
+      ...binding,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+      onRemoved: async (reason) => {
+        removed.push(String(reason));
+      },
+      cloud: {
+        getHistory: async () => {
+          if (revoked) throw new Error('unauthorized');
+          return page(fixture.records);
+        },
+        getContentToken: async () => {
+          throw new CloudE2eeDeviceRevoked();
+        },
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort,
+    });
+    await host.refresh();
+    revoked = true;
+    await host.refresh();
+    await host.removalCleanup();
+    expect(removed).toEqual(['device-revoked']);
+    // Membership and local data stay; only this identity is retired.
+    await expect(fs.readFile(join(root, 'removed.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await fs.readFile(join(root, 'revoked-device.json'), 'utf8'))).toEqual({
+      genesisHash: binding.genesisHash,
+      signingPublicKey: key,
+    });
+    await host.close();
+    host = undefined;
+    const next = await prepareCliE2eeMachineLegacy({
+      accountId,
+      ...binding,
+      machineId: 'synthetic-machine',
+      frontendSigningPublicKey: fixture.sender,
+      membershipId: 'ef'.repeat(16),
+      pairingSessionId: 'ef'.repeat(16),
+      keyring: noKeyring,
+    });
+    if ('superseded' in next) throw new Error('unexpected supersession');
+    expect(next.signingPublicKey).not.toBe(key);
+    // The retired original stays as historical evidence; it is never offered again.
+    expect(
+      await fs.readFile(
+        join(root, 'custody', `${binding.genesisHash}-${key}.machine-revoked.device`)
+      )
+    ).toBeInstanceOf(Buffer);
+  } finally {
+    await host?.close().catch(() => undefined);
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receipt-error'] as const)(
@@ -3864,6 +4704,312 @@ it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receip
 );
 
 describe('remote machine command', () => {
+  // Admission is visible before the approving desktop has delivered the current key.
+  const admittedBeforeKey = async (directory: string) => {
+    const { makeDesktopRemotePairing } =
+      await import('../../electron/src/main/services/e2ee-remote-pairing.mts');
+    return execute(
+      Effect.gen(function* () {
+        const custody = yield* makeNodeE2eeCustody({
+          directory: join(directory, 'owner'),
+          wrapper,
+        });
+        const prepared = yield* custody.prepareDevice();
+        const signed = yield* signGenesisRecord({
+          signer: prepared,
+          encryptionPublicKey: prepared.enc,
+          initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(21))),
+          userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(31))),
+          membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(11))),
+        });
+        const signer = yield* custody.retainDevice(signed.genesis, prepared);
+        const view = Result.getOrThrow(
+          verifyLedger({
+            anchor: signed.genesis,
+            records: [signed.record],
+            checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+          })
+        );
+        const db = new DatabaseSync(join(directory, 'desktop.sqlite'));
+        yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+        db.exec('CREATE TABLE records(position INTEGER PRIMARY KEY, record BLOB)');
+        db.prepare('INSERT INTO records VALUES(0,?)').run(signed.record);
+        const offer = yield* makeDesktopRemotePairing({
+          db,
+          workspaceId: 'workspace',
+          genesis: signed.genesis,
+          genesisRecord: signed.record,
+          signer,
+          current: () => Effect.succeed(view),
+        }).offer({
+          accountId: 'remote-account',
+          deploymentUrl: 'https://cloud.synthetic.test',
+          ingressUrl: 'https://edge.synthetic.test',
+        });
+        return { offer, encoded: Buffer.from(JSON.stringify(offer)).toString('base64url') };
+      })
+    );
+  };
+
+  it('keeps waiting after admission until the approving desktop delivers the current key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-wait-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+    let keyDelivered = false;
+    const activation = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async () => {
+        if (!keyDelivered) throw new Error('e2ee_waiting_for_key');
+      });
+    const retained = vi
+      .spyOn(legacy, 'retainCliE2eeMachineBootstrapLegacy')
+      .mockResolvedValue(undefined as never);
+    try {
+      const { offer, encoded } = await admittedBeforeKey(directory);
+      const statuses: string[] = [];
+      let polls = 0;
+      const result = await pairRemoteMachineLegacy({
+        encodedOffer: encoded,
+        machineId: 'machine',
+        cloud: {} as CloudE2eePort,
+        signal: new AbortController().signal,
+        keyring: noKeyring,
+        claim: async (body) => {
+          const { material } = JSON.parse(body);
+          return {
+            pairingSessionId: offer.pairingSessionId,
+            status: polls === 0 ? 'claimed' : 'admitted',
+            expiresAt: offer.expiresAt,
+            material,
+            location: null,
+          };
+        },
+        show: (value) => statuses.push(value.status),
+        // Explicit signal: the desktop's refresh delivers the key during the second key wait.
+        wait: async () => {
+          polls += 1;
+          if (statuses.filter((status) => status === 'waiting-for-key').length === 2)
+            keyDelivered = true;
+        },
+        now: () => 0,
+      });
+
+      expect(result).toMatchObject({ workspaceId: 'workspace', machineId: 'machine', ready: true });
+      expect(statuses).toContain('waiting-for-key');
+    } finally {
+      activation.mockRestore();
+      retained.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('stops waiting for the key at its deadline and keeps other activation failures terminal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-deadline-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+    let failure = new Error('e2ee_waiting_for_key');
+    const activation = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async () => {
+        throw failure;
+      });
+    try {
+      const { offer, encoded } = await admittedBeforeKey(directory);
+      let clock = 0;
+      const run = () =>
+        pairRemoteMachineLegacy({
+          encodedOffer: encoded,
+          machineId: 'machine',
+          cloud: {} as CloudE2eePort,
+          signal: new AbortController().signal,
+          keyring: noKeyring,
+          claim: async (body) => ({
+            pairingSessionId: offer.pairingSessionId,
+            status: 'admitted',
+            expiresAt: offer.expiresAt,
+            material: JSON.parse(body).material,
+            location: null,
+          }),
+          show: () => {},
+          wait: async () => {
+            clock += 60_000;
+          },
+          now: () => clock,
+        });
+      await expect(run()).rejects.toThrow('e2ee_waiting_for_key');
+      expect(clock).toBeGreaterThanOrEqual(10 * 60_000);
+
+      clock = 0;
+      failure = new Error('e2ee_binding_conflict');
+      await expect(run()).rejects.toThrow('e2ee_binding_conflict');
+      expect(clock).toBe(0);
+    } finally {
+      activation.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('re-pairs a revoked machine with a fresh identity instead of offering its revoked key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-revoked-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { makeDesktopRemotePairing } = yield* Effect.promise(
+            () => import('../../electron/src/main/services/e2ee-remote-pairing.mts')
+          );
+          const { pairRemoteMachineLegacy } = yield* Effect.promise(
+            () => import('../src/lib/e2ee/remote-pairing')
+          );
+          const { CloudE2eeDeviceRevoked } = yield* Effect.promise(
+            () => import('../src/lib/cloud-e2ee-errors')
+          );
+          const custody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'owner'),
+            wrapper,
+          });
+          const prepared = yield* custody.prepareDevice();
+          const signed = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(21))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(31))),
+            membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(11))),
+          });
+          const signer = yield* custody.retainDevice(signed.genesis, prepared);
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: signed.genesis,
+              records: [signed.record],
+              checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+            })
+          );
+          const db = new DatabaseSync(join(directory, 'desktop.sqlite'));
+          yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+          db.exec('CREATE TABLE records(position INTEGER PRIMARY KEY, record BLOB)');
+          db.prepare('INSERT INTO records VALUES(0,?)').run(signed.record);
+          const append = (record: Uint8Array) => {
+            view = Result.getOrThrow(
+              extendLedger(view, [record], {
+                length: view.length + 1,
+                head: hashRecordBytes(record),
+              })
+            );
+            db.prepare('INSERT INTO records VALUES(?,?)').run(view.length - 1, record);
+          };
+          const remote = makeDesktopRemotePairing({
+            db,
+            workspaceId: 'workspace',
+            genesis: signed.genesis,
+            genesisRecord: signed.record,
+            signer,
+            current: () => Effect.succeed(view),
+          });
+          const args = {
+            accountId: 'remote-account',
+            deploymentUrl: 'https://cloud.synthetic.test',
+            ingressUrl: 'https://edge.synthetic.test',
+          };
+          // First pairing: admitted into the verified ledger.
+          const first = yield* remote.offer(args);
+          const original = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...first, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in original) throw new Error('unexpected supersession');
+          const material = (value: typeof original) => ({
+            ...value,
+            machineId: 'machine',
+            ok: true as const,
+            type: 'prepare' as const,
+          });
+          const request = yield* remote.approve(
+            first.pairingSessionId,
+            yield* remote.stage(first.pairingSessionId, material(original))
+          );
+          if (!request) throw new Error('expected admission');
+          append(new Uint8Array(Buffer.from(request.recordHex, 'hex')));
+          yield* remote.retire(first.pairingSessionId);
+          // The owner revokes the stopped machine; core keeps its keys in device history.
+          append(
+            yield* signLedgerRecord(
+              Result.getOrThrow(
+                prepareLedgerCommand(view, signer.publicKey, {
+                  _tag: 'RevokeDevice',
+                  target: Result.getOrThrow(
+                    Bytes.signingPublicKey(
+                      new Uint8Array(Buffer.from(original.signingPublicKey, 'hex'))
+                    )
+                  ),
+                })
+              ),
+              signer
+            )
+          );
+          // A machine that cannot learn its revocation still offers the old key:
+          // the desktop names the reason instead of a generic invalid input.
+          const unknowing = yield* remote.offer(args);
+          const reused = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...unknowing, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in reused) throw new Error('unexpected supersession');
+          expect(reused.signingPublicKey).toBe(original.signingPublicKey);
+          const refused = yield* Effect.result(
+            remote.stage(unknowing.pairingSessionId, material(reused))
+          );
+          expect(Result.isFailure(refused) && refused.failure).toMatchObject({
+            message: 'e2ee_pairing_key_revoked',
+          });
+          yield* remote.retire(unknowing.pairingSessionId, true);
+          // The real command path learns the exact revocation and offers a new identity.
+          const next = yield* remote.offer(args);
+          const probes: string[] = [];
+          let staged: string | undefined;
+          const outcome = yield* Effect.promise(() =>
+            pairRemoteMachineLegacy({
+              encodedOffer: Buffer.from(JSON.stringify(next)).toString('base64url'),
+              machineId: 'machine',
+              keyring: noKeyring,
+              signal: new AbortController().signal,
+              cloud: {
+                getContentToken: async (input: { credential: string }) => {
+                  probes.push(input.credential);
+                  throw new CloudE2eeDeviceRevoked();
+                },
+              } as unknown as CloudE2eePort,
+              claim: async (body) => {
+                const sent = JSON.parse(body).material;
+                staged = await Effect.runPromise(remote.stage(next.pairingSessionId, sent));
+                return {
+                  pairingSessionId: next.pairingSessionId,
+                  status: 'cancelled',
+                  expiresAt: next.expiresAt,
+                  material: sent,
+                  location: null,
+                };
+              },
+              show: () => {},
+            }).catch((error: unknown) => error)
+          );
+          expect(outcome).toMatchObject({ message: 'e2ee_pairing_cancelled_create_new_command' });
+          expect(probes).toHaveLength(1);
+          expect(staged).toEqual(expect.any(String));
+          const fresh = JSON.parse(
+            String(db.prepare('SELECT material FROM remote_local_pairing').get()?.material)
+          ) as { signingPublicKey: string; encryptionPublicKey: string };
+          expect(fresh.signingPublicKey).not.toBe(original.signingPublicKey);
+          expect(fresh.encryptionPublicKey).not.toBe(original.encryptionPublicKey);
+        })
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('retains material-bound consent and exact signatures across restart without touching local pairing', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-command-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
@@ -4013,6 +5159,1635 @@ describe('remote machine command', () => {
       );
     } finally {
       vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+const executionFixture = Effect.fnUntraced(function* (directory: string, count = 2) {
+  let observedAuthority: Parameters<typeof readDaemonLossAuthority>[0];
+  const fixture = yield* setup(directory, count);
+  const custody = yield* makeCliE2eeCustody({
+    directory: join(directory, 'machine'),
+    keyring: noKeyring,
+  });
+  const device = yield* custody.openDevice(fixture.genesis);
+  const runtime = yield* makeCliE2eeRuntime({
+    directory: join(directory, 'runtime'),
+    workspaceId: 'workspace',
+    custody,
+    device,
+    genesisRecord: fixture.genesisRecord,
+    onVerifiedLedger: (view, generation) => {
+      observedAuthority = { view, generation };
+    },
+  });
+  for (let start = 0; start < fixture.records.length; start += 64)
+    yield* runtime.ingest(
+      page(fixture.records, start, Math.min(start + 64, fixture.records.length))
+    );
+  const baseClock = yield* Clock.Clock;
+  const io = {
+    wall: 0,
+    monotonic: 0,
+    offline: false,
+    reads: 0,
+    respond: async (_input: Parameters<CloudE2eePort['getHistory']>[0]) => page(fixture.records),
+  };
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => io.wall,
+    currentTimeMillis: Effect.sync(() => io.wall),
+    currentTimeNanosUnsafe: () => BigInt(io.wall) * 1_000_000n,
+    currentTimeNanos: Effect.sync(() => BigInt(io.wall) * 1_000_000n),
+    monotonicTimeNanosUnsafe: () => BigInt(io.monotonic) * 1_000_000n,
+    monotonicTimeNanos: Effect.sync(() => BigInt(io.monotonic) * 1_000_000n),
+    sleep: (duration) => baseClock.sleep(duration),
+  };
+  const makeGate = (sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing']) =>
+    makeCliE2eeExecutionAuthorization({
+      sharing,
+      workspaceId: 'workspace',
+      credential: fixture.credential,
+      runtime,
+      cloud: {
+        getHistory: async (input) => {
+          expect(input.credential).toBe(fixture.credential);
+          expect(input.workspaceId).toBe('workspace');
+          io.reads++;
+          if (io.offline) throw new Error('synthetic network failure');
+          return io.respond(input);
+        },
+      },
+    }).pipe(Effect.provideService(Clock.Clock, clock));
+  const gate = yield* makeGate();
+  return {
+    fixture,
+    runtime,
+    gate,
+    makeGate,
+    io,
+    device,
+    readObservedAuthority: (key: string, membershipId?: string) =>
+      readDaemonLossAuthority(
+        observedAuthority,
+        hex(device.publicKey.toBytes()),
+        key,
+        membershipId
+      ),
+  };
+});
+
+const retainSignedScheduleUpdate = Effect.fnUntraced(function* (
+  origins: ExecutionOrigins,
+  docId: string,
+  doc: LoroDoc,
+  binding: Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>,
+  from?: ReturnType<LoroDoc['version']>
+) {
+  const update = doc.export({ mode: 'update', from });
+  const plaintext = new Uint8Array(4 + update.length);
+  new DataView(plaintext.buffer).setUint32(0, update.length, false);
+  plaintext.set(update, 4);
+  const context = {
+    protocol: 'loro-streams-crdt-payload-protection',
+    version: 2,
+    kind: 'update_batch',
+  } as const;
+  const sealed = yield* binding.seal({
+    context,
+    plaintext,
+    additionalData: (header) => Uint8Array.from([...header, 9]),
+  });
+  const request = { ...sealed, context, additionalData: Uint8Array.from([...sealed.header, 9]) };
+  const opened = yield* binding.openAuthenticated(request);
+  origins.retain(`doc:${docId}`, request, opened.plaintext);
+  opened.plaintext.fill(0);
+  return request;
+});
+
+describe('machine execution authorization freshness', () => {
+  effectIt.effect.each([
+    'valid',
+    'no-source-capability',
+    'foreign-source',
+    'pending-source',
+    'tampered-before-claim',
+    'project-shared',
+    'project-unshared',
+    'source-withdrawn',
+  ] as const)(
+    'authorizes the machine-signed scheduled turn after production preparation and handoff, with one shared claim (%s)',
+    (mode) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'scheduled-execution-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          const {
+            fixture,
+            runtime,
+            gate: authorization,
+            makeGate,
+            device,
+          } = yield* executionFixture(directory);
+          let sourceSigner: Parameters<typeof makeStreamsUpdateBinding>[0]['signer'] =
+            fixture.owner;
+          const sharedSource = ['project-shared', 'project-unshared', 'source-withdrawn'].includes(
+            mode
+          );
+          if (mode === 'foreign-source' || sharedSource) {
+            const custody = yield* makeNodeE2eeCustody({
+              directory: join(directory, 'foreign-source'),
+              wrapper,
+            });
+            const attacker = yield* custody.prepareDevice();
+            const request = yield* prepareJoinRequest({
+              genesis: fixture.genesis,
+              requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(94))),
+              userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(95))),
+              encryptionPublicKey: attacker.enc,
+              expiresAt: null,
+              signer: attacker,
+            });
+            const record = yield* signLedgerRecord(
+              Result.getOrThrow(
+                prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                  _tag: 'AdmitMember',
+                  membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(96))),
+                  request,
+                })
+              ),
+              fixture.owner
+            );
+            const start = fixture.records.length;
+            fixture.records.push(record);
+            fixture.current = Result.getOrThrow(
+              extendLedger(fixture.current, [record], {
+                length: fixture.records.length,
+                head: hashRecordBytes(record),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records, start));
+            sourceSigner = attacker;
+          }
+          const repo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (ownedRepo) => Effect.promise(() => ownedRepo.destroy())
+          );
+          const scheduleRepository = new ScheduleRepository(repo, 'workspace' as WorkspaceId, {
+            protectedContent: true,
+          });
+          const document = yield* Effect.promise(() =>
+            scheduleRepository.save({
+              scheduleId: 'reserved-message',
+              actorId: 'display-owner',
+              now: 0,
+              activationId: 'activation',
+              activityId: 'create',
+              create: true,
+              draft: {
+                title: 'Scheduled',
+                prompt: 'Scheduled hello',
+                machineId: 'machine',
+                ...(mode === 'project-unshared'
+                  ? {
+                      project: {
+                        kind: 'local' as const,
+                        localProjectId: 'private-project' as import('@lody/shared').LocalProjectId,
+                      },
+                    }
+                  : {}),
+                trigger: { kind: 'once', at: '1970-01-01T00:01:00.000Z' },
+                misfirePolicy: { kind: 'run_once' },
+                overlapPolicy: 'queue_one',
+                agent: { agentConfigId: 'agent' },
+                retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+              },
+            })
+          );
+          const scheduleDoc = (yield* Effect.promise(() =>
+            repo.openPersistedDoc(getScheduleRoomId('reserved-message'))
+          )).doc;
+          const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+          const scheduleBinding = yield* makeStreamsUpdateBinding({
+            genesis: fixture.genesis,
+            resource: `doc:${getScheduleRoomId('reserved-message')}`,
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: sourceSigner,
+            ledger: () => Effect.succeed(fixture.current),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          yield* retainSignedScheduleUpdate(
+            origins,
+            getScheduleRoomId('reserved-message'),
+            scheduleDoc,
+            scheduleBinding
+          );
+          let sharingCurrent = true;
+          const sourceGate = sharedSource
+            ? yield* makeGate((_requester, localProjectId) =>
+                Effect.succeed({
+                  allowed: localProjectId === undefined || localProjectId === 'shared-project',
+                  isCurrent: () => sharingCurrent,
+                })
+              )
+            : authorization;
+          const scheduleOptions = {
+            workspaceId: 'workspace',
+            doc: scheduleDoc,
+            origins,
+            open: scheduleBinding.openAuthenticated,
+            authorizeExecution: sourceGate.authorizeExecution,
+            isExecutionOpen: () => true,
+          };
+          if (mode === 'project-unshared') {
+            expect(
+              (yield* Effect.scoped(
+                authorizeEncryptedSchedule({
+                  ...scheduleOptions,
+                  request: {
+                    scheduleId: 'reserved-message',
+                    definitionFingerprint: scheduleDefinitionFingerprint(document),
+                  },
+                })
+              ))._tag
+            ).toBe('Denied');
+          }
+          const authorizeSchedule = (
+            request: ScheduleAuthorizationRequest,
+            localProjectId?: string
+          ) =>
+            Effect.scoped(
+              authorizeEncryptedSchedule({
+                ...scheduleOptions,
+                request,
+                executionTarget: { localProjectId },
+              })
+            ).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  if (mode === 'source-withdrawn') sharingCurrent = false;
+                })
+              )
+            );
+          const sessionId = 'scheduled-chat' as SessionId;
+          const handle = yield* Effect.promise(() =>
+            repo.openPersistedDoc(getSessionRoomId(sessionId))
+          );
+          const session = new SessionDocument(repo, sessionId, async () => {});
+          session.handle = handle;
+          session.composeSessionData(handle.doc, undefined, { historyBackend: 'loro' });
+          yield* Effect.addFinalizer(() =>
+            Effect.promise(() => session.destroy({ preserveStatus: true }))
+          );
+          const manager = {
+            repo,
+            syncMetaOrThrow: async () => {},
+            getOrCreateSessionDoc: async () => session,
+          } as unknown as LoroDocumentManager;
+          const prepared = withScheduledMessageInput(
+            yield* Effect.promise(() =>
+              prepareSessionInput(
+                { userId: 'display-owner', machineId: 'machine' } as AuthContext,
+                { id: 'workspace', contentMode: 'e2ee' } as WorkspaceSummary,
+                manager,
+                'Scheduled hello',
+                buildScheduleSessionCreateOptions({
+                  sessionId,
+                  userTurnId: 'scheduled-turn',
+                  agentConfigId: 'agent',
+                  title: 'Scheduled',
+                }),
+                { ...resolveTurnDispatchConfig({}), inheritSessionDefaults: false },
+                buildScheduleRunTarget({
+                  targetMachine: {
+                    id: 'machine',
+                    ownerUserId: 'display-owner',
+                    protocolCapabilities: {},
+                  } as MachineMeta,
+                  agentConfig: {
+                    id: 'agent',
+                    machineId: 'machine',
+                    cliType: 'claude',
+                    agentType: 'claude',
+                  } as AgentConfigMeta,
+                })
+              )
+            ),
+            { inputBlocks: [{ type: 'text', text: 'Scheduled hello' }] }
+          );
+          prepared.userTurn.timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+          prepared.userTurn.scheduleRun = {
+            scheduleId: 'reserved-message',
+            turnId: prepared.userTurn.id,
+            title: 'Scheduled',
+            definitionFingerprint: scheduleDefinitionFingerprint(document),
+          };
+          yield* Effect.promise(() => materializePreparedSessionInput(manager, prepared));
+          expect(
+            (yield* Effect.promise(() => repo.getDocMeta(getSessionRoomId(sessionId))))?.meta
+              .latestUserMsgId
+          ).toBeUndefined();
+          yield* Effect.promise(() => commitPreparedSessionDispatch(manager, prepared));
+          expect(
+            (yield* Effect.promise(() => repo.getDocMeta(getSessionRoomId(sessionId))))?.meta
+              .latestUserMsgId
+          ).toBe('scheduled-turn');
+          const binding = yield* makeStreamsUpdateBinding({
+            genesis: fixture.genesis,
+            resource: `doc:${getSessionRoomId(sessionId)}`,
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: device,
+            ledger: () => Effect.succeed(fixture.current),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          const storedTurn = (yield* Effect.sync(() => session.sessionData.history.readAll())).find(
+            (turn) => turn.id === prepared.userTurn.id
+          );
+          const intent = {
+            workspaceId: 'workspace',
+            ...(sharedSource
+              ? {
+                  localProjectIds: [
+                    mode === 'project-unshared' ? 'private-project' : 'shared-project',
+                  ],
+                }
+              : {}),
+            sessionId,
+            userTurnId: prepared.userTurn.id,
+            requesterUserId: 'display-owner',
+            inputConfig: storedTurn?.inputConfig,
+          };
+          const makeExecution = () =>
+            makeEncryptedAgentExecution({
+              genesis: hex(fixture.genesis.toBytes()),
+              workspaceId: 'workspace',
+              targetMachineId: 'machine',
+              journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+              resolveVerifiedOriginal: (input) =>
+                Effect.scoped(origins.resolve(input, handle.doc, binding.openAuthenticated)),
+              authorizeExecution: authorization.authorizeExecution,
+              ...(mode !== 'no-source-capability'
+                ? {
+                    authorizeSchedule:
+                      mode === 'pending-source'
+                        ? () =>
+                            Effect.succeed({
+                              _tag: 'Denied' as const,
+                              reason: 'e2ee_schedule_evidence_pending',
+                            })
+                        : authorizeSchedule,
+                  }
+                : {}),
+            });
+          const execution = makeExecution();
+          expect((yield* execution.claim(intent)).state).toBe('pending-evidence');
+          const update = handle.doc.export({ mode: 'update' });
+          const plaintext = new Uint8Array(4 + update.length);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const context = {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          } as const;
+          const sealed = yield* binding.seal({
+            context,
+            plaintext,
+            additionalData: (header) => Uint8Array.from([...header, 9]),
+          });
+          const request = {
+            ...sealed,
+            context,
+            additionalData: Uint8Array.from([...sealed.header, 9]),
+          };
+          const opened = yield* binding.openAuthenticated(request);
+          origins.retain(`doc:${getSessionRoomId(sessionId)}`, request, opened.plaintext);
+          opened.plaintext.fill(0);
+          expect(
+            yield* Effect.scoped(origins.resolve(intent, handle.doc, binding.openAuthenticated))
+          ).toMatchObject({ requesterDevice: hex(device.publicKey.toBytes()) });
+          if (mode === 'tampered-before-claim') {
+            const prompt = scheduleDoc.getText('prompt');
+            const prior = prompt.toString();
+            prompt.delete(0, prior.length);
+            prompt.insert(0, prior);
+            scheduleDoc.commit();
+          }
+          const claim = yield* execution.claim(intent);
+          if (mode === 'pending-source') {
+            expect(claim.state).toBe('pending-evidence');
+            yield* TestClock.adjust(900_000);
+            expect((yield* execution.claim(intent)).state).toBe('expired');
+            return;
+          }
+          if (mode !== 'valid' && mode !== 'project-shared') {
+            expect(claim.state).toBe('denied');
+            if (mode === 'project-unshared')
+              expect(claim).toMatchObject({ reason: 'e2ee_machine_not_shared' });
+            return;
+          }
+          expect(claim.state).toBe('claimed');
+          expect((yield* makeExecution().claim(intent)).state).toBe('uncertain');
+          if (claim.state !== 'claimed') throw new Error('expected execution permit');
+          yield* execution.complete(claim.permit);
+          expect((yield* makeExecution().claim(intent)).state).toBe('completed');
+        })
+      )
+  );
+
+  effectIt.effect.each(['owner-resave', 'owner-cancel', 'concurrent-cancel'] as const)(
+    'rejects a foreign member schedule and requires owner review before remote delivery (%s)',
+    (scenario) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'scheduled-execution-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          const { fixture, runtime, gate: authorization } = yield* executionFixture(directory);
+          const repo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (ownedRepo) => Effect.promise(() => ownedRepo.destroy())
+          );
+
+          // A second real ledger member cannot start the victim machine directly.
+          const attackerCustody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'attacker'),
+            wrapper,
+          });
+          const attacker = yield* attackerCustody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(91)));
+          const joinRequest = yield* prepareJoinRequest({
+            genesis: fixture.genesis,
+            requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(92))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(93))),
+            encryptionPublicKey: attacker.enc,
+            expiresAt: null,
+            signer: attacker,
+          });
+          const admission = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                _tag: 'AdmitMember',
+                membershipId,
+                request: joinRequest,
+              })
+            ),
+            fixture.owner
+          );
+          const start = fixture.records.length;
+          fixture.records.push(admission);
+          fixture.current = Result.getOrThrow(
+            extendLedger(fixture.current, [admission], {
+              length: fixture.records.length,
+              head: hashRecordBytes(admission),
+            })
+          );
+          yield* runtime.ingest(page(fixture.records, start));
+          expect(
+            yield* authorization.authorizeExecution('workspace', hex(attacker.publicKey.toBytes()))
+          ).toEqual({ _tag: 'Denied', reason: 'e2ee_machine_not_shared' });
+          let attackerClosed = false;
+          const attackerRepo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (r) => Effect.promise(() => (attackerClosed ? Promise.resolve() : r.destroy()))
+          );
+          const ws = 'workspace' as WorkspaceId;
+          const attackRepository = new ScheduleRepository(attackerRepo, ws, {
+            protectedContent: true,
+          });
+          const origins = new ExecutionOrigins(join(directory, 'schedule-origins.sqlite'));
+          let scheduleBinding:
+            | Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
+            | undefined;
+          // Caller-controlled actorId is only an ordinary CRDT field, not signer evidence.
+          yield* Effect.promise(() =>
+            attackRepository.save({
+              scheduleId: 'forged-owner',
+              actorId: 'display-owner',
+              now: 0,
+              activationId: 'attack-activation',
+              activityId: 'attack-create',
+              create: true,
+              draft: {
+                title: 'Forged owner',
+                machineId: 'machine',
+                prompt: 'ATTACKER_CHOSEN_PROMPT',
+                message: { inputBlocks: [{ type: 'text', text: 'ATTACKER_CHOSEN_PROMPT' }] },
+                destination: { kind: 'existing_session', sessionId: 'remote-chat' },
+                trigger: { kind: 'once', at: '1970-01-01T00:01:00.000Z' },
+                misfirePolicy: { kind: 'run_once' },
+                overlapPolicy: 'queue_one',
+                agent: { agentConfigId: 'agent', modeId: 'safe' },
+                retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+              },
+            })
+          );
+          const docId = getScheduleRoomId('forged-owner');
+          const registryId = getScheduleRegistryFlockDocId(ws);
+          const sourceDoc = yield* Effect.promise(() => attackerRepo.openPersistedDoc(docId));
+          const targetDoc = yield* Effect.promise(() => repo.openPersistedDoc(docId));
+          const sourceRegistry = yield* Effect.promise(() => attackerRepo.openFlockDoc(registryId));
+          const targetRegistry = yield* Effect.promise(() => repo.openFlockDoc(registryId));
+          const transfer = Effect.fnUntraced(function* (
+            source: LoroDoc,
+            registry: typeof sourceRegistry.flock,
+            signer: Parameters<typeof makeStreamsUpdateBinding>[0]['signer'],
+            from?: ReturnType<LoroDoc['version']>
+          ) {
+            for (const item of [
+              {
+                resource: `doc:${docId}`,
+                model: 'loro' as const,
+                bytes: source.export({ mode: 'update', from }),
+                apply: (bytes: Uint8Array) => targetDoc.doc.import(bytes),
+              },
+              {
+                resource: `flock:${registryId}`,
+                model: 'flock' as const,
+                bytes: registry.exportFile(),
+                apply: (bytes: Uint8Array) => targetRegistry.flock.importFile(bytes),
+              },
+            ]) {
+              const binding = yield* makeStreamsUpdateBinding({
+                genesis: fixture.genesis,
+                resource: item.resource,
+                model: item.model,
+                writeEpoch: 'current',
+                signer,
+                ledger: () => Effect.succeed(fixture.current),
+                readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+              });
+              const plaintext = new Uint8Array(4 + item.bytes.length);
+              new DataView(plaintext.buffer).setUint32(0, item.bytes.length, false);
+              plaintext.set(item.bytes, 4);
+              const context = {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              } as const;
+              const sealed = yield* binding.seal({
+                context,
+                plaintext,
+                additionalData: (header) => Uint8Array.from([...header, 9]),
+              });
+              const request = {
+                ...sealed,
+                context,
+                additionalData: Uint8Array.from([...sealed.header, 9]),
+              };
+              const opened = yield* binding.openAuthenticated(request);
+              if (item.model === 'loro') {
+                origins.retain(item.resource, request, opened.plaintext);
+                scheduleBinding = binding;
+              }
+              item.apply(opened.plaintext.subarray(4));
+              opened.plaintext.fill(0);
+            }
+          });
+          yield* transfer(sourceDoc.doc, sourceRegistry.flock, attacker);
+          const forged = yield* Effect.promise(() =>
+            new ScheduleRepository(repo, ws).read('forged-owner')
+          );
+          if (!forged || !scheduleBinding) throw new Error('missing forged schedule');
+          expect(
+            yield* origins.resolveSchedule(
+              {
+                scheduleId: 'forged-owner',
+                definitionFingerprint: scheduleDefinitionFingerprint(forged),
+              },
+              targetDoc.doc,
+              scheduleBinding.openAuthenticated
+            )
+          ).toEqual([hex(attacker.publicKey.toBytes())]);
+          const machineRepository = new ScheduleRepository(repo, ws);
+          type Prepared = {
+            prompt: string;
+            message?: ScheduleDocument['message'];
+            userTurnId: string;
+            sessionId: string;
+          };
+          const scheduleStore = new ScheduleStore<Prepared>(':memory:');
+          yield* Effect.addFinalizer(() => Effect.sync(() => scheduleStore.close()));
+          let now = 60000;
+          const delivered = new Map<
+            string,
+            { sessionId: string; message?: ScheduleDocument['message']; prompt: string }
+          >();
+          const handoffs: string[] = [];
+          let reviewClosed = false;
+          const ports = {
+            workspaceId: ws,
+            machineId: 'machine',
+            userId: 'display-owner',
+            encrypted: true,
+            store: scheduleStore,
+            now: () => now,
+            disabled: () => false,
+            ready: () => true,
+            authorize: (request) =>
+              Effect.runPromise(
+                Effect.scoped(
+                  authorizeEncryptedSchedule({
+                    workspaceId: ws,
+                    request,
+                    doc: targetDoc.doc,
+                    origins,
+                    open: (input) =>
+                      scheduleBinding
+                        ? scheduleBinding.openAuthenticated(input)
+                        : Effect.die('missing schedule binding'),
+                    authorizeExecution: authorization.authorizeExecution,
+                    isExecutionOpen: () => true,
+                  })
+                )
+              ).then((result) => result._tag === 'Authorized'),
+            list: () => machineRepository.list(),
+            read: (id) => machineRepository.read(id),
+            validateTarget: async () => {},
+            prepare: async (run) => {
+              expect(attackerClosed && reviewClosed).toBe(true);
+              return {
+                prompt: run.prompt,
+                message: run.message,
+                userTurnId: run.userTurnId,
+                sessionId: run.sessionId,
+              };
+            },
+            materialize: async () => {},
+            isDispatched: async (prepared) => delivered.has(prepared.userTurnId),
+            dispatch: async (prepared) => {
+              handoffs.push(prepared.userTurnId);
+              delivered.set(prepared.userTurnId, {
+                prompt: prepared.prompt,
+                message: prepared.message,
+                sessionId: prepared.sessionId,
+              });
+            },
+            isFinished: async () => false,
+            publish: async () => {},
+            onError: () => {},
+          } satisfies ScheduleEnginePorts<Prepared>;
+          const engine = new ScheduleEngine(ports);
+          yield* Effect.promise(() => engine.evaluate());
+          expect([...delivered.values()]).toEqual([]);
+          expect(scheduleStore.history(ws, 'forged-owner')[0]).toMatchObject({
+            state: 'retry_wait',
+            errorCode: 'E2EE_SCHEDULE_NOT_AUTHORIZED',
+          });
+          // An owner opens the same verified CRDT state on an independent client,
+          // reviews the payload and explicitly saves a new future activation.
+          const reviewRepo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (r) => Effect.promise(() => (reviewClosed ? Promise.resolve() : r.destroy()))
+          );
+          const reviewDoc = (yield* Effect.promise(() => reviewRepo.openPersistedDoc(docId))).doc;
+          reviewDoc.import(targetDoc.doc.export({ mode: 'update' }));
+          const reviewRegistry = yield* Effect.promise(() => reviewRepo.openFlockDoc(registryId));
+          reviewRegistry.flock.importFile(targetRegistry.flock.exportFile());
+          const reviewFrom = reviewDoc.version();
+          const reviewRepository = new ScheduleRepository(reviewRepo, ws, {
+            protectedContent: true,
+          });
+          const reviewed = yield* Effect.promise(() =>
+            reviewRepository.save({
+              scheduleId: 'forged-owner',
+              actorId: 'display-owner',
+              now: 60001,
+              activationId: 'owner-reviewed',
+              activityId: 'owner-save',
+              create: false,
+              draft: {
+                ...forged.definition,
+                prompt: 'OWNER_REVIEWED_MESSAGE',
+                message: { inputBlocks: [{ type: 'text', text: 'OWNER_REVIEWED_MESSAGE' }] },
+                trigger: { kind: 'once', at: '1970-01-01T00:02:00.000Z' },
+              },
+            })
+          );
+          yield* transfer(reviewDoc, reviewRegistry.flock, fixture.owner, reviewFrom);
+          const ownerBinding = scheduleBinding;
+          if (!ownerBinding) throw new Error('missing owner schedule binding');
+          expect(
+            yield* origins.resolveSchedule(
+              {
+                scheduleId: 'forged-owner',
+                definitionFingerprint: scheduleDefinitionFingerprint(reviewed),
+              },
+              targetDoc.doc,
+              ownerBinding.openAuthenticated
+            )
+          ).toEqual([hex(fixture.owner.publicKey.toBytes())]);
+          if (scenario !== 'owner-resave') {
+            const cancelFrom = reviewDoc.version();
+            if (scenario === 'concurrent-cancel') {
+              sourceDoc.doc.import(reviewDoc.export({ mode: 'update' }));
+              sourceRegistry.flock.importFile(reviewRegistry.flock.exportFile());
+              const editFrom = sourceDoc.doc.version();
+              yield* Effect.promise(() =>
+                attackRepository.save({
+                  scheduleId: 'forged-owner',
+                  actorId: 'display-owner',
+                  now: 60002,
+                  activationId: 'stale-phone-edit',
+                  activityId: 'phone-edit',
+                  create: false,
+                  draft: {
+                    ...reviewed.definition,
+                    prompt: 'CONCURRENT_UNAPPROVED_EDIT',
+                    message: {
+                      inputBlocks: [{ type: 'text', text: 'CONCURRENT_UNAPPROVED_EDIT' }],
+                    },
+                  },
+                })
+              );
+              yield* transfer(sourceDoc.doc, sourceRegistry.flock, attacker, editFrom);
+            }
+            yield* Effect.promise(() =>
+              reviewRepository.setEnabled({
+                scheduleId: 'forged-owner',
+                actorId: 'display-owner',
+                enabled: false,
+                now: 60002,
+                activationId: 'owner-cancel',
+                requestId: 'cancel',
+              })
+            );
+            yield* transfer(reviewDoc, reviewRegistry.flock, fixture.owner, cancelFrom);
+            expect(
+              (yield* Effect.promise(() => machineRepository.read('forged-owner')))?.definition
+                .enabled
+            ).toBe(false);
+          }
+          // Clients stop before the due slot. Only the receiving machine owns
+          // the clock, authorization and persistent occurrence ledger afterward.
+          yield* Effect.promise(() => attackerRepo.destroy());
+          attackerClosed = true;
+          yield* Effect.promise(() => reviewRepo.destroy());
+          reviewClosed = true;
+          now = 119999;
+          yield* Effect.promise(() => engine.evaluate());
+          expect([...delivered.values()]).toEqual([]);
+          now = 120000;
+          yield* Effect.promise(() => Promise.all([engine.evaluate(), engine.evaluate()]));
+          const restarted = new ScheduleEngine(ports);
+          now = 121000;
+          yield* Effect.promise(() => Promise.all([restarted.evaluate(), restarted.evaluate()]));
+          const dispatched = scheduleStore
+            .history(ws, 'forged-owner')
+            .filter((run) => run.state === 'dispatched');
+          if (scenario === 'owner-resave') {
+            expect([...delivered.values()]).toEqual([
+              {
+                prompt: 'OWNER_REVIEWED_MESSAGE',
+                sessionId: 'remote-chat',
+                message: { inputBlocks: [{ type: 'text', text: 'OWNER_REVIEWED_MESSAGE' }] },
+              },
+            ]);
+            expect(dispatched).toHaveLength(1);
+            expect([...delivered.keys()]).toEqual([dispatched[0]?.userTurnId]);
+            expect(handoffs).toEqual([...delivered.keys()]);
+          } else {
+            expect([...delivered.values()]).toEqual([]);
+            expect(dispatched).toEqual([]);
+            expect(handoffs).toEqual([]);
+          }
+        })
+      )
+  );
+  effectIt.effect.each([
+    'prompt',
+    'machineId',
+    'project',
+    'enabled',
+    'trigger',
+    'same-value',
+    'snapshot-only',
+    'manual-forgery',
+    'manual-valid',
+    'manual-valid-other-device',
+    'revoked-author',
+    'concurrent-edit',
+    'concurrent-timeline',
+  ] as const)('binds schedule execution to the current signed declaration (%s)', (mutation) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'schedule-proof-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        const { fixture, runtime, gate, device } = yield* executionFixture(directory);
+        const custody = yield* makeNodeE2eeCustody({
+          directory: join(directory, 'schedule-author'),
+          wrapper,
+        });
+        const writer = yield* custody.prepareDevice();
+        const admission = yield* prepareDeviceAdmission({
+          genesis: fixture.genesis,
+          membershipId: fixture.membershipId,
+          signer: writer,
+          encryptionPublicKey: writer.enc,
+          kind: 'personal',
+        });
+        const admitted = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(fixture.current, fixture.owner.publicKey, admission)
+          ),
+          fixture.owner
+        );
+        const admissionStart = fixture.records.length;
+        fixture.records.push(admitted);
+        fixture.current = Result.getOrThrow(
+          extendLedger(fixture.current, [admitted], {
+            length: fixture.records.length,
+            head: hashRecordBytes(admitted),
+          })
+        );
+        yield* runtime.ingest(page(fixture.records, admissionStart));
+        const repo = yield* Effect.acquireRelease(
+          Effect.promise(() => LoroRepo.create({})),
+          (owned) => Effect.promise(() => owned.destroy())
+        );
+        const ws = 'workspace' as WorkspaceId;
+        const repository = new ScheduleRepository(repo, ws, { protectedContent: true });
+        const document = yield* Effect.promise(() =>
+          repository.save({
+            scheduleId: 'proof',
+            actorId: 'display-owner',
+            now: 0,
+            activationId: 'active',
+            activityId: 'create',
+            create: true,
+            draft: {
+              title: 'Proof',
+              prompt: 'Original prompt',
+              machineId: 'machine',
+              trigger: { kind: 'once', at: '1970-01-01T00:01:00.000Z' },
+              misfirePolicy: { kind: 'run_once' },
+              overlapPolicy: 'queue_one',
+              agent: { agentConfigId: 'agent' },
+              retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+            },
+          })
+        );
+        const docId = getScheduleRoomId('proof');
+        const doc = (yield* Effect.promise(() => repo.openPersistedDoc(docId))).doc;
+        const binding = yield* makeStreamsUpdateBinding({
+          genesis: fixture.genesis,
+          resource: `doc:${docId}`,
+          model: 'loro',
+          writeEpoch: 'current',
+          signer: writer,
+          ledger: () => Effect.succeed(fixture.current),
+          readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+        });
+        const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+        yield* retainSignedScheduleUpdate(origins, docId, doc, binding);
+        let request: ScheduleAuthorizationRequest = {
+          scheduleId: 'proof',
+          definitionFingerprint: scheduleDefinitionFingerprint(document),
+        };
+        const authorize = (
+          source = origins,
+          concurrent: false | 'execution' | 'timeline' = false
+        ) =>
+          authorizeEncryptedSchedule({
+            workspaceId: ws,
+            request,
+            doc,
+            origins: source,
+            open: binding.openAuthenticated,
+            isExecutionOpen: () => true,
+            authorizeExecution: (workspaceId, signer) =>
+              gate.authorizeExecution(workspaceId, signer).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (concurrent === 'timeline') {
+                      const activity = doc.getList('timeline').pushContainer(new LoroMap());
+                      activity.set('id', 'unrelated');
+                      doc.commit();
+                    }
+                    if (concurrent === 'execution') {
+                      doc.getMap('definition').set('enabled', false);
+                      doc.commit();
+                    }
+                  })
+                )
+              ),
+          });
+        const sourceGrant = yield* authorize();
+        expect(sourceGrant).toMatchObject({ _tag: 'Authorized' });
+        if (sourceGrant._tag === 'Authorized') expect(sourceGrant.isCurrent?.()).toBe(true);
+        const from = doc.version();
+        if (mutation === 'snapshot-only') {
+          const snapshot = new LoroDoc();
+          snapshot.import(doc.export({ mode: 'snapshot' }));
+          try {
+            const empty = new ExecutionOrigins(join(directory, 'snapshot-only.sqlite'));
+            expect(
+              (yield* authorizeEncryptedSchedule({
+                workspaceId: ws,
+                request,
+                doc: snapshot,
+                origins: empty,
+                open: binding.openAuthenticated,
+                isExecutionOpen: () => true,
+                authorizeExecution: gate.authorizeExecution,
+              }))._tag
+            ).toBe('Denied');
+          } finally {
+            snapshot.free();
+          }
+          return;
+        }
+        if (
+          mutation === 'manual-forgery' ||
+          mutation === 'manual-valid' ||
+          mutation === 'manual-valid-other-device'
+        ) {
+          request = { ...request, manualRunKey: manualScheduleRunKey('proof', 'manual') };
+          if (mutation !== 'manual-forgery') {
+            yield* Effect.promise(() =>
+              repository.requestRun({
+                scheduleId: 'proof',
+                actorId: 'display-owner',
+                manualRunId: 'manual',
+                now: 0,
+              })
+            );
+            const manualBinding =
+              mutation === 'manual-valid-other-device'
+                ? yield* makeStreamsUpdateBinding({
+                    genesis: fixture.genesis,
+                    resource: `doc:${docId}`,
+                    model: 'loro',
+                    writeEpoch: 'current',
+                    signer: fixture.owner,
+                    ledger: () => Effect.succeed(fixture.current),
+                    readEpochKey: () =>
+                      Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+                  })
+                : binding;
+            yield* retainSignedScheduleUpdate(origins, docId, doc, manualBinding, from);
+          }
+          expect((yield* authorize())._tag).toBe(
+            mutation !== 'manual-forgery' ? 'Authorized' : 'Denied'
+          );
+          return;
+        }
+        if (mutation === 'revoked-author') {
+          const start = fixture.records.length;
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: writer.publicKey,
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(record);
+          fixture.current = Result.getOrThrow(
+            extendLedger(fixture.current, [record], {
+              length: fixture.records.length,
+              head: hashRecordBytes(record),
+            })
+          );
+          yield* runtime.ingest(page(fixture.records, start));
+          expect((yield* authorize())._tag).toBe('Denied');
+          return;
+        }
+        if (mutation === 'concurrent-timeline') {
+          expect((yield* authorize(origins, 'timeline'))._tag).toBe('Authorized');
+          return;
+        }
+        if (mutation === 'concurrent-edit') {
+          expect((yield* authorize(origins, 'execution'))._tag).toBe('Denied');
+          return;
+        }
+        if (mutation === 'prompt' || mutation === 'same-value') {
+          const text = doc.getText('prompt');
+          text.delete(0, text.length);
+          text.insert(0, mutation === 'same-value' ? 'Original prompt' : 'Attacker prompt');
+        } else {
+          const values = {
+            machineId: 'other-machine',
+            enabled: false,
+            project: { kind: 'local', localProjectId: 'attacker-project' },
+            trigger: { kind: 'once', at: '1970-01-01T00:02:00.000Z' },
+          };
+          doc.getMap('definition').set(mutation, values[mutation]);
+        }
+        doc.commit();
+        const changed = yield* Effect.promise(() => repository.read('proof'));
+        if (!changed) throw new Error('missing changed definition');
+        request = { ...request, definitionFingerprint: scheduleDefinitionFingerprint(changed) };
+        expect((yield* authorize())._tag).toBe('Denied');
+        // A deliberate owner save can authorize the newly displayed definition.
+        recordScheduleAuthorization(doc, changed);
+        yield* retainSignedScheduleUpdate(origins, docId, doc, binding, from);
+        expect((yield* authorize())._tag).toBe('Authorized');
+        expect(yield* gate.authorizeExecution(ws, hex(device.publicKey.toBytes()))).toMatchObject({
+          _tag: 'Authorized',
+        });
+      })
+    )
+  );
+
+  it('requires its own authenticated read, expires at 15 minutes from read start, and rechecks after restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-authorization-'));
+    let sender = '';
+    let credential = '';
+    let genesisRecord = new Uint8Array();
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, gate, io, device } = yield* executionFixture(directory);
+          sender = fixture.sender;
+          credential = fixture.credential;
+          genesisRecord = fixture.genesisRecord;
+          // Even a fully verified offline ledger grants no fresh execution authority.
+          io.offline = true;
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          expect((yield* runtime.status()).length).toBe(2);
+          io.offline = false;
+          io.respond = async () => {
+            io.wall += 60_000;
+            io.monotonic += 60_000;
+            return page(fixture.records);
+          };
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall = io.monotonic = 899_999;
+          io.offline = true;
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          // Another device cannot borrow this device's cached authorization.
+          expect(
+            yield* gate.authorizeExecution('workspace', hex(device.publicKey.toBytes()))
+          ).toMatchObject({ _tag: 'Denied' });
+          io.wall = io.monotonic = 900_000;
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.offline = false;
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(yield* gate.authorizeExecution('other-workspace', sender)).toMatchObject({
+            _tag: 'Denied',
+            reason: 'invalid-request',
+          });
+          expect(yield* gate.authorizeExecution('workspace', 'not-a-key')).toMatchObject({
+            _tag: 'Denied',
+            reason: 'invalid-request',
+          });
+        })
+      );
+      // Close the actual custody/SQLite Scope and reopen the same durable files offline.
+      await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(
+            Result.getOrThrow(Bytes.genesisHash(hashRecordBytes(genesisRecord).toBytes()))
+          );
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord,
+          });
+          const gate = yield* makeCliE2eeExecutionAuthorization({
+            workspaceId: 'workspace',
+            credential,
+            runtime,
+            cloud: {
+              getHistory: async () => {
+                throw new Error('offline after restart');
+              },
+            },
+          });
+          expect((yield* runtime.status()).length).toBe(2);
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('shares concurrent refreshes, preserves siblings after cancellation, and retries a failed read', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-flight-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, gate, io, device } = yield* executionFixture(directory);
+          const entered = Promise.withResolvers<void>();
+          const released = Promise.withResolvers<ReturnType<typeof page>>();
+          io.respond = async () => {
+            entered.resolve();
+            return released.promise;
+          };
+          const first = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', fixture.sender)
+          );
+          yield* Effect.promise(() => entered.promise);
+          const sibling = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', fixture.sender),
+            { startImmediately: true }
+          );
+          const machineSibling = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', hex(device.publicKey.toBytes())),
+            { startImmediately: true }
+          );
+          yield* Fiber.interrupt(first);
+          released.resolve(page(fixture.records));
+          expect(yield* Fiber.join(sibling)).toMatchObject({ _tag: 'Authorized' });
+          expect(yield* Fiber.join(machineSibling)).toMatchObject({ _tag: 'Authorized' });
+          expect(io.reads).toBe(1);
+          io.wall = io.monotonic = 900_000;
+          const failing = Promise.withResolvers<ReturnType<typeof page>>();
+          const retryEntered = Promise.withResolvers<void>();
+          io.respond = async () => {
+            retryEntered.resolve();
+            return failing.promise;
+          };
+          const deniedRequests = yield* Effect.forkChild(
+            Effect.all(
+              [
+                gate.authorizeExecution('workspace', fixture.sender),
+                gate.authorizeExecution('workspace', fixture.sender),
+              ],
+              { concurrency: 'unbounded' }
+            )
+          );
+          yield* Effect.promise(() => retryEntered.promise);
+          failing.reject(new Error('synthetic outage'));
+          expect(yield* Fiber.join(deniedRequests)).toEqual([
+            { _tag: 'Denied', reason: 'unavailable' },
+            { _tag: 'Denied', reason: 'unavailable' },
+          ]);
+          expect(io.reads).toBe(2);
+          io.respond = async () => page(fixture.records);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('terminal invalidation fences cached authority and in-flight refreshes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-invalidation-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, gate, io, device } = yield* executionFixture(directory);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          const entered = Promise.withResolvers<void>();
+          const released = Promise.withResolvers<ReturnType<typeof page>>();
+          io.respond = async () => {
+            entered.resolve();
+            return released.promise;
+          };
+          const other = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', hex(device.publicKey.toBytes()))
+          );
+          yield* Effect.promise(() => entered.promise);
+          gate.invalidate();
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+          released.resolve(page(fixture.records));
+          expect(yield* Fiber.join(other)).toEqual({ _tag: 'Denied', reason: 'closed' });
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('authorizes Guest reads on its own admitted machine while denying execution and foreign machines', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'guest-read-authority-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const f = yield* setup(directory, 3, join(directory, 'machine'), false, false, true);
+          const guest = f.guestMachine;
+          if (!guest) throw new Error('missing Guest machine fixture');
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'guest-runtime'),
+            workspaceId: 'workspace',
+            custody: guest.custody,
+            device: guest.device,
+            genesisRecord: f.genesisRecord,
+          });
+          yield* runtime.ingest(page(f.records));
+          const gate = yield* makeCliE2eeExecutionAuthorization({
+            workspaceId: 'workspace',
+            credential: 'synthetic',
+            runtime,
+            cloud: { getHistory: async () => page(f.records) },
+          });
+          const rpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: hex(guest.device.publicKey.toBytes()),
+            originals: new E2eeRpcOriginals(join(directory, 'guest-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('Guest dispatch must never reach signing'),
+          });
+          const prepared = yield* rpc
+            .prepareDispatch('guest-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(prepared._tag).toBe('Failure');
+          if (prepared._tag === 'Failure')
+            expect(prepared.failure).toMatchObject({ message: 'e2ee_rpc_denied' });
+          expect(yield* gate.authorizeRead('workspace', guest.requester)).toEqual({
+            _tag: 'Authorized',
+          });
+          expect(yield* gate.authorizeExecution('workspace', guest.requester)).toEqual({
+            _tag: 'Denied',
+            reason: 'not-authorized',
+          });
+          expect(yield* gate.authorizeRead('workspace', f.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'e2ee_machine_not_owned',
+          });
+          gate.invalidate();
+          expect(yield* gate.authorizeRead('workspace', guest.requester)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects cross-member roles and immediately applies same-member revocation without renewing cached authority', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-membership-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, gate, io, readObservedAuthority } = yield* executionFixture(
+            directory,
+            3
+          );
+          const observed = createDaemonLossRegistry(true);
+          observed.register(
+            { workspaceId: 'workspace', machineId: 'machine', accountId: 'account' },
+            () => ({
+              intakeClosed: false,
+              pending: {
+                processorActive: 0,
+                processorQueued: 0,
+                watcherChecks: 0,
+                executionTurns: 0,
+                executionBookkeeping: 0,
+              },
+            }),
+            readObservedAuthority
+          );
+          let current = fixture.current;
+          const memberEntry = [...current.inspectState().members].find(
+            ([, member]) => member.role === 'member'
+          );
+          if (!memberEntry) throw new Error('missing synthetic member');
+          const [memberId] = memberEntry;
+          const requester = [...current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === memberId
+          );
+          if (!requester) throw new Error('missing synthetic requester');
+          const [key, device] = requester;
+          const removedMemberBaseline = observed.inspect('workspace', key)!;
+          expect(removedMemberBaseline.code).toBeNull();
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const record = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(record);
+            current = Result.getOrThrow(
+              extendLedger(current, [record], {
+                length: fixture.records.length,
+                head: hashRecordBytes(record),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          for (const role of ['member', 'admin', 'guest', 'member'] as const) {
+            if (
+              role !== 'member' ||
+              current.inspectState().members.get(memberId)?.role !== 'member'
+            )
+              yield* append({ _tag: 'SetRole', membershipId: device.membershipId, role });
+            expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
+              _tag: 'Denied',
+              reason: role === 'guest' ? 'not-authorized' : 'e2ee_machine_not_shared',
+            });
+          }
+          const extraCustody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'extra'),
+            wrapper,
+          });
+          const extra = yield* extraCustody.prepareDevice();
+          yield* append(
+            yield* prepareDeviceAdmission({
+              genesis: fixture.genesis,
+              membershipId: fixture.membershipId,
+              signer: extra,
+              encryptionPublicKey: extra.enc,
+              kind: 'personal',
+            })
+          );
+          const extraKey = hex(extra.publicKey.toBytes());
+          expect(yield* gate.authorizeExecution('workspace', extraKey)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          const revokedBaseline = observed.inspect('workspace', extraKey)!;
+          expect(revokedBaseline.code).toBeNull();
+          // Historical author records remain, but known revocation rejects the cached grant immediately.
+          yield* append({ _tag: 'RevokeDevice', target: extra.publicKey });
+          expect(observed.inspect('workspace', extraKey)).toMatchObject({
+            code: 'e2ee_device_revoked',
+            fence: 'verified-ledger',
+            drained: true,
+            retired: false,
+            requesterInstance: revokedBaseline.requesterInstance,
+          });
+          expect(
+            readObservedAuthority(extraKey, hex(fixture.membershipId.toBytes()))
+          ).toMatchObject({ devicePresent: false, memberPresent: true });
+          io.offline = true;
+          expect(yield* gate.authorizeExecution('workspace', extraKey)).toEqual({
+            _tag: 'Denied',
+            reason: 'not-authorized',
+          });
+          io.offline = false;
+          const recovery = yield* extraCustody.prepareDevice();
+          yield* append(
+            yield* prepareDeviceAdmission({
+              genesis: fixture.genesis,
+              membershipId: fixture.membershipId,
+              signer: recovery,
+              encryptionPublicKey: recovery.enc,
+              kind: 'recovery',
+            })
+          );
+          expect(
+            yield* gate.authorizeExecution('workspace', hex(recovery.publicKey.toBytes()))
+          ).toEqual({ _tag: 'Denied', reason: 'not-authorized' });
+          const outsider = yield* extraCustody.prepareDevice();
+          expect(
+            yield* gate.authorizeExecution('workspace', hex(outsider.publicKey.toBytes()))
+          ).toEqual({
+            _tag: 'Denied',
+            reason: 'not-authorized',
+          });
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          yield* append({ _tag: 'RemoveMember', membershipId: device.membershipId });
+          expect(observed.inspect('workspace', key)).toMatchObject({
+            code: 'e2ee_member_removed',
+            fence: 'verified-ledger',
+            drained: true,
+            requesterInstance: removedMemberBaseline.requesterInstance,
+          });
+          expect(readObservedAuthority(key, memberId)).toMatchObject({
+            devicePresent: false,
+            memberPresent: false,
+          });
+          expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          yield* append({
+            _tag: 'RevokeDevice',
+            target: Result.getOrThrow(
+              Bytes.signingPublicKey(Buffer.from((yield* runtime.status()).devicePublicKey, 'hex'))
+            ),
+          });
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'not-authorized',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('denies a shared start when a verified member removal lands while the sharing check yields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-sharing-removal-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3);
+          let current = fixture.current;
+          const memberEntry = [...current.inspectState().members].find(
+            ([, member]) => member.role === 'member'
+          );
+          if (!memberEntry) throw new Error('missing synthetic member');
+          const [memberId] = memberEntry;
+          const requester = [...current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === memberId
+          );
+          if (!requester) throw new Error('missing synthetic requester');
+          const [key, device] = requester;
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const record = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(record);
+            current = Result.getOrThrow(
+              extendLedger(current, [record], {
+                length: fixture.records.length,
+                head: hashRecordBytes(record),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          let removeDuringCheck = false;
+          const gate = yield* makeGate(() =>
+            Effect.gen(function* () {
+              // The owner's removal is verified and ingested while this check yields;
+              // the policy read itself still answers "shared".
+              if (removeDuringCheck) {
+                removeDuringCheck = false;
+                yield* append({ _tag: 'RemoveMember', membershipId: device.membershipId });
+              }
+              return { allowed: true, isCurrent: () => true };
+            })
+          );
+          const shared = yield* gate.authorizeExecution('workspace', key);
+          expect(shared).toMatchObject({ _tag: 'Authorized' });
+          removeDuringCheck = true;
+          const raced = yield* gate.authorizeExecution('workspace', key);
+          expect(raced).toMatchObject({ _tag: 'Denied', reason: 'not-authorized' });
+          // The grant from before the removal can no longer admit a start either.
+          expect(shared._tag === 'Authorized' && shared.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects rollback, corrupted pages and reads that exhaust their freshness budget; keeps other owners usable', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-isolation-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const first = yield* executionFixture(join(directory, 'first'));
+          const other = yield* executionFixture(join(directory, 'other'));
+          first.io.respond = async () => page(first.fixture.records.slice(0, 1));
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Denied' });
+          first.io.respond = async () => ({ ...page(first.fixture.records), recordsHex: ['00'] });
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Denied' });
+          first.io.respond = async () => {
+            first.io.wall = first.io.monotonic = 900_000;
+            return page(first.fixture.records);
+          };
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Denied' });
+          expect(
+            yield* other.gate.authorizeExecution('workspace', other.fixture.sender)
+          ).toMatchObject({
+            _tag: 'Authorized',
+          });
+          // Neither local reads nor a previously created content binding depend on this gate.
+          expect(yield* first.runtime.status()).toMatchObject({ length: 2 });
+          yield* first.runtime.binding('local-document', 'loro', 0);
+          first.io.respond = async () => page(first.fixture.records);
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({
+            _tag: 'Authorized',
+          });
+          // Wall-clock rollback cannot lengthen the monotonic lease.
+          first.io.wall -= 1;
+          first.io.offline = true;
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Denied' });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  effectIt.effect(
+    'bounds a stalled refresh and ignores late replies while allowing a later retry',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'execution-timeout-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          const { fixture, runtime, gate, io } = yield* executionFixture(directory);
+          const entered = Promise.withResolvers<void>();
+          const late = Promise.withResolvers<ReturnType<typeof page>>();
+          io.respond = async () => {
+            entered.resolve();
+            return late.promise;
+          };
+          const request = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', fixture.sender)
+          );
+          yield* Effect.promise(() => entered.promise);
+          yield* TestClock.adjust(30_000);
+          expect(yield* Fiber.join(request)).toEqual({ _tag: 'Denied', reason: 'unavailable' });
+          // A stopped producer has no continuation that could ingest a late response.
+          late.resolve({ ...page(fixture.records), recordsHex: ['00'] });
+          io.respond = async () => page(fixture.records);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(yield* runtime.status()).toMatchObject({ length: 2 });
+        })
+      )
+  );
+
+  it('reads all pages at one checkpoint and rejects a checkpoint change before granting execution', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-pages-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, gate, io } = yield* executionFixture(directory, 67);
+          io.respond = async (input) => {
+            if (!input.cursor) return page(fixture.records, 0, 64);
+            expect(input.checkpoint).toEqual(page(fixture.records).checkpoint);
+            return {
+              ...page(fixture.records, 64),
+              checkpoint: { length: 67, headHash: '00'.repeat(32) },
+            };
+          };
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async (input) =>
+            input.cursor ? page(fixture.records, 64) : page(fixture.records, 0, 64);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      );
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });

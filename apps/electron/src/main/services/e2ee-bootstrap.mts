@@ -262,7 +262,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         }
       } else if (version !== 1 || id !== applicationId) throw fail('corrupt')
       db.exec(
-        'CREATE TABLE IF NOT EXISTS removed_workspaces(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
+        'CREATE TABLE IF NOT EXISTS removed_workspaces(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS revoked_devices(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
       )
       if (
         db.prepare('SELECT account_id FROM metadata').all().length !== 1 ||
@@ -727,6 +727,17 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     db
       .prepare('SELECT genesis,signing_key FROM removed_workspaces WHERE workspace_id=?')
       .get(workspaceId) as { genesis: string; signing_key: string } | undefined
+  // Additive reason row for the same exact receipt; absent means whole-member removal.
+  const removedReason = (workspaceId: string): 'member_removed' | 'device_revoked' | null => {
+    const row = removedRow(workspaceId)
+    if (!row) return null
+    const revoked = db
+      .prepare('SELECT genesis,signing_key FROM revoked_devices WHERE workspace_id=?')
+      .get(workspaceId) as { genesis: string; signing_key: string } | undefined
+    return revoked?.genesis === row.genesis && revoked.signing_key === row.signing_key
+      ? 'device_revoked'
+      : 'member_removed'
+  }
   const eraseRemoved = Effect.fnUntraced(function* (workspaceId: string) {
     const row = yield* sql(() => removedRow(workspaceId))
     if (!row) return false
@@ -772,6 +783,8 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     genesisHash: string
     signingPublicKey: string
     credential: string
+    /** Exact authenticated reason; device revocation is scoped to this device's identity. */
+    reason?: 'member_removed' | 'device_revoked'
   }) {
     // This is private host plumbing. Only the authenticated cloud removal result calls it.
     const creation = yield* creationFor(input.workspaceId)
@@ -793,9 +806,21 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
             (prior.genesis !== input.genesisHash || prior.signing_key !== input.signingPublicKey)
           )
             throw fail('conflict')
-          db.prepare(
-            'INSERT OR IGNORE INTO removed_workspaces(workspace_id,genesis,signing_key) VALUES(?,?,?)'
-          ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+          db.exec('BEGIN IMMEDIATE')
+          try {
+            db.prepare(
+              'INSERT OR IGNORE INTO removed_workspaces(workspace_id,genesis,signing_key) VALUES(?,?,?)'
+            ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+            // The first authenticated reason for this exact device is retained.
+            if (!prior && input.reason === 'device_revoked')
+              db.prepare(
+                'INSERT OR REPLACE INTO revoked_devices(workspace_id,genesis,signing_key) VALUES(?,?,?)'
+              ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+            db.exec('COMMIT')
+          } catch (cause) {
+            db.exec('ROLLBACK')
+            throw cause
+          }
         })
         return true
       })
@@ -832,16 +857,21 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
           if (
             previous?.genesis === origin.genesisHash &&
             previous.signing_key !== hex(device.publicKey.toBytes())
-          )
+          ) {
             db.prepare(
               'DELETE FROM removed_workspaces WHERE workspace_id=? AND genesis=? AND signing_key=?'
             ).run(workspaceId, previous.genesis, previous.signing_key)
+            db.prepare(
+              'DELETE FROM revoked_devices WHERE workspace_id=? AND genesis=? AND signing_key=?'
+            ).run(workspaceId, previous.genesis, previous.signing_key)
+          }
         })
       })
     )
   return Object.freeze({
     recordRemovedWorkspace,
     hasRemovedWorkspace: (workspaceId: string) => sql(() => Boolean(removedRow(workspaceId))),
+    removedReason: (workspaceId: string) => sql(() => removedReason(workspaceId)),
     forgetRemovedWorkspace,
     resumeRemovedWorkspace: (workspaceId: string) => withLock(eraseRemoved(workspaceId)),
     recordAccountIdentity: (value: { accountId: string; cryptoUserId: string }) =>

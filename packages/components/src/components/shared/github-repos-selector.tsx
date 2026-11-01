@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useState, useEffect, useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +14,6 @@ import {
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { composerSurface } from './composer-surface';
 import { OptionSelector } from './option-selector';
-import { useCloudQuery } from '@lody/platform/react';
 
 const CONNECT_GIT_REPO_OPTION_VALUE = '__connect_git_repo__';
 
@@ -56,7 +56,7 @@ export function GitHubReposSelector({
   const setCacheAtom = useSetAtom(setWorkspaceReposCacheAtom);
 
   // Fetch fresh data from server
-  const freshRepositories = useCloudQuery(
+  const freshRepositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );

@@ -137,7 +137,7 @@ export function readLegacySessionModelState(
   };
 }
 
-function readSessionAvailableCommands(
+export function readSessionAvailableCommands(
   sessionResponse: unknown
 ): AcpCapabilitiesResult['availableCommands'] {
   const parsed = zSessionAvailableCommands.safeParse(sessionResponse);
@@ -193,7 +193,7 @@ export function readLodyModelReasoningEfforts(
 const usesCodexModelEffortIds = (agent?: { cliType: string; agentType: string }): boolean =>
   agent?.cliType === 'builtin' && agent.agentType === 'codex';
 
-/** Extract cacheable capabilities from a real ACP new/load/resume session response. */
+/** Extract capabilities advertised by a real ACP new/load/resume session response. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
   lifecycleCapabilities: {

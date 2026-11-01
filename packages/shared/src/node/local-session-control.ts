@@ -598,6 +598,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.methodId === 'undefined' ||
+            (typeof value.methodId === 'string' &&
+              value.methodId.trim().length > 0 &&
+              value.methodId.length <= 1024)) &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&

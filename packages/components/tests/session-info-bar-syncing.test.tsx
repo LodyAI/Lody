@@ -125,9 +125,62 @@ describe('SessionInfoBar ambient information', () => {
     expect(container.querySelector('output')?.textContent).toBe('Simulator');
   });
 
+  it('opens Android directly when it is the only simulator preview', () => {
+    const openAndroid = vi.fn();
+    act(() =>
+      root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} onOpenAndroidEmulator={openAndroid} />)
+    );
+    const action = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Android Emulator"]'
+    );
+    expect(action).not.toBeNull();
+    act(() => action!.click());
+    expect(openAndroid).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it.each([false, true])(
+    'chooses either simulator from one popover (compact=%s)',
+    (compactMachineInfo) => {
+      const openIos = vi.fn();
+      const openAndroid = vi.fn();
+      act(() =>
+        root.render(
+          <SessionInfoBar
+            {...CONTEXT_LESS_PROPS}
+            compactMachineInfo={compactMachineInfo}
+            onOpenIosSimulator={openIos}
+            onOpenAndroidEmulator={openAndroid}
+          />
+        )
+      );
+      const trigger = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="iOS Simulator / Android Emulator"]'
+      );
+      expect(trigger).not.toBeNull();
+      expect(container.querySelectorAll('button')).toHaveLength(1);
+      for (const label of ['Android Emulator', 'iOS Simulator']) {
+        act(() => trigger!.click());
+        const dialog = document.body.querySelector('[role="dialog"]');
+        expect(dialog).not.toBeNull();
+        const option = Array.from(dialog!.querySelectorAll('button')).find(
+          (button) => button.textContent === label
+        );
+        expect(option).toBeDefined();
+        act(() => option!.click());
+        expect(trigger!.getAttribute('aria-expanded')).toBe('false');
+        expect(openAndroid).toHaveBeenCalledTimes(1);
+        expect(openIos).toHaveBeenCalledTimes(label === 'iOS Simulator' ? 1 : 0);
+      }
+    }
+  );
+
   it('shows the execution target alone while keeping owner details out of the resting bar', () => {
     act(() => root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} machine={MACHINE} />));
     expect(container.textContent).toBe(MACHINE.name);
+    const surface = container.querySelector('[data-info-bar-surface]');
+    expect(surface).not.toBeNull();
+    expect(surface!.className).toContain('rounded-lg');
     expect(container.querySelector('img')).toBeNull();
     expect(document.body.textContent).not.toContain('Maya Chen');
     act(() => container.querySelector<HTMLButtonElement>('button')!.click());

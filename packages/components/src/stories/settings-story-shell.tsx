@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   RouterProvider,
   createMemoryHistory,
+  createRoute,
   createRootRoute,
   createRouter,
 } from '@tanstack/react-router';
@@ -135,16 +136,23 @@ export function SettingsStoryProviders({
    which still throws without a nearest route match. Render the story through a
    real (memory) router so the page sits inside a matched route component —
    the global preview router only renders stories outside any route. */
-function createStoryRouter(children: ReactNode) {
+function createStoryRouter(children: ReactNode, initialPath: string) {
   const rootRoute = createRootRoute({ component: () => <>{children}</> });
+  const otherPath = createRoute({ getParentRoute: () => rootRoute, path: '$' });
   return createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([otherPath]),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
     context: {},
   });
 }
 
-export function RoutedStory({ children }: { children: ReactNode }) {
-  const [router] = useState(() => createStoryRouter(children));
+export function RoutedStory({
+  children,
+  initialPath = '/',
+}: {
+  children: ReactNode;
+  initialPath?: string;
+}) {
+  const [router] = useState(() => createStoryRouter(children, initialPath));
   return <RouterProvider router={router} />;
 }

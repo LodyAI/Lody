@@ -1,4 +1,6 @@
+import { isWorkspaceCodeCollabFlockDocId } from './code-collab-rooms';
 import { parseMachineFlockDocId } from './machine-flock';
+import { getScheduleRegistryFlockDocId } from './schedule-registry';
 import { getWorkspaceFlockDocId } from './workspace-flock';
 import type { WorkspaceId } from './ids';
 import type { SnapshotCodec, SnapshotUploadOptions } from '@loro-dev/streams-crdt';
@@ -66,7 +68,9 @@ export function encryptedWorkspaceRoom(
     const machine = parseMachineFlockDocId(room.flockDocId);
     if (
       (machine && machine.workspaceId === workspaceId) ||
-      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId)
+      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId) ||
+      room.flockDocId === getScheduleRegistryFlockDocId(workspaceId as WorkspaceId) ||
+      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId)
     )
       return { resource: `flock:${room.flockDocId}`, model: 'flock' };
   }
@@ -89,9 +93,10 @@ export function encryptedWorkspaceResolver(
   };
 }
 
-/** Unencrypted side channels remain unavailable until their E2EE milestones. */
+/** Shared feature verdicts: schedules use protected CRDT; minimal presence stays plaintext. */
 export type WorkspaceRestrictedFeature =
   | 'schedules'
+  | 'automations'
   | 'preview-comments'
   | 'code-collab-index'
   | 'shortcuts'
@@ -105,9 +110,22 @@ export type WorkspaceRestrictedFeature =
   | 'presence';
 export function workspaceSupports(
   content: WorkspaceStreamsMode,
-  _feature: WorkspaceRestrictedFeature
+  feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext';
+  if (
+    feature === 'preview-comments' ||
+    feature === 'code-collab-index' ||
+    feature === 'remote-preview' ||
+    feature === 'sharing'
+  )
+    return true;
+  return (
+    content.mode === 'plaintext' ||
+    feature === 'presence' ||
+    feature === 'export' ||
+    feature === 'attachments' ||
+    feature === 'schedules'
+  );
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */
@@ -119,8 +137,10 @@ export type WorkspaceEpochStatus = {
 /** Reception progress only: every non-closed phase permits retained-epoch sends. */
 export type WorkspaceEpochPhase = 'ready' | 'installing' | 'waiting-key' | 'failed' | 'closed';
 
-/** Stable room providers select a confirmed installed epoch per operation.
- * Reception never removes transports or blocks old-epoch sends. Timed-out raw
+/** Stable room providers retain epoch hints for UI/token coordination. Native
+ * hosts select the verified current epoch for new seals; these hints grant no
+ * authority to seal new content at an older epoch. Reception never removes
+ * transports or blocks already sealed old-epoch sends. Timed-out raw
  * work stays owned until settlement; its late receipt cannot commit a selection.
  * @deprecated Compose this Promise SDK boundary when its callers migrate.
  */
@@ -158,13 +178,19 @@ export function createWorkspaceEpochTransitionLegacy(input: {
     provider(
       make: (writeEpoch: number) => import('@loro-dev/streams-crdt').PayloadProtectionProvider
     ) {
-      const track = async <A>(work: () => A | Promise<A>): Promise<A> => {
+      const track = async <A>(
+        work: () => A | Promise<A>,
+        dispose?: (value: A) => void
+      ): Promise<A> => {
         if (isClosed()) throw new Error('e2ee_closed');
         const pending = Promise.resolve(work());
         admitted.add(pending);
         try {
           const result = await pending;
-          if (isClosed()) throw new Error('e2ee_closed');
+          if (isClosed()) {
+            dispose?.(result);
+            throw new Error('e2ee_closed');
+          }
           return result;
         } finally {
           admitted.delete(pending);
@@ -178,7 +204,10 @@ export function createWorkspaceEpochTransitionLegacy(input: {
         },
         open: (request) => {
           const selected = make(epoch);
-          return track(() => selected.open(request));
+          return track(
+            () => selected.open(request),
+            (plaintext) => plaintext.fill(0)
+          );
         },
       } satisfies import('@loro-dev/streams-crdt').PayloadProtectionProvider;
     },

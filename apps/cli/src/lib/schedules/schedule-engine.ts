@@ -1,11 +1,12 @@
 import {
   scheduleDefinitionFingerprint,
   type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
   type ScheduleRegistryRow,
   type ScheduleRuntimeRow,
 } from '@lody/shared';
-import type { AgentExecutionSlots } from '../agent-execution-slots';
 import type { ScheduleRun, ScheduleStore } from './schedule-store';
+import { isUnassociatedQuotaReservation } from './legacy-quota-reservation';
 
 export class ScheduleConfigurationError extends Error {
   readonly code: string;
@@ -21,17 +22,18 @@ export type ScheduleEnginePorts<Prepared> = {
   machineId: string;
   userId: string;
   store: ScheduleStore<Prepared>;
-  slots: AgentExecutionSlots;
   now: () => number;
   disabled: () => boolean;
   ready: () => boolean;
+  encrypted?: boolean;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   list: () => Promise<ScheduleRegistryRow[]>;
   read: (scheduleId: string) => Promise<ScheduleDocument | null>;
   validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
   prepare: (run: ScheduleRun<Prepared>) => Promise<Prepared>;
   materialize: (prepared: Prepared) => Promise<void>;
   isDispatched: (prepared: Prepared) => Promise<boolean>;
-  dispatch: (prepared: Prepared) => Promise<void>;
+  dispatch: (prepared: Prepared, run: ScheduleRun<Prepared>) => Promise<void | 'discarded'>;
   isFinished: (run: ScheduleRun<Prepared>) => Promise<boolean>;
   publish: (runtime: ScheduleRuntimeRow) => Promise<void>;
   onError: (error: unknown) => void;
@@ -52,15 +54,6 @@ export class ScheduleEngine<Prepared> {
   private readonly projections = new Map<string, ScheduleRuntimeRow>();
   constructor(private readonly ports: ScheduleEnginePorts<Prepared>) {}
 
-  restoreOccupancy(): void {
-    for (const run of this.ports.store.unfinished(this.ports.workspaceId)) {
-      if (
-        !run.message &&
-        (run.state === 'claimed' || run.state === 'session_prepared' || run.state === 'dispatched')
-      )
-        this.ports.slots.restore(run.agentConfigId, run.runKey);
-    }
-  }
   async stop(): Promise<void> {
     this.stopped = true;
     await this.active;
@@ -105,16 +98,9 @@ export class ScheduleEngine<Prepared> {
       if (current.state === 'dispatched' && (await p.isFinished(current))) {
         p.store.transition(current.runKey, ['dispatched'], { state: 'finished' });
         p.onEvent?.({ type: 'finished', scheduleId: run.scheduleId, runKey: run.runKey });
-        p.slots.release(current.agentConfigId, current.runKey);
       }
     }
-    if (!p.ready() || p.disabled()) {
-      // Restored preparation reserves only until durable dispatch evidence has
-      // been reconciled. Parked work must not block unrelated automation.
-      for (const run of p.store.unfinished(p.workspaceId))
-        if (run.state !== 'dispatched') p.slots.release(run.agentConfigId, run.runKey);
-      if (!p.ready()) return;
-    }
+    if (!p.ready()) return;
     const now = p.now();
     const rows = await p.list();
     if (p.disabled()) {
@@ -182,6 +168,14 @@ export class ScheduleEngine<Prepared> {
         this.skip(run, 'ACTIVATION_REVOKED');
         continue;
       }
+      if (run.prepared === undefined && isUnassociatedQuotaReservation(run)) {
+        this.skip(run, 'LEGACY_QUOTA_UNASSOCIATED');
+        await this.project(row, {
+          queueState: 'blocked',
+          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
+        });
+        continue;
+      }
       if (now - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
         this.skip(run, 'DISPATCH_EXPIRED');
         continue;
@@ -193,26 +187,8 @@ export class ScheduleEngine<Prepared> {
         });
         continue;
       }
-      const others = p.store
-        .unfinished(p.workspaceId)
-        .some(
-          (other) =>
-            other.scheduleId === run.scheduleId &&
-            other.runKey !== run.runKey &&
-            !other.manual &&
-            other.state !== 'pending'
-        );
-      // Full messages use the destination chat's busy gate. Agent-wide slots
-      // belong to generic tasks and must not serialize unrelated conversations.
-      if (
-        !run.manual &&
-        (others || (!run.message && !p.slots.reserve(run.agentConfigId, run.runKey)))
-      ) {
-        await this.project(row, { queueState: 'waiting_for_agent' });
-        continue;
-      }
-      if (run.manual && !run.message) p.slots.restore(run.agentConfigId, run.runKey);
       try {
+        await this.authorize(run);
         let current = p.store.transition(run.runKey, [run.state], {
           state: 'claimed',
           attempts: run.attempts + 1,
@@ -227,7 +203,6 @@ export class ScheduleEngine<Prepared> {
         const latest = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
         const document = await p.read(run.scheduleId);
         if (!p.ready() || p.disabled()) {
-          p.slots.release(run.agentConfigId, run.runKey);
           continue;
         }
         if (
@@ -250,7 +225,6 @@ export class ScheduleEngine<Prepared> {
         // Validation may await local reads; close the authorization window again.
         const gate = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
         if (!p.ready() || p.disabled()) {
-          p.slots.release(run.agentConfigId, run.runKey);
           continue;
         }
         if (
@@ -263,7 +237,16 @@ export class ScheduleEngine<Prepared> {
           this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
           continue;
         }
-        await p.dispatch(current.prepared!);
+        await this.authorize(run);
+        const result = await p.dispatch(current.prepared!, current);
+        if (result === 'discarded') {
+          this.skip(p.store.get(current.runKey)!, 'QUOTA_RECOVERY_ALREADY_ACCEPTED');
+          await this.project(row, {
+            queueState: 'blocked',
+            blockedCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED',
+          });
+          continue;
+        }
         p.store.transition(run.runKey, ['session_prepared'], {
           state: 'dispatched',
           dispatchedAt: p.now(),
@@ -298,7 +281,6 @@ export class ScheduleEngine<Prepared> {
             });
           else p.store.failAttempt(run.runKey, code, p.now());
           p.onEvent?.({ type: 'blocked', scheduleId: run.scheduleId, runKey: run.runKey, code });
-          p.slots.release(run.agentConfigId, run.runKey);
           await this.project(row, {
             queueState:
               error instanceof ScheduleConfigurationError ||
@@ -315,10 +297,22 @@ export class ScheduleEngine<Prepared> {
       if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
   }
 
+  private async authorize(run: ScheduleRun<Prepared>): Promise<void> {
+    if (!this.ports.encrypted) return;
+    if (
+      !this.ports.authorize ||
+      !(await this.ports.authorize({
+        scheduleId: run.scheduleId,
+        definitionFingerprint: run.definitionFingerprint,
+        ...(run.manual ? { manualRunKey: run.runKey } : {}),
+      }))
+    )
+      throw new ScheduleConfigurationError('E2EE_SCHEDULE_NOT_AUTHORIZED');
+  }
+
   private skip(run: ScheduleRun<Prepared>, code: string): void {
     this.ports.store.transition(run.runKey, [run.state], { state: 'skipped', errorCode: code });
     this.ports.onEvent?.({ type: 'skipped', scheduleId: run.scheduleId, runKey: run.runKey, code });
-    this.ports.slots.release(run.agentConfigId, run.runKey);
   }
   private async project(
     row: ScheduleRegistryRow,
@@ -341,6 +335,11 @@ export class ScheduleEngine<Prepared> {
     this.projections.set(row.scheduleId, {
       ...this.projections.get(row.scheduleId),
       ...(lastDispatch ? { lastDispatch } : {}),
+      ...(last?.activationId === row.activationId &&
+      (last.errorCode === 'LEGACY_QUOTA_UNASSOCIATED' ||
+        last.errorCode === 'QUOTA_RECOVERY_ALREADY_ACCEPTED')
+        ? { blockedCode: last.errorCode }
+        : {}),
       ...(row.scheduledMessage
         ? {
             messageState: lastDispatch

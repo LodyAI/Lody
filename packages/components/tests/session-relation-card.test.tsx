@@ -15,6 +15,7 @@ import {
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
+import { initI18n } from '../src/i18n';
 
 // This suite exercises relation rendering and navigation; collaboration controls
 // and their workspace-backed actions have their own behavioral suites.
@@ -65,7 +66,8 @@ describe('Session relation cards', () => {
   let root: Root;
   let container: HTMLDivElement;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -623,7 +625,57 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.textContent).toContain('Target unavailable');
+    expect(container.textContent).toContain('Operation failed');
+    expect(container.textContent).not.toContain('Operation completed');
   });
+
+  it.each([false, true])(
+    'counts successful targets even when progress hides their cards (%s)',
+    async (withProgress) => {
+      const completion = completionMessage.items[0];
+      if (completion.type !== 'operation_completion') throw new Error('fixture');
+      await act(async () =>
+        root.render(
+          <MessageRowView
+            sessionId={openerSessionId}
+            message={{
+              ...completionMessage,
+              items: [
+                {
+                  ...completion,
+                  ...(withProgress ? { progressMessageId: 'progress' } : {}),
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+                          assistantTurnId: 'assistant-turn',
+                        },
+                        {
+                          status: 'failed',
+                          label: 'Unavailable',
+                          error: {
+                            code: 'INVALID_ITEM',
+                            message: 'Synthetic failure',
+                            retryable: false,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }}
+          />
+        )
+      );
+      expect(container.textContent).toContain('1 succeeded · 1 failed · 0 cancelled');
+      expect(container.textContent).toContain('Synthetic failure');
+      expect(container.textContent).not.toContain('Operation completed');
+    }
+  );
 
   it('keeps a long reply to its opening line and shows all of it in a dialog', async () => {
     const opening =

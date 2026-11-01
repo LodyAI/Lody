@@ -18,7 +18,7 @@ guarantees. Routine implementation behavior stays in owning docs.
 
 This narrows the Spec trigger preserved by the
 [scoped-instructions decision](2026-09-08-scoped-agent-instructions.md), while retaining
-[Note triggers](2026-09-07-explicit-agent-note-triggers.md), bilingual maintenance and
+[Note triggers](../../archived/process/2026-09-07-explicit-agent-note-triggers.md), bilingual maintenance and
 approval of each reviewed Spec revision. Root and finishing instructions now follow
 the selection rules in `specs/AGENTS.md`; Notes no longer imply a companion Spec.
 

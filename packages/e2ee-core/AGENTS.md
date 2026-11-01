@@ -10,7 +10,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 ## Structure
 
 - Entries are exactly `.` (workflows), `./services` (ports), `./protocol`,
-  `./host`, `./adapters/node-custody`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
+  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/browser-custody`, `./adapters/indexeddb`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
   (bundle-time WebAssembly for workerd) and the unstable `./internal`. Add an export only to the entry whose role it serves.
 - Protocol code is pure (Result, plus Effect only for async crypto/verification)
   and imports no service or adapter. Workflows depend only on protocol code and
@@ -25,6 +25,12 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   native protection is borrowed; the close guard elsewhere.
 - `KeyProtector` and `CandidateProtector` stay distinct ports: an unpublished
   rotation key is never protected through the installed-key capability.
+- Before changing client custody or installation, read the [client custody Spec](../../specs/e2ee/client-custody.md).
+  Its new ports do not enable a host; native bridges stay scoped to protection,
+  and installation receipts never grant ledger authority.
+  Replacement archives the old receipt atomically without resetting the slot or
+  its revision. Client wrapping uses DAG-CBOR text AAD; never expand the ledger
+  CBOR subset to encode it. Shared bytes are pinned by `test/client-custody-vector.json`.
 
 ## Documentation
 
@@ -49,7 +55,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   verified context; frame metadata is unverified. A valid signature establishes
   neither permission nor AEAD validity.
 - Ed25519 requires canonical nonzero prime-subgroup A and R and S<L
-  (`zip215: false`); fixed native Effects and private exact caches keep these checks.
+  (`zip215: false`); fixed backends and private exact caches keep these checks.
+  Without WASM, explicit native Ed25519 non-support uses the same strict JS verifier;
+  other native failures remain unavailable. Browser private handles stay opaque and
+  cannot cross isolates. Their owner stops admission and drains HPKE before wiping
+  private bytes; shape-compatible objects never become valid handles.
   The WebAssembly verifier (`wasm/ed25519-strict`, rebuilt only by its `build.mjs`)
   is a fixed backend with the pure-JS fallback, never injectable, and must accept
   exactly what the pure-JS path accepts (`test/ed25519-wasm.test.ts`).
@@ -76,15 +86,42 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   opaque payload authentication grants no membership, freshness or execution
   authority. Keep application body codecs, target binding and send/rotation gates
   in the authorized integration; never expand `sealDocument` for these purposes.
+- Machine-sharing policies remain independent of ledger records. Execution requires
+  the current machine owner's active personal-device policy signature; historical
+  chain verification grants no execution authority. Generation evidence must qualify
+  the current machine through ledger-included initial/replacement admissions; removal
+  starts a new signed resource, while atomic replacement preserves its root.
+  Hosts own latest-head freshness,
+  resource-bound durable pins and actual local-project resolution. See the
+  [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+- Key rounds attempt receive and distribution independently; report each outcome
+  and retain the failed phase's retry cursor. Unknown senders request ledger refresh.
 - Durable workflows persist exact originals before any network step, retry
   those bytes, never re-sign, and keep results until explicit acknowledgement.
   Remote hints never end a task; only genuine ledger changes do.
 - Local store mutations are atomic, verify their own write and binding in the
   same transaction, and never become authority. No transaction spans crypto or
   network I/O.
+- IndexedDB routing stays stable across device replacement: one account/workspace/genesis
+  database retains pins and originals. Pairing rows additionally bind the local device,
+  installation, session and purpose. No receipt or stored state grants approval.
+  Mutations resolve only on transaction completion; close fences new calls and drains
+  admitted native transactions. Missing/corrupt existing storage never resets a pin.
+  Rebase validates the entire contiguous suffix, record shape and count/byte totals
+  before deleting covered rows in the same transaction.
+- Client hosts enter `ClientCustodyWriter.run` before allocating an identity and
+  hold it through finite local protection/storage work, releasing before network.
+  `ClientIdentityOriginals` supplies retained wrappers, never approval; authenticate
+  keys before ready. Read the adapter rules for [custody](src/adapters/browser-custody/AGENTS.md)
+  and [IndexedDB](src/adapters/indexeddb/AGENTS.md) before changing those boundaries.
 - Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
   never captured transcripts, real keychains or private designs.
 - TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx
   inside the worker; `--import tsx` alone does not resolve their imports on Node 22.
 
 Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/AGENTS.md).
+
+Product content seals prefer installed current keys. Only genuine missing-key
+results permit retained published keys inside the durable fifteen-minute first-observation
+budget; uncertain timing fails closed. Membership/device/role checks remain mandatory.
+See the [owner tradeoff](../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).

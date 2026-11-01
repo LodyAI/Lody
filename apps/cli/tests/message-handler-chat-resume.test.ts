@@ -79,6 +79,7 @@ describe('MessageHandler chat resume', () => {
       setSessionMode: vi.fn(async () => {}),
       unstable_setSessionModel: vi.fn(async () => {}),
       setSessionConfigOption: vi.fn(async () => undefined),
+      getAvailableCommands: () => [],
       getConfigOptions: vi.fn(() => []),
       currentModel: undefined,
     };

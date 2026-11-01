@@ -1,13 +1,19 @@
 import { createRouter as createTanstackRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import type { E2eeRuntimeFactory } from '@lody/platform';
 import type { LodyAuthClient } from './lib/auth';
+import { setTelemetryRouteTarget } from './lib/posthog-privacy';
 
 export type RouterContext = {
   authClient: LodyAuthClient;
+  /** Optional application-owned browser/native-shell host; local and Electron keep their owners. */
+  createE2eeRuntime?: E2eeRuntimeFactory;
 };
 
 type CreateRouterOptions = {
   authClient: LodyAuthClient;
+  /** Optional application-owned browser/native-shell host; local and Electron keep their owners. */
+  createE2eeRuntime?: E2eeRuntimeFactory;
   basepath?: string;
   history?: Parameters<typeof createTanstackRouter>[0]['history'];
 };
@@ -34,8 +40,23 @@ export const createRouter = (options: CreateRouterOptions) => {
     scrollRestoration: ({ location }) => shouldRouterRestoreScroll(location.pathname),
     context: {
       authClient: options.authClient,
+      createE2eeRuntime: options.createE2eeRuntime,
     },
   });
+  const publishTelemetryTarget = (pathname: string, committed: boolean) => {
+    const matches = router.matchRoutes(pathname);
+    const workspace = matches.find((match) => 'workspaceName' in match.params);
+    const slug = workspace?.params as { workspaceName?: string } | undefined;
+    setTelemetryRouteTarget(slug?.workspaceName ?? null, committed);
+  };
+  // Subscribe outside React so a switch closes the gate before route rendering,
+  // and never enables a new scope while the old DOM is still committed.
+  router.subscribe('onBeforeNavigate', ({ toLocation }) =>
+    publishTelemetryTarget(toLocation.pathname, false)
+  );
+  router.subscribe('onResolved', ({ toLocation }) =>
+    publishTelemetryTarget(toLocation.pathname, true)
+  );
   return router;
 };
 

@@ -10,6 +10,7 @@ import {
   AgentRoleId,
   AgentType,
   AcpCapabilityCacheEntry,
+  AcpCommandSummary,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
@@ -596,6 +597,7 @@ const acpSessionConfigSchema = schema
       agentRoleRevision: schema.Number({ required: false }),
       agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
     },
     { required: false }
   )
@@ -698,7 +700,15 @@ export const sessionHistorySchema = schema.LoroMap({
       scheduleId: schema.String(),
       turnId: schema.String(),
       title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
     },
+    { required: false }
+  ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
     { required: false }
   ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
@@ -1150,6 +1160,7 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   previewCandidate?: SessionPreviewCandidateMeta;
   /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
@@ -1277,9 +1288,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project'
+  'project' | 'acpSessionConfig'
 > & {
   project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };
 
 const sessionForkOperationDocSchema = schema.LoroMap(
@@ -1321,6 +1334,8 @@ export type SessionAcpRuntimeConfigSnapshot = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Actual commands for this ACP session; an empty list clears the menu. */
+  availableCommands?: AcpCommandSummary[];
 };
 
 export type SessionAcpRuntimeConfigPatch = Omit<
@@ -1336,6 +1351,14 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),
+    availableCommands: schema.LoroList(
+      schema.LoroMap({
+        name: schema.String(),
+        description: schema.String({ required: false }),
+      }),
+      undefined,
+      { required: false }
+    ),
   },
   { required: false }
 );
@@ -1356,6 +1379,8 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
+  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1460,7 +1485,9 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+  /** Omitted by control-only readers; execution reads the selected original from the document. */
+  rpcDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

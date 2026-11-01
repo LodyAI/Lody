@@ -15,6 +15,26 @@ import {
 
 export const WORKSPACE_MODE_ADMISSION_TIMEOUT_MS = 15_000;
 
+/** Cancelling an outbound operation releases only its waiter. The provider
+ * retains ownership of the read that classifies this workspace. */
+export async function waitForWorkspaceContentAdmission(
+  admission: Promise<void>,
+  signal: AbortSignal
+): Promise<void> {
+  signal.throwIfAborted();
+  let abort!: () => void;
+  const interrupted = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    await Promise.race([admission, interrupted]);
+    signal.throwIfAborted();
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 export class WorkspaceModeAdmissionTimeoutError extends Error {
   constructor() {
     super('Workspace mode verification needs a live authenticated connection');

@@ -184,6 +184,8 @@ import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
+import { PendingImageMarkupDialog } from '../sessions/pending-image-markup-dialog';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import { UserMessageEditor, type UserMessageEditorProps } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
@@ -643,6 +645,7 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -1782,6 +1785,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
@@ -2006,15 +2010,6 @@ export const SessionChatStreamView = forwardRef<
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
-     * The gap between the viewport's scroll space and Virtua's item-offset
-     * space — the viewport's top padding (`--conversation-top-inset` plus
-     * `py-6`), which Virtua does not account for. Measured from the DOM rather
-     * than assumed, and only on mount / viewport resize; see
-     * `measureItemOffsetDelta`.
-     */
-    const itemOffsetDeltaRef = useRef(0);
-
-    /**
      * Put a row's top at the viewport's top edge.
      *
      * THE one place that turns a row index into a scroll, so every jump in this
@@ -2028,7 +2023,7 @@ export const SessionChatStreamView = forwardRef<
       (rowIndex: number, smooth = false) => {
         listRef.current?.scrollRowToTop(rowIndex + leadingRowCount, {
           smooth,
-          offset: itemOffsetDeltaRef.current,
+          offset: listRef.current?.contentOffset ?? 0,
         });
       },
       [leadingRowCount]
@@ -2244,18 +2239,6 @@ export const SessionChatStreamView = forwardRef<
     }, [outlineEntries, virtualRows]);
     const [activeOutlineIndex, setActiveOutlineIndex] = useState(-1);
 
-    // Measured, not assumed: the rect difference also absorbs any border or
-    // start spacer, which a `padding-top` read would miss. Never on a scroll
-    // path — `getBoundingClientRect` forces layout.
-    const measureItemOffsetDelta = useCallback(() => {
-      const content = scrollViewportElement?.firstElementChild;
-      if (!scrollViewportElement || !(content instanceof HTMLElement)) return;
-      itemOffsetDeltaRef.current =
-        content.getBoundingClientRect().top -
-        scrollViewportElement.getBoundingClientRect().top +
-        scrollViewportElement.scrollTop;
-    }, [scrollViewportElement]);
-
     const syncActiveOutlineIndex = useCallback(() => {
       const vlist = listRef.current;
       if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
@@ -2271,32 +2254,23 @@ export const SessionChatStreamView = forwardRef<
       const next = resolveActiveOutlineIndex(
         outlineAnchors,
         (rowIndex) => vlist.getItemOffset(rowIndex + leadingRowCount),
-        vlist.scrollOffset - itemOffsetDeltaRef.current,
+        vlist.scrollOffset - vlist.contentOffset,
         isAtEnd
       );
       setActiveOutlineIndex(next);
     }, [initialScrollRestored, leadingRowCount, outlineAnchors]);
 
-    // Read the sync through refs so this effect only re-runs when the viewport
-    // is bound or its one-time initial position restore completes. Depending on
-    // the callback would re-run it on every streamed delta, which is exactly the
-    // forced layout the measurement comment above rules out.
+    // The handle owns the unshifted content origin. Observe viewport resizes
+    // through a stable callback instead of sampling shifted DOM rectangles.
     const syncActiveOutlineIndexRef = useLatestRef(syncActiveOutlineIndex);
-    const measureItemOffsetDeltaRef = useLatestRef(measureItemOffsetDelta);
     useEffect(() => {
       if (!scrollViewportElement) return undefined;
       const remeasure = () => {
-        measureItemOffsetDeltaRef.current();
         syncActiveOutlineIndexRef.current();
       };
       remeasure();
       return observeResizeOnAnimationFrame(scrollViewportElement, remeasure);
-    }, [
-      initialScrollRestored,
-      measureItemOffsetDeltaRef,
-      scrollViewportElement,
-      syncActiveOutlineIndexRef,
-    ]);
+    }, [initialScrollRestored, scrollViewportElement, syncActiveOutlineIndexRef]);
 
     /**
      * Jump to a round. The engine holds the round's row at the top as the rows
@@ -2319,7 +2293,7 @@ export const SessionChatStreamView = forwardRef<
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
 
-    // Which turns are in the viewport, from Virtua's own index math; the only
+    // Which turns are in the viewport, from the engine's item-space offsets; the only
     // input the hydration window has. Read through refs so a report never
     // re-creates the scroll handler, and deduplicated so a settled viewport
     // stops producing updates.
@@ -2333,9 +2307,10 @@ export const SessionChatStreamView = forwardRef<
       const rows = virtualRowsRef.current;
       if (rows.length === 0) return;
       const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
-      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const itemOffset = vlist.scrollOffset - vlist.contentOffset;
+      const startRow = clampRow(vlist.findItemIndex(itemOffset) - leadingRowCount);
       const endRow = clampRow(
-        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+        vlist.findItemIndex(itemOffset + vlist.viewportSize) - leadingRowCount
       );
       // Local rows have no history index. They must not request a bogus
       // hydration range when the viewport contains only accepted inputs.
@@ -2773,6 +2748,7 @@ export const SessionChatStreamView = forwardRef<
                 activeImageKey={activeImageKey}
                 onActiveImageKeyChange={setActiveImageKey}
                 entries={activeGalleryEntries}
+                onAnnotateImage={onAnnotateImage}
                 portalAnchorRef={scrollRootRef}
               />
             </ContainerQueryProvider>
@@ -2985,13 +2961,29 @@ const OperationCompletionView = ({
 }) => {
   const { t } = useTranslation();
   if (!hasVisibleOperationContent(completion)) return null;
-  const failedCompletion = completion.completion.type === 'error';
-  const cancelledCompletion = completion.completion.type === 'cancelled';
-  const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
+  const targetCards = getOperationCompletionItems(completion);
+  // Progress suppresses duplicate cards, but the summary still counts every result.
+  const results =
+    completion.completion.type === 'result'
+      ? completion.completion.value.items
+      : completion.completion.type === 'cancelled'
+        ? (completion.completion.partial?.items ?? [])
+        : [];
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const cancelled = results.filter((item) => item.status === 'cancelled').length;
+  const succeeded = results.filter((item) => item.status === 'succeeded').length;
+  const failedCompletion =
+    completion.completion.type === 'error' ||
+    (completion.completion.type === 'result' && failed > 0 && failed === results.length);
+  const cancelledCompletion =
+    completion.completion.type === 'cancelled' ||
+    (completion.completion.type === 'result' && cancelled > 0 && cancelled === results.length);
+  const partialCompletion = !failedCompletion && !cancelledCompletion && failed + cancelled > 0;
+  const StatusIcon =
+    failedCompletion || failed > 0 ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createsSessions =
     completion.operationKind === 'session_create' ||
     completion.operationKind === 'session_create_many';
-  const targetCards = getOperationCompletionItems(completion);
   const cards = targetCards.flatMap((item) =>
     item.target
       ? [
@@ -3027,8 +3019,9 @@ const OperationCompletionView = ({
       : []
   );
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, or targetless problems.
-  const showStatusCard = failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+  // failure, cancellation or mixed outcomes, or targetless problems.
+  const showStatusCard =
+    failedCompletion || cancelledCompletion || partialCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
@@ -3063,7 +3056,7 @@ const OperationCompletionView = ({
           <StatusIcon
             className={cn(
               'mt-0.5 h-4 w-4 shrink-0',
-              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
+              failedCompletion || failed > 0 ? 'text-destructive' : 'text-muted-foreground'
             )}
             aria-hidden="true"
           />
@@ -3074,7 +3067,10 @@ const OperationCompletionView = ({
                   ? 'orchestration.operationFailed'
                   : cancelledCompletion
                     ? 'orchestration.operationCancelled'
-                    : 'orchestration.operationCompleted'
+                    : partialCompletion
+                      ? 'orchestration.operationPartialResult'
+                      : 'orchestration.operationCompleted',
+                { succeeded, failed, cancelled }
               )}
             </div>
             {completion.completion.type === 'error' ? (
@@ -3150,6 +3146,11 @@ const noticeStyles = stylex.create({
     paddingInline: space[3],
     paddingBottom: space[3],
   },
+  // The follow-up row brings its own hairline and top padding, so the detail
+  // above it closes with the same space[2] the row opens with.
+  detailBeforeAfterDetail: {
+    paddingBottom: space[2],
+  },
   detailText: {
     display: 'block',
     minWidth: 0,
@@ -3163,10 +3164,12 @@ const noticeStyles = stylex.create({
     paddingInline: space[3],
     paddingBottom: space[3],
   },
+  // Its own block under the detail, not a header flex child: inside the header
+  // it took the full row width and squeezed the label into a one-glyph column.
   afterDetail: {
-    order: 6,
-    width: '100%',
     minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
 });
 
@@ -3232,7 +3235,7 @@ export const AgentNoticeBanner = ({
   const copyRidesHeader = !action;
   const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
   const bodyFooter = copyRidesHeader ? null : footer;
-  const hasBody = Boolean(detail || bodyFooter);
+  const hasBody = Boolean(detail || afterDetail || bodyFooter);
 
   return (
     <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
@@ -3242,13 +3245,18 @@ export const AgentNoticeBanner = ({
         {headerTrailing ? (
           <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
-        {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       </div>
       {detail ? (
-        <div {...stylex.props(noticeStyles.detail)}>
+        <div
+          {...stylex.props(
+            noticeStyles.detail,
+            afterDetail ? noticeStyles.detailBeforeAfterDetail : null
+          )}
+        >
           <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
         </div>
       ) : null}
+      {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );
@@ -3661,7 +3669,7 @@ const AgentWarningNoticeView = ({
     return null;
   }
 
-  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+  return <AgentWarningNoticeBody message={meta.message} source={meta.source} inTurn={inTurn} />;
 };
 
 /**
@@ -3676,18 +3684,48 @@ const AgentWarningNoticeView = ({
  */
 const AgentWarningNoticeBody = ({
   message,
+  source,
   inTurn = false,
 }: {
   message: string;
+  source?: string;
   inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
+  const label =
+    source === 'sessionCancelFailed'
+      ? t('sessions.systemNotices.agentWarning.stopRequestFailed', 'Stop request failed')
+      : source === 'sessionStopTimedOut'
+        ? t('sessions.systemNotices.agentWarning.stopTimedOut', 'Stopping took too long')
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailed',
+              'Could not stop the task'
+            )
+          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+  const guidance =
+    source === 'sessionCancelFailed'
+      ? t(
+          'sessions.systemNotices.agentWarning.stopRequestFailedGuidance',
+          'The agent could not process the Stop request. Lody will keep trying to end the task.'
+        )
+      : source === 'sessionStopTimedOut'
+        ? t(
+            'sessions.systemNotices.agentWarning.stopTimedOutGuidance',
+            'The task has not stopped yet. Lody is trying to force it to end.'
+          )
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
+              'The task may still be running. Try restarting Lody’s background service on this machine.'
+            )
+          : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner
         tone="warning"
-        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-        detail={message}
+        label={label}
+        detail={guidance ? `${guidance}\n\n${message}` : message}
       />
     </div>
   );
@@ -6388,6 +6426,7 @@ function useImageBlobUrls(
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [blobUrls, setBlobUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -6418,6 +6457,11 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
+        encryption: entry.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -6440,7 +6484,7 @@ function useImageBlobUrls(
     return () => {
       active = false;
     };
-  }, [activeIndex, authToken, entries, open, workspaceId]);
+  }, [activeIndex, authToken, entries, open, workspaceId, attachmentRuntime]);
 
   return blobUrls;
 }
@@ -6452,6 +6496,7 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange,
   entries,
   portalAnchorRef,
+  onAnnotateImage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -6459,7 +6504,20 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange: (imageKey: string | null) => void;
   entries: ReadonlyArray<SessionImageGalleryEntry>;
   portalAnchorRef?: ImagePreviewPortalAnchorRef;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
 }) => {
+  const { t } = useTranslation();
+  const [markupFile, setMarkupFile] = useState<File | null>(null);
+  const markupRequest = useRef(0);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    []
+  );
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [open, activeImageKey]);
   const activeIndex = useMemo(
     () => findSessionImageGalleryEntryIndex(entries, activeImageKey),
     [activeImageKey, entries]
@@ -6478,6 +6536,7 @@ const ImagePreviewDialog = ({
 
   const handleIndexChange = useCallback(
     (index: number) => {
+      markupRequest.current += 1;
       const entry = entries[index];
       if (entry) {
         onActiveImageKeyChange(entry.key);
@@ -6487,18 +6546,62 @@ const ImagePreviewDialog = ({
   );
 
   const handleClose = useCallback(() => {
+    markupRequest.current += 1;
     onOpenChange(false);
   }, [onOpenChange]);
 
   return (
-    <ZoomableImageViewer
-      open={open}
-      onClose={handleClose}
-      images={images}
-      index={activeIndex}
-      onIndexChange={handleIndexChange}
-      {...(portalAnchorRef ? { portalAnchorRef } : {})}
-    />
+    <>
+      <ZoomableImageViewer
+        open={open && !markupFile}
+        onClose={handleClose}
+        images={images}
+        index={activeIndex}
+        onIndexChange={handleIndexChange}
+        onAnnotate={
+          onAnnotateImage
+            ? (item) => {
+                const request = ++markupRequest.current;
+                if (!item.src) return;
+                void fetch(item.src)
+                  .then((response) => {
+                    if (!response.ok) throw new Error('Image unavailable');
+                    return response.blob();
+                  })
+                  .then((blob) => {
+                    if (request !== markupRequest.current) return;
+                    setMarkupFile(
+                      new File([blob], item.fileName || 'image.png', { type: blob.type })
+                    );
+                  })
+                  .catch(() => {
+                    if (request === markupRequest.current)
+                      toast.error(
+                        t(
+                          'sessions.fileViewer.selection.imageFailed',
+                          'Could not open this image for markup. Your attachment is unchanged.'
+                        )
+                      );
+                  });
+              }
+            : undefined
+        }
+        {...(portalAnchorRef ? { portalAnchorRef } : {})}
+      />
+      {markupFile && onAnnotateImage && (
+        <PendingImageMarkupDialog
+          file={markupFile}
+          portalAnchorRef={portalAnchorRef}
+          onClose={() => setMarkupFile(null)}
+          onAdd={(selection) => {
+            if (!onAnnotateImage(selection)) return false;
+            setMarkupFile(null);
+            onOpenChange(false);
+            return true;
+          }}
+        />
+      )}
+    </>
   );
 };
 
@@ -6527,6 +6630,7 @@ export const WorkspaceUserImageBlock = ({
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailLoadingError, setThumbnailLoadingError] = useState<string | null>(null);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
@@ -6591,6 +6695,11 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
+      encryption: entry.encryption,
+      attachmentToken:
+        attachmentRuntime?.workspaceId === workspaceId
+          ? attachmentRuntime.attachmentToken
+          : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6618,6 +6727,8 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.encryption,
+    attachmentRuntime,
     entry.sessionId,
     imageLoadFailedLabel,
     imageLoadUnavailableLabel,
@@ -6831,7 +6942,7 @@ export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGr
   );
 };
 
-const WorkspaceSessionFileGroup = ({
+export const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6843,6 +6954,7 @@ const WorkspaceSessionFileGroup = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
@@ -6862,6 +6974,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6871,7 +6988,7 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, postHog, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   const handlePreview = useCallback(
@@ -6899,6 +7016,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })
@@ -6919,7 +7041,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -7424,6 +7546,7 @@ const ThoughtCard = ({
           text={text}
           size={fontSize}
           isStreaming={isStreaming}
+          muted
           searchBlockId={searchBlockId}
         />
       </div>

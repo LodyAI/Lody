@@ -94,6 +94,8 @@ Code、Xcode 和 Sublime Text 等受支持编辑器。
 
 在左侧 sidebar 的最下方右侧有归档列表按钮，点击后会展示所有归档会话。点击会话右方的删除按钮会永久删除会话及其对话历史，此操作无法撤销。尚未移除的托管工作树继续按[同一备份规则](/zh/docs/worktrees#automatic-cleanup)等待清理；本地 Git 分支和提交仍会保留。
 
+未选择项目的会话，删除时会一并移除其 Lody 托管的聊天工作目录及其中文件，这些文件没有备份，无法恢复；仅归档时，只有空目录会被回收。
+
 <img src="/_docs-assets/delete-archive.png" alt="" />
 
 ## 批量恢复和删除

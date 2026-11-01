@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 
 import { act, createElement, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,7 +61,7 @@ import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { useWorkspaceAgentRoles } from '../src/hooks/use-workspace-agent-roles';
 import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, setLodyPresenceNowMsAtom } from '../src/atoms/presence';
-import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   useVisibleLocalProjects,
   useVisibleLocalProjectsFromMachineIndex,
@@ -75,7 +76,19 @@ import {
   resolveSessionDetailVisibilityState,
   type SessionDetailPresenceState,
 } from '../src/lib/session-detail-presence';
-import { TestCloudPlatformProvider } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
+import { PlatformContext } from '@lody/platform/react';
+import type { PlatformProvider } from '@lody/platform';
+import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
+import { ENCRYPTED_SHARED_MACHINE_REFRESH_MS } from '../src/lib/encrypted-shared-machines';
+import { withoutEncryptedSharedMachines } from '../src/lib/visible-machine-index';
+import { availableLocalHistoryMachineIds } from '../src/lib/session-visibility';
+import { SessionHistoryAccessBoundary } from '../src/components/sessions/session-history-access-boundary';
+vi.mock('../src/components/sessions/session-history-reader', () => ({
+  SessionHistoryReader: ({ sessionId }: { sessionId: string }) => (
+    <article aria-label="Read-only history">{sessionId}</article>
+  ),
+}));
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -128,8 +141,15 @@ function VisibleMachineAuthorizationProbe({
   return null;
 }
 
-function VisibleLocalProjectProbe({ onSnapshot }: { onSnapshot: (value: AccessSnapshot) => void }) {
+function VisibleLocalProjectProbe({
+  onSnapshot,
+  enabled = true,
+}: {
+  onSnapshot: (value: AccessSnapshot) => void;
+  enabled?: boolean;
+}) {
   const { accessByProjectKey, isLoading } = useVisibleLocalProjects({
+    enabled,
     includeMachineFlock: false,
   });
 
@@ -254,7 +274,16 @@ describe('visible access hooks', () => {
   }
 
   async function mount(workspaceId: string, node: ReactNode) {
+    store.set(currentWorkspaceSlugAtom, workspaceId);
     store.set(currentWorkspaceIdAtom, workspaceId as WorkspaceId);
+    const accountId = store.get(userAtom)?.id;
+    if (accountId)
+      store.set(workspaceContentModeAtom, {
+        accountId,
+        workspaceId,
+        workspaceSlug: workspaceId,
+        descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+      });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -435,6 +464,26 @@ describe('visible access hooks', () => {
       convexAuthorizedKeys: [],
       isLoading: false,
     });
+  });
+
+  it('removes cached ordinary project authority when the guard consumer is disabled', async () => {
+    queryMocks.localProjectRows = [
+      {
+        machineId: 'cached-machine',
+        localProjectId: 'cached-project',
+        ownerUserId: 'other-member',
+        sharedWithTeam: true,
+        updatedAt: 1,
+      },
+    ];
+    let result: AccessSnapshot | undefined;
+    const onSnapshot = (next: AccessSnapshot) => {
+      result = next;
+    };
+    await mount('cached-projects', <VisibleLocalProjectProbe onSnapshot={onSnapshot} />);
+    expect(result?.accessKeys).toEqual(['cached-machine:cached-project']);
+    await render(<VisibleLocalProjectProbe enabled={false} onSnapshot={onSnapshot} />);
+    expect(result?.accessKeys).toEqual([]);
   });
 
   it('does not reuse local-project access rows while a later mount is loading', async () => {
@@ -628,7 +677,7 @@ describe('visible access hooks', () => {
       );
       store.set(runtimeAtom, {
         workspaceId: scenario.runtimeWorkspace as WorkspaceId,
-        workspaceSlug: 'offline',
+        workspaceSlug: scenario.runtimeWorkspace,
         contentMode: scenario.mode,
         accountId: 'viewer-user',
       } as WorkspaceRuntime);
@@ -694,8 +743,393 @@ describe('visible access hooks', () => {
         sessions: scenario.visible ? [session.id] : [],
         archived: scenario.visible ? [archived.id] : [],
         roles: scenario.visible ? [privateRole.id] : [],
-        isLoading: true,
+        isLoading: scenario.mode !== 'e2ee' || scenario.runtimeWorkspace !== 'offline-workspace',
       });
     });
   }
+});
+
+describe('encrypted shared machine visibility', () => {
+  const workspaceId = 'encrypted-team' as WorkspaceId;
+  const member = 'member-user';
+  const owner = 'owner-user';
+  type View = import('@lody/platform').E2eeMachineSharingView;
+  const view = (machineId: string, overrides: Partial<View> = {}): View => ({
+    machineId,
+    ownerMembershipId: '11'.repeat(16),
+    generation: '22'.repeat(16),
+    head: { revision: 1, digest: '33'.repeat(32) },
+    sharedWithTeam: true,
+    projects: ['shared-project'],
+    canManage: false,
+    signer: '44'.repeat(32),
+    needsResign: false,
+    ...overrides,
+  });
+  const machine = (id: string, ownerUserId: string): MachineMeta & MachineLegacyMetaFields => ({
+    id: id as MachineId,
+    name: id,
+    ownerUserId,
+    cliVersion: '0.1.0',
+    os: 'linux',
+    sessions: [],
+    localProjects: Object.fromEntries(
+      ['shared-project', 'private-project'].map((projectId) => [
+        projectId,
+        { id: projectId, name: projectId, rootPath: `/synthetic/${projectId}`, createdAtMs: 1 },
+      ])
+    ) as MachineMeta['localProjects'],
+  });
+
+  let container: HTMLDivElement;
+  let root: Root;
+  let store: Store;
+  let views: Map<string, View | Error>;
+  let reads: string[];
+  let snapshot: { machines: string[]; projects: string[]; managed?: string[] } | undefined;
+
+  let renderTree: (node: ReactNode) => Promise<void>;
+  const consumer: Record<string, string[]> = {};
+  function Consumer({ name, enabled }: { name: string; enabled: boolean }) {
+    const index = useVisibleMachineMetas({ includeMachineFlock: false, enabled });
+    useEffect(() => {
+      consumer[name] = [...index.machines.keys()].sort();
+    }, [index, name]);
+    return null;
+  }
+  function Probe() {
+    const machines = useVisibleMachineMetas({ includeMachineFlock: false });
+    const projects = useVisibleLocalProjectsFromMachineIndex(machines);
+    useEffect(() => {
+      snapshot = {
+        machines: [...machines.machines.keys()].sort(),
+        projects: [...projects.projects.keys()].sort(),
+        managed: [...withoutEncryptedSharedMachines(machines.machines, machines).keys()].sort(),
+      };
+    }, [machines, projects]);
+    return null;
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    store = createStore();
+    views = new Map();
+    reads = [];
+    snapshot = undefined;
+    queryMocks.machineRows = undefined;
+    queryMocks.localProjectRows = undefined;
+    store.set(userAtom, { id: member, name: 'Member', email: 'member@example.test' });
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: member,
+      workspaceId,
+      workspaceSlug: workspaceId,
+      descriptor: { workspaceId, contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      contentMode: 'e2ee',
+      accountId: member,
+    } as WorkspaceRuntime);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId('own-machine' as MachineId)]: machine('own-machine', member),
+      [getMachineRoomId('shared-machine' as MachineId)]: machine('shared-machine', owner),
+      [getMachineRoomId('private-machine' as MachineId)]: machine('private-machine', owner),
+      [getMachineRoomId('failing-machine' as MachineId)]: machine('failing-machine', owner),
+    });
+    views.set('shared-machine', view('shared-machine'));
+    views.set(
+      'private-machine',
+      view('private-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    views.set('failing-machine', new Error('e2ee_sharing_unavailable'));
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      e2eeWorkspaces: {
+        ...TEST_CLOUD_PLATFORM.e2eeWorkspaces,
+        runtime: {
+          readMachineSharing: async (id: string, machineId: string) => {
+            // Reads for another workspace are recorded apart and never share its views.
+            reads.push(id === workspaceId ? machineId : `${id}/${machineId}`);
+            const value = views.get(id === workspaceId ? machineId : `${id}/${machineId}`);
+            if (!value || value instanceof Error) throw value ?? new Error('missing');
+            return value;
+          },
+        },
+      },
+    } as unknown as PlatformProvider;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    renderTree = (node) =>
+      act(async () => {
+        root.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>{node}</Provider>
+          </PlatformContext.Provider>
+        );
+      });
+    await renderTree(<Probe />);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it('shows another member machine and its signed shared projects only when the verified view allows it', async () => {
+    // Selection and execution only: automatic catalog writers and machine-RPC surfaces
+    // (migration, bug reports, memory settings) never see the shared encrypted machine.
+    expect(snapshot?.managed).toEqual(['own-machine']);
+    expect(snapshot).toMatchObject({
+      machines: ['own-machine', 'shared-machine'],
+      projects: [
+        'own-machine:private-project',
+        'own-machine:shared-project',
+        'shared-machine:shared-project',
+      ],
+    });
+    // Own machines are never read through the sharing port.
+    expect(reads.sort()).toEqual(['failing-machine', 'private-machine', 'shared-machine']);
+  });
+
+  it('keeps readable encrypted history on an unshared owner machine out of the execution index', async () => {
+    const history = {
+      ...createCachedSession(owner),
+      id: 'history-on-owner-machine' as SessionId,
+      machineId: 'private-machine' as MachineId,
+    };
+    const archived = { ...history, id: 'archived-owner-history' as SessionId, isArchived: true };
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(history.id)]: history,
+      [getSessionRoomId(archived.id)]: archived,
+    });
+    let result: { activeIds: string[]; archivedIds: string[] } | undefined;
+    await renderTree(
+      <>
+        <Probe />
+        <RouteScopedVisibilityProbe
+          onSnapshot={(next) => {
+            result = next;
+          }}
+        />
+      </>
+    );
+    expect(result).toEqual({ activeIds: [history.id], archivedIds: [archived.id] });
+    expect(snapshot?.machines).toEqual(['own-machine', 'shared-machine']);
+    expect(snapshot?.projects).not.toContain('private-machine:private-project');
+  });
+
+  it('keeps newly readable archive history out of management and automatic machine readers', async () => {
+    const privateHistory = {
+      ...createCachedSession(owner),
+      id: 'foreign-private-archive' as SessionId,
+      machineId: 'private-machine' as MachineId,
+      project: { kind: 'local' as const, localProjectId: 'private-project' as LocalProjectId },
+      isArchived: true,
+    };
+    const ownHistory = {
+      ...privateHistory,
+      id: 'own-private-archive' as SessionId,
+      userId: member,
+    };
+    const available = {
+      ...privateHistory,
+      id: 'available-archive' as SessionId,
+      machineId: 'own-machine' as MachineId,
+    };
+    store.set(
+      sessionMetaCacheAtom,
+      Object.fromEntries(
+        [privateHistory, ownHistory, available].map((session) => [
+          getSessionRoomId(session.id),
+          session,
+        ])
+      )
+    );
+    let result: { ids: string[]; readOnly: string[]; automaticReaders: string[] } | undefined;
+    let firstReadOnly: ReadonlySet<string> | undefined;
+    let currentReadOnly: ReadonlySet<string> | undefined;
+    function ArchiveProbe() {
+      const access = useVisibleArchivedSessionMetas();
+      useEffect(() => {
+        currentReadOnly = access.historyOnlySessionIds;
+        firstReadOnly ??= currentReadOnly;
+        result = {
+          ids: access.archivedSessions.map((session) => session.id).sort(),
+          readOnly: [...access.historyOnlySessionIds].sort(),
+          automaticReaders: availableLocalHistoryMachineIds(
+            access.archivedSessions,
+            access.visibleMachineIds,
+            access.visibleLocalProjectKeys
+          ),
+        };
+      }, [access]);
+      return null;
+    }
+    await renderTree(<ArchiveProbe />);
+    expect(result).toEqual({
+      ids: [available.id, privateHistory.id, ownHistory.id].sort(),
+      readOnly: [privateHistory.id],
+      automaticReaders: ['own-machine'],
+    });
+    // Existing authors retain metadata management, without gaining machine readers.
+    await act(async () =>
+      store.set(sessionMetaCacheAtom, (previous) => ({
+        ...previous,
+        [getSessionRoomId(privateHistory.id)]: { ...privateHistory, title: 'New title' },
+      }))
+    );
+    expect(currentReadOnly).toBe(firstReadOnly);
+    expect(result?.automaticReaders).toEqual(['own-machine']);
+  });
+
+  it('never mounts execution/probe controls for unshared history, including the author’s own session', async () => {
+    const history = { ...createCachedSession(member), machineId: 'private-machine' as MachineId };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(history.id)]: history });
+    let mountedControls = 0;
+    function InteractiveControls() {
+      useEffect(() => {
+        mountedControls++;
+      }, []);
+      return <input aria-label="Execution composer" />;
+    }
+    const tree = (
+      <SessionHistoryAccessBoundary sessionId={history.id}>
+        <InteractiveControls />
+      </SessionHistoryAccessBoundary>
+    );
+    await renderTree(tree);
+    expect(container.querySelector('article')?.textContent).toBe(history.id);
+    expect(container.querySelector('input')).toBeNull();
+    expect(mountedControls).toBe(0);
+    views.set('private-machine', view('private-machine'));
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(container.querySelector('input')?.getAttribute('aria-label')).toBe('Execution composer');
+    expect(mountedControls).toBe(1);
+    views.set('private-machine', view('private-machine', { sharedWithTeam: false }));
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(container.querySelector('article')?.textContent).toBe(history.id);
+    expect(container.querySelector('input')).toBeNull();
+    expect(mountedControls).toBe(1);
+  });
+
+  it('reads a private project or child tab without granting its shared machine’s other projects', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    const child = {
+      ...parent,
+      id: 'child' as SessionId,
+      parentSessionId: parent.id,
+      project: { kind: 'local', localProjectId: 'private-project' as LocalProjectId },
+    } as SessionMeta;
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parent.id)]: parent,
+      [getSessionRoomId(child.id)]: child,
+    });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('article')?.textContent).toBe(child.id);
+    expect(container.querySelector('input')).toBeNull();
+    await act(async () => {
+      store.set(userAtom, { id: 'different-account' } as never);
+    });
+    expect(container.querySelector('article')).toBeNull();
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  it('removes a withdrawn machine on the next ledger change and on the bounded refresh', async () => {
+    views.set(
+      'shared-machine',
+      view('shared-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(snapshot?.machines).toEqual(['own-machine']);
+    views.set('shared-machine', view('shared-machine'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine', 'shared-machine']);
+    // A read failure removes access immediately rather than keeping the old grant.
+    views.set('shared-machine', new Error('e2ee_sharing_unavailable'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine']);
+  });
+
+  it('hides a shared machine from a Guest, whom core denies', async () => {
+    views.set(
+      'shared-machine',
+      view('shared-machine', { deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(snapshot).toMatchObject({
+      machines: ['own-machine'],
+      projects: ['own-machine:private-project', 'own-machine:shared-project'],
+    });
+  });
+
+  it("keeps a consumer's shared machines when another consumer of the same store is disabled", async () => {
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled={false} />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    // The remaining consumer still refreshes: withdrawal is observed on the interval.
+    views.set(
+      'shared-machine',
+      view('shared-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(consumer.a).toEqual(['own-machine']);
+  });
+
+  it('stops reading once every consumer is disabled', async () => {
+    await renderTree(<Consumer name="a" enabled={false} />);
+    reads.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS * 2);
+    });
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(reads).toEqual([]);
+    expect(consumer.a).toEqual([]);
+  });
+
+  it('does not carry shared machines across a workspace switch', async () => {
+    const other = 'encrypted-other' as WorkspaceId;
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, other);
+      store.set(currentWorkspaceIdAtom, other);
+      store.set(workspaceContentModeAtom, {
+        accountId: member,
+        workspaceId: other,
+        workspaceSlug: other,
+        descriptor: { workspaceId: other, contentMode: 'e2ee', contentModeVersion: 1 },
+      } as never);
+      store.set(runtimeAtom, {
+        workspaceId: other,
+        workspaceSlug: other,
+        contentMode: 'e2ee',
+        accountId: member,
+      } as WorkspaceRuntime);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine']);
+    expect(reads).toContain(`${other}/shared-machine`);
+  });
 });

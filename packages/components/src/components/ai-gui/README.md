@@ -81,6 +81,14 @@ the reasoning behind those rules.
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
+- Conversation file links use `agent-file-link-context.ts`: absolute paths render
+  immediately, while relative candidates keep their original text/code until the
+  owning Session's file index confirms an exact path. The conversation boundary
+  borrows the existing shared index only when a relative candidate appears; leaf
+  subscriptions update presentation without reparsing Markdown. Opening goes
+  directly to the known path, retaining anchors. Copy uses the authored path,
+  without worktree discovery; Codex cards retain their original unencoded path.
+  `MarkdownCodexFileCitations.IndexedPaths` shows confirmation and removal.
 - `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
   then the first nonempty content text block. Claude result updates can replace
   content with a rejection message while retaining the original plan input.
@@ -289,7 +297,13 @@ second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
 working. While any task is pending or running, the finished turn keeps this
 panel after its answer; once every task is terminal, the panel returns to the
-folded work details. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+folded work details. When a turn has both agent runs and other tasks (shell
+commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
+tab, selected first, and a Tasks tab; each tab shows a spinner while live and
+carries no count. `groupOf` infers the split from task types because `taskKind`
+marks backgrounding, not agent versus command
+([decision](../../../../../.agents/notes/implemented/feature/2026-10-28-subagent-task-tabs.md)).
+A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
 the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
 `buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,
@@ -357,6 +371,10 @@ unhydrated turn ends the group. The row retains its final turn index so visible
 range reporting keeps every grouped turn hydrated. Failure summaries
 remain outside the bounded card list, and card navigation/title/status remain live.
 Message-selection mode keeps original rows so each selected id matches one record.
+Completion summaries aggregate the original item results: all-failed batches show
+failure, all-cancelled batches show cancellation, and mixed outcomes show counts.
+Progress deduplication hides duplicate cards without removing successes from those
+counts. A result envelope alone does not imply successful work.
 See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
 
 Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,

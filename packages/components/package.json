@@ -69,6 +69,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:posthog-browser": "node tests/posthog-browser.integration.mjs",
     "test:e2e:ui": "playwright test --ui",
     "storybook": "storybook dev --host 127.0.0.1 -p 6006",
     "build-storybook": "storybook build",
@@ -203,6 +204,7 @@
   },
   "devDependencies": {
     "@lody/configs": "workspace:*",
+    "@lody/e2ee-client": "workspace:*",
     "@playwright/test": "^1.58.2",
     "@radix-ui/react-avatar": "^1.1.10",
     "@storybook/react": "^10.6.2",

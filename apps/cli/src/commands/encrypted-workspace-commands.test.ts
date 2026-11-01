@@ -16,6 +16,7 @@ const encrypted = {
 const seen = vi.hoisted(() => ({
   exported: [] as string[],
   flock: [] as string[],
+  docs: [] as string[],
   selected: undefined as unknown,
 }));
 
@@ -26,6 +27,7 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => ({
   resolveWorkspaceOrThrow: async () => seen.selected,
   listWorkspaceCandidates: async () => [plaintext, encrypted],
   listAliveRoomIds: async () => [],
+  listAliveSessionMetas: async () => [],
   listAliveDocMetas: async () => [],
   withWorkspaceManager: async (
     _auth: unknown,
@@ -35,7 +37,9 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => ({
   ) =>
     run({
       syncMetaOrThrow: async () => undefined,
-      syncDocOrThrow: async () => undefined,
+      syncDocOrThrow: async (id: string) => {
+        seen.docs.push(id);
+      },
       syncFlockDocOrThrow: async (id: string) => {
         seen.flock.push(id);
       },
@@ -52,44 +56,55 @@ vi.mock('@/lib/session-export', () => ({
   },
 }));
 vi.mock('@/lib/schedules/schedule-documents', () => ({
-  listWorkspaceScheduleIds: async () => [],
+  listWorkspaceScheduleIds: async (_manager: unknown, workspaceId: string) => [
+    `${workspaceId}-message`,
+  ],
 }));
 
 beforeEach(() => {
   vi.resetModules();
   seen.exported = [];
   seen.flock = [];
+  seen.docs = [];
   seen.selected = undefined;
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
 });
 
 describe('encrypted workspaces in one-shot data commands', () => {
-  it('export --all-workspace never decrypts an encrypted workspace to disk', async () => {
+  it('export --all-workspace includes the encrypted workspace on the local export path', async () => {
     const { exportCommand } = await import('./export');
     await exportCommand.parseAsync(['--all-workspace', '--offline', '/tmp/lody-export-test'], {
       from: 'user',
     });
-    expect(seen.exported).toEqual(['plain']);
+    expect(seen.exported).toEqual(['plain', 'protected']);
   });
 
-  it('export of an explicitly selected encrypted workspace is refused', async () => {
-    seen.selected = encrypted;
-    const { exportCommand } = await import('./export');
-    await expect(
-      exportCommand.parseAsync(['--workspace', 'protected', '--offline', '/tmp/lody-export-test'], {
-        from: 'user',
-      })
-    ).rejects.toThrow('Export is not available for end-to-end encrypted workspaces.');
-    expect(seen.exported).toEqual([]);
-  });
+  it.each([true, false])(
+    'exports an explicitly selected encrypted workspace (offline=%s)',
+    async (offline) => {
+      seen.selected = encrypted;
+      const { exportCommand } = await import('./export');
+      await exportCommand.parseAsync(
+        ['--workspace', 'protected', ...(offline ? ['--offline'] : []), '/tmp/lody-export-test'],
+        { from: 'user' }
+      );
+      expect(seen.exported).toEqual(['protected']);
+      expect(seen.flock).toEqual(
+        offline ? [] : [getScheduleRegistryFlockDocId('protected' as never)]
+      );
+    }
+  );
 
-  it('sync skips the schedule registry only for an encrypted workspace', async () => {
+  it('sync includes schedule definitions and registry for ordinary and encrypted workspaces', async () => {
     const { syncCommand } = await import('./sync');
     await syncCommand.parseAsync(['--all-workspace', '--json'], { from: 'user' });
     expect(seen.flock).toEqual([
       getScheduleRegistryFlockDocId('plain' as never),
       getScheduleRegistryFlockDocId('plain' as never),
+      getScheduleRegistryFlockDocId('protected' as never),
+      getScheduleRegistryFlockDocId('protected' as never),
     ]);
+    expect(seen.docs).toEqual(['schedule-plain-message', 'schedule-protected-message']);
   });
 });
 
