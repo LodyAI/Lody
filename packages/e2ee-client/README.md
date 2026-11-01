@@ -168,6 +168,21 @@ Core retains and verifies receive/report/distribution originals; the shared fini
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.
 
+## Account-wide pairing workflow
+
+`@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing
+workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
+It owns the tag and expiry checks, the single-signature admission journal and local
+terminal states. Hosts supply four things:
+- an `AccountPairingStore` for durable state, which holds no secret and no private key;
+- the relay;
+- the per-workspace ports;
+- optional `diagnostics`.
+
+The pairing secret stays in memory. The desktop uses a SQLite store; a browser store is
+separate work. Identity protection is a per-workspace port decision, never this
+workflow's.
+
 ## Verification and limits
 
 `pnpm --filter @lody/e2ee-client test` runs fixed proof/credential-boundary tests.
