@@ -674,3 +674,85 @@ void test('an admission the ledger settled differently is retired and signed onc
     ['admit-w1-2']
   )
 })
+
+void test('expiry is checked again after the pre-signing refresh, before anything is signed or appended', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString, expiresAt } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts(['w1'])
+  // The refresh is network work; time passes the request's expiry while it runs.
+  a.hosts[0].refresh = () =>
+    Effect.sync(() => {
+      clock.now = expiresAt
+    })
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  assert.equal(
+    await refusal(
+      approver.pairing.approveAccountPairing({
+        pairingString,
+        requestId: 'request-1',
+        workspaceIds: ['w1']
+      })
+    ),
+    'pairing-expired'
+  )
+  assert.deepEqual(a.log.signed, [])
+  assert.deepEqual(a.log.appended, [])
+})
+
+void test('a workspace whose refresh or signature fails is not admitted while the others proceed', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const newDevice = device({ relay, requester: requesterHosts(), clock })
+  const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
+  const a = approverHosts()
+  a.hosts[0].refresh = () => Effect.fail(new Error('history unavailable'))
+  const approver = device({ relay, approver: a, clock, seed: 50 })
+  const result = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(result.workspaces, [
+    { workspaceId: 'w1', outcome: 'not-admitted' },
+    { workspaceId: 'w2', outcome: 'admitted' }
+  ])
+  assert.deepEqual(
+    a.log.signed.map((item) => item.workspaceId),
+    ['w2']
+  )
+  // A failed signature is isolated the same way, and a retry signs only the missing one.
+  delete a.hosts[0].refresh
+  const sign = a.hosts[0].sign
+  a.hosts[0].sign = () => Effect.fail(new Error('ledger busy'))
+  const again = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(
+    again.workspaces.map((item) => item.outcome),
+    ['not-admitted', 'admitted']
+  )
+  a.hosts[0].sign = sign
+  const last = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString,
+      requestId: 'request-1',
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.deepEqual(
+    last.workspaces.map((item) => item.outcome),
+    ['admitted', 'admitted']
+  )
+  assert.deepEqual(
+    a.log.signed.map((item) => item.workspaceId),
+    ['w2', 'w1']
+  )
+})

@@ -52,6 +52,8 @@ const sha256 = (value: Uint8Array): Uint8Array =>
 export type AccountPairingRefusal = 'pairing-tampered' | 'pairing-expired' | 'pairing-used'
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
   Object.assign(new Error(`e2ee_${code}`), { code })
+const isAccountMismatch = (error: unknown) =>
+  error instanceof Error && /\be2ee_account_mismatch\b/.test(error.message)
 function sql<A>(work: () => A): Effect.Effect<A, Error> {
   return Effect.try({
     try: work,
@@ -86,6 +88,9 @@ export interface AccountPairingApproverWorkspace {
   readonly genesis: Uint8Array
   /** This device's signing key in the workspace; it signs the admission. */
   readonly signingPublicKey: Uint8Array
+  /** Optional network step before signing: pull the verified ledger forward. The
+   * request's tag and expiry are checked again after it, before any signature. */
+  refresh?(): Effect.Effect<void, unknown>
   /** Prepares and signs one personal `AdmitDevice` for the row against the latest
    * verified ledger. No network; the caller journals the result before using it. */
   sign(row: PairingRequestRow): Effect.Effect<{ requestId: string; record: Uint8Array }, unknown>
@@ -577,6 +582,10 @@ export function makeDesktopAccountPairing(input: {
               )
               .run(lookupId, found.bytes, found.tag)
           )
+          const outcomes = new Map<
+            string,
+            AccountPairingApproval['workspaces'][number]['outcome']
+          >()
           // Sign each workspace and identity once; the original is durable before any
           // network step. The caller's permit makes check, sign and journal atomic.
           for (const item of selected) {
@@ -589,12 +598,33 @@ export function makeDesktopAccountPairing(input: {
                 return yield* Effect.fail(fail('corrupt'))
               continue
             }
-            if (
-              Result.isFailure(verifyPairingRequestTag(keys, request, raw(found.tag))) ||
-              Result.isFailure(checkPairingRequestLifetime(request, now()))
-            )
+            // A failed refresh or signature affects only this workspace.
+            if (workspace.refresh) {
+              const refreshed = yield* Effect.result(workspace.refresh())
+              if (Result.isFailure(refreshed)) {
+                rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure)
+                outcomes.set(workspace.workspaceId, 'not-admitted')
+                continue
+              }
+            }
+            // Checked again after the network step, immediately before signing.
+            if (Result.isFailure(verifyPairingRequestTag(keys, request, raw(found.tag))))
               return yield* Effect.fail(fail('pairing-tampered'))
-            const signed = yield* workspace.sign(row)
+            const lifetime = checkPairingRequestLifetime(request, now())
+            if (Result.isFailure(lifetime)) {
+              if (lifetime.failure.code === 'expired') {
+                yield* settle(lookupId, 'approver', 'expired')
+                return yield* Effect.fail(fail('pairing-expired'))
+              }
+              return yield* Effect.fail(fail('pairing-tampered'))
+            }
+            const signed = yield* Effect.result(workspace.sign(row))
+            if (Result.isFailure(signed)) {
+              if (isAccountMismatch(signed.failure)) return yield* Effect.fail(signed.failure)
+              rememberDesktopE2eeFailure('account-pairing-sign', signed.failure)
+              outcomes.set(workspace.workspaceId, 'not-admitted')
+              continue
+            }
             yield* sql(() =>
               db
                 .prepare(
@@ -605,15 +635,11 @@ export function makeDesktopAccountPairing(input: {
                   hex(row.signingPublicKey),
                   hex(workspace.genesis),
                   lookupId,
-                  signed.requestId,
-                  signed.record
+                  signed.success.requestId,
+                  signed.success.record
                 )
             )
           }
-          const outcomes = new Map<
-            string,
-            AccountPairingApproval['workspaces'][number]['outcome']
-          >()
           const deliverable: {
             workspace: AccountPairingApproverWorkspace
             journaled: AdmissionRow
@@ -621,9 +647,11 @@ export function makeDesktopAccountPairing(input: {
           }[] = []
           for (const item of selected) {
             const { workspace, row } = item!
-            const journaled = (yield* sql(() =>
+            const journaled = yield* sql(() =>
               admission(workspace.workspaceId, row.signingPublicKey)
-            ))!
+            )
+            // Not signed in this pass; its outcome is already recorded.
+            if (!journaled) continue
             const appended = yield* Effect.result(
               workspace.append(
                 journaled.request_id,

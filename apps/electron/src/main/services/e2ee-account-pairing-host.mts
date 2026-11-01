@@ -246,11 +246,11 @@ export function makeDesktopAccountPairingHost(input: {
         name: hint.name,
         genesis: raw(hint.genesisHash),
         signingPublicKey: raw(status.signingPublicKey),
-        // Sign against the latest verified head, not a stale local view.
+        // Pull the verified head forward before signing; the workflow then checks
+        // the request's tag and expiry again before calling `sign`.
+        refresh: () => refresh(workspaceId),
         sign: (row) =>
-          Effect.flatMap(refresh(workspaceId), () =>
-            owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row))
-          ),
+          owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row)),
         append: (requestId, record, credentialHash) =>
           Effect.gen(function* () {
             const appended = yield* Effect.result(
