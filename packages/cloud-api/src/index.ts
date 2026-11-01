@@ -7,11 +7,13 @@ import type {
   E2eeAppendRecordReply,
 } from './e2ee-device';
 import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+import type { E2eeAccountPairingRequests, E2eeAccountPairingReplies } from './e2ee-account-pairing';
 import type { E2eeMemberRequests, E2eeMemberReplies } from './e2ee-members';
 import type { E2eeMachineSharingRequests, E2eeMachineSharingReplies } from './e2ee-machine-sharing';
 export type * from './e2ee-machine-sharing';
 export type * from './e2ee-members';
 export type * from './e2ee-join';
+export type * from './e2ee-account-pairing';
 export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
@@ -444,6 +446,15 @@ export type CloudApi = {
     cancel: Mutation<E2eeJoinRequests['cancel'], E2eeJoinReplies['cancel']>;
     publish: Mutation<E2eeJoinRequests['publish'], E2eeJoinReplies['publish']>;
     claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
+  };
+  /** Account-wide personal device pairing relay; relays and notifies, never approves. */
+  e2eeAccountPairing: {
+    submit: Mutation<E2eeAccountPairingRequests['submit'], E2eeAccountPairingReplies['submit']>;
+    pending: Query<E2eeAccountPairingRequests['pending'], E2eeAccountPairingReplies['pending']>;
+    read: Query<E2eeAccountPairingRequests['read'], E2eeAccountPairingReplies['read']>;
+    decline: Mutation<E2eeAccountPairingRequests['decline'], E2eeAccountPairingReplies['decline']>;
+    publish: Mutation<E2eeAccountPairingRequests['publish'], E2eeAccountPairingReplies['publish']>;
+    claim: Query<E2eeAccountPairingRequests['claim'], E2eeAccountPairingReplies['claim']>;
   };
   e2eeMailbox: {
     put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;

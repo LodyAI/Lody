@@ -168,6 +168,18 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **New-device identities.** N keeps its per-workspace identities from before submission.
   A later request reuses them, and N never generates an identity over them.
 
+## Relay contract
+
+The public relay DTOs are in [`packages/cloud-api`](../../../../packages/cloud-api/src/e2ee-account-pairing.ts)
+under `e2eeAccountPairing`: submit, pending, read by lookup ID, decline, publish and claim.
+- **Authoritative bytes.** Clients trust only the canonical request and approval bytes and
+  their tags. Status, device name, expiry, location and the workspace routing list are
+  advisory copies for routing, rate limiting and notifications.
+- **Several approvers.** A claim returns every published approval, because each approver
+  covers only the workspaces it can sign for.
+- **Admissions.** These go through the existing ledger append path. Each invitation row
+  carries the approver's device access for its workspace.
+
 ## Verification limits
 
 - The string format has no test vectors yet.
