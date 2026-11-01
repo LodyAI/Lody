@@ -4,13 +4,6 @@ The composer footer knobs (Agent / Model / Interaction / Reasoning / Permission)
 Agent Role selection on every surface, attachments, and the two durable run-config
 authorities.
 
-The execution owner publishes confirmed configuration independently of frozen Turn
-inputs and history hydration. Existing composers combine that snapshot with private
-edits; required configuration failures stop prompt submission. The
-[ownership decision](../notes/implemented/architecture/2026-10-31-session-config-ownership.md)
-explains connection generations, first-acceptance revisions and strict failures;
-the [Spec](../../specs/session-config-ownership.md) defines the contract.
-
 Persisted and draft composers share `useSessionAcpSelectorContext`, which subscribes
 to the exact bound Provider and passes its runtime overrides to model and command
 catalog readers. This keeps extension-enabled Pi catalogs usable while rejecting
@@ -198,11 +191,11 @@ this page is the full text of the rules summarised there.
   shared with Settings.
   Picking a Role flows through the SAME preference channel as that agent's
   remembered defaults (`useAcpSessionConfigSelectionState`), never a second
-  apply path. A concrete pinned value the agent no longer supports stays visible
-  and reports a validation error instead of being substituted. That channel is a PURE DERIVATION: user
+  apply path — so a pinned value the agent no longer supports falls back visibly
+  there instead of being forced in. That channel is a PURE DERIVATION: user
   edits are the only stored selection state, and effective values resolve per
-  render (user edit > confirmed runtime snapshot for existing sessions;
-  creation drafts may seed defaults). A full runtime snapshot owns the non-user config table. Existing-session knob
+  render (user edit > runtime baseline > turn preference > capability default;
+  a full runtime snapshot owns the non-user config table). Existing-session knob
   edits, including explicit Fast off, live in a sparse account/workspace/session/
   target-scoped draft. A successful local send consumes only its captured field
   generations; remote Turns and navigation preserve unsent edits. Returning to the
@@ -250,11 +243,17 @@ this page is the full text of the rules summarised there.
   too; hiding it made the control look absent. `None` still leads the list and
   an unavailable Role is still listed, disabled, with its reason (from the
   shared `AGENT_ROLE_UNAVAILABLE_REASON_KEYS`).
-  `useSessionPendingConfig` bridges held-send Role/MCP provenance while attachments
-  prepare. Its logical Turn fence survives history/queue handoff; it never supplies
-  current mode, model or options. Frozen inputs remain visible in pending/queue rows.
-  Explicit next-draft edits survive admission and attachment progress does not rebuild
-  the catalog. Intent: [attachment send boundary](../../specs/session-files.md#61-send-boundary).
+  `useSessionPendingConfig` bridges a locally held send's frozen run config and
+  Role into the same selection inputs while attachments prepare. Its per-session
+  subscription reads the latest entry identity, so progress does not rebuild the
+  selector catalog. Explicit next-draft edits still win, and an older turn's
+  runtime snapshot is suppressed until the held turn becomes a history/queue
+  source. Both representations use the same logical Turn fence. A landed history
+  entry remains the temporary source while its rendered document snapshot catches
+  up; cancellation has no landed entry and releases the source. A newer durable
+  Turn permanently supersedes an observed older local source. Config controls keep
+  their normal faces while submission locks their menus or sheet, including models
+  exposed only through ACP config selectors. Intent: [attachment send boundary](../../specs/session-files.md#61-send-boundary).
   The Role editor is a Dialog, so every composer hosts it outside its menu /
   drawer — and the in-session one mounts it only while OPEN, because it reads
   machine visibility and the composer must stay renderable in hosts that do not
@@ -277,25 +276,20 @@ this page is the full text of the rules summarised there.
   replaying its values. `buildRecentRunConfigItems` drops a Role entry whose
   Role is not in the passed `agentRoles` — a Role never falls back, so a deleted
   or unavailable one must not quietly re-run as loose values.
-  A Turn's `inputConfig` freezes its requested values and optional `configRevision`.
-  `SessionDoc.acpRuntimeConfig` separately records the execution owner's connection
-  generation, revision, state and actual values. Configuration notifications bypass
-  transcript batching. A queued Turn, history hydration or catalog refresh cannot
-  override that snapshot. Local unsent edits remain private until admission.
-  First owner acceptance checks the captured revision in the same serial order as
-  configuration publication; an existing immutable receipt skips that check on retry.
-  A restarted owner invalidates persisted confirmation until a live connection attaches.
-  Admission and steer require the current revision to have completed local persistence.
-  The CLI applies mode, model and dependent options in order and awaits local durability
-  before prompt submission. Refusal, contradiction and unknown outcomes fail explicitly;
-  partial confirmed changes stay visible. Matching native steer injects without applying
-  configuration; its final synchronous submission check rejects uncertainty and routes
-  known mismatches to the ordinary queue. Old machines lacking
-  `sessionConfiguration` require an update to send; history and Stop remain available.
-  Without confirmation, unspecified values inherit from the agent at dispatch and the
-  composer says so. Capability validation preserves concrete invalid choices and
-  reports them. Consent alone does not prove a configuration change; Implement Plan
-  freezes its explicit non-Plan requirement in the new input and waits for confirmation.
+  Run config has two durable authorities. A user Turn freezes what executes in
+  its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
+  or queued Turn. ACP `config_option_update`/`current_mode_update` events update
+  the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
+  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
+  an older runtime event. Apply that shared baseline only to composer fields the
+  local user has not edited; local unsent choices remain a private draft until
+  send freezes them into a Turn. Never infer runtime config from a permission
+  click or its history outcome: consent is not proof that the agent applied the
+  change, and click-local state does not synchronize collaborators. Explicit
+  execution actions (Implement Plan, Create PR, Commit & Push, conflict/CI/review
+  fixes) are different: they create a new user Turn and must freeze a supported
+  non-Plan mode into that Turn's `inputConfig`; they still must not mutate local
+  composer state as a substitute for agent-confirmed runtime projection.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to

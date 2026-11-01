@@ -194,7 +194,6 @@ export type AcpSelectorOptions = {
   defaultModelId: string | null;
   /** Dynamic config option selectors for agents with configOptions (e.g. thought_level). */
   configOptionSelectors: AcpConfigOptionSelector[];
-  allConfigOptionSelectors?: AcpConfigOptionSelector[];
   /** Probed controls before per-model filtering; lets generic model validation restore hidden controls. */
   unnormalizedConfigOptionSelectors?: AcpConfigOptionSelector[];
   /** Per-model reasoning-effort ladders when the capability source publishes them. */
@@ -731,7 +730,6 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     defaultModelId:
       typeof modelConfigOption?.currentValue === 'string' ? modelConfigOption.currentValue : null,
     configOptionSelectors,
-    allConfigOptionSelectors: allSelectors,
     ...(isAcpProbed
       ? {
           unnormalizedConfigOptionSelectors: buildConfigOptionSelectors(

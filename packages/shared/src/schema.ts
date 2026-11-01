@@ -589,7 +589,6 @@ const acpSessionConfigSchema = schema
       resume: schema.String({ required: false }),
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
-      configRevision: schema.Number({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
       memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
@@ -1323,17 +1322,15 @@ const sessionForkOperationDocSchema = schema.LoroMap(
 );
 
 /**
- * Execution-owned configuration. The connection generation fences observations;
- * basedOnUserTurnId records provenance only and does not depend on history loading.
+ * ACP-reported runtime configuration after a Turn has started. This is shared
+ * control state, not transcript content: `basedOnUserTurnId` supplies the
+ * causal fence that prevents a late update from changing a newer Turn's
+ * composer baseline.
  */
 export type SessionAcpRuntimeConfigSnapshot = {
   acpSessionId: ACPSessionId;
   basedOnUserTurnId: string;
   revision: number;
-  /** Absent on pre-ownership snapshots, which are last-known data only. */
-  generation?: string;
-  state?: 'ready' | 'applying' | 'failed' | 'unknown';
-  error?: { code: string; message: string };
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
@@ -1351,9 +1348,6 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     acpSessionId: schema.String<ACPSessionId>(),
     basedOnUserTurnId: schema.String(),
     revision: schema.Number(),
-    generation: schema.String({ required: false }),
-    state: schema.String<'ready' | 'applying' | 'failed' | 'unknown'>({ required: false }),
-    error: schema.LoroMap({ code: schema.String(), message: schema.String() }, { required: false }),
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),

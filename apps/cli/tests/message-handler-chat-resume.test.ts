@@ -1,6 +1,5 @@
 import { withHistoryPort } from './history-port-fixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { Logger } from '../src/utils/logger';
 import {
@@ -8,7 +7,6 @@ import {
   type ACPSessionId,
   type SessionId,
   type WorkspaceId,
-  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -43,15 +41,7 @@ describe('MessageHandler chat resume', () => {
     };
 
     let history: unknown[] = [];
-    let confirmed: SessionAcpRuntimeConfigPatch | undefined;
-    const publish = async (_turn: string, patch: SessionAcpRuntimeConfigPatch) => {
-      confirmed = patch;
-      return true;
-    };
     const sessionDoc = withHistoryPort({
-      beginAcpRuntimeConfig: publish,
-      applyAcpRuntimeConfigPatch: publish,
-      flushLocalWrites: async () => {},
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -84,17 +74,6 @@ describe('MessageHandler chat resume', () => {
     };
 
     const agentClient = {
-      getConfiguration: () => ({
-        options: [],
-        read: Effect.succeed({
-          acpSessionId: meta.acpSessionId,
-          generation: 'restored-connection',
-          state: 'ready' as const,
-        }),
-        setMode: () => Effect.void,
-        setModel: () => Effect.void,
-        setOption: () => Effect.void,
-      }),
       isCreated: vi.fn(() => true),
       prompt: vi.fn(async () => ({})),
       setSessionMode: vi.fn(async () => {}),
@@ -187,7 +166,6 @@ describe('MessageHandler chat resume', () => {
       SessionStatusFactory.initializing('resuming')
     );
     expect(sessionDoc.setBaseBranch).toHaveBeenCalledWith('main');
-    expect(confirmed).toMatchObject({ generation: 'restored-connection', state: 'ready' });
     expect(agentClient.prompt).toHaveBeenCalledWith('acp-1', [{ type: 'text', text: 'hi' }], {
       signal: expect.any(AbortSignal),
     });

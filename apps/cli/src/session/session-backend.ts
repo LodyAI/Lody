@@ -5,6 +5,7 @@ import {
   type SessionHistoryInput,
   type SessionMeta,
   type SessionQueuePromotionRecord,
+  type SessionAcpRuntimeConfigPatch,
   type SessionSteerOperationRecord,
   type SessionPlanEntry,
 } from '@lody/shared';
@@ -71,6 +72,10 @@ export interface SessionBackend {
   subscribeHistory(listener: () => void): () => void;
   applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
+  applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean>;
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
   respondPermission(
@@ -298,6 +303,13 @@ class LoroSessionBackend implements SessionBackend {
 
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult> {
     return this.sessionDoc.sessionData.commands.applyHistoryImport(input);
+  }
+
+  async applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch);
   }
 
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {

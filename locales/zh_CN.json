@@ -1,7 +1,4 @@
 {
-  "sessions.configuration.updateRequired": "请更新执行机器，以使用已确认的配置发送消息。",
-  "sessions.configuration.invalidSelection": "所选配置当前不可用，请检查设置后再发送。",
-  "sessions.configuration.unconfirmed": "下一条消息执行时将确认 Agent 配置。",
   "export.e2ee.title": "创建解密副本？",
   "export.e2ee.disclosure": "这会在加密工作区之外创建可读副本。能访问剪贴板或所保存文件的人都能阅读；之后撤销工作区访问权限也无法收回副本。",
   "export.e2ee.confirm": "创建解密副本",
@@ -6017,8 +6014,5 @@
   "sessions.androidEmulator.quality.label": "预览画质",
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
-  "sessions.androidEmulator.quality.clear": "清晰",
-  "sessions.systemNotices.chatFailed.sessionConfigChanged": "配置已在别处更新，请用当前配置重新发送。",
-  "sessions.messageStatus.failedResend": "发送失败，重新发送",
-  "sessions.resendUndelivered.failedDescription": "使用当前配置将相同内容作为新消息发送？已完成的工作可能会重复执行。"
+  "sessions.androidEmulator.quality.clear": "清晰"
 }

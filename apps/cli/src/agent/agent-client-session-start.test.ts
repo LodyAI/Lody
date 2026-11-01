@@ -1,5 +1,3 @@
-import { Effect } from 'effect';
-import { AcpConfiguration } from './acp-configuration';
 import { reconcileProjectMemberLink } from '@/session/worktree/project-member-access';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -85,58 +83,6 @@ describe('AgentClient session startup', () => {
     vi.clearAllMocks();
     connectionMocks.initialize.mockResolvedValue({ agentCapabilities: {} });
     connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session-1' });
-  });
-
-  it('does not turn a lost config response into successful application', async () => {
-    vi.useFakeTimers();
-    const client = new AgentClient({
-      sessionId: 'config-failure' as SessionId,
-      logger: createLogger(),
-      terminalManager: {} as never,
-      onUpdateMessage: () => {},
-      onRequestPermission: vi.fn(),
-    });
-    await client.startSession({} as never, '/workdir');
-    connectionMocks.setSessionConfigOption.mockRejectedValue(
-      new Error('ProcessTransport is not ready for writing')
-    );
-    const failure = expect(
-      client.setSessionConfigOption('acp-session-1' as never, 'plan_mode', false)
-    ).rejects.toThrow('ProcessTransport is not ready for writing');
-    await vi.runAllTimersAsync();
-    await failure;
-    expect(client.getConfigOptions()).toEqual([]);
-  });
-
-  it('keeps the model from the agent response instead of substituting the requested model', async () => {
-    const options = [
-      {
-        id: 'model',
-        category: 'model',
-        name: 'Model',
-        type: 'select',
-        currentValue: 'old',
-        options: [
-          { value: 'old', name: 'Old' },
-          { value: 'new', name: 'New' },
-        ],
-      },
-    ];
-    connectionMocks.newSession.mockResolvedValueOnce({
-      sessionId: 'acp-session-1',
-      configOptions: options,
-    });
-    connectionMocks.setSessionConfigOption.mockResolvedValueOnce({ configOptions: options });
-    const client = new AgentClient({
-      sessionId: 'config-model' as SessionId,
-      logger: createLogger(),
-      terminalManager: {} as never,
-      onUpdateMessage: () => {},
-      onRequestPermission: vi.fn(),
-    });
-    await client.startSession({} as never, '/workdir');
-    await client.unstable_setSessionModel('acp-session-1' as never, 'new');
-    expect(client.currentModel?.modelId).toBe('old');
   });
 
   it.each([true, false])(
@@ -742,15 +688,19 @@ describe('AgentClient session startup', () => {
     });
 
     await client.startSession({} as never, '/workdir');
-    const result = await Effect.runPromise(
-      applyAcpSessionRunConfig({ configOptionValues: { effort: 'high' } }).pipe(
-        Effect.provideService(AcpConfiguration, client.getConfiguration())
-      )
-    );
-    expect(result).toMatchObject({
+    const result = await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-legacy-projection' as SessionId,
+        acpSessionId: 'acp-session-1' as never,
+        agentClient: client,
+      },
+      config: { configOptionValues: { effort: 'high' } },
+      logger,
+    });
+
+    expect(result.runtimeConfigPatch).toEqual({
       acpSessionId: 'acp-session-1',
       configOptionValues: { effort: 'high' },
-      state: 'ready',
     });
 
     connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
