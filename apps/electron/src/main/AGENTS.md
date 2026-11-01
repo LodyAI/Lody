@@ -121,4 +121,8 @@ clear the removed marker only after verifying a different retained signing key.
 Only the exact server code `e2ee_device_revoked` (`E2eeDeviceRevokedError`) is a
 device revocation. It reuses the same device-bound receipt and cleanup, records its
 reason, and reports `e2ee_device_revoked` until a re-pair replaces the key.
+The account operation boundary projects those typed results, also as a cause, to their
+exact codes and marks them for `accessLoss`; a matching message alone never counts.
+A failed local operation such as dispatch preparation checks this device's credential,
+as management does, and only that exact answer records the loss and stops the host.
 [Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).

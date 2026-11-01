@@ -57,7 +57,7 @@ async function load(relative, dependencies, console = globalThis.console, env = 
             ? { rememberDesktopE2eeFailure }
             : id === '../../services/e2ee-member-join.mjs'
               ? memberJoining
-              : id === '../../services/e2ee-cloud-errors.mjs'
+              : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
                 ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
                 : id === '../../services/e2ee-personal-pairing.mjs'
                   ? { PersonalPairingOfferSchema }
@@ -880,6 +880,7 @@ async function personalJoinFixture(t) {
     return row
   }
   const client = {
+    machineSharing: () => ({}),
     history: () => Effect.fail(new Error('unauthorized history')),
     // An unclassified rejection (raw error text) must never authorize deletion.
     contentStreamsToken: () =>
@@ -987,6 +988,7 @@ async function personalJoinFixture(t) {
           return erased
         },
         runDesktopE2eeOperation: (_accountId, work) => Effect.runPromise(work),
+        publicAccessLoss: () => null,
         desktopE2eeCloudClient: async () => ({ accountId, client })
       }
     })
@@ -1703,6 +1705,26 @@ void test('a snapshot-joined approver cancels another recipient without retiring
   )
 })
 
+void test('the operation boundary keeps typed access loss exact and never trusts a matching message', async () => {
+  const { api } = await account()
+  for (const [typed, code] of [
+    [new E2eeMemberRemovedError(), 'member_removed'],
+    [new E2eeDeviceRevokedError(), 'device_revoked'],
+    // A typed loss wrapped as another error's cause is still the server's answer.
+    [new Error('synthetic wrapper', { cause: new E2eeMemberRemovedError() }), 'member_removed']
+  ]) {
+    const error = await api.runDesktopE2eeOperation('account', Effect.fail(typed)).catch((e) => e)
+    assert.equal(error.message, `e2ee_${code}`)
+    assert.equal(api.publicAccessLoss(error), code)
+  }
+  const forged = await api
+    .runDesktopE2eeOperation('account', Effect.fail(new Error('e2ee_member_removed')))
+    .catch((e) => e)
+  assert.equal(forged.message, 'e2ee_host_operation_failed')
+  assert.equal(api.publicAccessLoss(forged), null)
+  assert.equal(api.publicAccessLoss(new Error('e2ee_member_removed')), null)
+})
+
 void test('management diagnostics preserve safe recovery actions without exposing native causes', async () => {
   const { api } = await account()
   for (const code of [
@@ -2123,6 +2145,50 @@ void test('credential-authenticated member removal drains and deletes through th
     0
   )
   await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
+})
+
+void test('a failed prepareDispatch diagnoses its device credential and reports only an exact access loss', async (t) => {
+  const input = {
+    sessionId: 'session',
+    userTurnId: 'turn',
+    userId: 'display-only',
+    timestamp: new Date(0).toISOString(),
+    inputConfig: {}
+  }
+  for (const [flag, code] of [
+    ['memberRemoved', 'member_removed'],
+    ['deviceRevoked', 'device_revoked'],
+    [null, null]
+  ]) {
+    const f = await personalJoinFixture(t)
+    const owner = await f.open(`dispatch-${code ?? 'unchanged'}`)
+    await owner.create()
+    // A local native failure that carries no access-loss classification of its own.
+    owner.host.prepareDispatch = () => Effect.die(new Error('synthetic native dispatch failure'))
+    if (flag) f.relay[flag] = true
+    const outcome = owner.ipc.prepareDispatch(f.workspaceId, 'synthetic-machine', input)
+    if (code) {
+      // Only the server's exact credential answer records loss, stops and cleans up.
+      await assert.rejects(outcome, new RegExp(`^Error: e2ee_${code}$`))
+      assert.equal(owner.readers.has(f.workspaceId), false)
+      assert.equal(
+        await Effect.runPromise(owner.bootstrap.hasRemovedWorkspace(f.workspaceId)),
+        true
+      )
+      await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === code)
+    } else {
+      // An unclassified credential answer is not removal: the failure stays generic.
+      await assert.rejects(outcome, (error) => {
+        assert.doesNotMatch(error.message, /member_removed|device_revoked/)
+        return true
+      })
+      assert.equal(owner.readers.has(f.workspaceId), true)
+      assert.equal(
+        await Effect.runPromise(owner.bootstrap.hasRemovedWorkspace(f.workspaceId)),
+        false
+      )
+    }
+  }
 })
 
 void test('credential-authenticated device revocation stops, drains and deletes only this device identity, and keeps its reason', async (t) => {

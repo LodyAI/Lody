@@ -17,6 +17,7 @@ import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 
 // Lazy application boundary. Plain workspaces never create a Scope or touch custody.
 const serial = Semaphore.makeUnsafe(1)
@@ -656,7 +657,33 @@ export async function recordDesktopE2eeCreated(input: {
   return withDesktopE2eeAccount((owner) => owner.bootstrap.recordCreated(input), input.workspaceId)
 }
 
+/**
+ * The typed, credential-authenticated cloud results carry `reason: 'unauthorized'`, not a
+ * `code`. Classify them before the generic projection, or every caller past this boundary
+ * sees `e2ee_host_operation_failed` and can never record the loss.
+ */
+const publicAccessLosses = new WeakMap<Error, 'member_removed' | 'device_revoked'>()
+function typedAccessLoss(error: unknown): 'member_removed' | 'device_revoked' | null {
+  let current = error
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (current instanceof E2eeMemberRemovedError) return 'member_removed'
+    if (current instanceof E2eeDeviceRevokedError) return 'device_revoked'
+    current = (current as { cause?: unknown }).cause
+  }
+  return null
+}
+/** Only a loss this boundary projected from a typed cloud result; never a matching message. */
+export function publicAccessLoss(error: unknown): 'member_removed' | 'device_revoked' | null {
+  return error instanceof Error ? (publicAccessLosses.get(error) ?? null) : null
+}
+
 function publicE2eeFailure(error: unknown): Error {
+  const loss = typedAccessLoss(error)
+  if (loss) {
+    const projected = new Error(`e2ee_${loss}`)
+    publicAccessLosses.set(projected, loss)
+    return projected
+  }
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
   const allowed = new Set([
     'identity-busy',
