@@ -198,9 +198,9 @@ it('unknown failure after tail replacement reaches the indeterminate phase', asy
     writer = createHistoryWriter(doc);
   writer.append(turn('u'));
   const error = new Error('commit outcome unknown');
-  const real = writer.updateWithRollback;
-  writer.updateWithRollback = (update) => {
-    real(update);
+  const real = writer.updateSelectedWithRollback;
+  writer.updateSelectedWithRollback = (select, update) => {
+    real(select, update);
     throw error;
   };
   const data = createLoroSessionData({ doc, sessionId, writer });

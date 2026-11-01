@@ -1701,3 +1701,78 @@ describe('loro session data adapter', () => {
     }
   });
 });
+
+it('selects complete subagent ancestry across stored turns and leaves unrelated bodies unread', async () => {
+  const doc = new Loro(),
+    referenceDoc = new Loro();
+  const snapshot = {
+    state: 'running',
+    parentRunId: null,
+    support: { stream: ['text'], progress: true, cancel: false, outputRead: 'none' },
+  };
+  const chain = ['grand', 'parent', 'child'].map((id, index) => ({
+    ...assistantTurn(id),
+    items: [
+      {
+        type: 'subagent_task',
+        taskId: id,
+        taskKind: 'subagent',
+        status: 'in_progress',
+        run: {
+          sessionId: 'root',
+          snapshot: { ...snapshot, parentRunId: index ? ['grand', 'parent'][index - 1] : null },
+          items: [],
+        },
+      },
+    ],
+  }));
+  const seed = [
+    { ...assistantTurn('unrelated'), items: [{ type: 'text', text: 'opaque'.repeat(10000) }] },
+    ...chain,
+    assistantTurn('tail'),
+  ];
+  for (const row of seed) {
+    doc.getList('history').push(row as never);
+    referenceDoc.getList('history').push(row as never);
+  }
+  doc.commit();
+  referenceDoc.commit();
+  const writer = createHistoryWriter(doc),
+    reference = createHistoryWriter(referenceDoc);
+  const notification = parseSessionNotification({
+    sessionId: 'root',
+    update: {
+      sessionUpdate: 'subagent_event',
+      event: {
+        version: 1,
+        sessionId: 'root',
+        runId: 'new',
+        type: 'snapshot',
+        snapshot: { ...snapshot, parentRunId: 'child' },
+      },
+    },
+  });
+  reference.update((history) =>
+    applyNotificationOnHistory(history, [notification], undefined, {
+      createId: () => 'created',
+      now: () => 'synthetic',
+    })
+  );
+  const expected = reference.readStored();
+  const historyId = doc.getList('history').id;
+  const json = LoroList.prototype.toJSON;
+  const body = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(function () {
+    if (this.id === historyId) throw new Error('whole history forbidden');
+    return json.call(this);
+  });
+  try {
+    await createSessionAgentWrites(writer).applyAgentBatch({
+      notifications: [notification],
+      createId: () => 'created',
+      now: () => 'synthetic',
+    });
+  } finally {
+    body.mockRestore();
+  }
+  expect(writer.readStored()).toEqual(expected);
+});

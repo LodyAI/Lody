@@ -51,7 +51,9 @@ General selection returns a digest of the queried fields, then validates those f
 
 ## Write design
 
-Loro's `HistoryWriter.updateSelected` hydrates the selected positions and feeds the existing reducers. Changes to metadata-only placeholders are rejected during planning. Range compensation stores the changed before-images and checks complete shallow membership plus the operation's receipt. The pre-write ID set identifies which newly inserted rows may have automatic seen/read transitions.
+Loro's `HistoryWriter.updateSelected` hydrates the selected positions and feeds the existing reducers. Changes to metadata-only placeholders are rejected during planning because the projection omits stored extension fields. Range compensation stores the changed before-images and checks complete shallow membership plus the operation's receipt. The pre-write ID set identifies which newly inserted rows may have automatic seen/read transitions.
+
+Compensation aligns complete before-images only within the validated range. Unchanged rows there and all prefix/suffix containers retain their identities, so delayed peer edits still merge into their original records. Later appends with restored IDs remain outside this alignment.
 
 Roost structural edits use an SDK membership manifest referencing existing physical segments. A reinserted business ID receives a fresh physical primary alias. Bounded private preparation produces a sealed root; final activation commits the root reference, branch revision and receipts atomically. Immediate compensation restores the old head; compensation after later appends uses another selected membership change.
 
