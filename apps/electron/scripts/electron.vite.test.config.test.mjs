@@ -1,8 +1,10 @@
+import './test-output-boundary.test.mjs'
+import { testOutputBoundary } from './test-output-boundary.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { loadConfigFromFile, build } from 'vite'
-import { mkdtemp, writeFile, readFile, rm, realpath, mkdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, realpath, mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -58,19 +60,23 @@ void test('test config retains main externalization, native probes and renderer 
       configFile: false,
       root,
       logLevel: 'silent',
-      plugins: profile.renderer.plugins.filter(
-        (plugin) => plugin?.name === 'lody-test-build-marker'
-      ),
+      plugins: [
+        testOutputBoundary(root),
+        ...profile.renderer.plugins.filter((plugin) => plugin?.name === 'lody-test-build-marker')
+      ],
       build: {
         ...profile.renderer.build,
-        outDir: join(root, 'dist'),
+        outDir: join(root, '.test-build/renderer'),
         rollupOptions: { input: join(root, 'index.html') }
       }
     })
-    assert.deepEqual(JSON.parse(await readFile(join(root, 'dist/test-build.json'), 'utf8')), {
-      profile: 'test-build',
-      version: 1
-    })
+    assert.deepEqual(
+      JSON.parse(await readFile(join(root, '.test-build/renderer/test-build.json'), 'utf8')),
+      {
+        profile: 'test-build',
+        version: 1
+      }
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -95,13 +101,16 @@ void test('each isolated section removes a deleted entry on the next build', asy
     await writeFile(sentinel, 'sibling')
     for (const name of ['main', 'preload', 'renderer']) {
       const section = loaded.config[name]
-      const output = join(root, 'isolated', name)
+      const output = join(root, '.test-build', name)
       const compile = (input) =>
         build({
           configFile: false,
           root: source,
           logLevel: 'silent',
-          plugins: section.plugins.filter((plugin) => plugin?.name === 'lody-test-build-marker'),
+          plugins: [
+            testOutputBoundary(root),
+            ...section.plugins.filter((plugin) => plugin?.name === 'lody-test-build-marker')
+          ],
           build: {
             ...section.build,
             outDir: output,
@@ -119,5 +128,48 @@ void test('each isolated section removes a deleted entry on the next build', asy
     }
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+void test('real Vite rejects a linked output before touching its external contents', async () => {
+  const directory = fileURLToPath(new URL('../', import.meta.url))
+  const loaded = await loadConfigFromFile(
+    { command: 'build', mode: 'oss' },
+    fileURLToPath(new URL('electron.vite.test.config.ts', import.meta.url)),
+    directory,
+    'silent'
+  )
+  const checkout = fileURLToPath(new URL('../../../', import.meta.url))
+  await mkdir(join(checkout, '.test-build'), { recursive: true })
+  const base = await mkdtemp(join(checkout, '.test-build', 'boundary-'))
+  const outside = await realpath(await mkdtemp(join(tmpdir(), 'public-outside-')))
+  try {
+    const source = join(base, 'source')
+    await mkdir(source)
+    await writeFile(join(source, 'entry.js'), 'globalThis.current = 1')
+    await writeFile(join(outside, 'sentinel'), 'keep')
+    const output = join(base, 'output')
+    await symlink(outside, output, 'dir')
+    await assert.rejects(
+      build({
+        configFile: false,
+        root: source,
+        logLevel: 'silent',
+        plugins: loaded.config.main.plugins.filter((p) =>
+          ['lody-test-build-marker', 'lody-test-output-boundary'].includes(p?.name)
+        ),
+        build: {
+          ...loaded.config.main.build,
+          outDir: output,
+          lib: undefined,
+          rollupOptions: { input: join(source, 'entry.js') }
+        }
+      }),
+      /unsafe_test_build_output/
+    )
+    assert.equal(await readFile(join(outside, 'sentinel'), 'utf8'), 'keep')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
   }
 })

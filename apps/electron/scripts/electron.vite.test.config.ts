@@ -1,6 +1,7 @@
 import { defineConfig } from 'electron-vite'
 import original from '../electron.vite.config'
 import { resolve } from 'node:path'
+import { assertTestBuildOutput, testOutputBoundary } from './test-output-boundary.mjs'
 
 // Explicit test entry point. Release builds continue to load the original config.
 export default defineConfig(async (env) => {
@@ -8,9 +9,12 @@ export default defineConfig(async (env) => {
   for (const name of ['main', 'preload', 'renderer'] as const) {
     const section = config[name]
     if (!section) continue
+    const checkout = resolve(__dirname, '../../..')
+    const outDir = resolve(checkout, '.test-build/electron/out', name)
+    await assertTestBuildOutput(checkout, outDir)
     section.build = {
       ...section.build,
-      outDir: resolve(__dirname, '../../../.test-build/electron/out', name),
+      outDir,
       ...(name === 'renderer' ? { target: 'esnext' } : {}),
       emptyOutDir: true,
       minify: false,
@@ -19,6 +23,7 @@ export default defineConfig(async (env) => {
       reportCompressedSize: false
     }
     section.plugins = [
+      testOutputBoundary(checkout),
       ...(section.plugins ?? []),
       {
         name: 'lody-test-build-marker',
