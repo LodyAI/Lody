@@ -74,4 +74,7 @@ export const E2eeRemoteMachinePairing = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;
+// The approval guide replaces the full page only for devices that still need approval.
+export const E2eeDeviceApprovalGuide = () =>
+  createElement('output', { 'data-approval-guide': true });
 export const E2eeLedgerAudit = () => null;
