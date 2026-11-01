@@ -45,6 +45,8 @@ import {
   getMachineRoomId,
   getSessionRoomId,
   SessionStatusFactory,
+  resolveLatestSessionGoalFromHistory,
+  type SessionGoalMessage,
   type SessionId,
   type SessionHistoryInput,
   type SessionHistoryReadResponse,
@@ -183,6 +185,30 @@ async function nativeFixture(
   };
   nativeFixtures.add(result);
   return result;
+}
+async function invalidateGoalIndex(sessionId: string): Promise<void> {
+  const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
+  const client = new RoostNativeClient({
+    dbPath: join(nativeDirectory, 'history.db'),
+    seed,
+    allowedOwners: [Identity.fromSeed(seed).owner()],
+    maxQueuedRequests: 32,
+    maxQueuedBytes: 8 * 1024 * 1024,
+  });
+  try {
+    await client.ready;
+    await client.stream(`lody-session:${sessionId}`).writeBatch([], {
+      indexPuts: [
+        {
+          table: 'lody_goal_projection_v1',
+          key: new Uint8Array(),
+          value: new TextEncoder().encode('{invalid'),
+        },
+      ],
+    });
+  } finally {
+    await client.close();
+  }
 }
 const nativeContractFixture: SessionBackendContractFixtureFactory = async (options = {}) => {
   const fixture = await nativeFixture(undefined, true);
@@ -2413,6 +2439,340 @@ describe('Production Roost history semantics', () => {
       expect(await fixture.backend.readHistory()).toEqual(before);
     } finally {
       await client.close();
+    }
+  });
+
+  it('reads a persisted old goal without history bodies and returns an isolated goal', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const goal = {
+      type: 'goal' as const,
+      threadId: 'old',
+      objective: 'Retain',
+      status: 'active' as const,
+    };
+    await fixture.backend.appendHistoryTurn({ ...nativeAssistant('old-goal'), items: [goal] });
+    for (let i = 0; i < 45; i++) await fixture.backend.appendHistoryTurn(nativeUser(`plain-${i}`));
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    const readGoal = fixture.backend.readLatestGoal;
+    if (!readGoal) throw new Error('Missing Native goal query');
+    const full = vi
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
+      .mockRejectedValue(new Error('body unavailable'));
+    const page = vi
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage')
+      .mockRejectedValue(new Error('body unavailable'));
+    try {
+      const actual = await readGoal();
+      expect(actual).toEqual(goal);
+      if (actual) actual.objective = 'caller mutation';
+      expect(await readGoal()).toEqual(goal);
+    } finally {
+      full.mockRestore();
+      page.mockRestore();
+    }
+  });
+
+  it('scans an unknown goal projection through state overlays without retaining old bodies or publishing it', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const goal = (status: 'active' | 'paused'): SessionGoalMessage => ({
+      type: 'goal',
+      threadId: 'scan',
+      objective: 'Retain',
+      status,
+    });
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('first-goal'),
+      items: [goal('active')],
+    });
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('newer-goal'),
+      items: [goal('active')],
+    });
+    for (let i = 0; i < 45; i++)
+      await fixture.backend.appendHistoryTurn(nativeUser(`scan-plain-${i}`));
+    await fixture.backend.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: { ...nativeAssistant('newer-goal'), items: [goal('paused')] } as never,
+    });
+    const reference = resolveLatestSessionGoalFromHistory(await fixture.backend.readHistory());
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
+    const client = new RoostNativeClient({
+      dbPath: join(nativeDirectory, 'history.db'),
+      seed,
+      allowedOwners: [Identity.fromSeed(seed).owner()],
+      maxQueuedRequests: 32,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
+    await client.ready;
+    const host = client.stream(`lody-session:${id}`);
+    const key = { table: 'lody_goal_projection_v1', key: new Uint8Array() };
+    const invalid = new TextEncoder().encode('{invalid');
+    try {
+      await host.writeBatch([], { indexPuts: [{ ...key, value: invalid }] });
+      await fixture.close();
+      fixture = await nativeFixture(id);
+      const readGoal = fixture.backend.readLatestGoal;
+      if (!readGoal) throw new Error('Missing Native goal query');
+      const full = vi
+        .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
+        .mockRejectedValue(new Error('whole read forbidden'));
+      try {
+        expect(await readGoal()).toEqual(reference);
+        expect(await host.readIndex([key])).toEqual([invalid]);
+        const body = new Error('old body unavailable');
+        const page = vi
+          .spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage')
+          .mockRejectedValue(body);
+        const indexed = vi
+          .spyOn(NodeLodyHistory.prototype, 'readProjectedMessagesById')
+          .mockRejectedValue(body);
+        try {
+          expect(await readGoal()).toEqual(reference);
+          await expect(fixture.backend.history.readAt(0)).rejects.toBe(body);
+          expect(await fixture.backend.history.readAt(46)).toMatchObject({
+            state: 'ready',
+            turn: { id: 'scan-plain-44' },
+          });
+        } finally {
+          page.mockRestore();
+          indexed.mockRestore();
+        }
+      } finally {
+        full.mockRestore();
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('preserves GC metadata fallback, non-active overrides and read failures', async () => {
+    const fixture = await nativeFixture();
+    const legacy: SessionGoalMessage = {
+      type: 'goal',
+      threadId: 'legacy',
+      objective: 'Retain',
+      status: 'active',
+    };
+    const ports = {
+      workspaceDocument: {
+        getOrCreateSessionDoc: async () => ({ getMetaState: async () => ({ latestGoal: legacy }) }),
+      },
+      getSessionBackend: async () => fixture.backend,
+    };
+    const receiver = ports as unknown as MessageHandler;
+    expect(await MessageHandler.prototype.hasActiveGoal.call(receiver, fixture.doc.sessionId)).toBe(
+      true
+    );
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('cleared-goal'),
+      items: [{ ...legacy, status: 'cleared' }],
+    });
+    expect(await MessageHandler.prototype.hasActiveGoal.call(receiver, fixture.doc.sessionId)).toBe(
+      false
+    );
+    const failure = new Error('goal read failed');
+    const failed = {
+      ...ports,
+      getSessionBackend: async () => ({
+        readLatestGoal: async () => {
+          throw failure;
+        },
+      }),
+    } as unknown as MessageHandler;
+    await expect(
+      MessageHandler.prototype.hasActiveGoal.call(failed, fixture.doc.sessionId)
+    ).rejects.toBe(failure);
+    const rpc = {
+      ...ports,
+      getSessionBackend: async () => ({
+        readHistory: async () => [{ items: [{ ...legacy, status: 'paused' }] }],
+      }),
+    } as unknown as MessageHandler;
+    expect(await MessageHandler.prototype.hasActiveGoal.call(rpc, fixture.doc.sessionId)).toBe(
+      false
+    );
+  });
+
+  it('keeps goal queries current after goal commands, removal, copying and reopen', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const goal = (threadId: string): SessionGoalMessage => ({
+      type: 'goal',
+      threadId,
+      objective: 'Retain',
+      status: 'active',
+    });
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('goal-older'),
+      items: [goal('older')],
+    });
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('goal-newer'),
+      items: [goal('newer')],
+    });
+    const assertCurrent = async () => {
+      if (!fixture.backend.readLatestGoal) throw new Error('Missing Native goal query');
+      expect(await fixture.backend.readLatestGoal()).toEqual(
+        resolveLatestSessionGoalFromHistory(await fixture.backend.readHistory())
+      );
+    };
+    await assertCurrent();
+    await fixture.backend.applyHistoryAction({
+      kind: 'clear-goal',
+      threadId: 'newer',
+      updatedAt: 1,
+    });
+    await assertCurrent();
+    expect(await fixture.backend.readLatestGoal?.()).toMatchObject({
+      threadId: 'newer',
+      status: 'cleared',
+    });
+    await fixture.backend.applyHistoryAction({
+      kind: 'upsert-goal',
+      goal: { ...goal('newer'), status: 'paused' },
+      fallback: nativeAssistant('fallback') as never,
+    });
+    await assertCurrent();
+    const copy = await fixture.backend.captureForkSnapshot();
+    const destination = await nativeFixture();
+    await destination.backend.importForkHistory(copy, copy.history);
+    expect(await destination.backend.readLatestGoal?.()).toMatchObject({
+      threadId: 'newer',
+      status: 'paused',
+    });
+    await fixture.close();
+    fixture = await nativeFixture(id);
+    await assertCurrent();
+    await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'goal-newer' });
+    await assertCurrent();
+    expect(await fixture.backend.readLatestGoal?.()).toMatchObject({
+      threadId: 'older',
+      status: 'active',
+    });
+    await fixture.backend.applyHistoryAction({ kind: 'remove-turn', turnId: 'goal-older' });
+    await assertCurrent();
+    expect(await fixture.backend.readLatestGoal?.()).toBeNull();
+  });
+
+  it('retries goal inspection when an older goal changes in place between pages', async () => {
+    let fixture = await nativeFixture();
+    const id = fixture.doc.sessionId;
+    const goal: SessionGoalMessage = {
+      type: 'goal',
+      threadId: 'raced',
+      objective: 'Retain',
+      status: 'paused',
+    };
+    await fixture.backend.appendHistoryTurn({ ...nativeAssistant('raced-goal'), items: [goal] });
+    for (let i = 0; i < 45; i++)
+      await fixture.backend.appendHistoryTurn(nativeUser(`raced-plain-${i}`));
+    await fixture.close();
+    await invalidateGoalIndex(id);
+    fixture = await nativeFixture(id);
+    const peer = await nativeFixture(fixture.doc.sessionId);
+    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    let changed = false;
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(async function (
+      ...args
+    ) {
+      const page = await readPage.apply(this, args);
+      if (!changed) {
+        changed = true;
+        await peer.backend.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            ...nativeAssistant('raced-goal'),
+            items: [{ ...goal, status: 'active' }],
+          } as never,
+        });
+      }
+      return page;
+    });
+    expect(await fixture.backend.readLatestGoal?.()).toEqual({ ...goal, status: 'active' });
+    expect(changed).toBe(true);
+    expect(await fixture.backend.readLatestGoal?.()).toEqual({ ...goal, status: 'active' });
+  });
+
+  it('rechecks the history generation when goal inspection races an index-only activation', async () => {
+    const id = `native-goal-pointer-${ordinal++}`;
+    let client: RoostNativeClient | undefined;
+    const onChanges = RoostNativeClient.prototype.onChanges;
+    const capture = vi.spyOn(RoostNativeClient.prototype, 'onChanges').mockImplementation(function (
+      ...args
+    ) {
+      client = this;
+      return onChanges.apply(this, args);
+    });
+    const fixture = await nativeFixture(id);
+    capture.mockRestore();
+    if (!client) throw new Error('Expected Native history owner');
+    for (let i = 0; i < 45; i++)
+      await fixture.backend.appendHistoryTurn(nativeUser(`goal-pointer-old-${i}`));
+    const goal: SessionGoalMessage = {
+      type: 'goal',
+      threadId: 'activated',
+      objective: 'Keep active',
+      status: 'active',
+    };
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
+    const generation = new RoostHistoryGeneration(client, Identity.fromSeed(seed).owner(), id);
+    await generation.replace(
+      [{ ...nativeAssistant('goal-pointer-new'), items: [goal] }],
+      'goal-pointer-stage'
+    );
+    const raw = client.stream(`lody-session:${id}`);
+    const pointer = { table: 'lody_history_generation_v1', key: new TextEncoder().encode('next') };
+    const [activation] = await raw.readIndex([pointer]);
+    if (!activation) throw new Error('Expected staged activation');
+    await raw.compareAndWriteIndex(
+      [{ ...pointer, value: activation }],
+      [{ ...pointer, value: null }]
+    );
+    await fixture.close();
+    await invalidateGoalIndex(id);
+    let armed = false;
+    vi.spyOn(RoostNativeClient.prototype, 'onChanges').mockImplementation(
+      function (stream, listener, options) {
+        client = this;
+        return onChanges.call(
+          this,
+          stream,
+          (cursor, key) => {
+            if (!armed) listener(cursor, key);
+          },
+          options
+        );
+      }
+    );
+    const reopened = await nativeFixture(id);
+    await reopened.backend.flushLocalWrites();
+    const readPage = NodeLodyHistory.prototype.readActiveBranchPage;
+    let switched = false;
+    vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchPage').mockImplementation(async function (
+      ...args
+    ) {
+      const result = await readPage.apply(this, args);
+      if (armed && !switched) {
+        switched = true;
+        const before = await this.observedEventCursor();
+        await this.stream.compareAndWriteIndex(
+          [{ ...pointer, value: null }],
+          [{ ...pointer, value: activation }]
+        );
+        expect(await this.observedEventCursor()).toBe(before);
+      }
+      return result;
+    });
+    armed = true;
+    try {
+      expect(await reopened.backend.readLatestGoal?.()).toEqual(goal);
+      expect(switched).toBe(true);
+      expect(await reopened.backend.readLatestGoal?.()).toEqual(goal);
+    } finally {
+      armed = false;
     }
   });
 

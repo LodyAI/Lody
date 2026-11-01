@@ -11038,7 +11038,9 @@ export class MessageHandler {
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
-    const historyGoal = resolveLatestSessionGoalFromHistory(await backend.readHistory());
+    const historyGoal = backend.readLatestGoal
+      ? await backend.readLatestGoal()
+      : resolveLatestSessionGoalFromHistory(await backend.readHistory());
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 

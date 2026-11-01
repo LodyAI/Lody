@@ -512,6 +512,10 @@ reloads foreign work. A retained goal value is reusable only for the same host
 and freshly observed cursor. See the
 [append CPU investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-append-cpu-structure.md).
 
+GC inspects goals through synchronous Loro fields or Roost's certified projection
+and reverse logical pages. See the
+[goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
+
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing
