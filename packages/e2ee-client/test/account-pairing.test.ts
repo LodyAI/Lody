@@ -6,7 +6,7 @@ import {
   type AccountPairingRequestRecord,
   type AccountPairingStore,
 } from '../src/account-pairing';
-import { accountPairingStoreContract } from './account-pairing-store-contract';
+import { accountPairingStoreChecks } from './account-pairing-store-contract';
 
 /** Reference store for tests: the same semantics as the durable adapters. */
 function memoryStore(): AccountPairingStore {
@@ -61,7 +61,7 @@ function memoryStore(): AccountPairingStore {
 }
 
 describe('account pairing store contract (reference)', () => {
-  accountPairingStoreContract(async () => memoryStore());
+  for (const [name, check] of accountPairingStoreChecks(async () => memoryStore())) it(name, check);
 });
 
 describe('portable account pairing workflow', () => {

@@ -13,12 +13,15 @@ export type E2eeAccountPairingErrorCode =
   /** The authenticated expiry passed, or the request reached another terminal state. */
   | 'pairing-expired'
   /** This host already used or finished this pairing secret. */
-  | 'pairing-used';
+  | 'pairing-used'
+  /** Another tab of this browser owns the account pairing; it runs only there. */
+  | 'pairing-elsewhere';
 
 const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
+  'pairing-elsewhere',
 ];
 /** Reads the typed refusal from a host error; anything else is an ordinary failure. */
 export function accountPairingErrorCode(error: unknown): E2eeAccountPairingErrorCode | null {

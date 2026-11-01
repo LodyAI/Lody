@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./pairing": "./src/pairing.ts",
     "./account-pairing": "./src/account-pairing.ts",
+    "./account-pairing/browser": "./src/account-pairing-browser.ts",
     "./history": "./src/admission.ts",
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts"
