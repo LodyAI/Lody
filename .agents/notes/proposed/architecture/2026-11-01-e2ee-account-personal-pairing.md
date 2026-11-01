@@ -198,4 +198,34 @@ behind the developer-mode beta switch "Account-wide device pairing".
 - The string format, key derivation, canonical request and approval bytes and both tags
   are pinned by `packages/e2ee-core/test/pairing-vector.json`. An independent
   standard-library Python generator (`test/generate-pairing-vector.py`) produces it.
-- No device, notification or backend work exists yet.
+- The relay backend is a private default-off draft. Notifications, location and the
+  device wiring below are not done.
+
+## Desktop host
+
+[`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts)
+implements both sides in Electron main. It is not yet connected to IPC or to the
+per-workspace ledger hosts, which arrive as injected ports.
+- **Secret.** `S` stays in memory and never touches disk. A restart ends that request
+  locally, and the device starts a new one with the same retained identities.
+- **Terminal states.** Approved, declined, expired and cancelled are recorded per lookup
+  ID in local SQLite. The first state wins and is never revived, whatever the relay
+  reports.
+- **Approver.** The approver authenticates the request with its tag and checks the expiry
+  against its own clock. It checks both again immediately before each signature.
+  - Each workspace's exact signed admission is journaled before any network step and
+    retried as-is, including after a restart.
+  - The journal is keyed by workspace and the new device's signing key, not by request. If
+    a request expires after admission but before delivery, the next request from the same
+    retained identity reuses that original, so a workspace is never signed twice.
+  - Pairing operations run one at a time, which keeps check, sign and journal atomic.
+  - The secret and derived keys are wiped on every exit, including failure and
+    interruption.
+  - An approval is published only after this device has verified its own approval tag.
+    Its `approverSigningPublicKey` is the signer of the first row, sorted by genesis; each
+    row's record hash binds that workspace's actual signer.
+- **New device.** It installs an invitation only after the approval tag verifies, the
+  approval binds its own request digest, its own expiry still holds and the invitation
+  digest matches. Anything else from the relay is ignored.
+- **Decoding.** Relayed bytes are decoded by core's strict `decodePairingRequest` and
+  `decodePairingApproval`, which accept only canonical encodings.

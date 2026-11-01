@@ -1,9 +1,12 @@
+import { encode } from '@ipld/dag-cbor';
 import { Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import vector from './pairing-vector.json';
 import {
   PAIRING_REQUEST_MAX_LIFETIME_MS,
   checkPairingRequestLifetime,
+  decodePairingApproval,
+  decodePairingRequest,
   derivePairingKeys,
   disposePairingKeys,
   encodePairingApproval,
@@ -219,6 +222,67 @@ describe('pairing keys and tags', () => {
     expect(failure(at(now - 1))).toMatchObject({ code: 'expired' });
     // A lifetime longer than allowed (plus the clock-skew allowance) is refused.
     expect(failure(at(now + PAIRING_REQUEST_MAX_LIFETIME_MS + 60_001))).toMatchObject({
+      code: 'invalid-input',
+    });
+  });
+});
+
+describe('pairing decoding', () => {
+  it('decodes the pinned request and approval bytes back to the same values', () => {
+    const keys = ok(derivePairingKeys(secret));
+    const decoded = ok(decodePairingRequest(bytes(vector.requestBytes)));
+    expect(hex(ok(encodePairingRequest(decoded)))).toBe(vector.requestBytes);
+    expect(decoded).toMatchObject({
+      account: 'synthetic-account',
+      direction: 'requester-shows',
+      deviceName: 'Synthetic laptop',
+      expiresAt: 1_800_000_600_000,
+    });
+    expect(hex(decoded.lookupId)).toBe(vector.lookupId);
+    expect(decoded.rows.map((row) => hex(row.genesis))).toEqual([hex(fill(0x11)), hex(fill(0x22))]);
+    expect(Result.isSuccess(verifyPairingRequestTag(keys, decoded, bytes(vector.requestTag)))).toBe(
+      true
+    );
+    const approvalDecoded = ok(decodePairingApproval(bytes(vector.approvalBytes)));
+    expect(hex(ok(encodePairingApproval(approvalDecoded)))).toBe(vector.approvalBytes);
+    expect(hex(approvalDecoded.requestDigest)).toBe(vector.requestDigest);
+  });
+
+  it('refuses non-canonical, foreign, oversized and malformed bytes', () => {
+    const decoded = ok(decodePairingRequest(bytes(vector.requestBytes)));
+    const tuple = (rows: unknown[]) => [
+      'lody-e2ee/pair-request/v1',
+      decoded.account,
+      decoded.lookupId,
+      decoded.direction,
+      decoded.deviceName,
+      decoded.expiresAt,
+      rows,
+    ];
+    const asRows = decoded.rows.map((row) => [
+      row.genesis,
+      row.signingPublicKey,
+      row.encryptionPublicKey,
+      row.possessionProof,
+      row.credentialHash,
+    ]);
+    for (const malformed of [
+      new Uint8Array(),
+      bytes('ff'),
+      // Rows out of order are not the canonical encoding.
+      encode(tuple([...asRows].reverse())),
+      encode(tuple([asRows[0], asRows[0]])),
+      encode(['lody-e2ee/pair-approval/v1', ...tuple(asRows).slice(1)]),
+      encode(tuple(asRows).slice(0, 6)),
+      encode({ request: tuple(asRows) }),
+      new Uint8Array(256 * 1024 + 1),
+    ])
+      expect(failure(decodePairingRequest(malformed))).toMatchObject({ code: 'invalid-input' });
+    // An approval is never accepted as a request, nor the reverse.
+    expect(failure(decodePairingRequest(bytes(vector.approvalBytes)))).toMatchObject({
+      code: 'invalid-input',
+    });
+    expect(failure(decodePairingApproval(bytes(vector.requestBytes)))).toMatchObject({
       code: 'invalid-input',
     });
   });

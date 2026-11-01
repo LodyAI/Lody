@@ -9,6 +9,7 @@ import { api } from '@lody/cloud-api'
 import type {
   E2eeAppendRecordRequest,
   E2eeContentTokenRequest,
+  E2eeAccountPairingRequests,
   E2eeDeviceAccess,
   E2eeJoinRequests,
   E2eeMemberRequests,
@@ -78,6 +79,47 @@ const historyPage = z.object({
   nextCursor: z.string().min(1).nullable()
 })
 const appended = z.object({ status: z.enum(['committed', 'conflict']), recordHash: hash })
+const pairingStatus = z.enum(['pending', 'approved', 'declined', 'expired'])
+const pairingSummary = z.object({
+  requestId: z.string().min(1),
+  status: pairingStatus,
+  deviceName: z.string().min(1).max(128),
+  approximateLocation: z.string().max(256).nullable(),
+  requestedAt: nonnegative,
+  expiresAt: nonnegative
+})
+const pairingWorkspaces = z
+  .array(z.object({ workspaceId: z.string().min(1), genesisHash: hash }))
+  .max(64)
+const pairingRecord = pairingSummary.extend({
+  lookupId: z.string().regex(/^[0-9a-f]{32}$/),
+  requestHex: bytesHex(64 * 1024),
+  requestTagHex: hash,
+  workspaces: pairingWorkspaces
+})
+const pairingClaim = z
+  .object({
+    status: pairingStatus,
+    approvals: z
+      .array(
+        z.object({
+          approvalHex: bytesHex(8 * 1024),
+          approvalTagHex: hash,
+          publishedAt: nonnegative,
+          invitations: z
+            .array(
+              z.object({
+                workspaceId: z.string().min(1),
+                genesisHash: hash,
+                invitationHex: bytesHex(3 * 1024 * 1024)
+              })
+            )
+            .max(64)
+        })
+      )
+      .max(8)
+  })
+  .nullable()
 const joinSession = z.object({
   workspaceId: z.string().min(1),
   accountId: z.string().min(1),
@@ -467,6 +509,39 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       return request((client) => client.query(api.e2eeMembers.claim, original), memberRequest)
     },
 
+    // Account-wide pairing relay. Replies are untrusted; callers verify every tag.
+    pairingSubmit: (requestInput: E2eeAccountPairingRequests['submit']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.mutation(api.e2eeAccountPairing.submit, original),
+        pairingSummary
+      )
+    },
+    pairingRead: (requestInput: E2eeAccountPairingRequests['read']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.query(api.e2eeAccountPairing.read, original),
+        pairingRecord.nullable()
+      )
+    },
+    pairingDecline: (requestInput: E2eeAccountPairingRequests['decline']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.mutation(api.e2eeAccountPairing.decline, original),
+        z.object({ status: z.literal('declined') })
+      )
+    },
+    pairingPublish: (requestInput: E2eeAccountPairingRequests['publish']) => {
+      const original = { ...requestInput }
+      return request(
+        (client) => client.mutation(api.e2eeAccountPairing.publish, original),
+        z.object({ status: z.literal('published') })
+      )
+    },
+    pairingClaim: (requestInput: E2eeAccountPairingRequests['claim']) => {
+      const original = { ...requestInput }
+      return request((client) => client.query(api.e2eeAccountPairing.claim, original), pairingClaim)
+    },
     joinBegin: (requestInput: E2eeJoinRequests['begin']) => {
       const original = { ...requestInput }
       return request((client) => client.mutation(api.e2eeJoinMailbox.begin, original), joinSession)

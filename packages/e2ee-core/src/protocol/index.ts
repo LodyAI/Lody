@@ -203,6 +203,8 @@ export {
   disposePairingKeys,
   encodePairingRequest,
   encodePairingApproval,
+  decodePairingRequest,
+  decodePairingApproval,
   pairingRequestDigest,
   pairingRequestTag,
   verifyPairingRequestTag,
