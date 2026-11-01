@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { loadConfigFromFile, build } from 'vite'
-import { mkdtemp, writeFile, readFile, rm, realpath } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, realpath, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -71,6 +71,52 @@ void test('test config retains main externalization, native probes and renderer 
       profile: 'test-build',
       version: 1
     })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+void test('each isolated section removes a deleted entry on the next build', async () => {
+  const loaded = await loadConfigFromFile(
+    { command: 'build', mode: 'oss' },
+    fileURLToPath(new URL('electron.vite.test.config.ts', import.meta.url)),
+    fileURLToPath(new URL('../', import.meta.url)),
+    'silent'
+  )
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'lody-clean-test-output-')))
+  try {
+    const source = join(root, 'source')
+    await mkdir(source)
+    const current = join(source, 'current.js')
+    const probe = join(source, 'probe.js')
+    await writeFile(current, 'globalThis.current = 1')
+    await writeFile(probe, 'globalThis.probe = 1')
+    const sentinel = join(root, 'do-not-delete.txt')
+    await writeFile(sentinel, 'sibling')
+    for (const name of ['main', 'preload', 'renderer']) {
+      const section = loaded.config[name]
+      const output = join(root, 'isolated', name)
+      const compile = (input) =>
+        build({
+          configFile: false,
+          root: source,
+          logLevel: 'silent',
+          plugins: section.plugins.filter((plugin) => plugin?.name === 'lody-test-build-marker'),
+          build: {
+            ...section.build,
+            outDir: output,
+            lib: undefined,
+            rollupOptions: { input, output: { entryFileNames: '[name].js' } }
+          }
+        })
+      await compile({ current, 'native-storage-smoke': probe })
+      await readFile(join(output, 'native-storage-smoke.js'))
+      await compile({ current })
+      await readFile(join(output, 'current.js'))
+      await readFile(join(output, 'test-build.json'))
+      await assert.rejects(readFile(join(output, 'native-storage-smoke.js')), { code: 'ENOENT' })
+      assert.equal(await readFile(sentinel, 'utf8'), 'sibling')
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

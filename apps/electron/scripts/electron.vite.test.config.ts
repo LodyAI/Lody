@@ -12,6 +12,7 @@ export default defineConfig(async (env) => {
       ...section.build,
       outDir: resolve(__dirname, '../../../.test-build/electron/out', name),
       ...(name === 'renderer' ? { target: 'esnext' } : {}),
+      emptyOutDir: true,
       minify: false,
       cssMinify: false,
       sourcemap: false,
