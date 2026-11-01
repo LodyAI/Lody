@@ -94,6 +94,8 @@ export class CliSupervisor {
   private prepareAbortController: AbortController | null = null;
   private exitActionAbortController: AbortController | null = null;
   private activeRun: ActiveRun | null = null;
+  /** A run whose SIGKILL left its leader or part of its tree unconfirmed. */
+  private unreleasedRun: ActiveRun | null = null;
   private externalRuntimeState: CliRuntimeState | null = null;
   private externalHostIdentity: SupervisorHostIdentity | null = null;
   private latestRuntimeState: CliRuntimeState | null = null;
@@ -608,15 +610,17 @@ export class CliSupervisor {
   }
 
   private async terminateActiveRun(reason: string, graceMs: number): Promise<void> {
-    const run = this.activeRun;
+    const run = this.activeRun ?? this.unreleasedRun;
     if (!run) return;
 
     this.clearHealthyRunTimer();
     this.lastStateMessage = reason;
     this.publishState();
-    const graceDelivered = this.requestGracefulShutdown(run);
-
-    let result = await this.waitForRun(run, graceMs, graceDelivered);
+    // An already escalated run gets SIGKILL again, not a second grace period.
+    const escalated = run === this.unreleasedRun;
+    let result = escalated
+      ? null
+      : await this.waitForRun(run, graceMs, this.requestGracefulShutdown(run));
     let killFailure: string | null = null;
     if (!result) {
       this.lastStateMessage = `${reason}; forcing CLI process to exit`;
@@ -633,6 +637,9 @@ export class CliSupervisor {
       this.lastExitCode = result.code;
       this.lastExitAtMs = Date.now();
     }
+    // Keep the run until its whole tree is confirmed gone, so a retried stop
+    // terminates it again instead of releasing ownership over survivors.
+    this.unreleasedRun = !result || killFailure ? run : null;
     if (!result || killFailure) {
       const message = `CLI process ${run.handle.child.pid ?? 'unknown'} did not exit after SIGKILL${
         killFailure ? `: ${killFailure}` : ''

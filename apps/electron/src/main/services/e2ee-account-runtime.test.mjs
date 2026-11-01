@@ -342,6 +342,59 @@ void test('uncertain admission preserves append and reconciliation failures, the
   assert.deepEqual(warnings, [])
 })
 
+void test('quit retains a supervisor whose stop failed so recovery retries the same owner', async () => {
+  const { CliService } = await load(
+    './cli-service.ts',
+    {
+      electron: { app: {}, powerSaveBlocker: {} },
+      '../platform': { mainPlatformKind: 'cloud' },
+      '@lody/shared/node/installation-profile': { getLodyDataDir: () => '/synthetic-data' },
+      '@lody/shared/node/local-cli-host-lease': {
+        getLocalCliHostEndpoint: () => '/synthetic-host'
+      },
+      '@lody/shared/node/local-ipc': { getLocalDaemonRunFilePath: () => '/synthetic-run' },
+      '@lody/shared/node/process': {},
+      '@lody/shared/node/local-session-control': {},
+      '@lody/shared/node/local-project-control': {},
+      '@lody/shared/node/local-cli-supervisor': {},
+      '@lody/shared/local-machine-rpc': {},
+      '@lody/cli-supervisor': {},
+      './shell-env': {},
+      './system-proxy-env': {},
+      '../desktop-log': {},
+      '../desktop-log-core': {},
+      './desktop-execution-host': {},
+      './local-session-control-budget': {}
+    },
+    { error() {} }
+  )
+  const service = Object.create(CliService.prototype)
+  Object.assign(service, {
+    cliAutoStartEnabled: true,
+    preventSleepEnabled: false,
+    powerSaveBlockerId: null,
+    cliState: {},
+    cliStateSenders: new Set(),
+    trackedCliChildren: new Map()
+  })
+  const stopFailure = new Error('synthetic child did not exit after SIGKILL')
+  let exited = false
+  service.supervisor = {
+    getState: () => ({ phase: exited ? 'stopped' : 'fatal', desiredState: 'stopped' }),
+    stop: async () => {
+      if (!exited) throw stopFailure
+    }
+  }
+
+  await assert.rejects(service.shutdownForQuit(0), (error) => error === stopFailure)
+  // The unresolved owner stays visible instead of reporting a stopped CLI.
+  assert.equal(service.getCliState().phase, 'fatal')
+
+  exited = true
+  await service.shutdownForQuit(0)
+  assert.equal(service.getCliState().phase, 'stopped')
+})
+
 void test('local pairing timeout remains an unknown outcome and does not poison a later CLI request', async () => {
   const { IpcTimeoutError, IpcConnectError } = await import('@lody/shared/node/local-ipc')
   const { CliService } = await load('./cli-service.ts', {

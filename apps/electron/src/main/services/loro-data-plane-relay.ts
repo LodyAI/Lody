@@ -85,12 +85,10 @@ export class LoroDataPlaneRelay {
     }
 
     this.clearRedialTimer()
-    this.stopPingLoop()
-    this.clearPendingDaemonWrites()
     this.sendersPeers.clear()
     const socket = this.socket
-    this.socket = null
-    this.setConnected(false)
+    // Also releases the dial, so re-enabling starts a fresh socket at once.
+    this.dropSocket()
     socket?.destroy(new Error('loro_data_plane_relay_disabled'))
   }
 
@@ -184,6 +182,9 @@ export class LoroDataPlaneRelay {
     if (!this.enabled) throw new Error('loro_data_plane_relay_disabled')
     if (this.socket && !this.socket.destroyed) return
     if (this.connecting) return await this.connecting
+    // A destroyed socket whose close has not arrived yet is retired here, so
+    // renderers still see the disconnect and rejoin on the new connection.
+    if (this.socket) this.dropSocket()
 
     this.connecting = new Promise<void>((resolve, reject) => {
       const socket = this.createSocket(this.socketPath)
@@ -199,7 +200,11 @@ export class LoroDataPlaneRelay {
         }
       })
 
+      // Events of a socket that was disabled, destroyed or replaced must not
+      // touch the connection state of its successor.
+      const current = (): boolean => this.socket === socket
       socket.once('connect', () => {
+        if (!current()) return
         this.connecting = null
         this.redialAttempt = 0
         this.lastInboundAt = Date.now()
@@ -208,18 +213,12 @@ export class LoroDataPlaneRelay {
         resolve()
       })
       socket.once('error', (error) => {
-        this.connecting = null
+        if (current()) this.connecting = null
         reject(error)
       })
       socket.on('close', () => {
-        if (this.socket === socket) this.socket = null
-        this.connecting = null
-        this.stopPingLoop()
-        // Frames queued for the dead socket are dropped: protocol v3+ recovers
-        // by design (adapters rejoin on reconnect and join reconciliation
-        // re-uploads anything the daemon is missing).
-        this.clearPendingDaemonWrites()
-        this.setConnected(false)
+        if (!current()) return
+        this.dropSocket()
         this.scheduleRedial()
       })
       socket.on('data', (chunk) => {
@@ -233,6 +232,17 @@ export class LoroDataPlaneRelay {
     })
 
     return await this.connecting
+  }
+
+  private dropSocket(): void {
+    this.socket = null
+    this.connecting = null
+    this.stopPingLoop()
+    // Frames queued for the dead socket are dropped: protocol v3+ recovers
+    // by design (adapters rejoin on reconnect and join reconciliation
+    // re-uploads anything the daemon is missing).
+    this.clearPendingDaemonWrites()
+    this.setConnected(false)
   }
 
   private scheduleRedial(): void {

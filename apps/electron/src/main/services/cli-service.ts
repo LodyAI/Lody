@@ -1012,15 +1012,19 @@ export class CliService {
    * after that bounded wait fails quit instead of being orphaned.
    */
   async shutdownForQuit(graceMs = CLI_QUIT_GRACE_MS): Promise<void> {
+    let supervisorFailure: unknown
     if (this.supervisor) {
       // Stop polling/retry first so the supervisor does not relaunch the child
       // after we signal it. (This also asks its active child to shut down.)
+      // A failed stop keeps the supervisor: it still owns the child and host
+      // lease, so quit fails and recovery retries this same owner.
       try {
         await this.supervisor.stop({ terminationGraceMs: graceMs })
+        this.supervisor = null
       } catch (error) {
         console.error('[Electron] Supervisor shutdown barrier failed', error)
+        supervisorFailure = error
       }
-      this.supervisor = null
     }
     this.clearMachineIdCache()
 
@@ -1030,6 +1034,7 @@ export class CliService {
     })
     this.updatePowerSaveBlocker()
     this.publishCliState()
+    if (supervisorFailure !== undefined) throw supervisorFailure
     if (survivors.length > 0) {
       const error = new Error(
         `Embedded CLI did not confirm exit after SIGKILL (${survivors.join('; ')})`
