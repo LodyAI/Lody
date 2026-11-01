@@ -3,7 +3,12 @@ import type { SharingRemote } from '@lody/e2ee-machine-sharing'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
-import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
+import {
+  Bytes,
+  PAIRING_MAX_WORKSPACES,
+  decodeRecord,
+  hashRecordBytes
+} from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@lody/cloud-api'
 import type {
@@ -90,7 +95,7 @@ const pairingSummary = z.object({
 })
 const pairingWorkspaces = z
   .array(z.object({ workspaceId: z.string().min(1), genesisHash: hash }))
-  .max(64)
+  .max(PAIRING_MAX_WORKSPACES)
 const pairingRecord = pairingSummary.extend({
   lookupId: z.string().regex(/^[0-9a-f]{32}$/),
   requestHex: bytesHex(64 * 1024),
@@ -114,7 +119,7 @@ const pairingClaim = z
                 invitationHex: bytesHex(3 * 1024 * 1024)
               })
             )
-            .max(64)
+            .max(PAIRING_MAX_WORKSPACES)
         })
       )
       .max(8)

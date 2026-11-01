@@ -3,6 +3,7 @@ import { Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import vector from './pairing-vector.json';
 import {
+  PAIRING_MAX_WORKSPACES,
   PAIRING_REQUEST_MAX_LIFETIME_MS,
   checkPairingRequestLifetime,
   decodePairingApproval,
@@ -167,6 +168,41 @@ describe('pairing keys and tags', () => {
     expect(failure(verifyPairingRequestTag(other, original, tag))).toMatchObject({
       code: 'authentication',
     });
+  });
+
+  it('caps a request and an approval at the relay workspace limit', () => {
+    expect(PAIRING_MAX_WORKSPACES).toBe(64);
+    const keys = ok(derivePairingKeys(secret));
+    const row = (index: number) => ({
+      genesis: new Uint8Array(32)
+        .fill(0)
+        .map((_, at) => (at === 0 ? index >> 8 : at === 1 ? index & 255 : 7)),
+      signingPublicKey: fill(0x12),
+      encryptionPublicKey: fill(0x13),
+      possessionProof: fill(0x14, 64),
+      credentialHash: fill(0x15),
+    });
+    const rows = (count: number) => Array.from({ length: count }, (_, index) => row(index));
+    const atLimit = { ...request(keys.lookupId), rows: rows(PAIRING_MAX_WORKSPACES) };
+    expect(Result.isSuccess(encodePairingRequest(atLimit))).toBe(true);
+    expect(
+      failure(encodePairingRequest({ ...atLimit, rows: rows(PAIRING_MAX_WORKSPACES + 1) }))
+    ).toMatchObject({ code: 'invalid-input' });
+    const approvalRows = (count: number) =>
+      rows(count).map((item) => ({
+        genesis: item.genesis,
+        admissionRecordHash: fill(0x16),
+        invitationDigest: fill(0x17),
+      }));
+    const base = approval(fill(0x01));
+    expect(
+      Result.isSuccess(
+        encodePairingApproval({ ...base, rows: approvalRows(PAIRING_MAX_WORKSPACES) })
+      )
+    ).toBe(true);
+    expect(
+      failure(encodePairingApproval({ ...base, rows: approvalRows(PAIRING_MAX_WORKSPACES + 1) }))
+    ).toMatchObject({ code: 'invalid-input' });
   });
 
   it('refuses malformed requests before computing a tag', () => {
