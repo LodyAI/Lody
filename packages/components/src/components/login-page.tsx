@@ -432,11 +432,7 @@ function BrowserRedirect({
 
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <span
-      className={cn(stylex.props(styles.providerIcon).className, '[&_svg]:size-[18px]!', className)}
-    >
-      {children}
-    </span>
+    <span className={cn(stylex.props(styles.providerIcon).className, className)}>{children}</span>
   );
 }
 
@@ -444,6 +440,7 @@ function GoogleIcon() {
   return (
     <ProviderIcon>
       <svg
+        {...stylex.props(styles.providerGlyph)}
         aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
         viewBox="-0.5 0 48 48"
@@ -474,6 +471,7 @@ function AppleIcon() {
   return (
     <ProviderIcon>
       <svg
+        {...stylex.props(styles.providerGlyph)}
         fill="currentColor"
         viewBox="-52.01 0 560.035 560.035"
         xmlns="http://www.w3.org/2000/svg"
@@ -492,6 +490,7 @@ function DiscordIcon() {
   return (
     <ProviderIcon>
       <svg
+        {...stylex.props(styles.providerGlyph)}
         aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 -28.5 256 256"
@@ -510,7 +509,7 @@ function DiscordIcon() {
 function GitHubIcon() {
   return (
     <ProviderIcon>
-      <Github />
+      <Github {...stylex.props(styles.providerGlyph)} />
     </ProviderIcon>
   );
 }
@@ -1466,7 +1465,7 @@ export function LoginPage({
         >
           <span {...stylex.props(styles.methodContent)}>
             <ProviderIcon>
-              <Mail strokeWidth={1.75} />
+              <Mail {...stylex.props(styles.providerGlyph)} strokeWidth={1.75} />
             </ProviderIcon>
             <span {...stylex.props(styles.methodLabel)}>{emailEntryLabel}</span>
             {lastLoginMethod === 'email' ? lastUsedBadge : null}
@@ -1653,7 +1652,7 @@ export function LoginPage({
             aria-label={submitLabel}
             height="calc(var(--spacing) * 10)"
             width="100%"
-            className="mt-1"
+            className={stylex.props(styles.emailSubmitSpacing).className}
             disabled={isButtonsDisabled}
           >
             {isEmailSubmitting ? (
@@ -1764,7 +1763,7 @@ export function LoginPage({
           <SocialLoginButtonContent
             icon={
               <ProviderIcon>
-                <Mail strokeWidth={1.75} />
+                <Mail {...stylex.props(styles.providerGlyph)} strokeWidth={1.75} />
               </ProviderIcon>
             }
             label={emailEntryLabel}
@@ -2033,7 +2032,9 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  providerGlyph: { width: '18px', height: '18px' },
   pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
+  emailSubmitSpacing: { marginTop: 'calc(var(--spacing) * 1)' },
   // The window holds two things: an inset visual surface and the sign-in
   // column. On a narrow window they stack, the visual on top.
   page: {
