@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, CSSProperties } from 'react';
 import { useLayoutEffect, useState } from 'react';
 import { within, userEvent, fn } from 'storybook/test';
 import { LoginPage, type LoginPageProps } from '@/components/login-page';
@@ -381,4 +381,72 @@ export const ElectronCallbackFailure: Story = {
       <DesktopLoginFailure {...args} />
     </WithSearchParam>
   ),
+};
+
+// The automatic handoff bypasses replaceLocation. This trusted fixture keeps its
+// sandbox in place to block external-protocol launch; it does not isolate hostile scripts.
+/* oxlint-disable react/iframe-missing-sandbox -- The trusted same-origin Storybook bundle needs scripts and origin access for its frame guard. Its unchanged navigation path never removes the sandbox. */
+function ElectronPostTransferFixture({ scoped = false }: { scoped?: boolean }) {
+  const [blockedClick, setBlockedClick] = useState('');
+  const [hostNavigation, setHostNavigation] = useState('');
+  const frame = window.frameElement as HTMLIFrameElement | null;
+  const protectedFrame =
+    frame?.tagName === 'IFRAME' &&
+    frame.hasAttribute('data-login-handoff-sandbox') &&
+    frame.sandbox.length === 2 &&
+    frame.sandbox.contains('allow-scripts') &&
+    frame.sandbox.contains('allow-same-origin');
+  if (!protectedFrame) {
+    const url = new URL(window.location.href);
+    url.searchParams.set(
+      'id',
+      scoped
+        ? 'components-loginpage--electron-post-transfer-spacing'
+        : 'components-loginpage--electron-post-transfer'
+    );
+    url.searchParams.set('viewMode', 'story');
+    return (
+      <iframe
+        title="Sandboxed LoginPage post-transfer"
+        data-login-handoff-sandbox=""
+        sandbox="allow-scripts allow-same-origin"
+        src={url.href}
+        style={{ display: 'block', width: '100%', height: '100dvh', border: 0 }}
+      />
+    );
+  }
+  return (
+    <div
+      style={scoped ? ({ '--spacing': '5px' } as CSSProperties) : undefined}
+      data-login-post-transfer=""
+      onClickCapture={(event) => {
+        const link =
+          event.target instanceof Element
+            ? event.target.closest<HTMLAnchorElement>('a[data-electron-handoff-link]')
+            : null;
+        if (!link) return;
+        event.preventDefault();
+        setBlockedClick(link.href);
+      }}
+    >
+      <WithSearchParam search="?client_id=electron&state=stylex-ui-state&code_challenge=stylex-ui-challenge">
+        <LoginPageStoryHarness
+          isElectronRenderer={false}
+          sessionValue={authenticatedSession}
+          transferUser={async () => ({
+            data: { electron_authorization_code: 'stylex-ui-code' },
+          })}
+          replaceLocation={setHostNavigation}
+        />
+      </WithSearchParam>
+      <output hidden data-handoff-click={blockedClick} data-host-navigation={hostNavigation} />
+    </div>
+  );
+}
+
+/* oxlint-enable react/iframe-missing-sandbox */
+
+export const ElectronPostTransfer: Story = { render: () => <ElectronPostTransferFixture /> };
+export const ElectronPostTransferSpacing: Story = {
+  render: () => <ElectronPostTransferFixture scoped />,
 };

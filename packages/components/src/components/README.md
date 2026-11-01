@@ -153,6 +153,11 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   beside the automatic navigation — a browser that refuses a custom-scheme
   navigation reports nothing back, so the link must already be on screen.
   [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-electron-browser-signin-account-choice.md).
+  The post-transfer Storybook states mount the real LoginPage in a same-origin
+  sandboxed iframe that blocks custom-protocol launch while the trusted fixture
+  keeps its sandbox intact. It is not an isolation boundary for hostile scripts.
+  Manual link activation is recorded without opening external software; these
+  states cover UI, not OS handoff.
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in
   `lib/electron-update-banner.ts`.

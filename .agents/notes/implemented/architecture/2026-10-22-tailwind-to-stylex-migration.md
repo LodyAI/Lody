@@ -2608,21 +2608,23 @@ successful cells or assigning an unproved paint cause.
 
 ### Public callers and the remaining cascade boundary
 
-Audited scopes 147–191 remove 120 source utilities, including the six private
+Audited scopes 147–194 remove 124 source utilities, including the six private
 spacing consumers in189. The two opacity candidates in192 remain Tailwind.
 Six redundant size/shrink occurrences remain separate cleanup. The nine native
 compiler-trial defaults were restored after188 and receive zero credit.
 The helper's frozen189 cut contains252/8/21 across30 production sources,
 matched by hash to its successful670-input final build.
-The accepted191 full non-story components cut contains1,356 occurrences in152
+The accepted194 full non-story components cut contains1,352 occurrences in152
 files and730 unresolved expressions across1,397 sources. Its three core roots
-contain1,347/150/726 across791 sources: components918/136/633, legacy UI429/14/93,
+contain1,343/150/726 across791 sources: components914/136/633, legacy UI429/14/93,
 and53 route files0/0/0. The other nine occurrences are eight shared conversation
 column classes and one keyboard-sheet important bottom override. These are
 source lower bounds, not completion rates or whole-branch visual approval.
 
-`inventory-source-through191-accepted-proof.json` freezes those inputs; relative
-to190 only the private command-warning Popup differs.
+`inventory-source-through194-accepted-proof.json` freezes those inputs; relative
+to191 only SessionDetail’s pending-child Spinner and LoginPage’s handoff link differ.
+Together with the helper, the static lower bound is1,604 occurrences in160 files,
+with751 unresolved expressions; it is not an exact total or completion percentage.
 The helper remains a separate frozen189 input; its exact scan and source hashes
 are in `inventory-helper-source-through189-proof.json` and
 `inventory-helper-v2-after189.json`. Scope185
@@ -2678,6 +2680,8 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Native time-input constraint190 | One private native-picker hiding rule;18 full Input and indicator regions are pixel-exact,78 real UA shadow nodes match, and keyboard/controlled-value results remain equal. | Whole view15/18 PNGs exact;three light390 OPENs2094/2112/2094raw have maximum channel delta1 and remain unproved. The constraint does not replace the Input well/font or add a primitive API;no leading/same-pseudo competition exists in this closed call graph. |
 | Private helper spacing189 | Six consumer utilities use five optional CSS-typed properties. Final six shorthand/longhand-order screenshot pairs and342 records match. The56 original healthy states have a final-source real-browser bridge over1,360 records; three Copied records also match. | The original56 images are55 exact and Copy3 are2 exact; two OPENs total68raw/43threshold remain. The bridge is field qualification, not new PNGs, and only18 exact logo-port carriers differ. The naive merge's four actual failures3922raw/3436threshold remain. Caller/Slot order is preserved by omitting overwritten API-owned fields; old dimension/ink-only and ToggleRoot Provider behavior stay unchanged. Two original cleanup outcomes remain unknown; all four final bridge runs close normally. |
 | Private warning interaction191 | One Popup pointer-events constraint;16 pairs,148 target records and1,204 form-geometry records match apart from12 exact class carriers. Original Positioner hit interception, blur and narrow-story clipping remain. | Twelve PNGs exact;four caret-location OPENs total72raw/72threshold remain without a timing-cause claim. The paired After includes192 isolated candidates; a separate final191-only build matches Root inputs. Its documentation scan adds three unused arbitrary-property utility rules; existing ordered rules/registrations remain equal. Final observation is supplemental After-only evidence, not new paired PNGs. |
+| Actual pending child193 | Two size utilities use the existing Spinner diameter API. All11 actual Electron PNG/RGBA pairs match, with77 target,176 ancestor and3,443 geometry records; Back restores the main conversation in all22 captures. | Raw objects differ:957 exact boot-clock/generated-ID fields and44 binding/dimension carriers remain explicit. The real900ms rotation is sampled at a fixed400ms phase; this does not prove every natural animation frame. Eight other unreachable or unheld pending-state dimensions stay Tailwind. |
+| Login handoff link194 | Two size utilities use existing Button width/height props. All32 expanded-link regions and pixels outside the live canvas match;4 separate native reduced-motion whole PNG/RGBA pairs are exact. Tab, Enter, pointer activation and the actual handoff href match. | All32 normal-motion whole-image OPENs remain, totaling191,628 raw/threshold pixels inside the WebGL canvas; no exact paint cause is claimed. The same-origin sandbox fixture blocks external-protocol launch and records manual activation. It proves the actual post-transfer UI, not OS handoff. Two precise legal-link origins, frame environment and binding carriers remain separate raw differences. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
 | Native compiler trial188 | Three real arbitrary-property callers change strip598→16px, viewport598→840px, and clipping/hit testing despite passing default/named controls. | All13 trial paths restored,6 new files removed and3 temporary dependency links removed;cache packages retained. Nine defaults remain Tailwind. Earlier66-pair successes and actual-App312raw OPEN remain evidence, not acceptance. |
 

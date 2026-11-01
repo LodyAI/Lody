@@ -1791,7 +1791,8 @@ export function LoginPage({
       {electronHandoffUrl ? (
         <Button
           render={<a href={electronHandoffUrl} data-electron-handoff-link />}
-          className="h-10 w-full"
+          height="calc(var(--spacing) * 10)"
+          width="100%"
         >
           {/* A real link: the automatic navigation may be refused, and this is
               then the user's way to open the desktop app. */}

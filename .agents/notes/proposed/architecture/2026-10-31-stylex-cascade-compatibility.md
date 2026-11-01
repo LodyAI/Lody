@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults between CSS layers changes supported caller precedence. An early flat-utilities route preserves 66 existing browser pairs and the visible native row in a real Electron trial, but three additional arbitrary-property callers change width, minimum width and hit testing. Named utility controls still match: the failure is the original ordering between named and arbitrary-property rules, which `twMerge` does not remove. All thirteen trial source/configuration/dependency paths were restored and its nine defaults receive zero migration credit. Ordering-aware replacement remains proposed; private owned UI migration continues independently.
+Moving public Tailwind defaults across CSS layers or changing their class identities can alter supported caller precedence. The early flat-utilities trial was restored after three arbitrary-property counterexamples, and exact-position hash aliases still break named `cn` controls. A smaller CSS-only experiment preserves twelve controls by replacing the original declarations with real StyleX metadata while keeping selectors, class strings and rule positions unchanged. This is a proposed declaration-ownership bridge that still requires Tailwind candidate ordering and explicit bindings. No production compiler, dependency or public compatibility API has changed, and these experiments receive zero migration credit.
 
 ## Evidence and limits
 
@@ -132,8 +132,50 @@ Adaptive defaults remain Tailwind. `leaves188-counterexample.html` owns the real
 captures and `root188-native-rejection-restoration-proof.json` the exact rollback.
 All171/177/180/184 successes, OPENs and failures remain historical evidence.
 
+## Declaration ownership with compatibility selectors
+
+`root-native-default-boundary-research.json` records the locked-version follow-up.
+Placing independent hashed atoms beside their original Tailwind rules repairs the
+previous arbitrary-property and zero-specificity cases, but three real named
+controls fail: `w-0` changes width0→400px, `opacity-50` changes0.5→0.7, and `block`
+changes to flex with a different hit chain. The current `cn` cannot identify the
+new hash as the original utility group. Registering three explicit groups through
+`extendTailwindMerge` repairs those synthetic controls, but introduces another
+registry and does not preserve exported raw class strings. CSS position alone is
+therefore insufficient; sharing ordinary atom identities also remains unsafe.
+
+A separate two-binding experiment keeps the old `.opacity-70` and `.w-full`
+selectors and class values. It detaches the original declaration nodes and inserts
+the actual StyleX metadata declarations at the same rule positions and contexts;
+there is no second effective Tailwind body masking the new declarations. The full
+CSS remains byte-identical. Two compiled `stylex.props` bindings are explicitly
+mapped back to their legacy class values, so real `twMerge` behavior is retained.
+Chrome verifies twelve static controls, including zero-specificity opacity0.7,
+normal descendant opacity1, named width0 and arbitrary width400px. A separately
+recompiled opacity0.6 declaration is rejected by the strict equivalence oracle.
+
+This proves only a small declaration-ownership boundary. It still needs Tailwind
+to retain and order candidates, explicit metadata-to-selector/context and class
+bindings, and a custom build transform. It is not an existing StyleX option or a
+completed product migration. Dynamic values, variants, Slot composition,
+production consumers, development updates and complete source maps remain
+unverified. The probe changes no product, configuration, dependency or lockfile;
+its real browser checks produce no application screenshots. The exact compile,
+binding and browser records live under `root-native-exact-slot-probe/`.
+
 ## Proposed next boundary
 
-Evaluate a small extraction route only for an explicitly identified native default whose complete caller and state contract is demonstrated. Give that route distinct compiler identities and atom prefixes, preserve the ordinary route, and test the actual final CSS order. Keep public raw selectors, Slot behavior and state/query utilities on their existing paths until their separate ordering contracts have an equivalent replacement.
+Evaluate the selector-preserving bridge on one bounded owner before widening it.
+Keep its real StyleX declarations beside that owner, preserve the original `cn`
+inputs and public class contract, and reject missing or unequal declaration and
+context mappings. Retaining an effective Tailwind declaration underneath an
+unused StyleX class is not a migration. Record compatibility selector bindings
+separately from ordinary StyleX atoms and source-utility removal counts.
 
-Before integrating a build change, demonstrate that the real application, Storybook and standalone output share that boundary; audit collisions, variables, registrations and every retained rule. Repeat named and arbitrary-property callers, variants, shorthand interactions and normal StyleX controls. A default screenshot, an empty caller guard, or thirteen passing native cases cannot approve arbitrary public Slot migration. No global extraction order has been selected, and no compatibility API has been retired.
+Before production integration, demonstrate the actual application, Storybook and
+test pipelines, named and arbitrary-property callers, normal and zero-specificity
+ancestors, shorthand and variable behavior, Slot cases and ordinary StyleX
+controls. Check final optimized output rather than an intermediate stylesheet;
+selector-list optimization and stale development responses must not invalidate
+the contract. No global layer/order change is selected, no public compatibility
+API is retired, and the rejected thirteen-path trial remains restored.

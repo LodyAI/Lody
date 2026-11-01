@@ -913,6 +913,9 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `leaves191-acceptance.html` | One private warning interaction;16pairs/148targets/1,204form geometry records match,12PNGexact | Four caret-location OPENs72raw/72threshold;original Positioner interception/blur and phone-story clipping retained;final191-only build/smoke separate |
 | `leaves192-public-acceptance-delivery.html` | Zero migration;4direct controls exact and4public opacity regressions | Opacity0.7→1/721raw;Root sources unchanged;full animation-variable shorthand also unsupported by locked compiler mode |
 
+| `leaves193-acceptance.html` | Two private pending-child Spinner dimensions; 11 real Electron PNG pairs exact | 957 boot/ID raw differences, original strict-comparison failure and three supplementary images retained; not full JSON equality |
+| `leaves194-login-acceptance.html` | Two private handoff-anchor dimensions; 32 target/expanded-ring regions and pixels outside the canvas exact; four native reduced-motion whole PNG pairs exact | All 32 natural-motion whole images remain OPEN; strict sandbox exercises real Continue/Tab/Enter and href, without OS protocol or external Auth acceptance |
+
 The unchanged workspace-inset browser spec passes16 after-only cases in the
 healthy190 build. The prior32 failures remain recorded as a different environment;
 this adds durable behavior coverage and does not replace the original185 visual

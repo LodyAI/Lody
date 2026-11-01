@@ -5816,7 +5816,7 @@ const SessionDetail = ({
     <div {...stylex.props(detailStyles.loading)}>
       {showPendingChildTabState ? (
         <>
-          <Spinner className="h-5 w-5 text-muted-foreground" />
+          <Spinner diameter="calc(var(--spacing) * 5)" className="text-muted-foreground" />
           <p {...stylex.props(detailStyles.loadingText)}>
             {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
           </p>

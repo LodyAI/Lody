@@ -9,7 +9,7 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-将公开 Tailwind 缺省值移到不同 CSS 层会改变受支持调用方的优先级。前置 utilities 本层方案保持原 66 对浏览器状态和真实 Electron 试集成的可见标签行，但三个新增 arbitrary-property 调用方改变宽度、最小宽度与命中链。named utility 控制仍同；问题是 twMerge 不消除的 named／arbitrary-property 原规则顺序。十三个试集成源码／配置／依赖路径已完整恢复，九个默认值迁移信用为零。保原顺序的替代仍为提议，私有 UI 迁移独立继续。
+将公开 Tailwind 默认值移到其他CSS层或改变class身份，会改变受支持调用方的优先级。前置utilities试验已因三个arbitrary-property反例恢复，而原位hash别名仍会破坏named cn控制。更小的纯CSS试验保留原selector、class字符串与规则位置，以真正StyleX metadata替换原声明体，十二个控制均保持。它仍是依赖Tailwind候选排序和显式绑定的声明所有权过渡提议。生产compiler、依赖及公开兼容API均未改变，试验迁移计数为零。
 
 ## 证据与限制
 
@@ -101,8 +101,32 @@ Root 已把十三试集成路径恢复为原字节，并移除六个新增文件
 精确恢复见 root188-native-rejection-restoration-proof.json；171／177／180／184 的原成功、
 OPEN 和失败证据都保留。
 
+## 保留兼容selector的声明所有权
+
+锁版后续研究见root-native-default-boundary-research.json。将独立hash atom放在原Tailwind规则
+旁边，能修复之前的arbitrary-property／零特异性用例，但三个真实named控制失败：w-0宽度
+0→400px、opacity-50从0.5→0.7、block变flex且命中链不同。当前cn无法把新hash识别为原utility
+组；extendTailwindMerge显式登记三组可修这些合成控制，但需额外registry，且不保公开raw class
+字符串。因此仅保持CSS位置不够，复用普通atom身份也仍不安全。
+
+另一个双绑定试验保留.opacity-70／.w-full原selector及class值。原声明节点实际detach，再在相同
+规则位置及context插入真正StyleX metadata声明，没有另一份生效Tailwind body掩盖新声明。
+完整CSS字节不变；两个实际编译的stylex.props绑定显式映回旧class，使真正twMerge行为保持。
+Chrome验证十二个静态控制，含零特异性opacity0.7、普通后代opacity1、named宽0及arbitrary宽400px。
+另行真正重编译的opacity0.6被严格等价oracle拒绝。
+
+这只证明小范围声明所有权边界，仍需Tailwind保留／排序候选、显式metadata到selector／context及
+class绑定、自定义构建变换；不是StyleX现成选项或已完成产品迁移。动态值、variants、Slot、生产
+consumers、开发更新和完整source maps均未验证。probe未改产品／配置／依赖／lockfile，真实浏览器
+检查没有应用截图；精确compile／binding／browser记录位于root-native-exact-slot-probe/。
+
 ## 提议的下一边界
 
-只为明确识别、且全部调用方与状态合同已证明的原生缺省样式，评估一个小提取路径。为其使用独立编译身份和 atom 前缀，保留普通路径，并验证最终真实 CSS 顺序。公开 raw selector、Slot 行为以及 state／query utility 继续使用现有路径，直到各自的顺序合同有等价替代。
+只先在一个有限owner验证保留selector的过渡，把真正StyleX声明放在该owner附近，保原cn输入及
+公开class合同；缺失或不等价的声明／context映射必须拒绝。在生效Tailwind声明下面增加无用StyleX
+不算迁移。兼容selector绑定、普通StyleX atom及源码utility移除数分开记录。
 
-在集成构建改动前，需证明实际应用、Storybook 和 standalone 输出遵守相同边界，审查碰撞、变量、注册与每条保留规则，重跑 named／arbitrary-property 调用方、变体、shorthand 交互和普通 StyleX 控制。默认截图、empty-caller guard，或十三个原生用例通过，都不能批准任意公开 Slot 迁移。目前没有选择全局提取顺序，也没有退役任何兼容 API。
+生产集成前需验证真正App、Storybook及测试pipeline，named／arbitrary-property调用方、普通／零
+特异性祖先、简写与变量、Slot及普通StyleX控制。必须检查优化后的最终产物，不能只看中间CSS；
+selector-list优化与开发旧响应不能破坏合同。未选择全局层序变更、未退役公开兼容API，被拒绝的
+十三路径试集成保持恢复。
