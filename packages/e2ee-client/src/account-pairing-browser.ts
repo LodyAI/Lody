@@ -294,21 +294,37 @@ export function makeIndexedDbAccountPairingStore(options: {
  * so check, sign and journal never interleave between two tabs. */
 export function makeAccountPairingTabOwnership(options: { name: string; locks?: LockManager }) {
   const locks = options.locks ?? globalThis.navigator.locks;
-  let release: (() => void) | undefined;
+  /** Ends the held lock's callback; set before a claim reports ownership. */
+  let unlock: (() => void) | undefined;
+  /** The Web Lock request; settles once the lock is given back or was unavailable. */
   let settled: Promise<unknown> | undefined;
-  let releasing = false;
+  /** A claim whose lock callback has not run yet. */
+  let claiming: Promise<boolean> | undefined;
+  /** One shared handover; concurrent releases await the same promise. */
+  let closing: Promise<void> | undefined;
   let running = 0;
-  let idle: (() => void) | undefined;
-  const claim = () =>
-    new Promise<boolean>((resolve) => {
-      if (releasing) return resolve(false);
-      if (release) return resolve(true);
+  const idle: (() => void)[] = [];
+  const claim = (): Promise<boolean> => {
+    if (closing) return Promise.resolve(false);
+    if (unlock) return Promise.resolve(true);
+    claiming ??= new Promise<boolean>((resolve) => {
       settled = locks.request(options.name, { ifAvailable: true }, (lock) => {
-        if (!lock) return resolve(false);
+        if (!lock) {
+          resolve(false);
+          return undefined;
+        }
+        // Retain the release function before anyone can observe ownership.
+        const held = new Promise<void>((done) => (unlock = done));
         resolve(true);
-        return new Promise<void>((done) => (release = done));
+        return held;
       });
+      // A refused or failed request still settles the claim.
+      settled.catch(() => resolve(false));
+    }).finally(() => {
+      claiming = undefined;
     });
+    return claiming;
+  };
   return {
     /** Runs `work` only while this tab owns the pairing; `false` means another tab
      * owns it, or this tab is handing it over. */
@@ -318,9 +334,10 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
       Effect.flatMap<boolean, never, never, { owned: true; value: A } | { owned: false }, E, never>(
         Effect.promise(async () => {
           const owned = await claim();
-          // A release that started while claiming wins: take nothing new.
-          if (owned && !releasing) running++;
-          return owned && !releasing;
+          // A handover that started while claiming wins: take nothing new.
+          if (!owned || closing) return false;
+          running++;
+          return true;
         }),
         (owned) =>
           owned
@@ -329,29 +346,32 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
                   work,
                   Effect.sync(() => {
                     running--;
-                    if (running === 0) idle?.();
+                    if (running === 0) for (const wake of idle.splice(0)) wake();
                   })
                 ),
                 (value) => ({ owned: true as const, value })
               )
             : Effect.succeed({ owned: false as const })
       ),
-    /** Gives the pairing up so another tab can take it, after operations already
-     * running in this tab finish. */
+    /** Gives the pairing up so another tab can take it: refuses new work, settles a
+     * claim still waiting for its lock, drains running work, then gives the lock
+     * back. Concurrent calls share one handover. */
     release: () =>
-      Effect.promise(async () => {
-        releasing = true;
-        try {
-          if (running > 0) await new Promise<void>((resolve) => (idle = resolve));
-          idle = undefined;
-          const done = release;
-          release = undefined;
-          done?.();
-          await settled;
-        } finally {
-          releasing = false;
-        }
-      }),
+      Effect.promise(
+        () =>
+          (closing ??= (async () => {
+            try {
+              await claiming;
+              if (running > 0) await new Promise<void>((resolve) => idle.push(resolve));
+              const done = unlock;
+              unlock = undefined;
+              done?.();
+              await settled?.catch(() => undefined);
+            } finally {
+              closing = undefined;
+            }
+          })())
+      ),
   };
 }
 

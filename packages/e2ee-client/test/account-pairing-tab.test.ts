@@ -75,3 +75,62 @@ describe('handing the account pairing to another tab', () => {
     await Effect.runPromise(b.release());
   });
 });
+
+describe('releasing while a claim or another release is in flight', () => {
+  it('settles a claim still waiting for its lock callback before releasing, so no tab is stuck', async () => {
+    const name = `lody-e2ee-account-pairing:test-${crypto.randomUUID()}`;
+    // Real Web Locks, with tab A's lock callback held until an explicit signal.
+    let deliver!: () => void;
+    const callbackGate = new Promise<void>((resolve) => (deliver = resolve));
+    const delayed = {
+      request: (lockName: string, options: LockOptions, callback: (lock: Lock | null) => unknown) =>
+        navigator.locks.request(lockName, options, async (lock) => {
+          await callbackGate;
+          return callback(lock);
+        }),
+    } as unknown as LockManager;
+    const a = makeAccountPairingTabOwnership({ name, locks: delayed });
+    const b = makeAccountPairingTabOwnership({ name });
+    const tabA = withAccountPairingTabOwnership({ op: () => Effect.succeed('a') }, a);
+    // The lock request is issued, but its callback has not run yet.
+    const pending = Effect.runPromiseExit(tabA.op());
+    const released = Effect.runPromise(a.release());
+    deliver();
+    await released;
+    await pending;
+    // The lock is free again: another tab can pair.
+    const tabB = withAccountPairingTabOwnership({ op: () => Effect.succeed('b') }, b);
+    expect(await Effect.runPromise(tabB.op())).toBe('b');
+    await Effect.runPromise(b.release());
+  });
+
+  it('lets concurrent releases share one handover', async () => {
+    const name = `lody-e2ee-account-pairing:test-${crypto.randomUUID()}`;
+    const a = makeAccountPairingTabOwnership({ name });
+    const b = makeAccountPairingTabOwnership({ name });
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const tabA = withAccountPairingTabOwnership(
+      {
+        op: () =>
+          Effect.promise(async () => {
+            entered();
+            await gate;
+          }),
+      },
+      a
+    );
+    const running = Effect.runPromise(tabA.op());
+    await started;
+    const first = Effect.runPromise(a.release());
+    const second = Effect.runPromise(a.release());
+    open();
+    await running;
+    await Promise.all([first, second]);
+    const tabB = withAccountPairingTabOwnership({ op: () => Effect.succeed('b') }, b);
+    expect(await Effect.runPromise(tabB.op())).toBe('b');
+    await Effect.runPromise(b.release());
+  });
+});
