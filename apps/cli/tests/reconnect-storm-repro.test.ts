@@ -11,12 +11,12 @@
  * base delay). They are now regression guards for the fix, and each one logs
  * its pre-fix number so the delta stays visible:
  *
- *   scenario A: fan-outs/min   59 -> 2 -> 0   reconnects/min 59 -> 2 (sweep only)
+ *   scenario A: fan-outs/min   59 -> 2 -> 0   reconnects/min 59 -> backed-off room sweeps
  *   scenario D: reconciles/min 6667 -> 226 -> 0
  *
  * The second step (#2194): while the meta room stays joined, a failed doc or
- * Flock room is no longer a transport outage at all. Only the watchdog's
- * per-room sweep retries it.
+ * Flock room is no longer a transport outage at all. Only backed-off per-room
+ * sweeps retry it.
  *
  * Scenario B is the control that must NOT change: a genuine sustained outage
  * takes the meta room down, stays cheap, and its exponential backoff still works.
@@ -134,8 +134,10 @@ describe('reconnect storm repro', () => {
     let instance!: LoroConnectionRecoveryController;
     let stormActive = true;
     const reconnectCalls: unknown[] = [];
+    const reconnectAtMs: number[] = [];
     const reconnect = vi.fn(async (options?: unknown) => {
       reconnectCalls.push(options);
+      reconnectAtMs.push(Date.now());
       if (!stormActive) return;
       instance.setTransportStatus('connecting');
       setTimeout(() => {
@@ -165,11 +167,16 @@ describe('reconnect storm repro', () => {
     expect(fanOuts).toBe(0);
     expect(streamsOnline).not.toHaveBeenCalled();
     expect(instance.isRecovering()).toBe(false);
-    // The broken room is retried only by the 30s per-room watchdog sweep.
-    expect(reconnectCalls).toEqual([
-      { resetBackoff: false, timeout: 10_000 },
-      { resetBackoff: false, timeout: 10_000 },
-    ]);
+    // The broken room is retried only by per-room sweeps, which back off while
+    // it keeps failing instead of running at the 1s base delay.
+    expect(reconnectCalls.length).toBeLessThanOrEqual(10);
+    expect(
+      reconnectCalls.every(
+        (call) => JSON.stringify(call) === JSON.stringify({ resetBackoff: false, timeout: 10_000 })
+      )
+    ).toBe(true);
+    const gaps = reconnectAtMs.slice(1).map((at, index) => at - (reconnectAtMs[index] ?? 0));
+    expect(Math.max(...gaps)).toBeGreaterThanOrEqual(8_000);
   });
 
   it('SCENARIO B (control): a sustained outage backs off and never fans out', async () => {

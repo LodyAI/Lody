@@ -859,12 +859,23 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(history.isError, JSON.stringify(history)).not.toBe(true);
     expect(rooms[0]!.released).toBe(false);
 
+    // While that room is still retained, later reads answer without waiting again.
+    let settled = false;
+    const retained = callTool('lody_session_history', { sessionId: remoteSessionId }).then(
+      (result) => {
+        settled = true;
+        return result;
+      }
+    );
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect((await retained).isError).not.toBe(true);
+
     await vi.advanceTimersByTimeAsync(TRANSIENT_DOC_ROOM_RETAIN_MS);
     await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
     // The next read joins again, so a recovered room can still reach the replica.
     const again = callTool('lody_session_history', { sessionId: remoteSessionId });
-    await vi.waitFor(() => expect(rooms).toHaveLength(2));
-    rooms[1]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms).toHaveLength(3));
+    rooms[2]!.firstSync.resolve();
     expect((await again).isError).not.toBe(true);
   });
 

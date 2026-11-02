@@ -39,7 +39,9 @@ protection, so it does not explain the plaintext reports.
 
 1. **Health follows the meta room.** While the meta room is joined, an aggregate
    `disconnected` is reported as `rooms-degraded`. It is healthy for recovery
-   purposes: the 30 s watchdog's per-room sweep retries the room, and no
+   purposes: only the failed rooms are swept, starting about 1 s after the failure
+   and backing off to 30 s while they keep failing, so this Machine's own room
+   recovers as fast as before. No
    transport-wide reconnect, recovery edge or O(rooms) rescan starts.
    `isTransportConnected()`, which gates cloud side effects, is true while the meta
    room is joined. `waitUntilMetaSynced` waits for the meta room even when another
@@ -55,7 +57,8 @@ protection, so it does not explain the plaintext reports.
    Otherwise it opens a temporary `SessionDocument` outside `sessions`, under the
    doc's local ownership chain, and destroys it with status preserved. The cloud
    room is joined outside that wrapper. History waits at most 8 s for the first
-   sync; list and status do not wait. The room is then kept until its first sync
+   sync, unless a room retained by an earlier read is still pending; list and
+   status do not wait. The room is then kept until its first sync
    completes or `TRANSIENT_DOC_ROOM_RETAIN_MS` (150 s, longer than the 120 s
    Streams deadline) elapses. Releasing it right after the read would abort every
    slow first sync, so a large transcript would never reach the replica and a
@@ -87,8 +90,6 @@ protection, so it does not explain the plaintext reports.
 
 ## Trade-offs
 
-- When one of this Machine's own rooms fails while the meta room stays joined, it is
-  retried by the 30 s sweep instead of a 1 s backoff reconnect.
 - After 5 idle minutes, the first catalog read reports `catalog_syncing` again
   until the new reader reaches its baseline.
 - List and status for another Machine's Session answer from the replica as it
@@ -102,7 +103,7 @@ protection, so it does not explain the plaintext reports.
 ## Verification
 
 - `apps/cli/src/lib/loro/connection-recovery.test.ts` covers a failed doc room with
-  a joined meta room: no reconnect before the watchdog, a sweep-only retry, and
+  a joined meta room: a per-room sweep after about 1 s that backs off, and
   cloud side effects and meta waits still available. It also covers a
   disconnected transport without a meta room.
 - `apps/cli/tests/reconnect-storm-repro.test.ts` scenarios A and D: a flapping
@@ -113,8 +114,8 @@ protection, so it does not explain the plaintext reports.
   reads, not rejoined without a read, and can be joined again later.
 - `apps/cli/src/mcp/daemon-session-tools.test.ts` covers another Machine's Session:
   status keeps the room until its first sync and then releases it; history
-  answers from the replica when the first sync stalls and releases the room at
-  the bound; a later read joins again; a failed wrapper cleanup keeps the
+  answers from the replica when the first sync stalls, does not wait again while
+  that room is retained, and releases it at the bound; a later read joins again; a failed wrapper cleanup keeps the
   completed read.
 - Not verified against live Streams with a stalled room. The renderer-protection
   and cancellation branches of the retained room are covered by review, not by a

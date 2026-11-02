@@ -205,14 +205,20 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     expect(instance.isRecovering()).toBe(false);
     expect(instance.isTransportConnected()).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(29_000);
-    expect(reconnect).not.toHaveBeenCalled();
-
-    // The failed room is retried by the per-room watchdog sweep only.
+    // The failed room is swept about as soon as a reconnect would have run, so
+    // this Machine's own room recovers quickly, but only as a per-room sweep.
     await vi.advanceTimersByTimeAsync(1_000);
     expect(reconnect).toHaveBeenCalledTimes(1);
     expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
     expect(joinMetaRoom).not.toHaveBeenCalled();
+
+    // While it keeps failing, sweeps back off instead of repeating every second.
+    instance.setTransportStatus('disconnected');
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconnect).toHaveBeenCalledTimes(2);
+    expect(reconnect).toHaveBeenLastCalledWith({ resetBackoff: false, timeout: 10_000 });
     expect(metaSynced).not.toHaveBeenCalled();
     expect(streamsOnline).not.toHaveBeenCalled();
   });

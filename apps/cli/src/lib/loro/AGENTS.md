@@ -154,8 +154,8 @@ charges the attempt counter instead of resetting it, and `force` must not clear 
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
 
 Health follows the meta room. While it is joined, an aggregate `disconnected`
-means one doc or Flock room failed: health reads `rooms-degraded`, the 30s
-watchdog sweep retries that room, and cloud side effects keep running. Never
+means one doc or Flock room failed: health reads `rooms-degraded`, a backed-off
+per-room sweep (1s to 30s) retries that room, and cloud side effects keep running. Never
 schedule a transport-wide reconnect for it; one room that never finished its
 initial sync did that every two minutes
 ([note](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).

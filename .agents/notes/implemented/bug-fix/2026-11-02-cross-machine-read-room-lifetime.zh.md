@@ -34,8 +34,8 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 ## 决策
 
 1. **健康状态以 meta room 为准。** meta room 处于 joined 时，聚合 `disconnected` 报告为
-   `rooms-degraded`，在恢复逻辑中视为健康：由 30 s watchdog 的逐 room 清扫重试该 room，
-   不触发 transport 级重连、恢复边沿或 O(rooms) 重扫。控制云端副作用的
+   `rooms-degraded`，在恢复逻辑中视为健康：只清扫失败的 room，失败后约 1 s 开始，持续失败时退避到 30 s，
+   因此当前 Machine 自己的 room 恢复速度与之前相同；不触发 transport 级重连、恢复边沿或 O(rooms) 重扫。控制云端副作用的
    `isTransportConnected()` 在 meta room joined 时返回 true。即使其他 room 让聚合状态变成
    disconnected，`waitUntilMetaSynced` 也照常等待 meta room。adapter 关闭和真实断网都会让
    meta room 一起下线，因此仍走完整的恢复路径。
@@ -46,7 +46,7 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 3. **读取其他 Machine 的会话改为临时读。** `readSessionDocTransiently` 对已缓存或正在初始化的
    doc 直接读取；否则在该 doc 的本地所有权链下，于 `sessions` 之外打开一个临时
    `SessionDocument`，读完以保留状态的方式销毁。云端 room 在该 wrapper 之外 join。
-   history 最多等待 8 s 完成首次同步；list 和 status 不等待。随后 room 会保留到首次同步完成，
+   history 最多等待 8 s 完成首次同步，但如果之前读取保留的 room 仍在等待，就不再重复等待；list 和 status 不等待。随后 room 会保留到首次同步完成，
    或经过 `TRANSIENT_DOC_ROOM_RETAIN_MS`（150 s，长于 Streams 的 120 s 期限）为止。如果读完立即释放，
    每次较慢的首次同步都会被中止：大型对话记录永远到不了本地副本，已结束的 turn 也会一直显示忙碌。
    保留的 room 与 renderer bridge 共用登记表，因此正式的 `getOrCreateSessionDoc`、renderer 离开以及
@@ -68,7 +68,6 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 
 ## 权衡
 
-- 当前 Machine 自己的 room 失败而 meta room 仍 joined 时，改由 30 s 清扫重试，而不是 1 s 起步的退避重连。
 - 闲置 5 分钟后，第一次 catalog 读取会重新返回 `catalog_syncing`，直到新 reader 达到 baseline。
 - 其他 Machine 会话的 list 和 status 按本地副本现状作答，保留的 room 会为下一次读取刷新副本；
   活跃状态仍来自 presence 和所属 Machine 的 RPC 快照。
@@ -79,13 +78,13 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 ## 验证
 
 - `apps/cli/src/lib/loro/connection-recovery.test.ts` 覆盖 meta room joined 时某个 doc room
-  失败的情况：watchdog 之前不重连，只由清扫重试，云端副作用和 meta 等待照常可用；也覆盖没有
+  失败的情况：约 1 s 后只清扫该 room 并逐步退避，云端副作用和 meta 等待照常可用；也覆盖没有
   meta room 时 transport disconnected 的情况。
 - `apps/cli/tests/reconnect-storm-repro.test.ts` 场景 A 和 D：meta room joined 时聚合状态反复
   抖动，fan-out 和重扫均为零。场景 B：真实断网仍按退避重试。
 - `apps/cli/src/lib/loro/workspace-catalog-sync.test.ts` 覆盖其他 Machine 的 catalog 始终不同步
   的情况：闲置窗口后释放，读取会延长租约，没有读取时不重新 join，之后可以再次 join。
 - `apps/cli/src/mcp/daemon-session-tools.test.ts` 覆盖其他 Machine 的会话：status 会保留 room
-  直到首次同步后释放；首次同步卡住时 history 用本地副本作答，并在上限时释放 room；之后的读取会重新
+  直到首次同步后释放；首次同步卡住时 history 用本地副本作答，该 room 保留期间不再重复等待，并在上限时释放；之后的读取会重新
   join；临时 wrapper 清理失败时保留已完成的读取结果。
 - 未在真实 Streams 和卡住的 room 上验证。保留 room 时保护 renderer 和取消的分支只经过代码审查，没有测试覆盖。

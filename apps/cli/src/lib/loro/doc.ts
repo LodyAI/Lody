@@ -1692,10 +1692,13 @@ export class LoroDocumentManager {
         remoteSync: false,
         ...(historyBackend ? { historyBackend } : {}),
       });
+      // A room already retained for this doc is still in a slow or stuck first
+      // sync; waiting again would only add latency to every read.
+      const syncPending = this.localDocRoomBridges.has(docId);
       const room = await this.joinTransientDocRoom(sessionId, docId);
       let outcome: { ok: true; value: T } | { ok: false; error: unknown };
       try {
-        if (room && options.remoteSyncTimeoutMs > 0) {
+        if (room && !syncPending && options.remoteSyncTimeoutMs > 0) {
           await withTimeout(
             streamsRoomBinding(room).firstSyncedWithRemote,
             options.remoteSyncTimeoutMs,
