@@ -813,9 +813,26 @@ export function GeneralSettingsComponent() {
                 />
               </CompactRow>
             </div>
+            <CompactRow
+              labelId={prImagesLabelId}
+              helperId={prImagesHelperId}
+              label={t('settings.general.prImages.label', 'Automatically load PR images')}
+              helper={t(
+                'settings.general.prImages.helper',
+                'When off, load images individually. Image websites can see your IP address.'
+              )}
+            >
+              <Switch
+                aria-labelledby={prImagesLabelId}
+                aria-describedby={prImagesHelperId}
+                checked={prImagesEnabled === true}
+                onCheckedChange={setPrImagesEnabled}
+              />
+            </CompactRow>
           </CompactSection>
         )}
 
+        {/* Clear local cache stays last in General settings. */}
         <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>
           <ExperimentalFeatureRows />
           <CompactRow
@@ -827,24 +844,6 @@ export function GeneralSettingsComponent() {
               {t('settings.cache.clearCache.button')}
             </Button>
           </CompactRow>
-          {isElectron ? (
-            <CompactRow
-              labelId={prImagesLabelId}
-              helperId={prImagesHelperId}
-              label={t('settings.general.prImages.label', 'Automatically load PR images')}
-              helper={t(
-                'settings.general.prImages.helper',
-                'HTTPS image websites can see your IP address.'
-              )}
-            >
-              <Switch
-                aria-labelledby={prImagesLabelId}
-                aria-describedby={prImagesHelperId}
-                checked={prImagesEnabled === true}
-                onCheckedChange={setPrImagesEnabled}
-              />
-            </CompactRow>
-          ) : null}
         </CompactSection>
       </div>
       <ClearCacheConfirmDialog

@@ -1,6 +1,6 @@
 {
   "settings.general.prImages.label": "自动加载 PR 图片",
-  "settings.general.prImages.helper": "HTTPS 图片所在网站可能看到你的 IP 地址。",
+  "settings.general.prImages.helper": "关闭时可逐张加载。图片所在网站可能看到你的 IP 地址。",
   "sessions.prImage.image": "图片",
   "sessions.prImage.failed": "无法加载图片",
   "sessions.prImage.load": "加载图片",

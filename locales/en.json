@@ -1,6 +1,6 @@
 {
   "settings.general.prImages.label": "Automatically load PR images",
-  "settings.general.prImages.helper": "HTTPS image websites can see your IP address.",
+  "settings.general.prImages.helper": "When off, load images individually. Image websites can see your IP address.",
   "sessions.prImage.image": "Image",
   "sessions.prImage.failed": "Unable to load image",
   "sessions.prImage.load": "Load image",
