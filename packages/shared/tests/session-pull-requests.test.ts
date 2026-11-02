@@ -119,18 +119,7 @@ describe('session PR views', () => {
       [write.field]: write.value,
       pullRequestState: { [web]: { s: 'f', m: 'u', t: 1 }, [apiLater]: { s: 's', m: 'c', t: 1 } },
     });
-    expect(
-      views.map(({ url, repoFullName, number, status, ci, merge, readiness, current }) => ({
-        url,
-        repoFullName,
-        number,
-        status,
-        ci,
-        merge,
-        readiness,
-        current,
-      }))
-    ).toEqual([
+    expect(views.map(({ pr: _pr, state: _state, ...summary }) => summary)).toEqual([
       {
         url: api,
         repoFullName: 'example/api',
