@@ -1,6 +1,6 @@
 # 加密机器共享
 
-Status: draft
+Status: approved · [approval](https://github.com/LodyAI/Lody/pull/2228) (merge `9b24c65ee`) · [记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#机器共享)
 Translation: current
 
 [English](machine-sharing.md)

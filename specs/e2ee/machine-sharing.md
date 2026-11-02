@@ -1,6 +1,6 @@
 # Encrypted machine sharing
 
-Status: draft
+Status: approved · [approval](https://github.com/LodyAI/Lody/pull/2228) (merge `9b24c65ee`) · [record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#machine-sharing)
 Translation: current
 
 [中文](machine-sharing.zh.md)

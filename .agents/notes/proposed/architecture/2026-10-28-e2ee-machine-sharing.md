@@ -6,7 +6,7 @@ PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.co
 
 [中文](2026-10-28-e2ee-machine-sharing.zh.md)
 
-Intent and guarantees: [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) (draft).
+Intent and guarantees: [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) (approved).
 
 ## Abstract
 
