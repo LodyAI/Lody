@@ -148,6 +148,11 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
   - 它校验完整历史，并找出本账号唯一的成员身份。
   - 安装时，批准标签认证了准入记录的账本哈希；它找到这条记录，把记录的签名者当作背书者。
   - 遇到无关的待完成配对时，它报告 `pairing-journal-busy`，流程会把该工作区显示为 `blocked`。
+- **`makePortableAccountPairingApprover`** 是批准方一侧。在某个工作区有已打开、已接纳会话（`session.accountApproval`）的设备，可以在该工作区批准：
+  - 在本地签名个人 `AdmitDevice`，不走网络；
+  - 通过注入的账号认证 `appendRecord` 追加已记录的原件，并绑定新设备的凭据哈希，然后从已验证账本判定结果（已提交、已失效或尚未确定）；
+  - Owner 或 Admin 交付签名的快照邀请；Member 返回 `null`，批准行因此不带邀请，新设备改为验证完整历史；
+  - 给中继用的设备访问凭据只留在这个组装内部。
 - **`makeAccountE2eeRuntime`** 把账号级 `E2eeWorkspaceRuntime` 的调用分发到各工作区的运行时。它只暴露列出的方法，因此“按方法是否存在判断能力”的做法依然准确。
 
 身份保护方式由各宿主的平台决定（`PersonalHostPlatform.protection`）。

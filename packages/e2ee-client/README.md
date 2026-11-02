@@ -207,6 +207,15 @@ workflow's.
     ledger hash the approval tag authenticated.
   - It reports an unrelated pending join as `pairing-journal-busy`, which the workflow
     shows as `blocked`.
+- **`makePortableAccountPairingApprover`** is the approver side. A device with an
+  open, admitted session in a workspace (`session.accountApproval`) can approve there:
+  - it signs the personal `AdmitDevice` locally, with no network;
+  - it appends the journaled original with the new device's credential hash through
+    the injected account-authenticated `appendRecord`, then settles the outcome from
+    the verified ledger (committed, lost, or not yet decided);
+  - it delivers a signed snapshot invitation as Owner or Admin. A Member gets `null`,
+    so its row carries no invitation and the new device verifies the full history;
+  - its device access for the relay stays inside this composition.
 - **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
   per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
   accurate.

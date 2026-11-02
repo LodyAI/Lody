@@ -211,6 +211,15 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         updateMachineSharing: (...args: Parameters<RawSession['updateMachineSharing']>) =>
           call(raw.updateMachineSharing(...args)),
         ledgerState: () => call(raw.ledgerState()),
+        accountApproval: Object.freeze({
+          sign: (...args: Parameters<RawSession['accountApproval']['sign']>) =>
+            call(raw.accountApproval.sign(...args)),
+          settle: (...args: Parameters<RawSession['accountApproval']['settle']>) =>
+            call(raw.accountApproval.settle(...args)),
+          invitation: (...args: Parameters<RawSession['accountApproval']['invitation']>) =>
+            call(raw.accountApproval.invitation(...args)),
+          access: () => call(raw.accountApproval.access()),
+        }),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>

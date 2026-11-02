@@ -82,6 +82,17 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await call(page, 'keyRound')).ok).toBe(true);
       const sealed = await call(page, 'seal');
       expect(sealed.ok, JSON.stringify(sealed)).toBe(true);
+      // The paired portable device now approves a further device: it signs the
+      // admission, the append settles from the verified ledger, and its snapshot
+      // invitation verifies for it as endorser.
+      const approved = await call(page, 'accountApproveNewDevice');
+      expect(approved.ok, JSON.stringify(approved)).toBe(true);
+      expect(approved.value).toEqual({
+        before: 'unknown',
+        length: 3,
+        invitation: true,
+        access: true,
+      });
     } finally {
       await context?.close();
       await rm(dir, { recursive: true, force: true });
