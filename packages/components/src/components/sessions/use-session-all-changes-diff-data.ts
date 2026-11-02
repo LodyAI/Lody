@@ -32,6 +32,10 @@ const delay = (ms: number): Promise<void> =>
  *
  * Returns the same shape the diff panel consumes from the conversation hook, so the panel can
  * select between the two by `mode`.
+ *
+ * `ownerOffline` means presence has positively observed the owner Machine offline ('unknown' must
+ * not set it). Every diff here is read live from that Machine, so the hook sends nothing, drops any
+ * earlier batch instead of presenting it as current, and refetches once the owner returns.
  */
 export function useSessionAllChangesDiffData({
   sessionId,
@@ -42,6 +46,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending = false,
   enabled = true,
   scope = 'branch',
+  ownerOffline = false,
 }: {
   sessionId: SessionId;
   filePaths: string[];
@@ -51,6 +56,7 @@ export function useSessionAllChangesDiffData({
   fileProviderPending?: boolean;
   enabled?: boolean;
   scope?: CodeCollabAllChangesScope;
+  ownerOffline?: boolean;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -62,6 +68,7 @@ export function useSessionAllChangesDiffData({
   base: string | null;
   unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
   unavailableMessage: string | null;
+  ownerOffline: boolean;
 } {
   const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
@@ -84,6 +91,7 @@ export function useSessionAllChangesDiffData({
     unavailableMessage: string | null;
   } | null>(null);
   const currentBatch =
+    !ownerOffline &&
     batch !== null &&
     batch.provider === fileProvider &&
     batch.pathsKey === normalizedPathsKey &&
@@ -135,7 +143,7 @@ export function useSessionAllChangesDiffData({
     !fileProviderPending && (!fileProvider || !canBatch) && normalizedPaths.length > 0;
 
   useEffect(() => {
-    if (!enabled || !fileProvider?.getAllChangesDiff) {
+    if (!enabled || ownerOffline || !fileProvider?.getAllChangesDiff) {
       return undefined;
     }
     let cancelled = false;
@@ -245,16 +253,17 @@ export function useSessionAllChangesDiffData({
     return () => {
       cancelled = true;
     };
-    // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set or
-    // the comparison scope changes.
+    // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set,
+    // the comparison scope or owner liveness changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, fileProvider, normalizedPathsKey, scope]);
+  }, [enabled, fileProvider, normalizedPathsKey, ownerOffline, scope]);
 
   const hasAllResolved = useMemo(
     () => normalizedPaths.every((path) => Boolean(resolvedByPath[path])),
     [normalizedPaths, resolvedByPath]
   );
-  const isPanelLoading = normalizedPaths.length > 0 && !isDiffUnavailable && !hasAllResolved;
+  const isPanelLoading =
+    !ownerOffline && normalizedPaths.length > 0 && !isDiffUnavailable && !hasAllResolved;
   const unavailableMessage = currentBatch?.unavailableMessage ?? null;
   const batchReady =
     currentBatch !== null &&
@@ -272,5 +281,6 @@ export function useSessionAllChangesDiffData({
     base: currentBatch?.base ?? null,
     unavailableScopeReason: currentBatch?.unavailableScopeReason ?? null,
     unavailableMessage,
+    ownerOffline,
   };
 }
