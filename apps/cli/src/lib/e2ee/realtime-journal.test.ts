@@ -385,6 +385,35 @@ describe('host-only E2EE realtime journal', () => {
     }
   });
 
+  it.each(['SQLITE_BUSY', 'SQLITE_IOERR'])(
+    'preserves the journal when schema validation encounters %s',
+    (code) => {
+      journal.receive(request);
+      const original = snapshotDatabase(filename);
+      const cause = Object.assign(new Error('synthetic SQLite failure'), { code });
+      const prepare = Database.prototype.prepare;
+      let injected = false;
+      const spy = vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (sql) {
+        if (!injected && sql.includes('FROM realtime_requests LIMIT 0')) {
+          injected = true;
+          throw cause;
+        }
+        return prepare.call(this, sql);
+      });
+      const failure = expectCode(() => journal.claim(request), 'storage');
+      expect(failure.cause).toBe(cause);
+      spy.mockRestore();
+      expect(readdirSync(directory).some((name) => name.includes('.archive-'))).toBe(false);
+      expect(snapshotDatabase(filename)).toEqual(original);
+      expect(journal.read(request)).toMatchObject({ state: 'received', frame: request.frame });
+      takePermit(journal);
+      expect(new RealtimeJournal(filename, () => now).claim(request)).toMatchObject({
+        state: 'existing',
+        record: { state: 'uncertain' },
+      });
+    }
+  );
+
   it('rolls back a start whose commit is blocked by a live reader and recovers after reader release', () => {
     journal.receive(request);
     const reader = new Database(filename, { timeout: 0 });
