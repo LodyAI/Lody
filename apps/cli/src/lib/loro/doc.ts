@@ -1314,8 +1314,11 @@ export class LoroDocumentManager {
       sub: RepoRoomSubscription | null;
     }
   >();
+  /** Doc rooms a local renderer currently subscribes to; their docs stay loaded. */
+  private readonly localRendererDocRooms = new Set<string>();
 
   private handleLocalDocRoomJoin(docId: string): void {
+    this.localRendererDocRooms.add(docId);
     const sessionId = getSessionIdFromRoomId(docId);
     if (
       !sessionId ||
@@ -1387,6 +1390,7 @@ export class LoroDocumentManager {
   }
 
   private handleLocalDocRoomLeave(docId: string): void {
+    this.localRendererDocRooms.delete(docId);
     const sessionId = getSessionIdFromRoomId(docId);
     if (!sessionId || this.cleaningUp) {
       return;
@@ -1633,6 +1637,72 @@ export class LoroDocumentManager {
         await sessionDoc.destroy({ preserveStatus: true });
       }
     });
+  }
+
+  /**
+   * Observation read of a Session doc without adopting it into the shared
+   * `sessions` cache. A cached or initializing doc is read in place. Otherwise
+   * a temporary wrapper reads the local replica and is destroyed afterwards, so
+   * the request never leaves a cloud room joined for the life of the process.
+   * With `remoteSyncTimeoutMs > 0` it joins the room and waits at most that long
+   * for the first remote sync; `0` reads the local replica without joining.
+   * Holding other Machines' rooms after one-off reads made a room that never
+   * finished its initial sync retry until daemon restart (#2194).
+   */
+  async readSessionDocTransiently<T>(
+    sessionId: SessionId,
+    read: (sessionDoc: SessionDocument) => Promise<T>,
+    options: { remoteSyncTimeoutMs: number }
+  ): Promise<T> {
+    if (this.sessions.has(sessionId) || this.pendingSessionDocs.has(sessionId)) {
+      return await read(await this.getOrCreateSessionDoc(sessionId));
+    }
+    const docId = getSessionRoomId(sessionId);
+    const temporary = await this.withLocalDocOwnership(docId, async () => {
+      // A live owner may have adopted the doc while this read waited.
+      if (this.sessions.has(sessionId) || this.pendingSessionDocs.has(sessionId)) return null;
+      const sessionDoc = new SessionDocument(
+        this.repo,
+        sessionId,
+        // A local renderer or its cloud bridge still uses the loaded doc.
+        async (readDocId) => {
+          if (this.localRendererDocRooms.has(readDocId) || this.localDocRoomBridges.has(readDocId))
+            return;
+          await this.unloadDocRoom(readDocId);
+        },
+        this.logger,
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+      );
+      const meta = await this.repo.getDocMeta(docId);
+      const historyBackend = !isLoroRepoDocDeleted(meta)
+        ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
+        : undefined;
+      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
+        throw new Error('e2ee_history_backend_unavailable');
+      const remoteSync = options.remoteSyncTimeoutMs > 0;
+      await sessionDoc.init({
+        skipAutoRead: true,
+        remoteSync,
+        ...(historyBackend ? { historyBackend } : {}),
+      });
+      try {
+        if (remoteSync) {
+          await withTimeout(
+            sessionDoc.waitForRemoteSync(),
+            options.remoteSyncTimeoutMs,
+            `Timeout waiting for transient session doc sync (room=${docId})`
+          ).catch((error: unknown) => {
+            this.logger.debug(
+              `[${sessionId}] Transient session read continues from the local replica: ${formatErrorMessage(error)}`
+            );
+          });
+        }
+        return { value: await read(sessionDoc) };
+      } finally {
+        await sessionDoc.destroy({ preserveStatus: true });
+      }
+    });
+    return temporary ? temporary.value : await read(await this.getOrCreateSessionDoc(sessionId));
   }
 
   async createSession(
@@ -2414,7 +2484,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return this.mirror.subscribe(listener);
   }
 
-  async init(options: { skipAutoRead?: boolean; historyBackend?: SessionHistoryBackendKind } = {}) {
+  async init(
+    options: {
+      skipAutoRead?: boolean;
+      historyBackend?: SessionHistoryBackendKind;
+      /** False reads only the local replica and never joins the cloud room. */
+      remoteSync?: boolean;
+    } = {}
+  ) {
     this.destroyed = false;
     try {
       this.handle = await this.repo.openPersistedDoc(this.roomId);
@@ -2426,7 +2503,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       });
       this.sessionBackendInstance = await createSessionBackend(this, { historyBackend });
       await this.sessionBackendInstance.initialize({ skipAutoRead: options.skipAutoRead === true });
-      this.remoteSyncReady = this.startDocRoomSync();
+      if (options.remoteSync !== false) this.remoteSyncReady = this.startDocRoomSync();
     } catch (error) {
       await this.abortInitialization();
       throw error;

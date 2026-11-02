@@ -186,60 +186,59 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     expect(reconnect).not.toHaveBeenCalled();
   });
 
-  it('reports one meta sync once rooms finish rejoining after a real disconnect', async () => {
+  it('keeps one failed doc room from starting a transport-wide recovery', async () => {
+    // #2194: a cross-machine read joined a room whose initial sync never
+    // finished. Each failure made the aggregate 'disconnected', and treating
+    // that as an outage reconnected the workspace and rescanned every session
+    // about every two minutes. The meta room never left 'joined'.
     const reconnect = vi.fn(async () => {});
+    const joinMetaRoom = vi.fn();
     const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+    const instance = createController({ reconnect, joinMetaRoom }, metaSub);
     const metaSynced = vi.fn();
+    const streamsOnline = vi.fn();
     instance.onMetaRoomSynced(metaSynced);
+    instance.onStreamsOnline(streamsOnline);
 
     instance.setTransportStatus('disconnected');
-    expect(instance.getStreamsHealth()).toBe('recovering');
-    expect(instance.isRecovering()).toBe(true);
+    expect(instance.getStreamsHealth()).toBe('rooms-degraded');
+    expect(instance.isRecovering()).toBe(false);
+    expect(instance.isTransportConnected()).toBe(true);
 
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(reconnect).not.toHaveBeenCalled();
+
+    // The failed room is retried by the per-room watchdog sweep only.
     await vi.advanceTimersByTimeAsync(1_000);
     expect(reconnect).toHaveBeenCalledTimes(1);
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
+    expect(joinMetaRoom).not.toHaveBeenCalled();
     expect(metaSynced).not.toHaveBeenCalled();
-
-    // Rooms are back to merely joining: nothing is disconnected or errored
-    // anymore, so this is the end of the recovery episode.
-    instance.setTransportStatus('connecting');
-    await vi.waitFor(() => expect(metaSynced).toHaveBeenCalledTimes(1));
-
-    instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
+    expect(streamsOnline).not.toHaveBeenCalled();
   });
 
-  it('waits for aggregate transport recovery before reporting one meta sync', async () => {
+  it('confirms meta writes while an unrelated room is disconnected', async () => {
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect: vi.fn(async () => {}) }, metaSub);
+
+    instance.setTransportStatus('disconnected');
+    await expect(instance.waitUntilMetaSynced({ reason: 'test' })).resolves.toBe(true);
+    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a disconnected transport without a joined meta room as offline', async () => {
     const reconnect = vi.fn(async () => {});
     const metaSub = createMetaSub('joined');
     const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
 
+    metaSub.emitStatus('reconnecting');
     instance.setTransportStatus('disconnected');
+    expect(instance.getStreamsHealth()).toBe('recovering');
+    expect(instance.isTransportConnected()).toBe(false);
+    await expect(instance.waitUntilMetaSynced({ reason: 'test' })).resolves.toBe(false);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    expect(metaSub.waitUntilSynced).not.toHaveBeenCalled();
-    expect(metaSynced).not.toHaveBeenCalled();
-
-    // Recovery remains unhealthy, so the next attempt uses exponential
-    // backoff instead of being reset by the still-joined meta room.
-    await vi.advanceTimersByTimeAsync(1_999);
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(reconnect).toHaveBeenCalledTimes(2);
-    expect(metaSynced).not.toHaveBeenCalled();
-
-    instance.setTransportStatus('connected');
-    await vi.waitFor(() => expect(metaSynced).toHaveBeenCalledTimes(1));
-    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-
-    instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
   });
 
   it('reports each real meta-room recovery generation exactly once', async () => {
@@ -267,12 +266,9 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     expect(metaSynced).toHaveBeenCalledTimes(2);
   });
 
-  it('throttles the expensive fan-out on a transport-only flap but never the online signal', async () => {
-    // The two signals carry different meanings and must not be collapsed again.
-    // `meta-room-synced` drives O(rooms) rescans, so a flap that never took the
-    // meta room down is rate-limited. `streams-online` releases work parked
-    // while offline (a dirty Machine Flock doc arms no timer of its own), so it
-    // must fire on every edge.
+  it('ignores transport-only flaps while the meta room stays joined', async () => {
+    // `meta-room-synced` drives O(rooms) rescans. A flap that never took the
+    // meta room down cannot have missed metadata, so it is not a recovery edge.
     const reconnect = vi.fn(async () => {});
     const metaSub = createMetaSub('joined');
     const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
@@ -287,13 +283,10 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
       await vi.advanceTimersByTimeAsync(0);
     }
 
-    // First recovery is not delayed (cold start); the rest wait out the floor.
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-    expect(streamsOnline).toHaveBeenCalledTimes(5);
-
-    // Deferred, never dropped: the throttled emit lands once the floor elapses.
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(metaSynced).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(metaSynced).not.toHaveBeenCalled();
+    expect(streamsOnline).not.toHaveBeenCalled();
+    expect(reconnect).not.toHaveBeenCalled();
   });
 
   it('does not throttle a fan-out after the meta room actually degraded', async () => {

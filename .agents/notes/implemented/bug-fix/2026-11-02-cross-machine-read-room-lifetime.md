@@ -1,0 +1,107 @@
+# Cross-machine reads must not hold rooms or degrade the transport
+
+Status: implemented
+Translation: current
+Issue: [#2194](https://github.com/LodyAI/Lody/issues/2194)
+
+[中文](2026-11-02-cross-machine-read-room-lifetime.zh.md)
+
+## Abstract
+
+A daemon MCP read of another Machine's data (`lody_agent_role_list` without a
+Machine filter, `lody_session_list`, `lody_session_status_many`,
+`lody_session_history`) joined that Machine's Flock or Session room and kept it
+joined until the process ended. When such a room never finished its initial sync,
+each 120 s `initial_sync_timeout` made the aggregate Streams status
+`disconnected`. Recovery then reconnected the whole workspace, rejoined that room,
+rescanned owned Sessions and skipped cloud side effects. The cycle repeated about
+every 121 s until restart. The fix bounds the lifetime of rooms held by those reads
+and stops one failed room from counting as a transport outage.
+
+## Mechanism
+
+- Catalog readers held every requested Flock forever: `held` had no removal path,
+  the reader ended in `Effect.never`, and failures retried without a limit.
+- MCP Session reads used `getOrCreateSessionDoc`. That call adopts the doc into the
+  shared, unrefcounted `sessions` cache, which nothing evicts for another Machine's
+  Session.
+- In `loro-repo@0.25.0` the aggregate is `disconnected` when any room is in error.
+  `connection-recovery.ts` treated that as unhealthy: it reconnected the workspace,
+  ran the meta-ready ceremony and set `isTransportConnected()` to false.
+- In `streams-crdt@0.19.2` `initial_sync_timeout` is retryable. The failed join
+  state stays attached, and `repo.reconnect()` revives it through `rejoin()`.
+
+The same code was present in 0.108.x. Cross-machine Roles and reads made the
+trigger common. The Streams patch added in 0.109.0 runs only with payload
+protection, so it does not explain the plaintext reports.
+
+## Decision
+
+1. **Health follows the meta room.** While the meta room is joined, an aggregate
+   `disconnected` is reported as `rooms-degraded`. It is healthy for recovery
+   purposes: the 30 s watchdog's per-room sweep retries the room, and no
+   transport-wide reconnect, recovery edge or O(rooms) rescan starts.
+   `isTransportConnected()`, which gates cloud side effects, is true while the meta
+   room is joined. `waitUntilMetaSynced` waits for the meta room even when another
+   room made the aggregate disconnected. Adapter close and real outages take the
+   meta room down too, so they keep the full recovery path.
+2. **Catalog leases are transient.** Metadata and the workspace Flock stay joined.
+   Any other catalog reader is released `TRANSIENT_CATALOG_IDLE_MS` (5 min) after
+   the last `hold`/`ready` call. An idle reader stops waiting for its baseline and
+   stops retrying. A release defect is reported at
+   shutdown but is not cached: the next read starts a fresh reader.
+3. **Session reads of another Machine are transient.**
+   `readSessionDocTransiently` reads a cached or initializing doc in place.
+   Otherwise it opens a temporary `SessionDocument` outside `sessions`, under the
+   doc's local ownership chain, and destroys it with status preserved. List and
+   status read only the local replica (`remoteSync: false`). History joins and
+   waits at most 8 s for the first sync, then releases the room. The temporary
+   wrapper does not unload the doc while a local renderer room or its cloud bridge
+   still uses it. This Machine's own Sessions keep the cached execution doc.
+
+## Alternatives
+
+- **Only adopt [loro-streams#440](https://github.com/loro-dev/loro-streams/pull/440)**
+  (240 s deadline, non-retryable timeout). This lengthens each cycle and changes
+  which caller retries. Catalog retries still rejoin, and every failure still makes
+  the aggregate disconnected, so the machine-wide effect remains. It is still worth
+  adopting once published.
+- **Change the aggregate in loro-repo.** That is the correct long-term owner of
+  per-room status, but it needs an SDK release. The Lody-side health rule does not
+  depend on it and stays correct if the SDK later reports per-room failures
+  separately.
+- **Destroy cached Session docs after MCP reads.** Rejected: `sessions` has no
+  refcount, and destroying a doc another holder adopted breaks that holder (see
+  `apps/cli/src/lib/loro/AGENTS.md`).
+- **Keep the old recovery and only add reconnect backoff.** That backoff already
+  existed (`tests/reconnect-storm-repro.test.ts`). It bounds the reconnect rate but
+  still marks the machine offline and skips cloud side effects for the whole
+  failure.
+
+## Trade-offs
+
+- When one of this Machine's own rooms fails while the meta room stays joined, it is
+  retried by the 30 s sweep instead of a 1 s backoff reconnect.
+- After 5 idle minutes, the first catalog read reports `catalog_syncing` again
+  until the new reader reaches its baseline.
+- List and status for another Machine's Session can use a stale local replica.
+  Liveness still comes from presence and the owner's RPC snapshot.
+- Why some rooms never finish their initial sync from another machine
+  (server, proxy or room data) is not addressed here.
+
+## Verification
+
+- `apps/cli/src/lib/loro/connection-recovery.test.ts` covers a failed doc room with
+  a joined meta room: no reconnect before the watchdog, a sweep-only retry, and
+  cloud side effects and meta waits still available. It also covers a
+  disconnected transport without a meta room.
+- `apps/cli/tests/reconnect-storm-repro.test.ts` scenarios A and D: a flapping
+  aggregate with a joined meta room causes zero fan-outs and scans. Scenario B: a
+  real outage still backs off.
+- `apps/cli/src/lib/loro/workspace-catalog-sync.test.ts` covers another Machine's
+  catalog that never syncs: it is released after the idle window, extended by
+  reads, not rejoined without a read, and can be joined again later.
+- `apps/cli/src/mcp/daemon-session-tools.test.ts` covers list and status of another
+  Machine's Session with no room join, and history that joins once and releases.
+- Not verified against live Streams with a stalled room. The renderer-protection
+  branch of the temporary wrapper is covered by review, not by a test.

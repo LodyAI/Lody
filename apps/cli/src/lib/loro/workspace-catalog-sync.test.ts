@@ -17,7 +17,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import { makeWorkspaceCatalogSync } from './workspace-catalog-sync';
+import { makeWorkspaceCatalogSync, TRANSIENT_CATALOG_IDLE_MS } from './workspace-catalog-sync';
 import { WorkspaceCatalogSyncLegacy } from './workspace-catalog-sync-legacy';
 import { makePromiseRepoNetwork } from './promise-repo-network.test-support';
 
@@ -325,6 +325,45 @@ describe('daemon Promise Repo catalog ownership', () => {
   );
 
   it.effect(
+    "releases another Machine's catalog once reads stop, even when its first sync never finishes",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #2194: a one-off Role listing held this room for the life of the
+          // daemon, so a room that never synced kept retrying forever.
+          const { net, owner, sync } = yield* fixture();
+          net.complete('meta');
+          net.complete(workspace);
+          expect(yield* sync.ready(machine, 0)).toBe(false);
+
+          // A read inside the window extends the lease.
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS - 1_000);
+          yield* sync.hold(machine);
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS - 1_000);
+          expect(net.live.has(machine)).toBe(true);
+
+          yield* TestClock.adjust(1_000);
+          expect(net.live.has(machine)).toBe(false);
+          expect(net.closed.has(machine)).toBe(true);
+          // Nothing rejoins it without a new read; permanent catalogs stay joined.
+          yield* TestClock.adjust(10 * TRANSIENT_CATALOG_IDLE_MS);
+          expect(net.live.has(machine)).toBe(false);
+          expect(net.live.has('meta')).toBe(true);
+          expect(net.live.has(workspace)).toBe(true);
+
+          // A later read joins again and can reach its baseline.
+          yield* sync.hold(machine);
+          yield* Effect.promise(() => net.joined(machine));
+          net.complete(machine);
+          expect(yield* sync.ready(machine, 1_000)).toBe(true);
+          yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+          expect(net.live.has(machine)).toBe(false);
+          yield* Scope.close(owner, Exit.void);
+        })
+      )
+  );
+
+  it.effect(
     'keeps a cold detached baseline uncertain and catches up when the same Repo attaches later',
     () =>
       Effect.scoped(
@@ -514,6 +553,51 @@ describe('daemon Promise Repo catalog ownership', () => {
         );
         expect(yield* sync.ready(workspace, 1_000)).toBe(true);
         expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        const exit = yield* Effect.exit(Scope.close(owner, Exit.void));
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) {
+          const defect = exit.cause.reasons.find((reason) => reason._tag === 'Die');
+          expect(defect).toMatchObject({
+            defect: { cause: { reasons: [{ defect: { errors: [original] } }] } },
+          });
+        }
+        for (const id of [workspace, machine]) yield* Effect.promise(() => repo.unloadFlockDoc(id));
+      })
+    )
+  );
+
+  it.effect('reports an idle release defect at shutdown without blocking the next read', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repo = yield* createRepo();
+        const original = new Error('Synthetic idle release failure');
+        const acquire = repo.acquireFlockDoc.bind(repo);
+        let failRelease = true;
+        let machineLeases = 0;
+        vi.spyOn(repo, 'acquireFlockDoc').mockImplementation(async (id) => {
+          const lease = await acquire(id);
+          if (id === machine) machineLeases += 1;
+          return {
+            ...lease,
+            release: async () => {
+              await lease.release();
+              if (id === machine && failRelease) {
+                failRelease = false;
+                throw original;
+              }
+            },
+          };
+        });
+        const owner = yield* Scope.make();
+        const sync = yield* Scope.provide(
+          makeWorkspaceCatalogSync(repo, workspaceId, logger, false),
+          owner
+        );
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+        // The failed idle release is not a cached answer: a fresh reader joins.
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        expect(machineLeases).toBe(2);
         const exit = yield* Effect.exit(Scope.close(owner, Exit.void));
         expect(Exit.isFailure(exit)).toBe(true);
         if (Exit.isFailure(exit)) {

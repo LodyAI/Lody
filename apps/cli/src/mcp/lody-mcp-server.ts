@@ -106,7 +106,7 @@ import {
   composeAgentRolePrompt,
   loadWorkspaceAgentRoleCatalog,
 } from '@/lib/agent-role-create';
-import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
 import {
@@ -1678,26 +1678,52 @@ const resolveSessionLiveWorkingFromSignals = (
   });
 };
 
+/** Bounded first-sync wait for reading another Machine's transcript once. */
+const REMOTE_SESSION_HISTORY_SYNC_WAIT_MS = 8_000;
+
+/**
+ * Reads another Machine's Session doc without keeping its cloud room joined.
+ * This Machine's own Sessions keep the shared cached doc that execution uses.
+ */
+const readSessionDocForMcp = async <T>(
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  localMachineId: string,
+  read: (sessionDoc: SessionDocument) => Promise<T>,
+  remoteSyncTimeoutMs: number
+): Promise<T> =>
+  session.machineId === localMachineId
+    ? await read(await manager.getOrCreateSessionDoc(session.id))
+    : await manager.readSessionDocTransiently(session.id, read, { remoteSyncTimeoutMs });
+
 const readSessionExecutionSnapshot = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
-  live: SessionLiveWorking
-): Promise<SessionExecutionSnapshot> => {
-  const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
-  const backend = await createSessionBackend(sessionDoc, session);
-  const [directory, queue] = await Promise.all([
-    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
-    backend.getMessageQueue(),
-  ]);
-  const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
-  const queuedTurnCount =
-    queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
-  return resolveSessionExecutionSnapshot({
-    live,
-    ...(activeTurnId ? { activeTurnId } : {}),
-    queuedTurnCount,
-  });
-};
+  live: SessionLiveWorking,
+  localMachineId: string
+): Promise<SessionExecutionSnapshot> =>
+  await readSessionDocForMcp(
+    manager,
+    session,
+    localMachineId,
+    async (sessionDoc) => {
+      const backend = await createSessionBackend(sessionDoc, session);
+      const [directory, queue] = await Promise.all([
+        backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+        backend.getMessageQueue(),
+      ]);
+      const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
+      const queuedTurnCount =
+        queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+      return resolveSessionExecutionSnapshot({
+        live,
+        ...(activeTurnId ? { activeTurnId } : {}),
+        queuedTurnCount,
+      });
+    },
+    // Status reads the local replica; the owner's presence and RPC carry liveness.
+    0
+  );
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1951,7 +1977,12 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
           nowMs,
           rpc: liveStatuses.get(session.id),
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, live);
+        const execution = await readSessionExecutionSnapshot(
+          manager,
+          session,
+          live,
+          auth.machineId
+        );
         return { session, live, execution };
       });
       matches.push(
@@ -2041,7 +2072,12 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           nowMs,
           rpc: live,
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, liveWorking);
+        const execution = await readSessionExecutionSnapshot(
+          manager,
+          session,
+          liveWorking,
+          auth.machineId
+        );
         return {
           sessionId,
           ok: true as const,
@@ -2098,17 +2134,24 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         false
       );
     }
-    const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const backend = await createSessionBackend(sessionDoc, session);
-    // Bounded business paging: `limit` counts displayable turns, the cursor is a
-    // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-    return await buildSessionHistoryForReader({
-      sessionId,
-      history: backend.history,
-      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-      ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-      maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-    });
+    return await readSessionDocForMcp(
+      manager,
+      session,
+      auth.machineId,
+      async (sessionDoc) => {
+        const backend = await createSessionBackend(sessionDoc, session);
+        // Bounded business paging: `limit` counts displayable turns, the cursor is a
+        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+        return await buildSessionHistoryForReader({
+          sessionId,
+          history: backend.history,
+          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+        });
+      },
+      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+    );
   });
 };
 

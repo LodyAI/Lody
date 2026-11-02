@@ -769,6 +769,57 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
+    // #2194: these reads joined other Machines' Session rooms for the life of
+    // the daemon, so a room that never synced kept retrying forever.
+    stubCreateOptionsReaders();
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    await manager.registerMachine(otherMachineId, {
+      id: otherMachineId,
+      name: 'Other',
+      ownerUserId,
+    });
+    const remoteSessionId = await manager.createSession(otherMachineId, 'custom', 'claude');
+    await manager.repo.flush();
+    const remoteRoomId = getSessionRoomId(remoteSessionId);
+    const joinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
+    const remoteRooms: Array<{ released: boolean }> = [];
+    vi.spyOn(manager.repo, 'joinDocRoom').mockImplementation(async (roomId, ...rest) => {
+      const room = await joinDocRoom(roomId, ...rest);
+      if (roomId !== remoteRoomId) return room;
+      const tracked = { released: false };
+      remoteRooms.push(tracked);
+      const unsubscribe = room.unsubscribe.bind(room);
+      room.unsubscribe = () => {
+        tracked.released = true;
+        unsubscribe();
+      };
+      return room;
+    });
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+
+    const listed = await call('lody_session_list', {});
+    const status = await call('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    // List and status read the local replica only.
+    expect(remoteRooms).toEqual([]);
+    const cachedAfterReads = manager.getConnectedRoomCount();
+    const history = await call('lody_session_history', { sessionId: remoteSessionId });
+
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    // History joins once for a bounded first sync, then releases the room.
+    expect(remoteRooms).toEqual([{ released: true }]);
+    expect(manager.getConnectedRoomCount()).toBe(cachedAfterReads);
+  });
+
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
     await seedRoles();
     vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
