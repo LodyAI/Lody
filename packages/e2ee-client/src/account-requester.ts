@@ -1,8 +1,15 @@
 import { Effect, Result } from 'effect';
-import type { E2eeWorkspaceHistoryPage, E2eeWorkspaceHistoryRequest } from '@lody/cloud-api';
+import type {
+  E2eeAppendRecordRequest,
+  E2eeWorkspaceHistoryPage,
+  E2eeWorkspaceHistoryRequest,
+} from '@lody/cloud-api';
 import type { E2eeAccountPairingRuntime, E2eeWorkspaceRuntime } from '@lody/platform';
 import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
-import type { AccountPairingRequesterWorkspace } from './account-pairing';
+import type {
+  AccountPairingApproverWorkspace,
+  AccountPairingRequesterWorkspace,
+} from './account-pairing';
 import { verifyPersonalHistory } from './admission';
 import type { makePersonalDeviceHost } from './host';
 import { decodePersonalRequest } from './pairing';
@@ -234,6 +241,75 @@ const ACCOUNT_METHODS: readonly (keyof AccountPairingMethods)[] = [
   'approveAccountPairing',
   'declineAccountPairing',
 ];
+
+/** One open workspace session of this device, as the account-pairing approver uses
+ * it (`accountApproval` of the personal session). */
+export interface AccountPairingApproverSession {
+  readonly binding: { readonly device: { toBytes(): Uint8Array } };
+  readonly accountApproval: {
+    sign(row: {
+      signingPublicKey: Uint8Array;
+      encryptionPublicKey: Uint8Array;
+      possessionProof: Uint8Array;
+    }): Effect.Effect<{ requestId: string; record: Uint8Array }, unknown>;
+    settle(record: Uint8Array): Effect.Effect<'committed' | 'lost' | 'unknown', unknown>;
+    invitation(record: Uint8Array): Effect.Effect<Uint8Array | null, unknown>;
+    access(): Effect.Effect<{ workspaceId: string; credential: string }, unknown>;
+  };
+  refresh(): Effect.Effect<unknown, unknown>;
+}
+
+/**
+ * Approver ports for the shared workflow on a portable host. Each workspace where
+ * this device has an open, admitted personal session signs the new device's
+ * `AdmitDevice` locally, appends the journaled original bound to the new device's
+ * credential hash, and delivers a snapshot invitation (Owner/Admin) or none (Member).
+ */
+export function makePortableAccountPairingApprover(input: {
+  workspaces: () => readonly AccountPairingWorkspaceHint[];
+  /** This device's admitted session in the workspace, or `null` when it has none. */
+  session: (workspaceId: string) => Effect.Effect<AccountPairingApproverSession | null, unknown>;
+  /** The account-authenticated ledger append. */
+  appendRecord: (request: E2eeAppendRecordRequest) => Effect.Effect<unknown, unknown>;
+}): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
+  return Effect.fnUntraced(function* () {
+    const result: AccountPairingApproverWorkspace[] = [];
+    for (const hint of input.workspaces()) {
+      const session = yield* input.session(hint.workspaceId);
+      if (!session) continue;
+      const approval = session.accountApproval;
+      const { workspaceId } = hint;
+      result.push({
+        workspaceId,
+        name: hint.name,
+        genesis: fromHex(hint.genesisHash),
+        signingPublicKey: session.binding.device.toBytes(),
+        refresh: () => Effect.asVoid(session.refresh()),
+        sign: (row) => approval.sign(row),
+        append: (requestId, record, credentialHash) =>
+          Effect.gen(function* () {
+            const appended = yield* Effect.result(
+              input.appendRecord({
+                workspaceId,
+                requestId,
+                recordHex: toHex(record),
+                credentialHash: toHex(credentialHash),
+              })
+            );
+            // Verified reads beat lost acknowledgements: settle from the ledger.
+            const settled = yield* approval.settle(record);
+            if (settled === 'committed') return undefined;
+            if (settled === 'lost') return yield* Effect.fail(fail('admission-lost'));
+            if (Result.isFailure(appended)) return yield* Effect.fail(appended.failure);
+            return yield* Effect.fail(fail('append_unconfirmed'));
+          }),
+        invitation: (record) => approval.invitation(record),
+        access: () => approval.access(),
+      });
+    }
+    return result;
+  });
+}
 
 /**
  * One account-level `E2eeWorkspaceRuntime` over per-workspace runtimes. Only the
