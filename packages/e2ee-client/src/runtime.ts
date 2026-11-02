@@ -275,7 +275,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                           })
                         )
                       )
-                        return yield* fail('conflict');
+                        return yield* fail('history-conflict');
                       const value = yield* status(lease.session);
                       yield* guard(id, expected);
                       if (lease.closing || pending.closed) return yield* fail('closed');

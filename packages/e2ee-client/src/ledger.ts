@@ -11,6 +11,7 @@ import {
   hashRecordBytes,
   snapshotTrustFromView,
   verifyLedgerEffect,
+  verifyLedgerSnapshot,
   requireLedgerContinuation,
 } from '@lody/e2ee-core/protocol';
 import {
@@ -33,6 +34,35 @@ export interface PersonalLedgerOrigin {
   readonly invitation: WorkspaceInvitationSnapshot;
   readonly endorser: Bytes.SigningPublicKey;
 }
+
+/** Requalify the unchanged snapshot from its independently replayed signed prefix. */
+export const qualifyPersonalLedgerOrigin = Effect.fnUntraced(function* (
+  approval: Extract<PersonalApproval, { kind: 'history' }>
+) {
+  const original = approval.originalOrigin;
+  if (!original) return yield* fail('invalid-input');
+  const receipt = original.invitation;
+  if (receipt.workspaceId !== approval.offer.workspaceId || receipt.length > approval.view.length)
+    return yield* fail('history-conflict');
+  const prefix = yield* verifyLedgerEffect({
+    anchor: approval.view.genesis,
+    records: approval.pages
+      .flatMap((page) => page.recordsHex)
+      .slice(0, receipt.length)
+      .map(fromHex),
+    checkpoint: { head: receipt.head, length: receipt.length },
+  });
+  const trust = yield* Effect.fromResult(
+    snapshotTrustFromView(prefix, original.endorser, receipt.headSignature)
+  );
+  const view = yield* Effect.fromResult(
+    verifyLedgerSnapshot({ snapshot: receipt.snapshot, trust })
+  );
+  return {
+    view,
+    snapshot: { bytes: new Uint8Array(receipt.snapshot), offset: receipt.offset, trust },
+  };
+});
 /** Feed and submission composition over injected ports, preserving a single origin and rollback pin across local identity replacement. */
 export const personalLedgerControl = (input: { readonly approval: PersonalApproval }) =>
   Layer.effectContext(
@@ -60,28 +90,9 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         const full = yield* verifyPersonalHistory(approval.offer, approval.pages);
         yield* Effect.fromResult(requireLedgerContinuation(full, approval.view));
         if (approval.originalOrigin) {
-          const original = approval.originalOrigin,
-            receipt = original.invitation;
-          if (receipt.workspaceId !== approval.offer.workspaceId || receipt.length > full.length)
-            return yield* fail('conflict');
-          const records = approval.pages
-            .flatMap((page) => page.recordsHex)
-            .slice(0, receipt.length)
-            .map(fromHex);
-          const prefix = yield* verifyLedgerEffect({
-            anchor: genesis,
-            records,
-            checkpoint: { head: receipt.head, length: receipt.length },
-          });
-          // Historical manager qualification comes from freshly replayed signed history, never from the old cached label or lost KEK.
-          const trust = yield* Effect.fromResult(
-            snapshotTrustFromView(prefix, original.endorser, receipt.headSignature)
-          );
-          originView = prefix;
-          origin = {
-            kind: 'snapshot',
-            snapshot: { bytes: new Uint8Array(receipt.snapshot), offset: receipt.offset, trust },
-          };
+          const qualified = yield* qualifyPersonalLedgerOrigin(approval);
+          originView = qualified.view;
+          origin = { kind: 'snapshot', snapshot: qualified.snapshot };
         } else {
           origin = { kind: 'genesis', record: fromHex(approval.offer.genesisRecordHex) };
           originView = yield* Effect.fromResult(verifyPersonalOffer(approval.offer));

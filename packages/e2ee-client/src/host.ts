@@ -50,6 +50,7 @@ import { openPersonalSession } from './session';
 import { fail } from './errors';
 import { toHex, fromHex } from './bytes';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { qualifyPersonalLedgerOrigin } from './ledger';
 
 const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
 /** Account-wide pairing has no per-workspace offer: the identity is prepared before
@@ -109,6 +110,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     return yield* fail('scope-mismatch');
   // Capture trusted factories/capabilities once. Later object mutation cannot redirect in-flight ownership.
   const exchange = remote.exchange.bind(remote),
+    history = remote.history?.bind(remote),
     drainOld = platform.drainOld?.bind(platform);
   const parent = yield* Scope.Scope;
   const owner = yield* Scope.fork(parent),
@@ -242,6 +244,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             })
           : undefined;
         approval = { kind: 'history', offer: p.offer, pages, view, originalOrigin };
+        if (originalOrigin) yield* qualifyPersonalLedgerOrigin(approval);
       } else return yield* fail('approval-required');
       yield* Effect.fromResult(assertPersonalAdmission(p.binding, request, approval.view));
       return approval;
@@ -273,7 +276,37 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           if (!chunks) return yield* fail('corrupt');
           pages = yield* Effect.forEach(chunks, (chunk) => parse(chunk));
         }
-        return yield* verifyApproval(p, saved, pages);
+        const approved = yield* verifyApproval(p, saved, pages);
+        if (approved.kind !== 'snapshot' || !history) return approved;
+        // Keep the immutable approval, feed origin and pin. Only its missing
+        // signed prefix is added to the existing bound approval-evidence store.
+        const store = yield* evidence(p, identity);
+        const chunks = yield* store.load(p.offer.pairingSessionId);
+        let proof: unknown[];
+        if (chunks) proof = yield* Effect.forEach(chunks, (chunk) => parse(chunk));
+        else {
+          yield* guard;
+          const source = yield* history(identity.credential);
+          yield* guard;
+          proof = yield* Effect.fromResult(captureHistoryPages(source));
+        }
+        const qualified = yield* verifyApproval(
+          p,
+          {
+            kind: 'history',
+            origin: {
+              invitationHex: saved.invitationHex!,
+              endorser: approved.offer.endorser,
+            },
+          },
+          proof
+        );
+        if (!chunks)
+          yield* store.retain(
+            p.offer.pairingSessionId,
+            proof.map((page) => encode(page))
+          );
+        return qualified;
       })
     );
   const exchangeOriginal = (p: PreparedPersonalIdentity, action: PersonalExchange['action']) =>
@@ -558,9 +591,13 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         Effect.gen(function* () {
           const p = yield* prepare(offer, replacement);
           const existing = yield* pairings.load(key(p, 'approval'));
-          return existing
-            ? (yield* loadApproval(p), { status: 'approved' as const })
-            : yield* exchangeOriginal(p, 'claim');
+          if (existing) {
+            yield* loadApproval(p);
+            return { status: 'approved' as const };
+          }
+          const result = yield* exchangeOriginal(p, 'claim');
+          if (result.status === 'approved') yield* loadApproval(p);
+          return result;
         })
       ),
     cancel: (offer: PersonalPairingOffer, replacement = false) =>

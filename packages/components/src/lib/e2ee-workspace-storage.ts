@@ -1,5 +1,12 @@
 import type { WorkspaceAdmissionDescriptor, WorkspaceModeDescriptor } from '@lody/cloud-api';
-import type { ObservedLedgerCheckpoint, VerifiedLedgerHistory } from './e2ee-ledger-history';
+import {
+  bytesToHex,
+  type ObservedLedgerCheckpoint,
+  type VerifiedLedgerHistory,
+} from './e2ee-ledger-history';
+import { Result } from 'effect';
+import * as Hex from 'effect/encoding/Hex';
+import { Bytes, hasVerifiedCheckpoint } from '@lody/e2ee-core/protocol';
 
 /** Unreadable local evidence. Only optional caches may be repaired by deleting them. */
 export class E2eeLocalEvidenceCorruptError extends Error {
@@ -480,11 +487,20 @@ export function retainObservedLedgerCheckpoint(
       pending = true;
       continue;
     }
-    if (history.records[previous.length - 1]?.hash !== previous.headHash)
+    if (
+      !Result.getOrThrow(
+        hasVerifiedCheckpoint(history.view, {
+          length: previous.length,
+          head: Result.getOrThrow(
+            Bytes.recordHash(Result.getOrThrow(Hex.decode(previous.headHash)))
+          ),
+        })
+      )
+    )
       throw conflict('Ledger history changed');
   }
   if (pending) return false;
-  const head = history.records[history.view.length - 1]?.hash;
+  const head = bytesToHex(history.view.head.toBytes());
   if (!head || history.page.workspaceId !== workspaceId)
     throw new Error('Invalid verified history');
   // Immutable per-checkpoint keys keep another window's newer observation even
