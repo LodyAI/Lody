@@ -59,7 +59,10 @@ export interface AccountPairingIdentityHost {
 /** The portable personal device host of one workspace, as account pairing uses it.
  * Identity protection stays with the host's platform custody. */
 export function personalHostAccountPairing(
-  host: Effect.Success<ReturnType<typeof makePersonalDeviceHost>>
+  host: Pick<
+    Effect.Success<ReturnType<typeof makePersonalDeviceHost>>,
+    'scope' | 'prepareAccount' | 'acceptAccount'
+  >
 ): AccountPairingIdentityHost {
   return {
     workspaceId: host.scope.workspaceId,

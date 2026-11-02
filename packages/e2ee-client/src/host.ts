@@ -219,7 +219,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         const checked = yield* Effect.fromResult(verifyPersonalApproval(pinned, invitation));
         approval = {
           kind: 'snapshot',
-          offer: p.offer,
+          // The ledger re-verifies this snapshot from `offer`: it carries the real endorser.
+          offer: pinned,
           invitation,
           view: checked.view,
           originalOrigin: {
