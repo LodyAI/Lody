@@ -5,8 +5,8 @@ import type {
 } from '@lody/shared';
 import {
   getSessionPullRequestLegacyFields,
-  resolveSessionPullRequests,
-  type SessionPullRequestSource,
+  resolveSessionPrimaryPullRequest,
+  type SessionPullRequestView,
   parseGitHubPullRequestUrl,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
@@ -15,6 +15,8 @@ export type SessionGitHubState = {
   /** The session owning the PR, also used for server-side repository identity. */
   sourceSessionId: SessionMeta['id'] | undefined;
   repoFullName: string;
+  /** Shared summary of the described PR; every surface reads the same view. */
+  latestPrView: SessionPullRequestView | null;
   latestPr: SessionPullRequestMeta | null;
   latestPrState: SessionPullRequestStateMeta | null;
   canShowGitHubActions: boolean;
@@ -35,47 +37,6 @@ export type SessionGitHubState = {
    * agent commits (clean tree, real commits, still no PR).
    */
   hasChanges: boolean;
-};
-
-export const getLatestPullRequest = (
-  session: SessionPullRequestSource | null | undefined
-): SessionPullRequestMeta | null => {
-  const prList = resolveSessionPullRequests(session);
-  if (!prList.length) {
-    return null;
-  }
-  if (!prList.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)) {
-    return prList[prList.length - 1] ?? null;
-  }
-  return prList.toSorted((a, b) => comparePullRequestRecency(a, b))[0] ?? null;
-};
-
-/**
- * The current PR of one repository. A multi-repository Session records PRs of
- * several repositories in one list; its context stage describes the first
- * member, so it must show that repository's PR, never another one's.
- */
-export const getLatestPullRequestForRepository = (
-  session: SessionPullRequestSource | null | undefined,
-  repoFullName: string
-): SessionPullRequestMeta | null => {
-  const target = repoFullName.toLowerCase();
-  const matching = resolveSessionPullRequests(session).filter(
-    (pr) => parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() === target
-  );
-  return getLatestPullRequest({ pullRequests: matching });
-};
-
-const comparePullRequestRecency = (
-  left: SessionPullRequestMeta,
-  right: SessionPullRequestMeta
-): number => {
-  const leftReportedAt = getSessionPullRequestLegacyFields(left).reportedAt ?? '';
-  const rightReportedAt = getSessionPullRequestLegacyFields(right).reportedAt ?? '';
-  if (leftReportedAt || rightReportedAt) {
-    return rightReportedAt.localeCompare(leftReportedAt);
-  }
-  return 0;
 };
 
 export const getPullRequestNumber = (
@@ -117,15 +78,12 @@ export const getSessionGitHubState = (
     (resolveProjectGitHubRepo(sourceSession?.project) ?? sourceSession?.repoFullName)?.trim() ?? '';
   const repoFullName =
     activeRepository === undefined ? legacyRepoFullName : (activeRepository?.trim() ?? '');
-  const latestPr =
-    sourceSession?.projectRun || activeRepository !== undefined
-      ? repoFullName
-        ? getLatestPullRequestForRepository(sourceSession, repoFullName)
-        : null
-      : getLatestPullRequest(sourceSession);
-  const latestPrState = latestPr?.url
-    ? (sourceSession?.pullRequestState?.[latestPr.url] ?? null)
-    : null;
+  const latestPrView = resolveSessionPrimaryPullRequest(
+    sourceSession,
+    activeRepository === undefined && !sourceSession?.projectRun ? undefined : repoFullName || null
+  );
+  const latestPr = latestPrView?.pr ?? null;
+  const latestPrState = latestPrView?.state ?? null;
 
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
   const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
@@ -143,6 +101,7 @@ export const getSessionGitHubState = (
   return {
     sourceSessionId: sourceSession?.id,
     repoFullName,
+    latestPrView,
     latestPr,
     latestPrState,
     canShowGitHubActions: !!repoFullName,

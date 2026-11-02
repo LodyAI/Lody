@@ -1,4 +1,8 @@
-import { getEffectiveSessionActivitySummary as getTaskActivitySummary } from '../src/components/sessions/session-tasklist-mapping';
+import {
+  getEffectiveSessionActivitySummary as getTaskActivitySummary,
+  mapSessionMetaToTaskListTask,
+} from '../src/components/sessions/session-tasklist-mapping';
+import { getSessionGitHubState } from '../src/lib/session-github-state';
 import { describe, expect, test } from 'vitest';
 
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -380,6 +384,34 @@ describe('buildSessionListRows repo + PR mapping', () => {
     expect(tasks[0]?.prStatus).toBe('open');
     expect(tasks[0]?.prCiState).toBe('s');
     expect(tasks[0]?.prReadiness).toBe('y');
+  });
+
+  test("shows a Project group's default-repository PR, matching the Info Bar", () => {
+    const api = 'https://github.com/example/api/pull/7';
+    const web = 'https://github.com/example/web/pull/9';
+    const session = makeSession({
+      id: 'session',
+      title: 'Group session',
+      project: { kind: 'github', repoFullName: 'example/api', branch: 'main' },
+      projectRun: { name: 'group', members: {} } as unknown as SessionMeta['projectRun'],
+      pullRequests: [
+        { url: api, status: 'merged' },
+        { url: web, status: 'open' },
+      ],
+      pullRequestState: { [web]: { s: 'f', t: 1 } },
+    });
+
+    const [row] = buildSessionListRows([session], {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+    });
+    const task = mapSessionMetaToTaskListTask(session, 'Untitled');
+    const infoBar = getSessionGitHubState(session);
+
+    expect(infoBar.latestPr?.url).toBe(api);
+    expect([row?.prUrl, row?.prStatus, row?.prCiState]).toEqual([api, 'merged', null]);
+    expect([task.prUrl, task.prStatus, task.prCiState]).toEqual([api, 'merged', null]);
   });
 
   test('derives no readiness when the PR merge state is not clean', () => {
