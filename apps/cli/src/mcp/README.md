@@ -128,6 +128,10 @@ records the measurements and why subprocess/request isolation remains necessary.
   actor tag adds no information. Recovery uses the Operation's owner Machine plus current
   authorization; it does not freeze the daemon account that originally accepted the Operation.
   Every MCP Session path rejects a runtime invocation without userId.
+  Chat sender checks use the active Turn's frozen audience when it is known. Goal
+  turns therefore need no user history row to delegate. Unresolved senders retain
+  the exact-input history check; sender provenance never grants user authority.
+  This sender snapshot stays inside the daemon; legacy socket responses are unchanged.
 
 ## Machine presence
 

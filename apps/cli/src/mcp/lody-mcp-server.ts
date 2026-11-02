@@ -2257,6 +2257,7 @@ type InvokingTurnContext = {
   frozenInputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const buildInvocationIdentity = (source: InvokingTurnSource): InvocationIdentity => {
@@ -2280,6 +2281,7 @@ type InvokingTurnSource = {
   inputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   notificationProvenancePending?: boolean;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
@@ -2307,6 +2309,7 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     inputConfig,
     notificationOriginTurnIds: active.notificationOriginTurnIds ?? [],
     notificationProvenancePending: active.notificationProvenancePending,
+    sender: active.sender,
   };
 };
 
@@ -2374,6 +2377,7 @@ const resolveInvokingTurnContext = async (
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
+    sender: source.sender,
     notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
@@ -2466,12 +2470,14 @@ const reverseChatError = (): LodyOperationStoreError =>
     false
   );
 
-/** Read only the exact input owned by the active invocation, never earlier conversation turns. */
+/** Prefer the frozen sender; only unresolved provenance needs the exact input history. */
 const readInvokingChatSender = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
   invoking: InvokingTurnContext
 ): Promise<string | undefined> => {
+  if (invoking.sender?.kind === 'agent') return invoking.sender.sessionId;
+  if (invoking.sender?.kind === 'user') return undefined;
   const doc = await manager.getOrCreateSessionDoc(session.id);
   const backend = await createSessionBackend(doc);
   const input = await backend.history.readTurn(invoking.identity.sourceTurnId);

@@ -52,6 +52,8 @@ Parent instructions apply. Background: [README.md](README.md).
 - Align chain caps and MCP guidance; create/chat forbid courtesy, duplicate callbacks
   and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
   rejected batch items.
+  Prefer the active Turn's frozen audience for sender checks; read exact input history
+  only when the sender is unresolved. Sender provenance does not grant user authority.
 
 - Single and batch chats pass `steerActiveTurn`, steering a turn running on the calling
   daemon; recovery replay never steers. Never activate a steered or existing `pending_apply`

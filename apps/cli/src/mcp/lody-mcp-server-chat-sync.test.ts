@@ -10,9 +10,11 @@ import {
   type LodyOperationCompletion,
   type LodyOperationItemResult,
   type SessionId,
+  type MachineId,
 } from '@lody/shared';
 import { LodyOperationStoreError, type LodyOperationStore } from '@/orchestration/operation-store';
 import type { SessionToolHandlers } from './session-tool-router';
+import { runWithDaemonWorkspace } from '@/lib/session-command-environment';
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
@@ -347,6 +349,18 @@ describe('turn-scoped reverse chat rejection', () => {
   let writer: ReturnType<typeof createHistoryWriter>;
   let delivered: { sessionId: string; prompt: string }[];
 
+  const withActiveRuntime = <T>(run: () => Promise<T>) =>
+    runWithDaemonWorkspace(
+      {
+        workspaceId: 'workspace-id' as WorkspaceId,
+        machineId: requesterSession.machineId as MachineId,
+        userId: requesterSession.userId,
+        manager: {} as LoroDocumentManager,
+        readInvocation: mocks.activeInvocation,
+      },
+      run
+    );
+
   const setInput = (turnId: string, senderSessionId?: string) => {
     writer.append({
       id: turnId,
@@ -603,36 +617,87 @@ describe('turn-scoped reverse chat rejection', () => {
     }
   );
 
-  it('rejects only the reverse item in a mixed batch and persists the unrelated target once', async () => {
-    const thirdSession = { ...targetSession, id: 'third-session-id' };
-    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
-      const session = [requesterSession, targetSession, thirdSession].find(
-        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
-      );
-      return session ? { meta: session } : undefined;
-    });
-    const args = {
-      operationId: 'mixed-batch',
-      items: [
-        { sessionId: targetSession.id, prompt: 'Reply to A' },
-        { sessionId: thirdSession.id, prompt: 'Work for C' },
-      ],
-    };
-    await startSessionChatManyOperation(args);
-    const accepted = store.get(requesterSession.id as SessionId, args.operationId);
-    expect(accepted.items[0]).toMatchObject({
-      status: 'failed',
-      error: { code: 'REVERSE_CHAT_FORBIDDEN', retryable: false },
-    });
-    expect(accepted.items[1]).toMatchObject({
-      status: 'active',
-      inputDurable: true,
-      target: { sessionId: thirdSession.id },
-    });
-    expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
-    await startSessionChatManyOperation(args);
-    expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
-  });
+  it.each(['history', 'runtime'] as const)(
+    'rejects only the reverse item using %s provenance and persists the unrelated target once',
+    async (source) => {
+      if (source === 'runtime') {
+        mocks.activeInvocation.mockReturnValue({
+          ...mocks.activeInvocation(),
+          sender: { kind: 'agent', sessionId: targetSession.id },
+        });
+        mocks.readTurn.mockImplementation(async (id: string) => {
+          if (!id.startsWith('assistant:')) throw new Error('Input history unavailable');
+          return sessionData.history.readTurn(id);
+        });
+      }
+      const thirdSession = { ...targetSession, id: 'third-session-id' };
+      mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+        const session = [requesterSession, targetSession, thirdSession].find(
+          (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+        );
+        return session ? { meta: session } : undefined;
+      });
+      const args = {
+        operationId: 'mixed-batch',
+        items: [
+          { sessionId: targetSession.id, prompt: 'Reply to A' },
+          { sessionId: thirdSession.id, prompt: 'Work for C' },
+        ],
+      };
+      const dispatch = () => startSessionChatManyOperation(args);
+      await (source === 'runtime' ? withActiveRuntime(dispatch) : dispatch());
+      const accepted = store.get(requesterSession.id as SessionId, args.operationId);
+      expect(accepted.items[0]).toMatchObject({
+        status: 'failed',
+        error: { code: 'REVERSE_CHAT_FORBIDDEN', retryable: false },
+      });
+      expect(accepted.items[1]).toMatchObject({
+        status: 'active',
+        inputDurable: true,
+        target: { sessionId: thirdSession.id },
+      });
+      expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
+      await (source === 'runtime' ? withActiveRuntime(dispatch) : dispatch());
+      expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
+    }
+  );
+
+  it.each(['single', 'batch'] as const)(
+    'accepts a %s chat from a Goal turn without an input history row',
+    async (kind) => {
+      writer.append({
+        id: 'assistant:goal:resume:synthetic',
+        role: 'assistant',
+        timestamp: '2026-10-12T00:00:00Z',
+        author: {
+          v: 1,
+          kind: 'agent',
+          sessionId: requesterSession.id,
+          turnId: 'goal:resume:synthetic',
+          name: 'Agent B',
+        },
+        items: [],
+        fileDiff: [],
+      });
+      mocks.activeInvocation.mockReturnValue({
+        ...mocks.activeInvocation(),
+        sourceTurnId: 'goal:resume:synthetic',
+        sender: { kind: 'user' },
+      });
+      const args = { sessionId: targetSession.id, prompt: 'Continue the task' };
+      if (kind === 'single') {
+        await withActiveRuntime(() =>
+          startSessionChatOperation({ ...args, operationId: 'goal-single' })
+        );
+      } else {
+        await withActiveRuntime(() =>
+          startSessionChatManyOperation({ operationId: 'goal-batch', items: [args] })
+        );
+      }
+      expect(storedOperations()).toHaveLength(1);
+      expect(delivered).toEqual([args]);
+    }
+  );
 
   it.each(['human', 'another-agent'] as const)(
     'allows a later %s input to chat to A despite the earlier delegated turn',
