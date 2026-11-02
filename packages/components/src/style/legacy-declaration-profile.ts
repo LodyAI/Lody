@@ -19,6 +19,12 @@ export const legacyDeclarations = [
   { key: 'contextMuted', alias: 'bg-muted', js: 'backgroundColor', css: 'background-color' },
   // oxlint-disable-next-line no-useless-concat -- Keep metadata out of implicit utility scanning.
   { key: 'nonShrinking', alias: 'shrink-0', js: 'flexShrink', css: 'flex-' + 'shrink' },
+  { key: 'sidebarHeightEight', alias: 'h-8', js: 'height', css: 'height' },
+  { key: 'sidebarHeightSeven', alias: 'h-7', js: 'height', css: 'height' },
+  { key: 'sidebarHeightTwelve', alias: 'h-12', js: 'height', css: 'height' },
+  { key: 'sidebarHeightFive', alias: 'h-5', js: 'height', css: 'height' },
+  { key: 'sidebarCornerMedium', alias: 'rounded-md', js: 'borderRadius', css: 'border-radius' },
+  { key: 'heightFull', alias: 'h-full', js: 'height', css: 'height' },
 ] as const;
 
 export const legacyBindings = {
@@ -53,4 +59,12 @@ export const legacyBindings = {
   contextCornerClass: ['contextCorner'],
   contextMutedClass: ['contextMuted'],
   sidebarLabelShrinkClass: ['nonShrinking'],
+  sidebarHeightEightClass: ['sidebarHeightEight'],
+  sidebarHeightSevenClass: ['sidebarHeightSeven'],
+  sidebarHeightTwelveClass: ['sidebarHeightTwelve'],
+  sidebarHeightFiveClass: ['sidebarHeightFive'],
+  sidebarCornerMediumClass: ['sidebarCornerMedium'],
+  editorHeightClass: ['heightFull'],
+  editorWidthClipClass: ['fullWidth', 'clipped'],
+  editorContainClass: ['heightFull', 'container'],
 } as const;

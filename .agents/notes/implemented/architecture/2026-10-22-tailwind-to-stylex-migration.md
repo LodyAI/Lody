@@ -2616,27 +2616,27 @@ Six redundant size/shrink occurrences remain separate cleanup; restored native
 compiler-trial defaults receive zero credit. The declaration bridge transfers
 ownership while retaining legacy output.
 
-The integrated226 component cut recognizes1,239 AST occurrences in143 files and802
-unresolved expressions across1,399 production sources. Helper222 remains191
-occurrences/eight files/21 unresolved expressions across30 sources. Their v2 union
-is1,430 occurrences/151 files/823 unresolved expressions. Known bridge output is86
-positions: the prior68, nine in223, four each in224/225 and one in226. Two bridge-only
-consumers are outside the AST utility file list. The **conservative compatibility
-lower bound remains1,516 occurrences in153 files**. These eighteen additional
-positions transfer declaration ownership; they remove no Tailwind dependency.
-Eighteen retained aliases and sorting remain. Unresolved expressions include
-ordinary StyleX/runtime values, not823 confirmed utilities or a completion ratio.
-Earlier source cuts remain frozen at their recorded bounds. Build-only227 changes
-key-to-atom association, with zero consumer credit; its sample is not production.
+The working integrated229 component cut recognizes1,219 AST occurrences in141
+files and837 unresolved expressions across1,399 production sources. Helper222
+remains191 occurrences/eight files/21 unresolved expressions across30 sources.
+Their v2 union is1,410 occurrences/149 files/858 unresolved expressions. Known
+bridge output is106 positions across nine owners; four bridge-only consumers
+are outside the AST utility file list. The **conservative compatibility lower
+bound remains1,516 occurrences in153 files**. Scope228/229 transfers twenty more
+positions; its twenty-four retained aliases still depend on Tailwind ordering.
+Unresolved expressions include ordinary StyleX/runtime values and imported
+bindings, not858 confirmed utilities or a completion ratio. Earlier cuts remain
+frozen. Build-only227 has zero consumer credit; its sample is not production.
 
-`inventory-source-through226-integrated-proof.json` and
-`inventory-v2-through226-integrated-fullsrc.json` own the guarded overlays on the
-prior225 snapshot. Helper remains the frozen222 cut. Source inventories exclude
-stories but CSS scanning can consume their literals. Final combined Root
-qualification is separate; per-unit matrices retain their actual source cuts.
-The [bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
-owns226's pointer-transform differences, rejected integration and227's three
-original paint OPENs; none are closed by matching CSS or settled screenshots.
+`inventory-source-through229-integrated-proof.json` and
+`inventory-v2-through229-integrated-fullsrc.json` own the guarded six-file overlay
+on227 and verify all1,399 production source bytes against Root. Helper remains
+its frozen222 cut. Stories are excluded from this inventory but can affect CSS
+scanning. The new combined Root qualification is separate from the original
+21+18 exact per-unit matrices and the completed223–227 qualification. The
+[bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
+owns the real public-container rejection, metadata scan repair, pointer/cursor
+history and all original OPENs; later matching CSS or frames do not close them.
 
 Earlier204 template-class removals changed unresolved counts without extra utility
 removal. Scope185 removes twenty manually audited literals but only seven were in

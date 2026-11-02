@@ -23,6 +23,12 @@ const styles = stylex.create({
   contextCorner: { borderRadius: 'var(--radius-lg)' },
   contextMuted: { backgroundColor: 'hsl(var(--muted) / 1)' },
   nonShrinking: { flexShrink: 0 },
+  sidebarHeightEight: { height: 'calc(var(--spacing) * 8)' },
+  sidebarHeightSeven: { height: 'calc(var(--spacing) * 7)' },
+  sidebarHeightTwelve: { height: 'calc(var(--spacing) * 12)' },
+  sidebarHeightFive: { height: 'calc(var(--spacing) * 5)' },
+  sidebarCornerMedium: { borderRadius: 'var(--radius-md)' },
+  heightFull: { height: '100%' },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -100,3 +106,25 @@ export const contextCornerClass = legacyClass(stylex.props(styles.contextCorner)
 export const contextMutedClass = legacyClass(stylex.props(styles.contextMuted).className);
 
 export const sidebarLabelShrinkClass = legacyClass(stylex.props(styles.nonShrinking).className);
+
+export const sidebarHeightEightClass = legacyClass(
+  stylex.props(styles.sidebarHeightEight).className
+);
+export const sidebarHeightSevenClass = legacyClass(
+  stylex.props(styles.sidebarHeightSeven).className
+);
+export const sidebarHeightTwelveClass = legacyClass(
+  stylex.props(styles.sidebarHeightTwelve).className
+);
+export const sidebarHeightFiveClass = legacyClass(stylex.props(styles.sidebarHeightFive).className);
+export const sidebarCornerMediumClass = legacyClass(
+  stylex.props(styles.sidebarCornerMedium).className
+);
+
+export const editorHeightClass = legacyClass(stylex.props(styles.heightFull).className);
+export const editorWidthClipClass = legacyClass(
+  stylex.props(styles.fullWidth, styles.clipped).className
+);
+export const editorContainClass = legacyClass(
+  stylex.props(styles.heightFull, styles.container).className
+);

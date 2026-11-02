@@ -15,6 +15,7 @@ import {
 import { formatKeyBinding } from '@/lib/commands';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { editorHeightClass, editorWidthClipClass } from '@/style/legacy-defaults.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { useActiveVSCodeThemeId, useResolvedTheme } from '../../theme-provider';
 import {
@@ -365,7 +366,7 @@ export function LocalTerminalPanel({
   const host = (
     <div
       ref={hostRef}
-      className={cn('lody-terminal-panel h-full w-full overflow-hidden', className)}
+      className={cn('lody-terminal-panel', editorHeightClass, editorWidthClipClass, className)}
       onContextMenu={windowsRightClick ? handleWindowsRightClick : undefined}
     />
   );

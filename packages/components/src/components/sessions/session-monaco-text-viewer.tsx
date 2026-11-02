@@ -6,6 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
 import { cn } from '@/lib/utils';
+import { editorHeightClass, editorWidthClipClass } from '@/style/legacy-defaults.stylex';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
 import { ensureSessionMonacoLanguages } from '@/lib/session-monaco-languages';
 import {
@@ -259,7 +260,7 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={cn('h-full min-h-[240px] w-full overflow-hidden', className)}>
+    <div className={cn(editorHeightClass, 'min-h-[240px]', editorWidthClipClass, className)}>
       <div ref={containerRef} {...stylex.props(styles.editorContainer)} />
     </div>
   );

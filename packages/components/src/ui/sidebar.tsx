@@ -18,6 +18,11 @@ import {
   sidebarGroupLayoutClass,
   sidebarMenuLayoutClass,
   sidebarLabelShrinkClass,
+  sidebarHeightEightClass,
+  sidebarHeightSevenClass,
+  sidebarHeightTwelveClass,
+  sidebarHeightFiveClass,
+  sidebarCornerMediumClass,
   sidebarMenuButtonLayoutClass,
   sidebarPaddingClass,
 } from '@/style/legacy-defaults.stylex';
@@ -451,10 +456,10 @@ function SidebarGroupLabel({
       className={cn(
         'text-sidebar-foreground/70 ring-sidebar-ring',
         sidebarFlexClass,
-        'h-8',
+        `${sidebarHeightEightClass}`,
         sidebarLabelShrinkClass,
         sidebarItemsCenterClass,
-        "rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        `${sidebarCornerMediumClass} px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         'group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0',
         className
       )}
@@ -479,7 +484,7 @@ function SidebarGroupAction({
         sidebarFlexClass,
         'aspect-square w-5',
         sidebarItemsCenterClass,
-        "justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        `justify-center ${sidebarCornerMediumClass} p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'group-data-[collapsible=icon]:hidden',
@@ -524,7 +529,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<'li'>) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  `peer/menu-button ${sidebarMenuButtonLayoutClass} rounded-md ${sidebarPaddingClass} text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-2 active:bg-sidebar-hover active:text-sidebar-hover-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-selection data-[active=true]:font-medium data-[active=true]:text-sidebar-selection-foreground data-[state=open]:hover:bg-sidebar-hover data-[state=open]:hover:text-sidebar-hover-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
+  `peer/menu-button ${sidebarMenuButtonLayoutClass} ${sidebarCornerMediumClass} ${sidebarPaddingClass} text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-2 active:bg-sidebar-hover active:text-sidebar-hover-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-selection data-[active=true]:font-medium data-[active=true]:text-sidebar-selection-foreground data-[state=open]:hover:bg-sidebar-hover data-[state=open]:hover:text-sidebar-hover-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
   {
     variants: {
       variant: {
@@ -533,9 +538,9 @@ const sidebarMenuButtonVariants = cva(
           'bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-hover))]',
       },
       size: {
-        default: 'h-8 text-sm',
-        sm: 'h-7 text-xs',
-        lg: 'h-12 text-sm group-data-[collapsible=icon]:p-0!',
+        default: `${sidebarHeightEightClass} text-sm`,
+        sm: `${sidebarHeightSevenClass} text-xs`,
+        lg: `${sidebarHeightTwelveClass} text-sm group-data-[collapsible=icon]:p-0!`,
       },
     },
     defaultVariants: {
@@ -615,7 +620,7 @@ function SidebarMenuAction({
         sidebarFlexClass,
         'aspect-square w-5',
         sidebarItemsCenterClass,
-        "justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        `justify-center ${sidebarCornerMediumClass} p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'peer-data-[size=sm]/menu-button:top-1',
@@ -639,9 +644,9 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) 
       className={cn(
         'text-sidebar-foreground pointer-events-none absolute right-1',
         sidebarFlexClass,
-        'h-5 min-w-5',
+        `${sidebarHeightFiveClass} min-w-5`,
         sidebarItemsCenterClass,
-        'justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none',
+        `justify-center ${sidebarCornerMediumClass} px-1 text-xs font-medium tabular-nums select-none`,
         'peer-hover/menu-button:text-sidebar-hover-foreground peer-data-[active=true]/menu-button:text-sidebar-selection-foreground',
         'peer-data-[size=sm]/menu-button:top-1',
         'peer-data-[size=default]/menu-button:top-1.5',
@@ -741,13 +746,13 @@ function SidebarMenuSubButton({
       className={cn(
         'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground',
         sidebarFlexClass,
-        'h-7',
+        sidebarHeightSevenClass,
         sidebarMinWidthClass,
         '-translate-x-px',
         sidebarItemsCenterClass,
         sidebarGapClass,
         sidebarOverflowClass,
-        "rounded-md px-2 outline-hidden focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        `${sidebarCornerMediumClass} px-2 outline-hidden focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         'data-[active=true]:bg-sidebar-selection data-[active=true]:text-sidebar-selection-foreground',
         size === 'sm' && 'text-xs',
         size === 'md' && 'text-sm',

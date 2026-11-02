@@ -1,5 +1,6 @@
 import { forwardRef, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { editorContainClass } from '@/style/legacy-defaults.stylex';
 
 interface ContainerQueryProviderProps {
   children: ReactNode;
@@ -15,7 +16,7 @@ interface ContainerQueryProviderProps {
 export const ContainerQueryProvider = forwardRef<HTMLDivElement, ContainerQueryProviderProps>(
   function ContainerQueryProvider({ children, className }, ref) {
     return (
-      <div ref={ref} className={cn('h-full @container', className)}>
+      <div ref={ref} className={cn(editorContainClass, className)}>
         {children}
       </div>
     );
