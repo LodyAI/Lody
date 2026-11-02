@@ -9,16 +9,16 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过七十七个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector与ChatComposer共一百八十四个utility位置使用的五十五条flat声明，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
+把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过八十九个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu及message actions共二百一十四个utility位置使用的六十八个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
 
 ## 归属与编译
 
-| Owner                                                                                                          | 职责                                                                     |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 五十五个真实StyleX声明及七十七个源码scalar／group class绑定。            |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留五十五alias。 |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                              |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                           |
+| Owner                                                                                                          | 职责                                                                      |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 六十九个StyleX key、七十条物理声明及八十九个源码scalar／group class绑定。 |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留六十九alias。  |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                               |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                            |
 
 ```mermaid
 flowchart LR
@@ -31,13 +31,18 @@ flowchart LR
   N[普通StyleX收集器] --> P[普通StyleX产物]
 ```
 
-pre-transform在React／docgen之前校验固定AST语法，只接受literal flat声明及七十七个批准的
+pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及八十九个批准的
 stylex.props绑定，以锁定原生compiler折叠后输出原有顺序的旧class字符串。动态值、条件、
 namespace逃逸、混合class构造及不安全query loader均拒绝；缺少adapter时源码模块直接抛错。
 
-CSS变换位于Vite CSS处理之后、发布之前，先校验全部原selector、utilities context、单声明、
+CSS变换位于Vite CSS处理之后、发布之前，先校验全部原selector、utilities context、精确单字段或封闭pair声明体、
 值及important，再做任何修改。每个旧声明实际detach，原槽位插入真实metadata声明的clone。
 没有另一份生效Tailwind body、新特异性、全局层序调整、共享普通atom或额外inline保活声明。
+
+唯一多声明例外是精确的font-medium writer-first pair；两字段读取同一元素本地
+--font-weight-medium变量。compiler按属性关联两个native atom，保留原注册，在mutation前
+拒绝缺失、逆序、重复、important、不等或意外字段。
+[字重pair决定](2026-11-03-stylex-font-writer-pair.zh.md)拥有其验收；其它writer规则与variants仍不支持。
 
 adapter跟随真正Tailwind Vite优化阶段：serve保留原始声明，两个官方build入口与adapter共用
 Tailwind options，真实metadata clone使用同一锁版optimizer及CSS minify设置。raw／library
@@ -69,7 +74,7 @@ Babel7.29.7、StyleX0.19.0、PostCSS8.5.6，trace-mapping0.3.31核map；版本�
 StyleX、祖先及真正Radix Slot的优先级。原366px container query及冻结transition utility沿用旧路径。
 DOM、ref、事件、disabled及响应式行为不迁入adapter。
 
-一百八十四个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。五十五alias及一百八十四个编译后输出出现次数
+二百一十四个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。六十九alias及二百一十四个编译后输出出现次数
 仍是明确兼容依赖。v2 scanner仍只报告它识别的AST次数；桥的已知输出另列，并加回保守剩余边界。
 精确源码切面及数字由[迁移Note](2026-10-22-tailwind-to-stylex-migration.zh.md#公开调用方与剩余层叠边界)负责。
 
@@ -204,6 +209,22 @@ consumer信用。
 原生产Vite管线不发布可用CSS source map。JS及真实DEV CSS作者映射已验证，不称生产CSS映射完整，
 也没有全局Vite workaround。实际components Vite CSS transform已返回，但早先server.close保
 unsettled-await失败；该检查产生的源码已保留并恢复为锁定字节，不据此声称正常cleanup。
+
+236–240继续转移三十个声明归属位置，净utility移除为零：Composer底色七处、LoroSidebar十处、
+AttachmentAddMenu五处、message-action chrome七处及ACP字重pair一处。当前bank为69 key、
+70物理声明、89绑定、32种CSS属性（含私有字重writer），214个保留输出仍依赖原Tailwind alias
+与排序。当前Root组合构建／浏览器资格与以下隔离单元报告分列。
+
+| 单元               | 真实验收                                                     | 保留限制                                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Composer236        | desktop24对12PNG同，mobile4对2同；107CSS对全同。             | desktop十二OPEN240raw、mobile两个OPEN6,916raw／180threshold；另一个PNG同的mobile状态仍有三个hover字段差异。独立hover-none对照不关闭原差异；alpha border因raw oracle拒绝仍TW。 |
+| LoroSidebar237     | 27PNG对全同，6,391body／135target记录；107CSS对全同。        | CTA／workspace radio回调实测，三个menu动作只证明paint／close。报告close race原失败保留。                                                                                      |
+| Attachment238      | 正式24对19PNG同，3,433body／106target；107CSS对全同。        | 五OPEN199,629raw／零阈值；三个root-only相同对照不验收submenu。两个复杂MCP宽度因raw不等继续TW。                                                                                |
+| Message actions239 | 33对31PNG同，5,861body／125target；107CSS对全同。            | 两mobile-tap OPEN71raw／2threshold；任意公开icon、selection Range、独立Check-present反馈门禁及fine／hover能力未证明。原state writer保留。                                     |
+| ACP font240        | 24PNG对全同，3,969body／255target；六build路径108CSS对全同。 | 仅一个label；合成研究24DOM合同／三图为另一范围。bank前缀与最终Root组合另验。                                                                                                  |
+
+leaves236至leaves240的delivery、HTML及独审保留实际输入、URL载体、原失败及cleanup结果。
+新PNG／CSS同不关闭原像素、hover字段或device限制。message resting opacity保持精确raw的0%。
 
 ## 仍约束设计的被拒路径
 

@@ -45,8 +45,9 @@ source-removal credit, and a counterexample withdraws the claimed mapping.
 
 The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
 keeps original selectors, class strings and rule positions while replacing each
-original declaration with actual StyleX metadata. It currently serves twelve fixed
-owners through fifty-five flat declarations and seventy-seven authored static bindings; ordinary StyleX
+original declaration with actual StyleX metadata. It currently serves fifteen fixed
+owners through sixty-eight single-field keys, one closed font-weight pair and
+eighty-nine authored static bindings; ordinary StyleX
 uses its normal collector. A missing, unequal or unsupported slot rejects. The
 single profile retains the legacy aliases through the existing source scan, so
 Tailwind candidate ordering remains an explicit dependency. Moving a literal into
@@ -69,6 +70,15 @@ configuration's explicit optimization value through `postcssOptions`, including
 during serve. An empty PostCSS optimize object defaults to non-minified output;
 Vite's producer has different defaults. Producer options are mutually exclusive.
 Raw/library callers must opt into a matching phase explicitly.
+
+The only supported multi-declaration rule is the exact `font-medium` pair:
+the element-local `--tw-font-weight` writer followed by `font-weight`, both
+reading `var(--font-weight-medium)`. Keep its original registration and order.
+Associate native atoms by property, validate every replacement before mutation,
+and reject omitted, reordered, duplicate, important or unequal fields. This is
+not permission to add arbitrary writer rules or variants. The
+[font-pair decision](../../../../.agents/notes/implemented/architecture/2026-11-03-stylex-font-writer-pair.md)
+owns the evidence and limits.
 
 The independent helper controls' reviewed internal call graph and original raw
 selectors are separate contracts. Their local ordinary/Slot split is not a recipe

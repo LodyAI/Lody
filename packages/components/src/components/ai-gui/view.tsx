@@ -238,6 +238,7 @@ import {
   resolveSessionHistoryDurationMs,
 } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
+import { messageRestOpacityClass, messageFooterLayoutClass } from '@/style/legacy-defaults.stylex';
 import { withClassName } from '@/lib/stylex';
 import { conversationSurface } from './surface';
 import {
@@ -5198,7 +5199,10 @@ const UserMessageRowView = ({
                 className={cn(
                   'transition-opacity',
                   !isMobile &&
-                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                    cn(
+                      messageRestOpacityClass,
+                      'group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                    )
                 )}
               />
             )}
@@ -5218,7 +5222,10 @@ const UserMessageRowView = ({
                           stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
                           'transition-opacity',
                           !isMobile &&
-                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                            cn(
+                              messageRestOpacityClass,
+                              'group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                            )
                         )}
                         onClick={() => {
                           setEditText(getTextContentFromMessageItems(message.items));
@@ -5250,7 +5257,10 @@ const UserMessageRowView = ({
                           stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
                           'transition-opacity',
                           !isMobile &&
-                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                            cn(
+                              messageRestOpacityClass,
+                              'group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                            )
                         )}
                         onClick={handlePin}
                         aria-label={
@@ -5290,7 +5300,10 @@ const UserMessageRowView = ({
                         stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
                         'transition-opacity',
                         !isMobile &&
-                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                          cn(
+                            messageRestOpacityClass,
+                            'group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                          )
                       )}
                       onClick={() => {
                         void handleCopy();
@@ -6758,7 +6771,8 @@ export const AssistantTurnFooter = ({
                   cn(
                     stylex.props(activityTypography.footnote, viewStyles.assistantActionWeight)
                       .className,
-                    'gap-1.5 rounded-md px-3 transition-colors'
+                    messageFooterLayoutClass,
+                    'transition-colors'
                   ),
                   isAccent
                     ? 'border border-primary/40 bg-primary/[0.12] text-primary shadow-xs hover:bg-primary/[0.18] hover:text-primary disabled:opacity-60'

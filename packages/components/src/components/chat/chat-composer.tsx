@@ -1,4 +1,7 @@
 import {
+  composerClearBorderClass,
+  composerInputInkClass,
+  composerSecondaryInkClass,
   composerLandingMinimumClass,
   composerLandingInsetClass,
   composerSessionInsetClass,
@@ -752,17 +755,17 @@ export function getChatComposerTextareaClassName({
     isLanding
       ? cn(
           composerLandingMinimumClass,
-          'border-transparent',
+          composerClearBorderClass,
           composerLandingInsetClass,
           'sm:min-h-[140px]'
         )
       : cn(
-          cn('border-transparent', composerSessionInsetClass),
+          cn(composerClearBorderClass, composerSessionInsetClass),
           // Mobile session composer floors at a single line; desktop keeps two.
           isMobile ? composerMobileMinimumClass : composerDesktopMinimumClass
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/85'
+    cn(composerInputInkClass, 'placeholder:text-input-placeholder/85')
   );
 }
 
@@ -1170,11 +1173,11 @@ export function ChatComposer({
     stylex.props(typography.prompt).className,
     cn(
       composerDialogShapeClass,
-      'border-transparent',
+      composerClearBorderClass,
       composerTransparentClass,
       'focus-visible:ring-0 focus-visible:ring-offset-0'
     ),
-    'text-input-foreground placeholder:text-input-placeholder/85'
+    cn(composerInputInkClass, 'placeholder:text-input-placeholder/85')
   );
 
   const actionBaseClassName = cn(
@@ -1239,7 +1242,9 @@ export function ChatComposer({
 
   const secondaryButtonClassName = cn(
     actionBaseClassName,
-    'border-foreground/[0.10] bg-background text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground focus-visible:ring-ring',
+    'border-foreground/[0.10]',
+    composerSecondaryInkClass,
+    'hover:bg-foreground/[0.04] hover:text-foreground focus-visible:ring-ring',
     'dark:border-input-border/60 dark:bg-input/60 dark:text-input-foreground dark:hover:bg-muted/60'
   );
 

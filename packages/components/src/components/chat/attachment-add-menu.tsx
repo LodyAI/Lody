@@ -6,6 +6,12 @@ import * as stylex from '@stylexjs/stylex';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  attachmentPointerClass,
+  attachmentMobileRowClass,
+  attachmentMobileBlockClass,
+  attachmentIntrinsicWidthClass,
+} from '@/style/legacy-defaults.stylex';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -164,8 +170,8 @@ export function AttachmentAddMenu({
   const triggerSize =
     !isLanding && isMobile ? 'calc(var(--spacing) * 9)' : 'calc(var(--spacing) * 7)';
   const itemClass = cn(
-    'cursor-pointer',
-    isMobile && 'gap-2.5 py-2.5',
+    attachmentPointerClass,
+    isMobile && attachmentMobileRowClass,
     isMobile && stylex.props(styles.itemMobileType).className
   );
   const plusClassName = stylex.props(isMobile ? styles.plusLarge : styles.plusSmall).className;
@@ -234,7 +240,9 @@ export function AttachmentAddMenu({
            collapsing too narrow. The pushed MCP panel needs room for server
            names, so it takes its own floor and ceiling. */
         minWidth={view === 'mcp' ? undefined : isMobile ? 160 : 140}
-        className={view === 'mcp' ? 'w-[min(20rem,calc(100vw-2rem))]' : 'w-max'}
+        className={
+          view === 'mcp' ? 'w-[min(20rem,calc(100vw-2rem))]' : attachmentIntrinsicWidthClass
+        }
       >
         {view === 'mcp' && mcp ? (
           // Keyed so the panel swap replays the slide: the pushed level enters
@@ -337,7 +345,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             // Stays `items-center` (the shared selection-item default): the check
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
-            className={cn(isMobile && 'py-2.5')}
+            className={cn(isMobile && attachmentMobileBlockClass)}
             closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >

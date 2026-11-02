@@ -13,6 +13,7 @@ import {
   acpLabelClass,
   acpPlainCornerClass,
   acpPlainPaddingClass,
+  acpMediumWeightClass,
 } from '@/style/legacy-defaults.stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@/ui/armed-overlays';
@@ -112,7 +113,7 @@ export function AcpSessionSelect({
       title={withSelectedLabel(triggerTitle) ?? label}
     >
       {icon ? <span {...stylex.props(styles.icon)}>{icon}</span> : null}
-      {!iconOnly ? <span className="font-medium">{label}</span> : null}
+      {!iconOnly ? <span className={acpMediumWeightClass}>{label}</span> : null}
       {isMenuEnabled && !iconOnly ? <ChevronDown {...stylex.props(styles.chevron)} /> : null}
     </Button>
   );

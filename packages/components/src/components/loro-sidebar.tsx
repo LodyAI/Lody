@@ -19,6 +19,11 @@ import {
 } from 'react';
 import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import {
+  loroRecoveryFrameClass,
+  loroSwitcherGapClass,
+  sidebarInkClass,
+} from '@/style/legacy-defaults.stylex';
 import { clsx } from 'clsx';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
@@ -1491,7 +1496,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           height="calc(var(--spacing) * 7)"
           className={cn(
             SIDEBAR_HELPER_TEXT_CLASS,
-            'mt-3 rounded-full border-sidebar-border bg-sidebar px-3 font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+            loroRecoveryFrameClass,
+            'font-medium',
+            sidebarInkClass,
+            'shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
           )}
           onClick={() => onChatScopeChange('team')}
         >
@@ -1684,7 +1692,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         }
                         className={clsx(
                           stylex.props(shellStyles.switcherMenuChoice).className,
-                          'gap-1.5'
+                          loroSwitcherGapClass
                         )}
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
@@ -1746,13 +1754,25 @@ export const LoroSidebar = memo(function LoroSidebar({
 
           {/* Icon boxes match the radio rows' avatars, so both row kinds
               share one leading column and one text column. */}
-          <Menu.Item className="gap-1.5" icon={Plus} onClick={() => onCreateWorkspaceClicked?.()}>
+          <Menu.Item
+            className={loroSwitcherGapClass}
+            icon={Plus}
+            onClick={() => onCreateWorkspaceClicked?.()}
+          >
             {mergedLabels.createWorkspace}
           </Menu.Item>
-          <Menu.Item className="gap-1.5" icon={Users} onClick={() => onInviteClicked?.()}>
+          <Menu.Item
+            className={loroSwitcherGapClass}
+            icon={Users}
+            onClick={() => onInviteClicked?.()}
+          >
             {mergedLabels.inviteMembers}
           </Menu.Item>
-          <Menu.Item className="gap-1.5" icon={Link2} onClick={() => onLinkRepoClicked?.()}>
+          <Menu.Item
+            className={loroSwitcherGapClass}
+            icon={Link2}
+            onClick={() => onLinkRepoClicked?.()}
+          >
             {mergedLabels.connectGithubRepo}
           </Menu.Item>
         </Menu.Content>

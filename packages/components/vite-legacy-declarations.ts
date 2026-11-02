@@ -75,19 +75,33 @@ export function compileLegacyDeclarations(
   assert.equal(local.init.arguments[0].type, 'ObjectExpression');
   const properties: Ast[] = local.init.arguments[0].properties;
   assert.equal(properties.length, legacyDeclarations.length);
-  const authors = new Map<string, Ast>();
+  const authors = new Map<string, Ast[]>();
   for (const [index, spec] of legacyDeclarations.entries()) {
     const property = properties[index];
     assert.equal(property.type, 'ObjectProperty');
     assert(!property.computed && property.key.name === spec.key);
     assert.equal(property.value.type, 'ObjectExpression');
-    assert.equal(property.value.properties.length, 1);
-    const value = property.value.properties[0];
-    assert.equal(value.type, 'ObjectProperty');
-    assert(!value.computed && value.key.name === spec.js);
-    assert(['StringLiteral', 'NumericLiteral'].includes(value.value.type));
-    if (value.value.type === 'NumericLiteral') assert(Number.isFinite(value.value.value));
-    authors.set(spec.key, value);
+    const names = 'writer' in spec ? [spec.writer, spec.js] : [spec.js];
+    if ('writer' in spec)
+      assert.deepEqual(spec, {
+        key: 'mediumWeight',
+        alias: 'font-medium',
+        js: 'fontWeight',
+        css: 'font-weight',
+        writer: '--tw-font-weight',
+      });
+    assert.equal(property.value.properties.length, names.length);
+    const values: Ast[] = property.value.properties;
+    for (const [i, value] of values.entries()) {
+      assert.equal(value.type, 'ObjectProperty');
+      assert(!value.computed);
+      assert.equal(value.key.type, names[i].startsWith('--') ? 'StringLiteral' : 'Identifier');
+      assert.equal(value.key.name ?? value.key.value, names[i]);
+      assert(['StringLiteral', 'NumericLiteral'].includes(value.value.type));
+      if (value.value.type === 'NumericLiteral') assert(Number.isFinite(value.value.value));
+      if ('writer' in spec) assert.equal(value.value.value, 'var(--font-weight-medium)');
+    }
+    authors.set(spec.key, values);
   }
   const bindings = Object.entries(legacyBindings);
   for (const [index, [name, keys]] of bindings.entries()) {
@@ -115,13 +129,13 @@ export function compileLegacyDeclarations(
     );
     assert.equal(
       new Set(
-        keys.map((key) => {
+        keys.flatMap((key) => {
           const spec = legacyDeclarations.find((s) => s.key === key);
           assert(spec);
-          return spec.css;
+          return 'writer' in spec ? [spec.writer, spec.css] : [spec.css];
         })
       ).size,
-      keys.length,
+      keys.reduce((count, key) => count + authors.get(key)!.length, 0),
       'Overlapping CSS properties in a binding remain unsupported'
     );
   }
@@ -156,8 +170,8 @@ export function compileLegacyDeclarations(
   const metadata: Ast[] = result.metadata.stylex;
   assert.equal(
     metadata.length,
-    legacyDeclarations.length,
-    'Each style key requires one distinct flat atom'
+    legacyDeclarations.reduce((count, spec) => count + authors.get(spec.key)!.length, 0),
+    'Each authored property requires one distinct flat atom'
   );
   const metadataById = new Map<string, Declaration>();
   for (const tuple of metadata) {
@@ -207,20 +221,31 @@ export function compileLegacyDeclarations(
     assert.equal(classes.type, 'StringLiteral');
     return classes;
   };
-  const atoms = new Map<string, string>();
+  const atoms = new Map<string, string[]>();
   const usedAtoms = new Set<string>();
-  const declarations = probes.map(({ spec }, index) => {
+  const declarations = probes.flatMap(({ spec }, index) => {
     const probe = allFolded[bindings.length + index].declaration.declarations[0];
-    const classes = foldedClassNode(probe.init);
-    assert.equal(classes.value.split(' ').length, 1, 'A key probe must resolve to one atom');
-    const id = classes.value;
-    const atomDeclaration = metadataById.get(id);
-    assert(atomDeclaration, 'Unknown key-probe atom');
-    assert.equal(atomDeclaration.prop, spec.css, 'Unexpected property for key: ' + spec.key);
-    assert(!usedAtoms.has(id), 'Deduplicated style keys remain unsupported');
-    usedAtoms.add(id);
-    atoms.set(spec.key, id);
-    return { alias: spec.alias, declaration: atomDeclaration, author: authors.get(spec.key) };
+    const ids: string[] = foldedClassNode(probe.init).value.split(' ');
+    const css = 'writer' in spec ? [spec.writer, spec.css] : [spec.css];
+    assert.equal(ids.length, css.length, 'Unexpected key-probe atom count');
+    atoms.set(spec.key, ids);
+    const values = ids.map((id) => {
+      const value = metadataById.get(id);
+      assert(value, 'Unknown key-probe atom');
+      assert(!usedAtoms.has(id), 'Deduplicated style keys remain unsupported');
+      usedAtoms.add(id);
+      return value;
+    });
+    assert.deepEqual(
+      new Set(values.map((value) => value.prop)),
+      new Set(css),
+      'Unexpected property for key: ' + spec.key
+    );
+    return css.map((property, i) => ({
+      alias: spec.alias,
+      declaration: values.find((value) => value.prop === property)!,
+      author: authors.get(spec.key)![i],
+    }));
   });
   assert.equal(usedAtoms.size, metadataById.size, 'Unassociated metadata atom');
   const folded = allFolded.slice(0, bindings.length);
@@ -233,7 +258,7 @@ export function compileLegacyDeclarations(
     const classes = foldedClassNode(value.init.arguments[0]);
     assert.deepEqual(
       classes.value.split(' '),
-      keys.map((k) => atoms.get(k))
+      keys.flatMap((k) => atoms.get(k)!)
     );
     value.init = {
       ...classes,
@@ -301,8 +326,17 @@ export function replaceLegacyDeclarations(
 ) {
   const ast = postcss.parse(code, { from: filename });
   const claimed = new Set<Declaration>();
-  const replacements = compiled.declarations.flatMap(({ alias, declaration, author }) => {
-    const aligned = alignedDeclaration(declaration, optimization);
+  const aliases = [...new Set(compiled.declarations.map((d) => d.alias))];
+  const replacements = aliases.flatMap((alias) => {
+    const owned = compiled.declarations.filter((d) => d.alias === alias);
+    assert(
+      owned.length === 1 ||
+        (alias === 'font-medium' &&
+          owned.length === 2 &&
+          owned[0].declaration.prop === '--tw-font-weight' &&
+          owned[1].declaration.prop === 'font-weight'),
+      'Only the closed font-medium writer pair may share a slot'
+    );
     const selector = '.' + alias.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
     const found: postcss.Rule[] = [];
     ast.walkRules((rule) => {
@@ -321,40 +355,43 @@ export function replaceLegacyDeclarations(
       found.length === 1 || (alias === '@container' && found.length === 2),
       'Missing or ambiguous compatibility slot: ' + alias
     );
-    return found.map((rule) => {
+    return found.flatMap((rule) => {
       const context = [];
       for (let p = rule.parent; p && p.type !== 'root'; p = p.parent) {
         assert(p.type === 'atrule');
         context.unshift([p.name, p.params]);
       }
       assert.deepEqual(context, [['layer', 'utilities']]);
-      assert.equal(rule.nodes.length, 1);
-      const old = rule.first;
-      assert(old?.type === 'decl' && !old.important);
-      assert(!claimed.has(old), 'Ambiguous shared compatibility declaration');
-      claimed.add(old);
-      assert.equal(old.prop, aligned.prop);
-      assert.equal(
-        comparable(old.prop, old.value),
-        comparable(aligned.prop, aligned.value),
-        'Unequal compatibility declaration: ' + alias
-      );
-      const replacement = aligned.clone();
-      replacement.raws = { ...old.raws };
-      replacement.source = {
-        input: new Input(compiled.raw, { from: compiled.filename }),
-        start: {
-          line: author.key.loc.start.line,
-          column: author.key.loc.start.column + 1,
-          offset: author.key.start,
-        },
-        end: {
-          line: author.value.loc.end.line,
-          column: author.value.loc.end.column + 1,
-          offset: author.value.end,
-        },
-      };
-      return { rule, old, replacement };
+      assert.equal(rule.nodes.length, owned.length);
+      return owned.map(({ declaration, author }, index) => {
+        const aligned = alignedDeclaration(declaration, optimization);
+        const old = rule.nodes[index];
+        assert(old?.type === 'decl' && !old.important);
+        assert(!claimed.has(old), 'Ambiguous shared compatibility declaration');
+        claimed.add(old);
+        assert.equal(old.prop, aligned.prop);
+        assert.equal(
+          comparable(old.prop, old.value),
+          comparable(aligned.prop, aligned.value),
+          'Unequal compatibility declaration: ' + alias
+        );
+        const replacement = aligned.clone();
+        replacement.raws = { ...old.raws };
+        replacement.source = {
+          input: new Input(compiled.raw, { from: compiled.filename }),
+          start: {
+            line: author.key.loc.start.line,
+            column: author.key.loc.start.column + 1,
+            offset: author.key.start,
+          },
+          end: {
+            line: author.value.loc.end.line,
+            column: author.value.loc.end.column + 1,
+            offset: author.value.end,
+          },
+        };
+        return { rule, old, replacement };
+      });
     });
   });
   for (const { rule, old, replacement } of replacements) {

@@ -9,14 +9,14 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of fifty-five flat declarations with seventy-seven authored bindings used at one hundred and eighty-four utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector and ChatComposer, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of sixty-eight single-field keys and one closed font-weight pair with eighty-nine authored bindings used at two hundred and fourteen utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu and message actions, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
 | Owner                                                                                                          | Responsibility                                                                                                                              |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Twenty-four real StyleX declarations and seventy-seven authored scalar/group class bindings.                                                |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its fifty-five aliases. |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Sixty-nine StyleX keys, seventy physical declarations and eighty-nine authored scalar/group class bindings.                                 |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its sixty-nine aliases. |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                               |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                           |
 
@@ -32,18 +32,26 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal flat declarations and the seventy-seven approved `stylex.props`
+It accepts literal single-field declarations, the closed font-weight pair and the eighty-nine approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
 module throws if consumed without its build adapter.
 
 The CSS transform runs after Vite's CSS processing and before CSS publication.
-It validates all original selectors, `utilities` contexts, single declarations,
+It validates all original selectors, `utilities` contexts, the exact single-field or closed-pair bodies,
 values and importance before mutating anything. Each old declaration is detached
 and replaced by a clone of the real metadata declaration at that same position.
 There is no second effective Tailwind body, new specificity, layer reordering,
 shared ordinary atom or extra inline source-retention declaration.
+
+The only multi-declaration exception is the exact `font-medium` writer-first
+pair. Both fields read the same element-local `--font-weight-medium` variable.
+The compiler associates the two native atoms by property, preserves the original
+registration and rejects any omitted, reordered, duplicate, important, unequal
+or unexpected field before mutation. The
+[font-pair decision](2026-11-03-stylex-font-writer-pair.md) owns that acceptance;
+other writer rules and variants remain unsupported.
 
 The adapter follows the actual Tailwind Vite optimization phase. Serve mode leaves
 declarations raw; the two official build entries share their Tailwind options with
@@ -90,18 +98,18 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-One hundred and six consumer utility positions becoming imported bindings are not that many fewer
-remaining legacy occurrences. The fifty-five aliases and one hundred and eighty-four compiled output occurrences
+Two hundred and fourteen consumer utility positions becoming imported bindings are not that many fewer
+remaining legacy occurrences. The sixty-nine aliases and two hundred and fourteen compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
 [migration note](2026-10-22-tailwind-to-stylex-migration.md#public-callers-and-the-remaining-cascade-boundary)
 owns those exact source cuts and counts.
 
-Widen only a demonstrated flat owner after its real Before capture and caller
+Widen only a demonstrated owner after its real Before capture and caller
 checks. Distinct keys may use different values of the same CSS property. The
 compiler adds one private native `stylex.props` probe per validated key, associates
-its actual atom ID with flat metadata, and removes every probe before publication.
+its actual atom IDs with metadata, and removes every probe before publication.
 It does not infer key identity from property/value sets or metadata ordering.
 Overlapping properties inside one binding, atom deduplication, unknown atoms and
 reserved probe-name collisions reject. This remains a closed build transform,
@@ -296,9 +304,30 @@ Chrome scenes with touch points0, not hardware/touch acceptance. Narrow desktop
 width alone did not reach that branch; the initial touch-reset cause assumption
 was also disproved, and both zero-accepted attempts remain. Root reuses the existing
 padding-zero key as well as six ACP keys, avoiding duplicate atoms without changing
-the frozen candidate. Current55 keys/77 bindings need their own final combined
+the frozen candidate. The frozen234 cut's55 keys/77 bindings need their own final combined
 qualification; neither the original matrices nor235's44-key proof replace it.
 Build-only232/235 earn zero consumer credit.
+
+The236–240 continuation transfers thirty further ownership positions with zero
+net utility removal. Composer base colors add seven, LoroSidebar ten,
+AttachmentAddMenu five, message-action chrome seven and the ACP font pair one.
+The current bank has69 keys,70 physical declarations,89 bindings and32 distinct
+CSS properties, including the private font writer. Its214 retained outputs still
+depend on the original Tailwind aliases and sorting. The combined current Root
+build/browser qualification is separate from these isolated unit reports.
+
+| Unit               | Real acceptance                                                                | Retained limits                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Composer236        | Desktop12/24 PNGs exact; mobile2/4 exact;107 CSS pairs exact.                  | Desktop12 paint OPENs240raw, mobile2 OPENs6,916raw/180threshold; another PNG-exact mobile state has three hover-field differences. Separate hover-none control does not close them. Alpha border stays Tailwind after raw oracle rejection. |
+| LoroSidebar237     | All27 PNG pairs exact,6,391 body/135 target records;107 CSS pairs exact.       | CTA/workspace radio callbacks are verified; three menu actions establish paint/close only. Report close-race failure remains recorded.                                                                                                      |
+| Attachment238      | Formal19/24 PNGs exact,3,433 body/106 targets;107 CSS pairs exact.             | Five OPENs199,629raw/zero-threshold; three exact root-only controls are not submenu acceptance. Two complex MCP widths stay Tailwind after exact raw-value rejection.                                                                       |
+| Message actions239 | 31/33 PNGs exact,5,861 body/125 targets;107 CSS pairs exact.                   | Two mobile-tap OPENs71raw/2threshold. Arbitrary public icon, selection Range, independently gated Check-present feedback and fine/hover capability are not established. Original state writers remain.                                      |
+| ACP font240        | 24/24 PNGs exact,3,969 body/255 targets;108 CSS pairs across six builds exact. | One label only; synthetic research's24 DOM cases in three images are a different scope. Normalized bank prefix and final Root composition require separate verification.                                                                    |
+
+Each `leaves236` through `leaves240` delivery, its HTML and independent review
+retain the actual inputs, URL carriers, initial failures and cleanup outcomes.
+No new exact PNG or CSS asset closes an original pixel, hover-field or device
+limitation. The message resting opacity remains the exact raw `0%` expression.
 
 The original production Vite pipeline does not publish a usable CSS source map.
 JS and real development CSS author mappings are verified; complete production CSS

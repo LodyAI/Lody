@@ -37,10 +37,13 @@ const originalSource = () => {
     --color-sidebar: ${opaque(colors.sidebar.DEFAULT)};
     --color-background: ${opaque(colors.background)};
     --color-input-field: ${opaque(colors.input.field)};
+    --color-input-foreground: ${opaque(colors.input.foreground)};
+    --color-muted-foreground: ${opaque(colors.muted.foreground)};
     --color-sidebar-foreground: ${opaque(colors.sidebar.foreground)};
+    --color-sidebar-border: ${opaque(colors.sidebar.border)};
   }`;
   return (
-    '@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; --radius-2xl: 1rem; }' +
+    '@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; --radius-2xl: 1rem; --font-weight-medium: 500; }' +
     theme
   );
 };
@@ -75,13 +78,17 @@ describe('closed legacy declaration bridge', () => {
     result.root.walkDecls((d) => {
       if (d.source?.input.file === filename) owned++;
     });
-    expect(owned).toBe(legacyDeclarations.length);
+    expect(owned).toBe(
+      legacyDeclarations.reduce((count, spec) => count + ('writer' in spec ? 2 : 1), 0)
+    );
     const map = new TraceMap(result.map!.toJSON(), pathToFileURL(path.resolve('owned.css')).href);
     const generated = postcss.parse(result.css);
     for (const spec of legacyDeclarations) {
       const selector = '.' + spec.alias.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
       generated.walkRules(selector, (rule) => {
-        const declaration = rule.first!;
+        const declaration = rule.nodes.find(
+          (node) => node.type === 'decl' && node.prop === spec.css
+        )!;
         const actual = originalPositionFor(map, {
           line: declaration.source!.start!.line,
           column: declaration.source!.start!.column - 1,
@@ -254,7 +261,9 @@ describe('closed legacy declaration bridge', () => {
     recovered.root.walkDecls((d) => {
       if (d.source?.input.file === filename) owned++;
     });
-    expect(owned).toBe(legacyDeclarations.length);
+    expect(owned).toBe(
+      legacyDeclarations.reduce((count, spec) => count + ('writer' in spec ? 2 : 1), 0)
+    );
   });
 
   it.each([
@@ -752,4 +761,129 @@ describe('explicit configured PostCSS phase', () => {
       configuredDeclarationBridge({ tailwindOptions: {}, postcssOptions: { optimize: false } })
     ).toThrow('Choose one stylesheet producer');
   });
+});
+
+const fontPairSpecs = [
+  {
+    key: 'mediumWeight',
+    alias: 'font-medium',
+    js: 'fontWeight',
+    css: 'font-weight',
+    writer: '--tw-font-weight',
+  },
+];
+const fontPairBindings = { mediumClass: ['mediumWeight'] };
+const fontPairSource = `import * as stylex from '@stylexjs/stylex';
+function legacyClass(_classes: string | undefined): string { throw new Error('fixture'); }
+const styles = stylex.create({ mediumWeight: {
+  '--tw-font-weight': 'var(--font-weight-medium)',
+  fontWeight: 'var(--font-weight-medium)',
+} });
+export const mediumClass = legacyClass(stylex.props(styles.mediumWeight).className);
+`;
+describe('closed font-medium writer pair', () => {
+  it.each([false, { minify: false }, { minify: true }] as const)(
+    'preserves the actual font rule, registration and both author maps in phase %j',
+    async (phase) => {
+      await withKeyProfile(
+        async (api) => {
+          const rawCSS = await originalCSS(['font-medium']);
+          const css = phase ? optimize(rawCSS, phase).code : rawCSS;
+          const compiled = api.compileLegacyDeclarations(fontPairSource, filename);
+          expect(
+            compiled.declarations.map(({ declaration }) => [declaration.prop, declaration.value])
+          ).toEqual([
+            ['--tw-font-weight', 'var(--font-weight-medium)'],
+            ['font-weight', 'var(--font-weight-medium)'],
+          ]);
+          expect(compiled.code).toBe('export const mediumClass = "font-medium";');
+          const result = api.replaceLegacyDeclarations(
+            css,
+            'owned.css',
+            compiled,
+            undefined,
+            phase
+          );
+          expect(result.css).toBe(css);
+          const trace = new TraceMap(
+            result.map!.toJSON(),
+            pathToFileURL(path.resolve('owned.css')).href
+          );
+          const generated = postcss.parse(result.css);
+          generated.walkRules('.font-medium', (rule) => {
+            for (const [i, node] of rule.nodes.entries()) {
+              const position = originalPositionFor(trace, {
+                line: node.source!.start!.line,
+                column: node.source!.start!.column - 1,
+              });
+              const authored = i === 0 ? "'--tw-font-weight':" : 'fontWeight:';
+              const lines = fontPairSource.slice(0, fontPairSource.indexOf(authored)).split('\n');
+              expect(fileURLToPath(position.source!)).toBe(filename);
+              expect([position.line, position.column]).toEqual([
+                lines.length,
+                lines.at(-1)!.length,
+              ]);
+            }
+          });
+        },
+        fontPairSpecs,
+        fontPairBindings
+      );
+    }
+  );
+  it.each([
+    ['writer omitted', "  '--tw-font-weight': 'var(--font-weight-medium)',\n", ''],
+    [
+      'different reader',
+      "fontWeight: 'var(--font-weight-medium)'",
+      "fontWeight: 'var(--tw-font-weight)'",
+    ],
+    [
+      'different writer',
+      "'--tw-font-weight': 'var(--font-weight-medium)'",
+      "'--tw-font-weight': '700'",
+    ],
+    [
+      'extra property',
+      "fontWeight: 'var(--font-weight-medium)'",
+      "fontWeight: 'var(--font-weight-medium)', color: 'red'",
+    ],
+  ])('rejects authored pair with %s', async (_name, before, after) => {
+    await withKeyProfile(
+      (api) => {
+        expect(() =>
+          api.compileLegacyDeclarations(fontPairSource.replace(before, after), filename)
+        ).toThrow();
+      },
+      fontPairSpecs,
+      fontPairBindings
+    );
+  });
+  it.each(['missing writer', 'reversed pair', 'duplicate writer', 'important writer'])(
+    'rejects unequal original %s without changing the input',
+    async (change) => {
+      await withKeyProfile(
+        async (api) => {
+          const css = postcss.parse(await originalCSS(['font-medium']));
+          css.walkRules('.font-medium', (rule) => {
+            if (change === 'missing writer') rule.first!.remove();
+            if (change === 'reversed pair') rule.prepend(rule.last!);
+            if (change === 'duplicate writer') rule.append(rule.first!.clone());
+            if (change === 'important writer') (rule.first as postcss.Declaration).important = true;
+          });
+          const input = css.toString();
+          expect(() =>
+            api.replaceLegacyDeclarations(
+              input,
+              'owned.css',
+              api.compileLegacyDeclarations(fontPairSource, filename)
+            )
+          ).toThrow();
+          expect(css.toString()).toBe(input);
+        },
+        fontPairSpecs,
+        fontPairBindings
+      );
+    }
+  );
 });

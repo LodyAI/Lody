@@ -60,6 +60,23 @@ const styles = stylex.create({
   composerCorner2xl: { borderRadius: 'var(--radius-2xl)' },
   composerRightSixteen: { paddingRight: 'calc(var(--spacing) * 16)' },
   composerMaximum85vh: { maxHeight: '85vh' },
+  composerClearBorder: { borderColor: 'transparent' },
+  composerInputInk: { color: 'hsl(var(--input-foreground) / 1)' },
+  composerQuietInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  loroRecoveryTop: { marginTop: 'calc(var(--spacing) * 3)' },
+  loroFullCorner: { borderRadius: 'calc(infinity * 1px)' },
+  loroSidebarBorder: { borderColor: 'hsl(var(--sidebar-border) / 1)' },
+  loroInlineThree: { paddingInline: 'calc(var(--spacing) * 3)' },
+  loroGapOneHalf: { gap: 'calc(var(--spacing) * 1.5)' },
+  attachmentPointer: { cursor: 'pointer' },
+  attachmentGapTwoHalf: { gap: 'calc(var(--spacing) * 2.5)' },
+  attachmentBlockTwoHalf: { paddingBlock: 'calc(var(--spacing) * 2.5)' },
+  attachmentIntrinsicWidth: { width: 'max-content' },
+  messageRestOpacity: { opacity: '0%' },
+  mediumWeight: {
+    '--tw-font-weight': 'var(--font-weight-medium)',
+    fontWeight: 'var(--font-weight-medium)',
+  },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -285,3 +302,47 @@ export const composerPastedPaddingClass = legacyClass(stylex.props(styles.paddin
 export const composerPastedMaximumClass = legacyClass(
   stylex.props(styles.composerMaximum85vh).className
 );
+
+export const composerClearBorderClass = legacyClass(
+  stylex.props(styles.composerClearBorder).className
+);
+export const composerInputInkClass = legacyClass(stylex.props(styles.composerInputInk).className);
+export const composerSecondaryInkClass = legacyClass(
+  stylex.props(styles.pageFill, styles.composerQuietInk).className
+);
+
+export const loroRecoveryFrameClass = legacyClass(
+  stylex.props(
+    styles.loroRecoveryTop,
+    styles.loroFullCorner,
+    styles.loroSidebarBorder,
+    styles.sidebarFill,
+    styles.loroInlineThree
+  ).className
+);
+
+export const loroSwitcherGapClass = legacyClass(stylex.props(styles.loroGapOneHalf).className);
+
+export const attachmentPointerClass = legacyClass(stylex.props(styles.attachmentPointer).className);
+
+export const attachmentMobileRowClass = legacyClass(
+  stylex.props(styles.attachmentGapTwoHalf, styles.attachmentBlockTwoHalf).className
+);
+
+export const attachmentMobileBlockClass = legacyClass(
+  stylex.props(styles.attachmentBlockTwoHalf).className
+);
+
+export const attachmentIntrinsicWidthClass = legacyClass(
+  stylex.props(styles.attachmentIntrinsicWidth).className
+);
+
+export const messageRestOpacityClass = legacyClass(
+  stylex.props(styles.messageRestOpacity).className
+);
+
+export const messageFooterLayoutClass = legacyClass(
+  stylex.props(styles.loroGapOneHalf, styles.sidebarCornerMedium, styles.loroInlineThree).className
+);
+
+export const acpMediumWeightClass = legacyClass(stylex.props(styles.mediumWeight).className);

@@ -1854,19 +1854,20 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
 六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-工作树已集成234／235，components在1,399产品源识别1,141处AST／141文件／935未解析。
-helper222仍为30源／191处／八文件／21未解析；v2合计1,332处／149文件／956未解析表达式。
-十二个owner的已知桥输出184处，另四个仅桥consumer不在AST utility文件列表。
-**保守兼容下界仍为1,516处／153文件**。最新78处转移声明归属，仍保alias与Tailwind排序。
-未解析含正常StyleX／runtime值与import绑定，不是956个已确认utility或完成率。
-历史切面不回写；仅构建232／235不给consumer信用。
+已集成240切面的components在1,399产品源识别1,111处AST／141文件／969未解析。
+helper222仍为30源／191处／八文件／21未解析；v2合计1,302处／149文件／990未解析表达式。
+十五个owner的已知桥输出214处，另四个仅桥consumer不在AST utility文件列表。
+**保守兼容下界仍为1,516处／153文件**。236–240转移三十个声明归属位置，净Tailwind依赖
+移除为零；其69 key代表70物理声明／89绑定，含封闭字重pair。未解析含正常StyleX／runtime
+值与import绑定，不是990个已确认utility或完成率。
 
-inventory-source-through234235-integrated-proof.json及inventory-v2-through234235-integrated-fullsrc.json
+inventory-source-through240-integrated-proof.json及inventory-v2-through240-integrated-fullsrc.json
 拥有全部1,399份已hash产品输入；helper仍为冻结222切面。库存排除story，但其literal可影响CSS扫描。
-当前Root资格与原230–234矩阵及235的44key工具证明分列，保233五个绘制OPEN及原未采selection
-endpoints、26对组合补充的四OPEN、234五个mobile-UA OPEN。
-[桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有显式producer阶段、canonical
-key复用、真实公开容器反例、元数据扫描修复及全部原OPEN；新CSS或帧同不关闭旧差。
+原230–240矩阵与各组合Root切面范围分列。已验230–235组合十八对中十六PNG同、两个OPEN共
+1,668raw／18threshold，其620文件／6,246测试回归早于后续compiler扩展。当前236–240组合须另验，
+不关闭旧paint、hover字段、cleanup或device限制。
+[桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有compiler／调用方边界及各单元证据；
+[字重pair决定](2026-11-03-stylex-font-writer-pair.zh.md)拥有唯一多字段例外。历史库存切面不回写。
 
 此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
 在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，
