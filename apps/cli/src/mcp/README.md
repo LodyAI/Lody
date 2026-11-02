@@ -35,6 +35,56 @@ record synthetic coverage and unverified host/provider behavior.
 Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
 and lifecycle decisions behind them; it does not introduce additional requirements.
 
+## Skills over MCP
+
+The built-in `lody` server publishes the
+[Skills extension](https://skills.extensions.modelcontextprotocol.io/) from
+[one bundled catalog](skills/automations.ts). `skills/list` and `skills/get` return
+frontmatter and complete file manifests with SHA-256 digests and UTF-8 byte lengths.
+`resources/read` returns individual files. The App's modern HTTP handler advertises
+the extension through `server/discover`.
+
+| Boundary                       | Owner                                                 | Behavior                                                                          |
+| ------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Protocol discovery and content | [MCP registration](skills/server.ts)                  | Publishes skill entries and resources; server instructions point to the entry URI |
+| Manifest construction          | [Bundle construction](skills/catalog.ts)              | Parses SKILL.md frontmatter and hashes the exact resource bytes                   |
+| Automation workflow            | [Automations skill](skills/lody-automations/SKILL.md) | Routes conditions, settings and inspection to focused references                  |
+| Exact API parameters           | [Automation bundle](skills/automations.ts)            | Generates JSON Schema resources from the executing shared schemas                 |
+
+The MCP host discovers entries through `skills/list`, exposes names and descriptions
+in its native skill catalog, and uses its skill-loading path to verify and activate
+the selected content. `skills/get` resolves an entry given only its URI; a listed
+entry already contains its complete manifest. Supporting files load on demand via
+`resources/read`. Identity includes both the originating server and the resource URI.
+An ordinary resource read alone does not activate a skill.
+
+The [ACP startup owner](../agent/agent-client.ts) passes the built-in server through
+standard `mcpServers`, using the existing HTTP or stdio transport. The Agent owns
+its MCP connection and Skills extension consumption. ACP carries no additional skill
+metadata; Lody does not open a second client, install local snapshots, modify native
+plugin configuration or inject the guide into prompts.
+
+Automatic summary discovery requires an MCP host implementing the Skills extension.
+Supporting MCP tools or ACP alone does not establish that support. Hosts without the
+extension can see ordinary resources, but Lody does not label that as native skill
+activation. Protocol tests establish server interoperability, not native runtime
+support or model selection. With a synthetic stdio server advertising the extension,
+Codex 0.160.1 and Claude Agent SDK 0.3.293 connected and listed tools but did not
+request `skills/list` during initialization; the test skill did not appear in their
+native skill/command lists. In a Codex turn explicitly asking for the test skill,
+Codex listed and read its MCP resource and followed its instructions. This confirms
+resource access, not native skill activation. A Claude turn could not be tested
+because the SDK runtime was not logged in. HTTP transport, the full ACP path and
+other versions remain unverified. Native automatic discovery remains unconfirmed.
+
+Markdown and the existing runnable CI example are imported as raw text and embedded
+in both Vite production and esbuild development bundles. Generated schema resources
+are stable within that bundle. Discovery metadata is parsed from the skill's YAML
+frontmatter, rather than maintained separately. Supporting references
+use paths relative to the skill directory, including generated schema and example files.
+Unknown identities and paths fail rather than falling back to filesystem reads.
+The catalog is immutable for the process lifetime; a new CLI bundle publishes updates.
+
 ## Stdio lifetime
 
 `commands/internal.ts` executes `serveStdioMcp` with the SDK/Node adapter in
@@ -112,6 +162,17 @@ to select its project. See [session relations](../../../../specs/session-relatio
   and the local catalog could not validate a selection. It does not prove that an id is
   valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
   failures and explicit validation errors retain their existing non-retryable classification.
+- Daemon-hosted Session and catalog reads, including `lody_session_create_options`,
+  `lody_session_list`, and `lody_session_status_many`, use the daemon replica. They do not
+  call Streams for the request. Background catalog sync stays with the daemon. Create
+  options return local machines, agent configs, projects, and the current work context
+  when those rows are present. While the daemon baseline is not ready, an empty
+  agent-config catalog or a missing current or queried selection is retryable
+  `SYNC_UNAVAILABLE`, so absence is not reported as a definitive empty result. A ready
+  baseline may return an empty catalog. Role validation, explicit fresh-catalog discovery,
+  and Operation acceptance keep their existing freshness requirements. Authorization and
+  three-state presence are unchanged. Standalone CLI reads keep their own sync and
+  `--offline` contracts.
 - Without an active Operation handle, an Agent must wait at least 5 seconds between calls
   and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
   Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.

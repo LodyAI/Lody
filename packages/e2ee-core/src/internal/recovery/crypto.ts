@@ -43,6 +43,31 @@ export const parseCanonical = (input: Uint8Array): unknown => {
   if (!bytesEqual(bytes, canonical(value))) throw vaultError('invalid-input');
   return value;
 };
+const wipeByteLeaves = (value: unknown, depth = 0): void => {
+  if (value instanceof Uint8Array) value.fill(0);
+  else if (depth < 8 && value !== null && typeof value === 'object')
+    for (const item of Array.isArray(value) ? value : Object.values(value))
+      wipeByteLeaves(item, depth + 1);
+};
+/** Decode canonical CBOR secret plaintext for `use` only. Whether `use` returns
+ * or throws, the input copy, the canonical re-encoding and every decoded byte
+ * string are wiped, so `use` must copy anything it keeps. */
+export const useCanonicalSecret = <A>(input: Uint8Array, use: (value: unknown) => A): A => {
+  if (!(input instanceof Uint8Array) || input.length === 0 || input.length > MAX_VAULT_BYTES)
+    throw vaultError('invalid-input');
+  const bytes = new Uint8Array(input);
+  let value: unknown, again: Uint8Array | undefined;
+  try {
+    value = decode(bytes);
+    again = encode(value);
+    if (!bytesEqual(bytes, again)) throw vaultError('invalid-input');
+    return use(value);
+  } finally {
+    bytes.fill(0);
+    again?.fill(0);
+    wipeByteLeaves(value);
+  }
+};
 export const random = (size: number) => {
   try {
     return globalThis.crypto.getRandomValues(new Uint8Array(size));

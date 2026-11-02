@@ -32,6 +32,12 @@
 - `close()` 停止接纳，取消并等待操作，再释放密钥、credential 和数据库所有者。
   close/logout/清缓存不删除身份。组合不创建定时器、文档 Repo 或普通传输。
 
+## 封装 epoch
+
+新文档、Meta 和 Flock 的 seal 在 core 内部选择当前已验证 epoch。
+调用方的旧 epoch 只是提示；缺当前 key 时失败并等待重试，不生成新的旧 epoch 密文。
+已封装旧帧和历史读取保持有效；高于已验证账本的 epoch 提示必须等待追赶后重试。
+
 ## 有界退休
 
 owned host 和 session 的 `close()` 立即停止新工作，每个实际 drain 共用五秒等待预算。
@@ -113,6 +119,20 @@ readerLeases: preallocated-v1 接受 open 第四个参数中的唯一调用标�
 操作。已提交 epoch 的钥缺失时，先由 core receiver 验证并接收暂存原件；暂存不可用
 仍允许 mailbox 接收。背书快照缺少发布原件时走 mailbox/history。core 保留并验证
 receive/report/distribution 原件；共享有限维护流程只确认已观察到的业务终态，也会确认另一阶段失败时成功的兄弟阶段。没有明文降级。
+
+## 账号级配对流程
+
+`@lody/e2ee-client/account-pairing` 是各宿主共用的账号级个人设备配对流程（[基础规范](../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)）。它负责标签和有效期检查、单次签名的接纳日志，以及本地终态。宿主需要提供四样东西：
+- `AccountPairingStore`，保存持久状态，其中不含任何密钥或私钥；
+- 中继；
+- 按工作区的端口；
+- 可选的 `diagnostics`。
+
+配对密钥只保存在内存里。桌面端使用 SQLite 存储，浏览器端的存储另行实现。身份保护方式由按工作区的端口决定，不在这个流程里决定。
+
+`@lody/e2ee-client/account-pairing/browser` 提供浏览器端的组件：
+- `makeIndexedDbAccountPairingStore` 为每个账号维护一个数据库。每次修改都要等事务完成后才返回；事务中止或超出存储配额时，状态不会前进。
+- `makeAccountPairingTabOwnership` 与 `withAccountPairingTabOwnership` 通过 Web Locks 保证同一时间只有一个标签页负责该账号的配对，因为配对密钥只保存在那个标签页的内存里。其他标签页会收到 `pairing-elsewhere`；标签页关闭后锁会自动释放。
 
 ## 验证与限制
 

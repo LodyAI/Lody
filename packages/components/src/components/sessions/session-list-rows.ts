@@ -22,6 +22,21 @@ import { placeOpenedSessionsWithOpeners } from '@/lib/session-opened-by-tree';
 
 export type SessionListScope = 'my' | 'team';
 
+/** Unavailable local-project history has no project section; keep it in Chats. */
+export function selectSidebarTaskSessions(
+  sessions: SessionMeta[],
+  visibleLocalProjects: { has(key: string): boolean },
+  workspaceHistoryReadable = false
+): SessionMeta[] {
+  return sessions.filter(
+    (session) =>
+      session.project?.kind !== 'local' ||
+      session.projectRun !== undefined ||
+      (workspaceHistoryReadable &&
+        !visibleLocalProjects.has(`${session.machineId}:${session.project.localProjectId}`))
+  );
+}
+
 export type WorkspaceMember = {
   userId: string;
   user?: {
@@ -516,7 +531,8 @@ export function placeWorkspaceSessionsWithOpeners(
     }
   };
   for (const task of natural.chatSessions) addTask(task, 'chats');
-  for (const task of natural.repoSessions) addTask(task, `repo:${(task.repoFullName ?? '').trim()}`);
+  for (const task of natural.repoSessions)
+    addTask(task, `repo:${(task.repoFullName ?? '').trim()}`);
   for (const task of natural.projectGroupSessions)
     addTask(task, `group:${task.projectGroup?.id ?? ''}`);
   const sessionById = new Map<string, SessionMeta>();

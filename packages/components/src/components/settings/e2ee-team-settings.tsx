@@ -142,7 +142,7 @@ function TeamSession({
       await refresh();
     });
   return (
-    <Card.Root>
+    <Card.Root data-testid="e2ee-team-settings">
       <Card.Header>
         <Card.Title>{t('e2ee.team.title')}</Card.Title>
         <Card.Description>{t('e2ee.team.help')}</Card.Description>
@@ -166,18 +166,18 @@ function TeamSession({
             onChange={(event) => setEmail(event.target.value)}
             disabled={busy}
           />
-          <Button type="submit" disabled={busy || !data}>
+          <Button data-testid="e2ee-invite-email" type="submit" disabled={busy || !data}>
             {t('e2ee.team.invite')}
           </Button>
         </form>
         <div {...stylex.props(styles.row)}>
-          <Button variant="secondary" disabled={busy || !data} onClick={() => void create('link')}>
+          <Button data-testid="e2ee-invite-link-create" variant="secondary" disabled={busy || !data} onClick={() => void create('link')}>
             {t('e2ee.team.createLink')}
           </Button>
           <span {...stylex.props(styles.label)}>{t('e2ee.team.linkHelp')}</span>
         </div>
         {link && (
-          <Input
+          <Input data-testid="e2ee-invitation-link"
             aria-label={t('e2ee.team.invitationLink')}
             readOnly
             value={link}
@@ -189,7 +189,7 @@ function TeamSession({
           <p {...stylex.props(styles.label)}>{t('e2ee.team.noRequests')}</p>
         )}
         {data?.items.map((request) => (
-          <div key={request.requestId} {...stylex.props(styles.item)}>
+          <div data-testid="e2ee-join-request" data-request-id={request.requestId} key={request.requestId} {...stylex.props(styles.item)}>
             <div {...stylex.props(styles.row)}>
               <span {...stylex.props(styles.identity)}>
                 {request.applicantName || request.applicantEmail || t('e2ee.team.applicant')}
@@ -209,6 +209,8 @@ function TeamSession({
             </details>
             <div {...stylex.props(styles.row)}>
               <Button
+                data-testid="e2ee-join-approve"
+                data-request-id={request.requestId}
                 disabled={busy}
                 onClick={() =>
                   void perform(async () => {
@@ -259,7 +261,7 @@ function TeamSession({
                     <span {...stylex.props(styles.identity)}>
                       {member.name ?? t('e2ee.team.member')}
                     </span>
-                    <Button
+                    <Button data-testid="e2ee-member-promote" data-membership-id={member.membershipId}
                       variant="secondary"
                       disabled={busy}
                       onClick={() =>
@@ -332,7 +334,11 @@ function TeamHostSession({
   profiles?: ReadonlyMap<string, { name: string | null }>;
 }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ role: string; members: Member[] } | null>(null);
+  const [state, setState] = useState<{
+    runtime: E2eeWorkspaceRuntime;
+    role: string;
+    members: Member[];
+  } | null>(null);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -343,6 +349,7 @@ function TeamHostSession({
         if (stopped) return;
         if (
           status.deviceKind !== 'personal' ||
+          status.hasDeviceCredential !== true ||
           !['owner', 'admin'].includes(status.memberRole ?? '')
         ) {
           setState(null);
@@ -350,6 +357,7 @@ function TeamHostSession({
         }
         const history = hostLedgerHistory(view);
         setState({
+          runtime,
           role: status.memberRole!,
           members: Array.from(history.view.inspectState().members.entries()).map(
             ([membershipId, member], index) => ({
@@ -374,7 +382,7 @@ function TeamHostSession({
       clearTimeout(timer);
     };
   }, [runtime, workspaceId, labels, profiles, t]);
-  return state ? (
+  return state?.runtime === runtime ? (
     <E2eeTeamSettings
       runtime={runtime}
       workspaceId={workspaceId}

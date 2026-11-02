@@ -4,10 +4,13 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 
 - Direct ordinary attachment uploads require trusted mode admission for the current account and workspace before sending source bytes; a provisional runtime is not that proof. Protected attachment failures never enable ordinary HTTP or plaintext local fallback.
 - Send/RPC await local commits, never Repo flush. Save `humanInputReceipts` before activation; RPC is redundant.
+- Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
 
 - Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
+
+Organization queries require matching authenticated sessions.
 
 ## Electron IPC types
 
@@ -67,6 +70,10 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
   or Flock publish. Electron verifies disk machine identity and reads via local IPC,
   independent of daemon/index readiness. Unknown targets never fall back to Streams;
   confirmed remote targets retain restricted, bounded `file/preview`.
+- Encrypted remote file roles come from the verified ledger status, never the organization
+  listing. Refuse methods outside the closed read list for non-writers, and every remote file
+  method without host feature RPC, before signing, with non-retryable copy; the receiving
+  machine still authorizes. [Decision](../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md#browser-and-mobile-consumers).
 - Small local text may enter the full-document editor/cache. `paged-text` is a separate
   readonly snapshot with bounded random reads; never seed the save cache, executable
   HTML, rendered Markdown/SVG, or full-document copy/download from it. Hidden paged
@@ -88,6 +95,8 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
   transfer limits; stage isolated cache files and clean up after handoff, failure, or
   cancellation. Report cancellation separately; retain the preview and selection.
+- Before changing conversation Markdown/PNG exports, read the
+  [conversation export rules](../AGENTS.md#conversation-exports).
 
 ## File identity, caching, and errors
 

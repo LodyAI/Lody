@@ -43,6 +43,7 @@ import { getCliHttpFetch } from '@/utils/http-transport';
 import {
   canUseMachineForCliToken,
   getWorkspaceBillingEntitlementForCliToken,
+  parseMachineWorkspaceEntitlement,
   registerMachineAccessForCliToken,
 } from './workspace';
 import { NotificationService } from './notifications';
@@ -305,7 +306,16 @@ export function createCloudE2eePort(
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
     readEpochGroup: (input) =>
       client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
-        ...input,
+        workspaceId: input.workspaceId,
+        credential: input.credential,
+        // Native discovery also retains the publication signer. The wire key
+        // has exactly four fields; the receiver authenticates the originals.
+        key: {
+          genesis: input.key.genesis,
+          epoch: input.key.epoch,
+          commitment: input.key.commitment,
+          recordHash: input.key.recordHash,
+        },
         ...(options.token === undefined ? {} : { cliToken: options.token }),
       }),
     mailboxCall: async (method, input) => {
@@ -539,6 +549,24 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       logger: options.logger,
     }),
     attachmentUpload: { serverBaseUrl },
+    remoteAutomation: {
+      verifyControl: async (input) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL('/api/session-automation/verify', authSiteUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!response.ok) throw new Error(`Automation authorization failed (${response.status}).`);
+        return PreviewControlVerificationSchema.parse(await response.json());
+      },
+    },
     remotePreview: {
       simulatorIceServers: async (input) => {
         const response = await getCliHttpFetch({ logger: options.logger })(
@@ -599,6 +627,9 @@ export function createCommandAttachmentTransfer(
 }
 
 /** A cloud machine authenticated only to one admitted encrypted workspace. No account APIs. */
+/** Bounds the cooperative quota's plan read; a slower answer is treated as unavailable. */
+const MACHINE_ENTITLEMENT_TIMEOUT_MS = 10_000;
+
 export function createCloudE2eeMachinePort(options: {
   accountId: string;
   workspaceId: string;
@@ -653,6 +684,40 @@ export function createCloudE2eeMachinePort(options: {
     kind: 'cloud',
     e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
     attachmentUpload: { serverBaseUrl },
+    // Cooperative session/turn quotas select this workspace's plan with the machine's
+    // own device credential; the account API key path is never used here.
+    billing: {
+      getWorkspaceEntitlement: async (workspaceId) => {
+        if (workspaceId !== options.workspaceId) throw new Error('e2ee_binding_conflict');
+        // `query()` waits for a reconnect without bound while disconnected, which would
+        // keep the cooperative quota from ever failing open. Subscribe once with a
+        // deadline and release only this read's subscription, never the shared client.
+        const value = await new Promise<unknown>((resolve, reject) => {
+          let settled = false;
+          let unsubscribe: (() => void) | undefined;
+          const finish = (settle: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            unsubscribe?.();
+            settle();
+          };
+          const timer = setTimeout(
+            () => finish(() => reject(new Error('e2ee_billing_entitlement_timeout'))),
+            MACHINE_ENTITLEMENT_TIMEOUT_MS
+          );
+          unsubscribe = client.onUpdate(
+            api.e2eeMachinePairing.workspaceEntitlement,
+            access,
+            (result) => finish(() => resolve(result)),
+            (error) => finish(() => reject(error))
+          );
+          // A synchronous answer settles before the handle exists; release it now.
+          if (settled) unsubscribe();
+        });
+        return parseMachineWorkspaceEntitlement(value);
+      },
+    },
     e2ee: {
       ...e2ee,
       ...(machineSharing

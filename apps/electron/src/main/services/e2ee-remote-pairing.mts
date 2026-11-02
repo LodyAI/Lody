@@ -9,7 +9,16 @@ import {
 } from '@lody/shared/e2ee-remote-pairing'
 import type { LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
-const fail = () => new Error('e2ee_machine_pairing_conflict')
+// Coded so the host boundary reports a conflict or bad input, not a ledger failure.
+const fail = (code: 'conflict' | 'invalid-input' = 'conflict') =>
+  Object.assign(
+    new Error(code === 'conflict' ? 'e2ee_machine_pairing_conflict' : 'e2ee_invalid-input'),
+    { code }
+  )
+const OfferEndpointsSchema = RemoteMachineOfferSchema.pick({
+  deploymentUrl: true,
+  ingressUrl: true
+})
 /** Same native owner/serialization as local approval, with a separate journal and command pins. */
 export function makeDesktopRemotePairing(input: Parameters<typeof makeDesktopLocalPairing>[0]) {
   const pairing = makeDesktopLocalPairing({ ...input, journal: 'remote' })
@@ -41,6 +50,14 @@ export function makeDesktopRemotePairing(input: Parameters<typeof makeDesktopLoc
       input.db.prepare('SELECT session FROM remote_machine_offers WHERE retired=0').get()
     )
     if (previous) return yield* sql(() => saved())
+    // The signed command only carries HTTPS origins; refuse before signing.
+    if (
+      !OfferEndpointsSchema.safeParse({
+        deploymentUrl: args.deploymentUrl,
+        ingressUrl: args.ingressUrl
+      }).success
+    )
+      return yield* Effect.fail(fail('invalid-input'))
     const context = yield* pairing.context()
     const now = yield* Clock.currentTimeMillis
     const unsigned = {

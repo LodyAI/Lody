@@ -70,3 +70,10 @@ entries without authenticated actor evidence remain closed.
 Decision: [owner-signed policy](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 Synthetic crypto/SQLite tests and production assembly regressions establish host
 behavior, not a deployed backend or two-device product acceptance.
+
+`inspectCache(machineId)` is passive RAM evidence for diagnostics. It counts
+retained policies and team-enabled policy objects for that machine only, without
+opening a lazy owner, reading a clock, touching storage/network or renewing any
+stamp. Counts are not current authorization: an expired/revoked policy object may
+still be retained until a real operation invalidates it. `authorize` remains the
+only execution decision, with all existing freshness and ledger checks.

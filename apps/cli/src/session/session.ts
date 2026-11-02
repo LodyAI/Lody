@@ -1,3 +1,4 @@
+import { providerBindingFingerprint, type ProviderBinding } from './automation-observations';
 import { CommandTimedOut } from '@lody/shared/node/process';
 import { TURN_BUDGETS } from './turn-budgets';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
@@ -215,6 +216,14 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
+  }
+
+  getExecutionScope(): Pick<SessionConfig, 'project' | 'projectRun' | 'parentSessionId'> {
+    return {
+      project: this.config.project,
+      projectRun: this.config.projectRun,
+      parentSessionId: this.config.parentSessionId,
+    };
   }
 
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
@@ -438,6 +447,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitHubCredentials(): SessionCredentials {
     return this.credentials;
+  }
+
+  getProviderBinding(): ProviderBinding | undefined {
+    const config = this.config;
+    if (!config.agentConfigId) return undefined;
+    return {
+      bindingId: config.agentConfigId,
+      fingerprint: providerBindingFingerprint({
+        id: config.agentConfigId,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        env: config.env,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        codexAuth: config.codexAuth,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+      }),
+    };
   }
 
   getMemoryBinding(): SessionConfig['memory'] {

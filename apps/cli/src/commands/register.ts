@@ -1,11 +1,13 @@
 import type { Command } from 'commander';
 import { startCommand } from './start';
+
 import { appCommand } from './app';
 import { loginCommand } from './login';
 import { logoutCommand } from './logout';
 import { projectCommand } from './project';
 import { sessionCommand } from './session';
 import { scheduleCommand } from './schedule';
+import { automationCommand } from './automation';
 import { syncCommand } from './sync';
 import { workspaceCommand } from './workspace';
 import { dshCommand } from './dsh';
@@ -33,6 +35,7 @@ export function registerCommands(program: Command): void {
   program.addCommand(projectCommand);
   program.addCommand(sessionCommand);
   program.addCommand(scheduleCommand);
+  program.addCommand(automationCommand);
   program.addCommand(syncCommand);
   program.addCommand(workspaceCommand);
   program.addCommand(agentConfigCommand);

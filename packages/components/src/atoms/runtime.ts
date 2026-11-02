@@ -187,6 +187,12 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
   /** Local document access is independent of permission to transmit content. */
   waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
@@ -208,6 +214,11 @@ export type WorkspaceRuntime = {
   readonly contentMode?: 'plaintext' | 'e2ee';
   /** Host RPC support only; each operation still requires live admission and grants. */
   readonly protectedRpcAvailable?: boolean;
+  /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
+  readonly protectedCodeCollabRole?: {
+    get(): 'read' | 'write';
+    subscribe(listener: () => void): () => void;
+  };
   readonly attachmentToken?: () => Promise<string>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
@@ -607,6 +618,13 @@ export type WorkspaceRuntime = {
     command: import('@lody/shared').IosSimulatorCommand;
     timeoutMs?: number;
   }) => Promise<import('@lody/shared').IosSimulatorResponse>;
+  requestAndroidEmulatorControl: (request: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: import('@lody/shared').AndroidEmulatorCommand;
+    timeoutMs?: number;
+  }) => Promise<import('@lody/shared').AndroidEmulatorResponse>;
   dispose: () => Promise<void>;
 };
 
@@ -622,6 +640,8 @@ export type WorkspaceRuntimeInitFailure = {
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
   modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
+  /** Present for encrypted access loss, so the gate can route to re-pairing. */
+  workspaceId?: string;
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);

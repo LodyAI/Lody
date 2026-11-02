@@ -1,4 +1,4 @@
-import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
@@ -795,7 +795,7 @@ for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
     )
   })
 
-void test('only authenticated whole-member rejection carries the terminal local deletion signal', async () => {
+void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(
       Effect.scoped(
@@ -819,7 +819,76 @@ void test('only authenticated whole-member rejection carries the terminal local 
               result.failure instanceof E2eeMemberRemovedError,
               code === 'e2ee_member_removed'
             )
+            assert.equal(
+              result.failure instanceof E2eeDeviceRevokedError,
+              code === 'e2ee_device_revoked'
+            )
             assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+        })
+      )
+    )
+  }
+})
+
+void test('access loss authority belongs to a credential response, never an exception or unrelated endpoint', async () => {
+  for (const code of ['e2ee_member_removed', 'e2ee_device_revoked']) {
+    const terminal =
+      code === 'e2ee_member_removed' ? new E2eeMemberRemovedError() : new E2eeDeviceRevokedError()
+    for (const thrown of [{ data: { code } }, terminal]) {
+      for (const phase of ['jwt', 'fetch', 'json']) {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const client = yield* build(
+                async () => {
+                  if (phase === 'fetch') throw thrown
+                  const reply = Response.json(
+                    { status: 'error', errorMessage: 'synthetic', errorData: { code } },
+                    { status: 560 }
+                  )
+                  reply.json = async () => {
+                    throw thrown
+                  }
+                  return reply
+                },
+                {
+                  convexToken: async () => {
+                    if (phase === 'jwt') throw thrown
+                    return token()
+                  }
+                }
+              )
+              const result = yield* Effect.result(client.contentStreamsToken(access))
+              assert.equal(result._tag, 'Failure')
+              assert.equal(result.failure instanceof E2eeMemberRemovedError, false, phase)
+              assert.equal(result.failure instanceof E2eeDeviceRevokedError, false, phase)
+            })
+          )
+        )
+      }
+    }
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              {
+                status: 'error',
+                errorMessage: 'synthetic',
+                errorData: { code }
+              },
+              { status: 560 }
+            )
+          )
+          for (const operation of [
+            client.accountIdentity(),
+            client.history({ workspaceId: access.workspaceId })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure instanceof E2eeMemberRemovedError, false)
+            assert.equal(result.failure instanceof E2eeDeviceRevokedError, false)
           }
         })
       )

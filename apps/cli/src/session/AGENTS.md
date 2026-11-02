@@ -23,6 +23,8 @@
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
+  undefined fields must not make an unchanged encrypted original fail equality.
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC

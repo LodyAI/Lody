@@ -55,6 +55,7 @@ const entryPoints = {
   'deepseek-acp': path.join(sourceDirectory, 'deepseek-acp-entry.ts'),
   'devin-acp': path.join(sourceDirectory, 'devin-acp-entry.ts'),
   'grok-acp': path.join(sourceDirectory, 'grok-acp-entry.ts'),
+  'automation-program-worker': path.join(sourceDirectory, 'automations/programs/worker.ts'),
   'diff-worker': path.join(sourceDirectory, 'lib/code-collab/diff-worker.ts'),
   'file-index-scan-worker': path.join(sourceDirectory, 'lib/code-collab/file-index-scan-worker.ts'),
   'turn-diff-store-worker': path.join(sourceDirectory, 'lib/code-collab/turn-diff-store-worker.ts'),
@@ -189,7 +190,23 @@ export function createDevBuildOptions(deferredSpecifiers = new Set()) {
       'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('true'),
       'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('true'),
     },
-    plugins: [bundleTypeScriptWorkspaceSources(deferredSpecifiers)],
+    plugins: [
+      {
+        name: 'raw-text',
+        setup(pluginBuild) {
+          pluginBuild.onResolve({ filter: /\?raw$/ }, (args) => ({
+            path: path.resolve(args.resolveDir, args.path.slice(0, -4)),
+            namespace: 'raw-text',
+          }));
+          pluginBuild.onLoad({ filter: /.*/, namespace: 'raw-text' }, async (args) => ({
+            contents: await readFile(args.path, 'utf8'),
+            loader: 'text',
+            watchFiles: [args.path],
+          }));
+        },
+      },
+      bundleTypeScriptWorkspaceSources(deferredSpecifiers),
+    ],
   };
 }
 

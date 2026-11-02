@@ -1,3 +1,7 @@
+import {
+  protectedFileWriteDeniedMessage,
+  workspaceFeatureUnavailableMessage,
+} from '@/lib/workspace-feature';
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
@@ -259,6 +263,20 @@ export function getSessionFileErrorPresentation(
         'sessions.fileError.sessionMismatch.description',
         'This session is still connecting to its workspace. Try opening the file again in a moment.'
       ),
+    };
+  }
+
+  // Protected-workspace refusals (Guest role, host without signed file RPC) arrive
+  // as `permission_denied`; "Access denied" would wrongly blame filesystem rights.
+  const trimmed = message.trim();
+  if (
+    trimmed === protectedFileWriteDeniedMessage() ||
+    trimmed === workspaceFeatureUnavailableMessage('rpc')
+  ) {
+    return {
+      kind: 'content-unavailable',
+      title: t('sessions.fileError.protected.title', 'Not available in this encrypted workspace'),
+      description: trimmed,
     };
   }
 

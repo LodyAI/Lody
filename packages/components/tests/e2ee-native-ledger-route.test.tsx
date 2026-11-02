@@ -4,6 +4,7 @@ import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Result } from 'effect';
+import vector from '../../e2ee-core/test/ledger-v1-vector.json';
 import {
   Bytes,
   exportVerifiedState,
@@ -25,6 +26,12 @@ const fixture = vi.hoisted(() => ({
   showTools: false,
   workspaces: { status: 'loading' } as WorkspacesState,
   navigation: [] as unknown[],
+  management: undefined as
+    | {
+        setRole: (membershipId: string, role: 'admin' | 'member') => Promise<void>;
+        remove: (membershipId: string) => Promise<void>;
+      }
+    | undefined,
 }));
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
@@ -42,8 +49,10 @@ vi.mock('@lody/platform/react', () => ({
 }));
 vi.mock('jotai', () => ({
   useSetAtom: () => fixture.clear,
-  useAtomValue: () => fixture.cachedUser,
+  // The account pairing beta stays off; every other read is the cached user.
+  useAtomValue: (atom: unknown) => (atom === 'accountPairing' ? false : fixture.cachedUser),
 }));
+vi.mock('@/atoms/settings', () => ({ e2eeAccountPairingFeatureEnabledAtom: 'accountPairing' }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace', userAtom: 'user' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
@@ -54,14 +63,23 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     memberProfiles,
     children,
     onOpen,
+    memberManagement,
   }: {
-    history: { view: { length: number }; upgradeRequiredAt?: number } | null;
+    history: {
+      view: {
+        length: number;
+        inspectState: () => { members: ReadonlyMap<string, { role: string }> };
+      };
+      upgradeRequiredAt?: number;
+    } | null;
+    memberManagement?: typeof fixture.management;
     failure?: unknown;
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
     onOpen?: () => void;
-  }) =>
-    createElement(
+  }) => {
+    fixture.management = memberManagement;
+    return createElement(
       Fragment,
       null,
       createElement(
@@ -76,11 +94,17 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
               : (history?.view.length ?? 'loading'),
         ...[...(memberProfiles?.values() ?? [])].map((profile) => ` ${profile.name}`)
       ),
+      createElement('p', {
+        'data-member-roles': [...(history?.view.inspectState().members.values() ?? [])]
+          .map((member) => member.role)
+          .join(','),
+      }),
       children,
       onOpen
         ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
         : null
-    ),
+    );
+  },
 }));
 vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
 vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
@@ -94,7 +118,10 @@ vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
   E2eeLedgerAudit: ({ workspaceId }: { workspaceId: string }) =>
     fixture.showTools ? createElement('aside', { 'data-audit': workspaceId }) : null,
 }));
-import { saveE2eeGenesisPin } from '../src/lib/e2ee-workspace-storage';
+import {
+  saveE2eeGenesisPin,
+  readObservedLedgerCheckpoint,
+} from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
 (
@@ -149,6 +176,7 @@ beforeEach(() => {
   fixture.showTools = false;
   fixture.workspaces = { status: 'loading' };
   fixture.navigation = [];
+  fixture.management = undefined;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -567,6 +595,132 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
+it('releases exactly one count of a legacy window-scoped control reader', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // Electron main counts acquisitions per window and workspace. The content
+  // runtime in this same window already holds one count.
+  let count = 1;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {
+      count = Math.max(0, count - 1);
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(count).toBe(2);
+  await act(async () => root.unmount());
+  expect(count).toBe(1);
+});
+
+it('joins one legacy reader close when member removal and unmount overlap', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // The content runtime in this same window holds one Electron count.
+  let count = 1;
+  let calls = 0;
+  const removalClose = Promise.withResolvers<void>();
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_member_removed');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      calls += 1;
+      count = Math.max(0, count - 1);
+      await removalClose.promise;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(calls).toBe(1);
+  await act(async () => root.unmount());
+  await act(async () => removalClose.resolve());
+  expect(calls).toBe(1);
+  expect(count).toBe(1);
+});
+
+it('turns a live device revocation into local cleanup and re-pairing guidance, not removal', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  let closes = 0;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      // Main erased this device's identity after the authenticated revocation.
+      if (opens > 1)
+        throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked");
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      closes += 1;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(opens).toBe(2);
+  expect(closes).toBe(1);
+  expect(container.textContent).not.toContain('removed from this workspace');
+  // A revoked device lands on the approval guide, with re-pairing guidance.
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
+  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+});
+
+it('lands a device that needs approval on the guide and keeps the ledger behind Details', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      throw new PersonalHostError({ code: 'approval-required' });
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide).not.toBeNull();
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.lead');
+  // The existing explicit pairing stays available during the transition.
+  expect(guide?.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('false');
+  expect(container.querySelector('[data-control-state]')?.textContent).not.toBe(
+    'approval-required'
+  );
+  const details = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'e2ee.approvalGuide.details'
+  );
+  expect(details).toBeDefined();
+  await act(async () => details!.click());
+  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
+  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
+});
+
 it('fences the preallocated control reader before a cold open settles', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;
@@ -888,3 +1042,202 @@ it('retains pairing and audit beside verified history when the independent direc
   expect(container.querySelector('[data-pairing]')).not.toBeNull();
   expect(container.querySelector('[data-audit]')).not.toBeNull();
 });
+
+// Frozen, independently signed synthetic vector: member admission then Owner promotion.
+function roleLedger(length: 2 | 3): E2eeRuntimeLedgerView {
+  const records = vector.records.slice(0, length);
+  const headHash = records.at(-1)!.hash;
+  const view = Result.getOrThrow(
+    verifyLedger({
+      anchor: Result.getOrThrow(
+        Bytes.genesisHash(Uint8Array.from(Buffer.from(vector.anchor, 'hex')))
+      ),
+      records: records.map((record) => Uint8Array.from(Buffer.from(record.hex, 'hex'))),
+      checkpoint: {
+        head: hashRecordBytes(Uint8Array.from(Buffer.from(records.at(-1)!.hex, 'hex'))),
+        length,
+      },
+    })
+  );
+  const saved = Result.getOrThrow(exportVerifiedState(view));
+  return {
+    recordsHex: records.map((record) => record.hex),
+    stateHex: hex(saved.bytes),
+    status: {
+      ...local.status,
+      genesisHash: vector.anchor,
+      length,
+      headHash,
+      stateDigest: hex(saved.stateDigest.toBytes()),
+      position: `p1:${workspaceId}:${length}:source:0`,
+      memberRole: 'owner',
+      hasDeviceCredential: true,
+    },
+  };
+}
+
+function roleChangePort() {
+  let current = roleLedger(2);
+  const promoted = roleLedger(3);
+  const drain = Promise.withResolvers<void>();
+  let readers = 0;
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.port.describe = async () => ({
+    workspaceId,
+    genesisHash: vector.anchor,
+    cryptoOrgId: vector.anchor,
+    contentMode: 'e2ee',
+    contentModeVersion: 1,
+    activation: 'control-only',
+  });
+  fixture.port.history = async () => ({
+    workspaceId,
+    genesisHash: vector.anchor,
+    checkpoint: { length: current.status.length, headHash: current.status.headHash },
+    startIndex: current.status.length,
+    recordsHex: [],
+    nextCursor: null,
+    position: current.status.position!,
+  });
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      readers++;
+      return current.status;
+    },
+    close: async () => {
+      readers--;
+      await drain.promise;
+    },
+    ledgerView: async () => {
+      if (!readers) throw new Error('e2ee_not_open');
+      return current;
+    },
+    ingestLedgerRecords: async () => current.status,
+    setMemberRole: async (_workspace, member, role) => {
+      expect(member).toBe('0b'.repeat(16));
+      expect(role).toBe('admin');
+      current = promoted;
+    },
+    removeMember: async () => {
+      throw new Error('unused');
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  return {
+    port: fixture.port,
+    drain,
+    promoted,
+    readers: () => readers,
+  };
+}
+const renderedRoles = () =>
+  container.querySelector('[data-member-roles]')?.getAttribute('data-member-roles');
+
+it('keeps the control reader available after a verified role change', async () => {
+  const f = roleChangePort();
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.readers()).toBe(1);
+    await act(async () => fixture.management!.setRole('0b'.repeat(16), 'admin'));
+    // This is the native reader gate used by the passive ledgerView immediately after success.
+    await expect(fixture.port.runtime!.ledgerView(workspaceId)).resolves.toEqual(f.promoted);
+    expect(f.readers()).toBe(1);
+    expect(renderedRoles()).toBe('admin,owner');
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it.each(['unavailable', 'invalid-state'] as const)(
+  'blocks management when the post-role ledger is %s',
+  async (fault) => {
+    const f = roleChangePort();
+    const runtime = f.port.runtime!;
+    const read = runtime.ledgerView;
+    let rejectRead = false;
+    runtime.ledgerView = async (id) => {
+      const view = await read(id);
+      if (!rejectRead) return view;
+      if (fault === 'unavailable') throw new Error('synthetic read failure');
+      return { ...view, stateHex: '00' };
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    try {
+      await act(async () => root.render(createElement(Component)));
+      const checkpoint = readObservedLedgerCheckpoint(localStorage, 'account', workspaceId);
+      expect(checkpoint?.length).toBe(2);
+      rejectRead = true;
+      await act(async () => {
+        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow();
+      });
+      expect(f.readers()).toBe(1);
+      expect(container.querySelector('[data-control-state]')?.textContent).toBe('failed');
+      expect(fixture.management).toBeUndefined();
+      expect(renderedRoles()).toBe('member,owner');
+      expect(readObservedLedgerCheckpoint(localStorage, 'account', workspaceId)).toEqual(
+        checkpoint
+      );
+    } finally {
+      await act(async () => root.unmount());
+      await act(async () => f.drain.resolve());
+    }
+  }
+);
+
+it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
+  'publishes the verified post-role view only for its live reader (%s)',
+  async (change) => {
+    const f = roleChangePort();
+    const runtime = f.port.runtime!;
+    const read = runtime.ledgerView;
+    const exported = Promise.withResolvers<E2eeRuntimeLedgerView>();
+    const reading = Promise.withResolvers<void>();
+    let pause = false;
+    runtime.ledgerView = async (id) => {
+      const view = await read(id);
+      if (pause) {
+        pause = false;
+        reading.resolve();
+        return exported.promise;
+      }
+      return view;
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    try {
+      await act(async () => root.render(createElement(Component)));
+      pause = true;
+      let action!: Promise<void>;
+      await act(async () => {
+        action = fixture.management!.setRole('0b'.repeat(16), 'admin');
+        await reading.promise;
+      });
+      expect(f.readers()).toBe(1);
+      expect(renderedRoles()).toBe('member,owner');
+      expect(fixture.management).toBeUndefined();
+      if (change !== 'same-owner') {
+        // A new route binding has its own reader and ledger, while the old read is pending.
+        if (change === 'account-change') fixture.session.user.id = 'other-account';
+        else fixture.workspaceId = 'other-workspace';
+        f.drain.resolve();
+        runtime.ledgerView = async () => ({
+          ...roleLedger(2),
+          status: { ...roleLedger(2).status, workspaceId: fixture.workspaceId },
+        });
+        await act(async () => root.render(createElement(Component)));
+      }
+      await act(async () => {
+        exported.resolve(f.promoted);
+        await action;
+      });
+      expect(renderedRoles()).toBe(change === 'same-owner' ? 'admin,owner' : 'member,owner');
+      expect(f.readers()).toBe(1);
+    } finally {
+      await act(async () => root.unmount());
+      await act(async () => f.drain.resolve());
+    }
+  }
+);

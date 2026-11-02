@@ -78,6 +78,8 @@ export interface ScrollHost {
   readPaddingBottom(): number;
   /** Current heights of the given mounted rows; undefined for a row not in the DOM. */
   measure(keys: readonly string[]): ReadonlyArray<number | undefined>;
+  /** Positive-only origin shift; hosts opt in only with reliable native scrollend. */
+  setContentShift?(px: number): void;
   setExtent(px: number): void;
   setReplyRoom(px: number): void;
   writeScrollTop(value: number): void;
@@ -197,6 +199,7 @@ export class ScrollController {
   private glide: Glide | null = null;
   private viewportHeight: number;
   private contentTop = 0;
+  private contentShift = 0;
   private paddingBottom = 0;
   private viewportKnown = false;
   private extent = 0;
@@ -420,6 +423,10 @@ export class ScrollController {
       // near-edge snapping and stale-range recovery wait for scrollend.
       this.setIntent({ kind: 'follow' }, true);
     }
+    if (this.contentShift > 0 && scrollTop <= 0.5) {
+      this.run('origin-boundary', true);
+      return;
+    }
     if (this.intent.kind !== 'read') {
       // A move that was not the reader's: the mode's position wins.
       if (Math.abs(this.targetScrollTop() - scrollTop) > EPSILON_PX) {
@@ -516,6 +523,9 @@ export class ScrollController {
       this.compensationPendingCheck = false;
       this.momentumStats = { compensations: 0, interruptions: 0 };
     }
+    if (!active && !continuesAfterRelease && this.contentShift > 0) {
+      this.run('origin-settle', true);
+    }
   }
 
   /** The native `scrollend` event. */
@@ -531,6 +541,7 @@ export class ScrollController {
     this.compensationPendingCheck = false;
     this.momentumStats = { compensations: 0, interruptions: 0 };
     this.rearmAtGestureBottom();
+    if (this.contentShift > 0) this.run('origin-settle', true);
   }
 
   // ---- Commands -----------------------------------------------------------
@@ -625,8 +636,17 @@ export class ScrollController {
     return this.intent;
   }
 
-  get scrollOffset(): number {
+  get physicalScrollOffset(): number {
     return this.lastObserved?.scrollTop ?? this.readScrollTop();
+  }
+
+  /** Consumer coordinates omit the temporary native-touch origin shift. */
+  get scrollOffset(): number {
+    return this.physicalScrollOffset + this.contentShift;
+  }
+
+  get contentOffset(): number {
+    return this.contentTop + this.contentShift;
   }
 
   get viewportSize(): number {
@@ -634,14 +654,14 @@ export class ScrollController {
   }
 
   get scrollSize(): number {
-    return this.contentTop + this.geometry.total() + this.replyRoom + this.paddingBottom;
+    return this.contentOffset + this.geometry.total() + this.replyRoom + this.paddingBottom;
   }
 
   get snapshot(): ScrollSnapshot {
     return {
       sourceGeneration: this.sourceGeneration,
       geometryRevision: this.geometry.revision,
-      scrollTop: this.scrollOffset,
+      scrollTop: this.physicalScrollOffset,
       viewportHeight: this.viewportHeight,
       extent: this.extent,
       contentTop: this.contentTop,
@@ -811,6 +831,32 @@ export class ScrollController {
     this.recordBottom(Math.max(0, this.host.readScrollHeight() - this.viewportHeight));
     this.host.setExtent(Math.max(extentBefore, total));
     this.host.setReplyRoom(Math.max(roomBefore, room));
+    // Growing history above a touch reader must not write the native offset:
+    // WebKit ends its fling on compensation. Move only the content origin up,
+    // keeping every logical row at the same screen line. A positive shift never
+    // opens a leading hole. Shrinkage still compensates immediately.
+    const nativeTouch = this.momentum || this.touchActive;
+    if (this.contentShift > 0 && (!nativeTouch || !tx.relative || tx.logicalSampled <= 0.5)) {
+      this.contentTop += this.contentShift;
+      this.contentShift = 0;
+      this.host.setContentShift?.(0);
+      target = this.targetScrollTop();
+    }
+    if (
+      this.host.setContentShift &&
+      nativeTouch &&
+      (this.gesture !== null || this.contentShift > 0) &&
+      tx.relative &&
+      tx.logicalSampled > 0.5 &&
+      target > tx.logicalSampled &&
+      Math.abs(tx.sampled - tx.logicalSampled) < 0.5
+    ) {
+      const growth = target - tx.logicalSampled;
+      this.contentShift += growth;
+      this.contentTop -= growth;
+      this.host.setContentShift(this.contentShift);
+      target = this.targetScrollTop();
+    }
     let expected: number;
     if (tx.relative) {
       expected = target;
@@ -946,7 +992,8 @@ export class ScrollController {
     return true;
   }
 
-  private reportScroll(offset: number): void {
+  private reportScroll(physicalOffset: number): void {
+    const offset = physicalOffset + this.contentShift;
     if (this.lastReportedScroll !== null && Math.abs(this.lastReportedScroll - offset) < 0.5) {
       return;
     }

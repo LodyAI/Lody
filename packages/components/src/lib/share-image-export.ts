@@ -30,10 +30,13 @@ function pinOrderedListValues(element: HTMLElement): () => void {
   };
 }
 
-async function captureShareImage(element: HTMLElement): Promise<Blob> {
+async function captureShareImage(element: HTMLElement, assertCurrent: () => void): Promise<Blob> {
+  assertCurrent();
   await document.fonts.ready;
+  assertCurrent();
   await Promise.all(Array.from(element.querySelectorAll('img')).map((image) => image.decode()));
   const { snapdom } = await import('@zumer/snapdom');
+  assertCurrent();
   // SnapDOM 2.24 treats absent li[value] as zero when resolving list-item counters.
   const restoreLists = pinOrderedListValues(element);
   let blob: Blob;
@@ -89,15 +92,25 @@ async function captureShareImage(element: HTMLElement): Promise<Blob> {
   } finally {
     restoreLists();
   }
+  assertCurrent();
   if (blob.type !== 'image/png' || blob.size === 0) throw new Error('PNG encoding failed');
   return blob;
 }
 
-export async function copyShareImage(element: HTMLElement): Promise<void> {
+export async function copyShareImage(
+  element: HTMLElement,
+  assertCurrent: () => void = () => {},
+  admitOutput?: () => Promise<void>
+): Promise<void> {
+  assertCurrent();
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
-    const blob = await captureShareImage(element);
-    const result = await bridge.copyToClipboard({ pngBytes: await blob.arrayBuffer() });
+    const blob = await captureShareImage(element, assertCurrent);
+    const pngBytes = await blob.arrayBuffer();
+    await admitOutput?.();
+    assertCurrent();
+    const result = await bridge.copyToClipboard({ pngBytes });
+    assertCurrent();
     if (!result.copied) throw new Error(result.error || 'Image copy failed');
     return;
   }
@@ -108,8 +121,13 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
 
   // WebKit revokes transient user activation after an await. Start the clipboard
   // write synchronously and let ClipboardItem await the PNG capture itself.
-  const png = captureShareImage(element);
+  const png = captureShareImage(element, assertCurrent).then(async (blob) => {
+    await admitOutput?.();
+    assertCurrent();
+    return blob;
+  });
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+  assertCurrent();
 }
 
 /**
@@ -128,9 +146,11 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
 export async function exportShareImage(
   element: HTMLElement,
   title: string | undefined,
-  fallback: string
+  fallback: string,
+  assertCurrent: () => void = () => {},
+  admitOutput?: () => Promise<void>
 ): Promise<{ saved: boolean }> {
-  const blob = await captureShareImage(element);
+  const blob = await captureShareImage(element, assertCurrent);
 
   const name =
     (title?.trim() || fallback)
@@ -140,7 +160,11 @@ export async function exportShareImage(
   const fileName = `${name}.png`;
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
-    const result = await bridge.saveAs({ fileName, bytes: await blob.arrayBuffer() });
+    const bytes = await blob.arrayBuffer();
+    await admitOutput?.();
+    assertCurrent();
+    const result = await bridge.saveAs({ fileName, bytes });
+    assertCurrent();
     if (!result.saved && !result.canceled) throw new Error(result.error || 'Image save failed');
     return { saved: result.saved === true };
   }
@@ -149,13 +173,16 @@ export async function exportShareImage(
     // WKWebView cannot save a blob download. Give the OS an actual PNG file so
     // its share sheet can offer image actions, including Save Image on iOS.
     const { shareFileBytesNatively } = await import('./session-file-native-save');
-    const { shared } = await shareFileBytesNatively(
-      fileName,
-      new Uint8Array(await blob.arrayBuffer())
-    );
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await admitOutput?.();
+    assertCurrent();
+    const { shared } = await shareFileBytesNatively(fileName, bytes);
+    assertCurrent();
     return { saved: shared };
   }
 
+  await admitOutput?.();
+  assertCurrent();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

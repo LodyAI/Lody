@@ -201,13 +201,13 @@ test('existing screenshot attachments can be marked up without capturing the des
   await page.mouse.down();
   await page.mouse.move(box.x + 260, box.y + 110, { steps: 6 });
   await page.mouse.up();
+  await page.getByRole('textbox', { name: 'Annotation note' }).fill('Change the blue header');
   await page.getByRole('button', { name: 'Pen', exact: true }).click();
   await page.mouse.move(box.x + 40, box.y + 40);
   await page.mouse.down();
   await page.mouse.move(box.x + 150, box.y + 80, { steps: 8 });
   await page.mouse.up();
-  await page.getByRole('textbox', { name: 'Selection comment' }).fill('Change the blue header');
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Mark up image' })).toHaveCount(0);
   expect(
     await page.evaluate(async () => {
@@ -221,6 +221,30 @@ test('existing screenshot attachments can be marked up without capturing the des
     })
   ).toEqual({ comment: 'Change the blue header', type: 'image/png', width: 800, height: 400 });
 });
+
+for (const width of [390, 1280]) {
+  test(`image markup uses a full-window lightbox at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(
+      '/iframe.html?id=sessions-sessionfilebinarypreview--attached-image-markup&viewMode=story'
+    );
+    const lightbox = page.getByRole('dialog', { name: 'Mark up image' });
+    const canvas = lightbox.getByLabel('Draw on selected screenshot');
+    await expect(canvas).toBeVisible();
+    const box = await lightbox.boundingBox();
+    expect(box).toEqual({ x: 0, y: 0, width, height: 844 });
+    const controls = lightbox.getByRole('group', { name: 'Markup tools' });
+    const toolsBox = await controls.boundingBox();
+    expect(toolsBox).not.toBeNull();
+    expect(toolsBox!.x).toBeGreaterThanOrEqual(0);
+    expect(toolsBox!.x + toolsBox!.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Tab');
+    await expect(lightbox.locator(':focus')).toHaveCount(1);
+    await lightbox.getByRole('button', { name: 'Cancel' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(lightbox).toHaveCount(0);
+  });
+}
 
 for (const { width, theme, locale } of [
   { width: 390, theme: 'light', locale: 'en' },

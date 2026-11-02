@@ -1,3 +1,4 @@
+import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -15,6 +16,8 @@ import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
+import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 
 // Lazy application boundary. Plain workspaces never create a Scope or touch custody.
 const serial = Semaphore.makeUnsafe(1)
@@ -45,12 +48,17 @@ const CreationReceipt = z
   .strict()
 const owners = new Map<string, Account>()
 const removing = new Map<string, Deferred.Deferred<boolean, unknown>>()
+// Reason reported while an identity directory is fenced for terminal cleanup.
+const removingReasons = new Map<string, 'member_removed' | 'device_revoked'>()
 const accountDirectory = (accountId: string) =>
   join(
     app.getPath('userData'),
     'e2ee-bootstrap',
     createHash('sha256').update(accountId).digest('hex')
   )
+/** The account-wide pairing journal; it holds no secret and no private key. */
+export const desktopAccountPairingDatabase = (accountId: string) =>
+  join(accountDirectory(accountId), 'account-pairing.sqlite')
 type IdentityLocation = string | { requestId: string }
 function identityDirectory(accountId: string, location?: IdentityLocation) {
   const root = accountDirectory(accountId)
@@ -162,7 +170,10 @@ export function withDesktopE2eeAccount<A>(
             yield* closeCurrent
           const accountId = identity.userId
           const directory = identityDirectory(accountId, location)
-          if (removing.has(directory)) return yield* Effect.fail(accountFailure('member_removed'))
+          if (removing.has(directory))
+            return yield* Effect.fail(
+              accountFailure(removingReasons.get(directory) ?? 'member_removed')
+            )
           if (!create)
             yield* Effect.tryPromise({
               try: () => lstat(directory),
@@ -221,10 +232,66 @@ export function withDesktopE2eeAccount<A>(
           return yield* work(current)
         })
       )
+    ).pipe(withE2eeTestClock)
+  ).catch((error: unknown) => {
+    rememberDesktopE2eeFailure('account-operation', error)
+    throw publicE2eeFailure(error)
+  })
+}
+
+/** Passive metadata only: never acquire a lease or construct an absent owner. */
+export function inspectDesktopE2eeCachedState(
+  accountId: string,
+  workspaceId: string,
+  machineId: string
+) {
+  return Effect.runPromise(
+    serial.withPermit(
+      Effect.gen(function* () {
+        if (quitting) return yield* Effect.fail(accountFailure('closed'))
+        const auth = getIpcServiceDeps().authService
+        const identity = auth.getCachedSessionIdentity()
+        if (!identity.userId || identity.userId !== accountId)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        const owner = owners.get(identityDirectory(accountId, workspaceId))
+        if (owner?.closeFailed) return yield* Effect.fail(accountFailure('restart-required'))
+        const state = owner
+          ? yield* owner.host.inspectCachedState(workspaceId, machineId)
+          : {
+              workspaceId,
+              machineId,
+              entryPresent: false,
+              cachedPolicies: 0,
+              cachedExecutionGrants: 0
+            }
+        const latest = auth.getCachedSessionIdentity()
+        if (latest.userId !== accountId || latest.generation !== identity.generation)
+          return yield* Effect.fail(accountFailure('account_mismatch'))
+        return {
+          ...state,
+          accountId,
+          ownerPresent: Boolean(owner),
+          activeContentReaders: [...(owner?.readers.get(workspaceId)?.values() ?? [])].reduce(
+            (sum, count) => sum + count,
+            0
+          )
+        }
+      })
     )
   ).catch((error: unknown) => {
     throw publicE2eeFailure(error)
   })
+}
+
+/** E2E evidence only: one renderer's registered reader acquisitions. Synchronous,
+ * so it never waits on or takes the account lock, opens an owner or touches custody. */
+export function countDesktopE2eeReaders(
+  accountId: string,
+  workspaceId: string,
+  senderId: number
+): number {
+  const owner = owners.get(identityDirectory(accountId, workspaceId))
+  return owner?.accountId === accountId ? (owner.readers.get(workspaceId)?.get(senderId) ?? 0) : 0
 }
 
 /** Quit/logout await actual in-flight native operations before releasing stores. */
@@ -439,6 +506,8 @@ export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId:
 export function cleanupRemovedDesktopWorkspace(input: {
   accountId: string
   workspaceId: string
+  /** The exact authenticated reason the caller observed; it only labels the fence. */
+  reason?: 'member_removed' | 'device_revoked'
 }): Promise<boolean> {
   const { workspaceId } = input
   return Effect.runPromise(
@@ -472,6 +541,7 @@ export function cleanupRemovedDesktopWorkspace(input: {
             }
             const done = Deferred.makeUnsafe<boolean, unknown>()
             removing.set(directory, done)
+            removingReasons.set(directory, input.reason ?? 'member_removed')
             return { kind: 'owner' as const, directory, owner, done }
           })
         )
@@ -501,7 +571,10 @@ export function cleanupRemovedDesktopWorkspace(input: {
         )
         yield* serial.withPermit(
           Effect.gen(function* () {
-            if (removing.get(plan.directory) === plan.done) removing.delete(plan.directory)
+            if (removing.get(plan.directory) === plan.done) {
+              removing.delete(plan.directory)
+              removingReasons.delete(plan.directory)
+            }
             yield* Deferred.done(plan.done, result)
           })
         )
@@ -587,7 +660,33 @@ export async function recordDesktopE2eeCreated(input: {
   return withDesktopE2eeAccount((owner) => owner.bootstrap.recordCreated(input), input.workspaceId)
 }
 
+/**
+ * The typed, credential-authenticated cloud results carry `reason: 'unauthorized'`, not a
+ * `code`. Classify them before the generic projection, or every caller past this boundary
+ * sees `e2ee_host_operation_failed` and can never record the loss.
+ */
+const publicAccessLosses = new WeakMap<Error, 'member_removed' | 'device_revoked'>()
+function typedAccessLoss(error: unknown): 'member_removed' | 'device_revoked' | null {
+  let current = error
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (current instanceof E2eeMemberRemovedError) return 'member_removed'
+    if (current instanceof E2eeDeviceRevokedError) return 'device_revoked'
+    current = (current as { cause?: unknown }).cause
+  }
+  return null
+}
+/** Only a loss this boundary projected from a typed cloud result; never a matching message. */
+export function publicAccessLoss(error: unknown): 'member_removed' | 'device_revoked' | null {
+  return error instanceof Error ? (publicAccessLosses.get(error) ?? null) : null
+}
+
 function publicE2eeFailure(error: unknown): Error {
+  const loss = typedAccessLoss(error)
+  if (loss) {
+    const projected = new Error(`e2ee_${loss}`)
+    publicAccessLosses.set(projected, loss)
+    return projected
+  }
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
   const allowed = new Set([
     'identity-busy',
@@ -596,13 +695,19 @@ function publicE2eeFailure(error: unknown): Error {
     'account_unavailable',
     'custody_unavailable',
     'missing-binding',
+    'pairing-tampered',
+    'pairing-expired',
+    'pairing-used',
     'member_removed',
+    'device_revoked',
     'conflict',
     'local-evidence-conflict',
     'snapshot-history-required',
+    'key-update-required',
     'closed',
     'corrupt',
     'invalid-input',
+    'pairing_key_revoked',
     'storage',
     'invalid-ledger',
     'machine_not_owned',
@@ -636,7 +741,8 @@ export async function runDesktopE2eeOperation<A>(
       throw new Error('e2ee_account_mismatch')
   }
   assertAccount()
-  const result = await Effect.runPromise(work).catch((error) => {
+  const result = await Effect.runPromise(withE2eeTestClock(work)).catch((error) => {
+    rememberDesktopE2eeFailure('runtime-operation', error)
     throw publicE2eeFailure(error)
   })
   assertAccount()

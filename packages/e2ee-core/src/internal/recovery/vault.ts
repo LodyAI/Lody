@@ -19,6 +19,7 @@ import {
   sameCiphertext,
   ciphertextDigest,
   usePrf,
+  useCanonicalSecret,
   type VaultCiphertext,
   type VerifiedPasskeyPrf,
 } from './crypto';
@@ -34,6 +35,7 @@ const TrustSchema = Schema.Struct({
   length: Schema.Number,
 });
 const PackageSchema = Schema.Struct({
+  formatVersion: Schema.Literal(1),
   genesis: Schema.String,
   membershipId: Schema.String,
   signingPublic: Schema.Uint8Array,
@@ -45,6 +47,30 @@ const PackageSchema = Schema.Struct({
 });
 /** The private recovery package (recovery device keys and vault unlock material) the user keeps offline. Wipe it with `wipeRecoveryPackage` after use. */
 export type RecoveryPrivatePackage = typeof PackageSchema.Type;
+// RFC 8410 OneAsymmetricKey v1 without attributes or public key: the exact
+// 48-byte PKCS#8 that WebCrypto exports for Ed25519 (OID 1.3.101.112) and
+// X25519 (OID 1.3.101.110). Any other DER, version or algorithm is rejected.
+const pkcs8Prefix = (oid: number) =>
+  Uint8Array.of(
+    0x30,
+    0x2e,
+    0x02,
+    0x01,
+    0x00,
+    0x30,
+    0x05,
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    oid,
+    0x04,
+    0x22,
+    0x04,
+    0x20
+  );
+const isRfc8410Pkcs8 = (bytes: Uint8Array, oid: number) =>
+  bytes.length === 48 && bytesEqual(bytes.subarray(0, 16), pkcs8Prefix(oid));
 export function ownRecoveryPackage(input: RecoveryPrivatePackage): RecoveryPrivatePackage {
   const value = Result.getOrThrow(Schema.decodeUnknownResult(PackageSchema)(input));
   fromHex(value.genesis);
@@ -60,10 +86,8 @@ export function ownRecoveryPackage(input: RecoveryPrivatePackage): RecoveryPriva
     value.trust.genesisRecord.length > 8192 ||
     value.signingPublic.length !== 32 ||
     value.encryptionPublic.length !== 32 ||
-    value.signingPrivate.length < 32 ||
-    value.signingPrivate.length > 256 ||
-    value.encryptionPrivate.length < 32 ||
-    value.encryptionPrivate.length > 256
+    !isRfc8410Pkcs8(value.signingPrivate, 0x70) ||
+    !isRfc8410Pkcs8(value.encryptionPrivate, 0x6e)
   )
     throw vaultError('invalid-input');
   return {
@@ -236,8 +260,9 @@ const makeSession = Effect.fnUntraced(function* (input: {
       attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
       (plain) =>
         attempt(() => {
-          const value = ownRecoveryPackage(
-            Result.getOrThrow(Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain)))
+          // ownRecoveryPackage returns copies; the decoded temporaries are wiped.
+          const value = useCanonicalSecret(plain, (decoded) =>
+            ownRecoveryPackage(decoded as RecoveryPrivatePackage)
           );
           if (
             value.genesis !== ref.genesis ||
@@ -540,10 +565,8 @@ const makeSession = Effect.fnUntraced(function* (input: {
             attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
             (plain) =>
               attempt(() => {
-                const value = ownRecoveryPackage(
-                  Result.getOrThrow(
-                    Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain))
-                  )
+                const value = useCanonicalSecret(plain, (decoded) =>
+                  ownRecoveryPackage(decoded as RecoveryPrivatePackage)
                 );
                 return {
                   reference: {

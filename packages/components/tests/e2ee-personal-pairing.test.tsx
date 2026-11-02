@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ClientCustodyError } from '@lody/e2ee-core/services';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -125,6 +126,7 @@ describe('personal desktop approval', () => {
       await inputOffer();
       await click('e2ee.pair.trust');
       expect(submitted).toEqual(offer);
+      expect(container.querySelector('[data-testid="e2ee-pair-joining-key"]')?.textContent).toBe('55'.repeat(32));
       await click('e2ee.pair.claim');
       expect(joined).toBe(false);
       expect(container.textContent).toContain('e2ee.pair.waiting');
@@ -133,6 +135,26 @@ describe('personal desktop approval', () => {
       expect(joined).toBe(true);
       expect(container.textContent).toContain('e2ee.pair.ready');
       expect(admitted).toBe(false);
+    }
+  );
+  it.each(['locked', 'indeterminate', 'unavailable'] as const)(
+    'retains the pairing input and explains a typed custody %s outcome',
+    async (reason) => {
+      const original = runtime.preparePersonalJoin;
+      runtime.preparePersonalJoin = async () => {
+        throw new ClientCustodyError({ reason });
+      };
+      await render(false);
+      await inputOffer();
+      await click('e2ee.pair.trust');
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        `e2ee.custody.${reason}.help`
+      );
+      expect(container.querySelector('textarea')?.value).toBe(JSON.stringify(offer));
+      expect(joined).toBe(false);
+      runtime.preparePersonalJoin = original;
+      await click('e2ee.pair.trust');
+      expect(container.textContent).toContain('e2ee.pair.waiting');
     }
   );
   it('stops asking an admitted requester-only device to pair again', async () => {
@@ -151,6 +173,7 @@ describe('personal desktop approval', () => {
     await render();
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
+    expect(container.querySelector('[data-testid="e2ee-pair-preview-key"]')?.textContent).toBe('55'.repeat(32));
     await click('e2ee.pair.approve');
     expect(admitted).toBe(true);
     expect(container.textContent).toContain('e2ee.pair.published');

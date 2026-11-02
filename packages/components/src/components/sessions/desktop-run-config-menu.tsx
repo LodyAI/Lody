@@ -126,12 +126,14 @@ const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
 function OptionItem({
+  identity,
   icon,
   label,
   selected,
   disabled,
   onSelect,
 }: {
+  identity?: Pick<AgentConfigMeta, 'id' | 'machineId'>;
   icon?: ReactNode;
   label: string;
   selected: boolean;
@@ -140,6 +142,9 @@ function OptionItem({
 }) {
   return (
     <Menu.Item
+      data-testid={identity ? 'chat-agent-option' : undefined}
+      data-agent-config-id={identity?.id}
+      data-machine-id={identity?.machineId}
       disabled={disabled}
       role="menuitemradio"
       aria-checked={selected}
@@ -264,6 +269,7 @@ export function DesktopMachineMenu({
       <Menu.Trigger
         disabled={isDisabled}
         title={disabledReason}
+        data-testid="chat-machine-trigger"
         aria-label={t('chat.machineSelector.placeholder', 'Machine')}
         render={<Button type="button" variant="secondary" size="mini" />}
       >
@@ -284,6 +290,8 @@ export function DesktopMachineMenu({
         {options.map((option) => (
           <Menu.Item
             key={option.value}
+            data-testid="chat-machine-option"
+            data-machine-id={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             icon={Monitor}
@@ -683,6 +691,8 @@ export function DesktopRunConfigMenu({
                 aria-label={runConfigButtonAriaLabel}
                 aria-disabled
                 data-run-config-trigger=""
+                data-agent-config-id={selectedAgentConfig?.id}
+                data-machine-id={selectedAgentConfig?.machineId}
                 {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
               >
                 {triggerFace}
@@ -695,6 +705,8 @@ export function DesktopRunConfigMenu({
         <Menu.Trigger
           aria-label={runConfigButtonAriaLabel}
           data-run-config-trigger=""
+          data-agent-config-id={selectedAgentConfig?.id}
+          data-machine-id={selectedAgentConfig?.machineId}
           className={triggerClassName}
           render={<button type="button" />}
         >
@@ -797,6 +809,7 @@ export function DesktopRunConfigMenu({
                   {agentOptions.map(({ config }) => (
                     <OptionItem
                       key={`${config.id}:${config.machineId}`}
+                      identity={config}
                       icon={
                         <AgentIcon
                           cliType={config.cliType}

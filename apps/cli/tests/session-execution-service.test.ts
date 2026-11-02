@@ -1,3 +1,18 @@
+import { AutomationLedger } from '../src/automations/storage/ledger';
+import { dispatchQuotaSchedule } from '../src/automations/compat/quota-schedule';
+import {
+  observeSessionTurnLegacy,
+  reconcileSessionTurnsLegacy,
+} from '../src/automations/sources/sessions-legacy';
+import {
+  configureSessionPolicies,
+  internalPolicy,
+  upgradeCapacityPolicies,
+} from '../src/automations/policies/session';
+vi.hoisted(() => {
+  Object.assign(globalThis, { __LODY_E2E_DAEMON_LOSS__: true });
+  process.env.LODY_E2E = '1';
+});
 import { LodyOperationCoordinator } from '../src/orchestration/operation-coordinator';
 import { MessageHandler } from '../src/lib/message-handler';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
@@ -56,6 +71,7 @@ import {
   buildSessionTurnInputConfig,
   getMachineRoomId,
   getSessionRoomId,
+  quotaReservationIdentity,
   inputBlocksToHistoryItems,
   SessionStatusFactory,
   type AcpCapabilityCacheEntry,
@@ -66,6 +82,7 @@ import {
   type ChatFailedReason,
   type LocalProjectId,
   type MachineFlockKey,
+  type ProjectRef,
   type MachineId,
   type SessionGoalMessage,
   type SessionHistoryInput,
@@ -95,9 +112,7 @@ import { MachineDocument, SessionDocument, type LoroDocumentManager } from '../s
 import type { SessionActivePresencePhase } from '../src/lib/loro/session-active-presence';
 import { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 import { operationInboxLegacy } from '../src/orchestration/inbox/legacy';
-import {
-  InboxExecutionRejected,
-} from '../src/orchestration/inbox/admission-failure';
+import { InboxExecutionRejected } from '../src/orchestration/inbox/admission-failure';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { applyAcpSessionRunConfig } from '../src/session/acp-session-config-applier';
 import { Session } from '../src/session/session';
@@ -2631,7 +2646,15 @@ describe('SessionExecutionService', () => {
     encryptedExecution?: ReturnType<typeof makeEncryptedAgentExecution>;
     prepared?: boolean;
     create?: boolean;
-    onPrompt?: () => Promise<void>;
+    onPrompt?: (service: SessionExecutionService) => Promise<void>;
+    /** Requested by the turn message; untrusted input. */
+    project?: ProjectRef;
+    /** Synced Session meta; writable by any member. */
+    meta?: Record<string, unknown>;
+    /** Machine-held configuration of the live Session process. */
+    liveConfig?: { project?: ProjectRef; parentSessionId?: SessionId };
+    /** No live process: the turn restores one; started configurations are recorded. */
+    restore?: SessionConfig[];
   }) => {
     let history: Array<Record<string, unknown>> = [
       ...(options.earlierInputAuthor
@@ -2656,7 +2679,7 @@ describe('SessionExecutionService', () => {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
       prompt: vi.fn(async () => {
-        await options.onPrompt?.();
+        await options.onPrompt?.(service);
         if (options.promptFailure) throw options.promptFailure;
         return { stopReason: 'end_turn' };
       }),
@@ -2669,7 +2692,8 @@ describe('SessionExecutionService', () => {
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
       getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
+      getParentSessionId: () => options.liveConfig?.parentSessionId,
+      getExecutionScope: () => options.liveConfig ?? {},
       exec: vi.fn(async () => ''),
       terminate: vi.fn(async () => {}),
       updateGitIdentity: vi.fn(),
@@ -2677,8 +2701,10 @@ describe('SessionExecutionService', () => {
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
     let status = SessionStatusFactory.idle();
+    let restored = false;
     const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      // Read at call time, so a test can change synced metadata mid-turn.
+      getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
       setStatus: vi.fn(async (next: typeof status) => {
         status = next;
       }),
@@ -2713,9 +2739,16 @@ describe('SessionExecutionService', () => {
           : [...history, entry];
       }),
       sessionManager: {
-        getSession: vi.fn(() => activeSession),
+        getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
         getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(),
+        createSession: vi.fn(async (config: SessionConfig) => {
+          // Like SessionManager, preparation rereads the Project group from synced metadata.
+          const current = options.meta?.projectRun as SessionConfig['projectRun'];
+          if (current) await config.authorizeExecutionInputs?.({ projectRun: current });
+          options.restore?.push({ ...config, projectRun: current ?? config.projectRun });
+          restored = true;
+          return activeSession;
+        }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         validateSessionCredentials: vi.fn(async () => {}),
@@ -2756,7 +2789,7 @@ describe('SessionExecutionService', () => {
         sessionId: options.sessionId as SessionId,
         machineId: 'machine-1',
         workspaceId: options.workspaceId ?? 'workspace-1',
-        project: undefined,
+        project: options.project,
         acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
         userTurnId: options.userTurnId ?? 'turn-user-1',
         userId: options.requesterUserId ?? 'user-1',
@@ -2898,6 +2931,8 @@ describe('SessionExecutionService', () => {
     const { LoroDoc, LoroMap } = await import('loro-crdt');
     const source = new LoroDoc();
     const submitted: string[] = [];
+    const invocations: Array<{ requesterUserId: string } | undefined> = [];
+    const derivations: Array<'owner' | 'member' | undefined> = [];
     const presence = bindTestPresenceApplication(createSilentLogger());
     const execute = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>) =>
       Effect.runPromise(Effect.scoped(effect));
@@ -3329,8 +3364,12 @@ describe('SessionExecutionService', () => {
           hasPromptEventsForTurn: true,
           prepared: true,
           encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
-          onPrompt: async () => {
+          onPrompt: async (service) => {
             submitted.push('hi');
+            invocations.push(service.getActiveInvocationContext(sessionId as SessionId));
+            derivations.push(
+              service.reserveEncryptedDerivation(sessionId as SessionId, 'turn-user-1')?.kind
+            );
           },
         });
       if (backfillFailure) {
@@ -3377,6 +3416,13 @@ describe('SessionExecutionService', () => {
       const before = historyReads.length;
       const result = await dispatch();
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
+      // Derived work follows the verified signer, never the history row's display
+      // userId: the owner's own turn derives as owner; a shared member's turn derives
+      // as that member, re-authorized when the derived input is written and started.
+      if (!deniedSigner) {
+        expect(invocations[0]?.requesterUserId).toBe(user);
+        expect(derivations[0]).toBe(mode === 'other-member-shared' ? 'member' : 'owner');
+      }
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
       expect(result.failureMessages).toEqual(
         mode === 'other-member' || mode === 'other-member-closed'
@@ -3435,6 +3481,195 @@ describe('SessionExecutionService', () => {
     'executes a signed durable turn through production Lody construction (%s)',
     runProductionSignedTurn
   );
+
+  describe('encrypted shared-project scope', () => {
+    const local = (id: string): ProjectRef => ({
+      kind: 'local',
+      localProjectId: id as LocalProjectId,
+    });
+    // A member granted only project p1 on this machine; the owner-signed policy decides.
+    const sharedOnly = (f: ReturnType<typeof encryptedExecutionFixture>, asked: unknown[][]) =>
+      makeEncryptedAgentExecution({
+        genesis: 'genesis',
+        workspaceId: 'workspace-1',
+        targetMachineId: 'machine-1',
+        journal: lazyExecutionJournal(f.filename, () => 100),
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: 'member',
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspaceId, _device, localProjectId) => {
+          asked.push([localProjectId]);
+          return Effect.succeed(
+            localProjectId === undefined || localProjectId === 'p1'
+              ? { _tag: 'Authorized' }
+              : { _tag: 'Denied', reason: 'e2ee_machine_not_shared' }
+          );
+        },
+      });
+    it.each([
+      ['the requested project', { project: local('p2') }],
+      [
+        'a live process whose request names a shared project',
+        {
+          project: local('p1'),
+          liveConfig: { project: local('p2') },
+        },
+      ],
+      ['Session meta while the request omits the project', { meta: { project: local('p2') } }],
+      ['a new conversation', { project: local('p2'), create: true }],
+      [
+        'a Project group member',
+        {
+          meta: {
+            projectRun: {
+              id: 'group',
+              name: 'Group',
+              root: 'group',
+              members: {
+                member: {
+                  o: 0,
+                  src: { kind: 'local', machineId: 'machine-1', localProjectId: 'p2' },
+                  placement: { kind: 'root', dir: 'p2' },
+                  path: 'p2',
+                  base: 'main',
+                },
+              },
+            },
+          },
+        },
+      ],
+    ] as const)('never prompts a member on an unshared project from %s', async (_name, scope) => {
+      const f = encryptedExecutionFixture();
+      const asked: unknown[][] = [];
+      const submissions: string[] = [];
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: sharedOnly(f, asked),
+          ...scope,
+          onPrompt: async () => {
+            submissions.push('hi');
+          },
+        });
+        expect(submissions).toEqual([]);
+        expect(asked).toContainEqual(['p2']);
+        expect(result.failureMessages).toEqual([
+          expect.stringContaining('e2ee_machine_not_shared'),
+        ]);
+      } finally {
+        f.close();
+      }
+    });
+    it('restores from the metadata it authorized, even if synced metadata changes meanwhile', async () => {
+      const f = encryptedExecutionFixture();
+      const meta: Record<string, unknown> = {};
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      // The member rewrites synced metadata while the claim is authorizing.
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          Effect.sync(() => {
+            meta.project = local('p2');
+          }).pipe(Effect.andThen(shared.claim(intent))),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([[undefined]]);
+        // Before the fix the restore re-read the rewritten metadata and resolved p2.
+        expect(result.failureMessages.join('\n')).not.toContain('p2');
+        expect(started).toHaveLength(1);
+        expect(started[0]?.project).toBeUndefined();
+      } finally {
+        f.close();
+      }
+    });
+    it('refuses a Project group member added to synced metadata after authorization', async () => {
+      const f = encryptedExecutionFixture();
+      const group = (...ids: string[]) => ({
+        id: 'group',
+        name: 'Group',
+        root: 'group',
+        members: Object.fromEntries(
+          ids.map((id, o) => [
+            id,
+            {
+              o,
+              src: { kind: 'local', machineId: 'machine-1', localProjectId: id },
+              placement: { kind: 'root', dir: id },
+              path: id,
+              base: 'main',
+            },
+          ])
+        ),
+      });
+      const meta: Record<string, unknown> = { projectRun: group('p1') };
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          shared.claim(intent).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                meta.projectRun = group('p1', 'p2');
+              })
+            )
+          ),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([['p1']]);
+        // Before the fix the session manager adopted the reread group, including p2.
+        expect(started).toEqual([]);
+        expect(result.failureMessages.join('\n')).toContain('e2ee_machine_not_shared');
+      } finally {
+        f.close();
+      }
+    });
+    it('still prompts on the shared project and in a projectless conversation', async () => {
+      for (const scope of [{ project: local('p1') }, {}]) {
+        const f = encryptedExecutionFixture();
+        const submissions: string[] = [];
+        try {
+          await runSilentPromptTurn({
+            sessionId: 'shared-project-session',
+            hasPromptEventsForTurn: true,
+            prepared: true,
+            encryptedExecution: sharedOnly(f, []),
+            ...scope,
+            onPrompt: async () => {
+              submissions.push('hi');
+            },
+          });
+          expect(submissions).toEqual(['hi']);
+        } finally {
+          f.close();
+        }
+      }
+    });
+  });
 
   it('keeps a snapshot turn pending until its original signed update becomes available', async () => {
     const f = encryptedExecutionFixture();
@@ -4525,140 +4760,142 @@ describe('SessionExecutionService', () => {
     async (refreshOutcome) => {
       vi.useFakeTimers();
       try {
-      let history: Array<Record<string, unknown>> = [
-        {
-          id: 'turn-user-1',
-          role: 'user',
-          status: 'pending',
-          read: false,
-        },
-      ];
-      const agentClient = {
-        isCreated: vi.fn(() => true),
-        cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => ({})),
-        currentModel: undefined,
-      };
-      const exec = vi.fn(async (_cmd: string, args: string[]) => {
-        const key = args.join(' ');
-        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-        if (key === 'rev-parse HEAD') return 'abc123\n';
-        return '';
-      });
-      const activeSession = {
-        sessionId: 'session-1' as SessionId,
-        acpSessionId: 'acp-1' as ACPSessionId,
-        agentClient,
-        terminalManager: {} as unknown,
-        getWorkdir: () => '/tmp',
-        getHostWorkdir: () => '/tmp',
-        getParentSessionId: () => undefined,
-        exec,
-        terminate: vi.fn(async () => {}),
-        updateGitIdentity: vi.fn(),
-        createAgent: vi.fn(async () => 'acp-1'),
-        applyExecutionPlaneLimits: vi.fn(async () => {}),
-      };
-      const sessionDoc = withHistoryPort({
-        getMetaState: vi.fn(async () => ({ isArchived: false })),
-        setStatus: vi.fn(async () => {}),
-        setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(() => history),
-        updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-          history = updater(history);
-        }),
-      });
-      let releaseRefresh = () => {};
-      const refreshGate = new Promise<void>((resolve) => {
-        releaseRefresh = resolve;
-      });
-      const refreshStarted = createDeferred<void>();
-      const refreshCodeCollabSharedState = async () => {
-        refreshStarted.resolve();
-        if (refreshOutcome === 'rejecting') throw new Error('Synthetic refresh failure');
-        await refreshGate;
-      };
-      const presence = new Set<SessionId>();
-      const deps = createBaseDeps({
-        startSessionActivePresence: (id) => {
-          presence.add(id);
-        },
-        clearSessionActivePresence: (id) => {
-          presence.delete(id);
-        },
-        sessionManager: {
-          getSession: vi.fn(() => activeSession),
-          getPendingSession: vi.fn(() => null),
-          createSession: vi.fn(),
-          setSessionError: vi.fn(),
-          terminateSession: vi.fn(),
-          validateSessionCredentials: vi.fn(async () => {}),
-        } as unknown as SessionManager,
-        workspaceDocument: {
-          repo: {
-            upsertDocMeta: vi.fn(async () => {}),
-            getDocMeta: vi.fn(async () => undefined),
+        let history: Array<Record<string, unknown>> = [
+          {
+            id: 'turn-user-1',
+            role: 'user',
+            status: 'pending',
+            read: false,
           },
-          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-          updateAcpCapabilities: vi.fn(async () => {}),
-        } as unknown as LoroDocumentManager,
-        turnFinalization: {
-          finalizeACPState: vi.fn(async () => {}),
-          flushSessionUsage: vi.fn(async () => {}),
-          updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
-          refreshCodeCollabSharedState,
-          detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
-          syncWorkspaceGitState: vi.fn(async () => {}),
-          onTurnOutcome: vi.fn(async () => {}),
-        },
-      });
+        ];
+        const agentClient = {
+          isCreated: vi.fn(() => true),
+          cancel: vi.fn(async () => {}),
+          prompt: vi.fn(async () => ({})),
+          currentModel: undefined,
+        };
+        const exec = vi.fn(async (_cmd: string, args: string[]) => {
+          const key = args.join(' ');
+          if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
+          if (key === 'rev-parse HEAD') return 'abc123\n';
+          return '';
+        });
+        const activeSession = {
+          sessionId: 'session-1' as SessionId,
+          acpSessionId: 'acp-1' as ACPSessionId,
+          agentClient,
+          terminalManager: {} as unknown,
+          getWorkdir: () => '/tmp',
+          getHostWorkdir: () => '/tmp',
+          getParentSessionId: () => undefined,
+          exec,
+          terminate: vi.fn(async () => {}),
+          updateGitIdentity: vi.fn(),
+          createAgent: vi.fn(async () => 'acp-1'),
+          applyExecutionPlaneLimits: vi.fn(async () => {}),
+        };
+        const sessionDoc = withHistoryPort({
+          getMetaState: vi.fn(async () => ({ isArchived: false })),
+          setStatus: vi.fn(async () => {}),
+          setBaseBranch: vi.fn(async () => {}),
+          getHistory: vi.fn(() => history),
+          updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+            history = updater(history);
+          }),
+        });
+        let releaseRefresh = () => {};
+        const refreshGate = new Promise<void>((resolve) => {
+          releaseRefresh = resolve;
+        });
+        const refreshStarted = createDeferred<void>();
+        const refreshCodeCollabSharedState = async () => {
+          refreshStarted.resolve();
+          if (refreshOutcome === 'rejecting') throw new Error('Synthetic refresh failure');
+          await refreshGate;
+        };
+        const presence = new Set<SessionId>();
+        const deps = createBaseDeps({
+          startSessionActivePresence: (id) => {
+            presence.add(id);
+          },
+          clearSessionActivePresence: (id) => {
+            presence.delete(id);
+          },
+          sessionManager: {
+            getSession: vi.fn(() => activeSession),
+            getPendingSession: vi.fn(() => null),
+            createSession: vi.fn(),
+            setSessionError: vi.fn(),
+            terminateSession: vi.fn(),
+            validateSessionCredentials: vi.fn(async () => {}),
+          } as unknown as SessionManager,
+          workspaceDocument: {
+            repo: {
+              upsertDocMeta: vi.fn(async () => {}),
+              getDocMeta: vi.fn(async () => undefined),
+            },
+            getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+            updateAcpCapabilities: vi.fn(async () => {}),
+          } as unknown as LoroDocumentManager,
+          turnFinalization: {
+            finalizeACPState: vi.fn(async () => {}),
+            flushSessionUsage: vi.fn(async () => {}),
+            updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
+            refreshCodeCollabSharedState,
+            detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
+            syncWorkspaceGitState: vi.fn(async () => {}),
+            onTurnOutcome: vi.fn(async () => {}),
+          },
+        });
 
-      const service = new SessionExecutionService(deps);
-      const first = service.continueSession({
-        type: 'session/chat',
-        sessionId: 'session-1' as SessionId,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-        userTurnId: 'turn-user-1',
-        userId: 'user-1',
-        userName: 'User',
-        userEmail: 'user@example.com',
-      });
+        const service = new SessionExecutionService(deps);
+        const first = service.continueSession({
+          type: 'session/chat',
+          sessionId: 'session-1' as SessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-user-1',
+          userId: 'user-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        });
 
-      await refreshStarted.promise;
-      await vi.advanceTimersByTimeAsync(20_000);
-      await first;
-      releaseRefresh();
-      expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
-        'session-1',
-        activeSession,
-        expect.objectContaining({
-          baseCommitHash: 'abc123',
-          preferredBaseBranch: 'release/v2',
-        })
-      );
-      expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
-      expect(presence.size).toBe(0);
-      history.push({ id: 'turn-user-2', role: 'user', status: 'pending', read: false });
-      await service.continueSession({
-        type: 'session/chat',
-        sessionId: 'session-1' as SessionId,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-        acpSessionConfig: { prompt: 'next', cliType: 'builtin', agentType: 'codex' },
-        userTurnId: 'turn-user-2',
-        userId: 'user-1',
-        userName: 'User',
-        userEmail: 'user@example.com',
-      });
-      expect(history.find((entry) => entry.id === 'turn-user-2')?.status).toBe('handled');
-      expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
-      releaseRefresh();
-      await service.drainInboxExecutions();
-      } finally { vi.useRealTimers(); }
+        await refreshStarted.promise;
+        await vi.advanceTimersByTimeAsync(20_000);
+        await first;
+        releaseRefresh();
+        expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
+          'session-1',
+          activeSession,
+          expect.objectContaining({
+            baseCommitHash: 'abc123',
+            preferredBaseBranch: 'release/v2',
+          })
+        );
+        expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
+        expect(presence.size).toBe(0);
+        history.push({ id: 'turn-user-2', role: 'user', status: 'pending', read: false });
+        await service.continueSession({
+          type: 'session/chat',
+          sessionId: 'session-1' as SessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+          acpSessionConfig: { prompt: 'next', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-user-2',
+          userId: 'user-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        });
+        expect(history.find((entry) => entry.id === 'turn-user-2')?.status).toBe('handled');
+        expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
+        releaseRefresh();
+        await service.drainInboxExecutions();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   );
 
@@ -9549,6 +9786,13 @@ describe('SessionExecutionService', () => {
           expect(terminated).toBe(false);
         }
         await released;
+        if (completion === 'timeout') {
+          // Local cancellation can release the turn slot before transport drain.
+          expect(rawPending).toBe(true);
+          expect(service.inspectClientLoss().bookkeeping).toBeGreaterThan(0);
+          rawPrompt.resolve();
+          await rawCompletion;
+        }
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
         expect(activePresence.has(sessionId)).toBe(false);
         expect(presence.has(sessionId)).toBe(false);
@@ -9581,127 +9825,132 @@ describe('SessionExecutionService', () => {
   it('flushes cancellation when a cancelled prompt resolves before finalization starts', async () => {
     vi.useFakeTimers();
     try {
-    let meta: Record<string, unknown> = {};
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
-      meta = { ...meta, ...patch };
-    });
-    const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(() => []),
-      updateHistory: vi.fn(async () => {}),
-    });
-    let activeTurnId: string | undefined;
-    let service: SessionExecutionService;
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        const result = await service.cancelSession({
-          type: 'session/cancel',
-          sessionId: 'session-prompt-cancel-resolved' as SessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          turnId: 'assistant-prompt-cancel-resolved',
-        });
-        expect(result).toEqual({ success: true });
-        return {};
-      }),
-      currentModel: undefined,
-    };
-    const session = {
-      sessionId: 'session-prompt-cancel-resolved' as SessionId,
-      acpSessionId: 'acp-prompt-cancel-resolved' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-prompt-cancel-resolved'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => session),
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      validateSessionCredentials: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-    const deps = createBaseDeps({
-      sessionManager,
-      beginConversationTurn: vi.fn(() => {
-        activeTurnId = 'assistant-prompt-cancel-resolved';
-        return activeTurnId;
-      }),
-      getActiveTurnId: vi.fn(() => activeTurnId),
-      clearActiveTurnId: vi.fn((_sessionId, turnId) => {
-        if (activeTurnId === turnId) {
-          activeTurnId = undefined;
-        }
-      }),
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta,
-          getDocMeta: vi.fn(async () => ({
-            meta,
-          })),
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
-      processMessageQueue: vi.fn(async () => {}),
-    });
+      let meta: Record<string, unknown> = {};
+      const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
+        meta = { ...meta, ...patch };
+      });
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async () => {}),
+        setBaseBranch: vi.fn(async () => {}),
+        getHistory: vi.fn(() => []),
+        updateHistory: vi.fn(async () => {}),
+      });
+      let activeTurnId: string | undefined;
+      let service: SessionExecutionService;
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          const result = await service.cancelSession({
+            type: 'session/cancel',
+            sessionId: 'session-prompt-cancel-resolved' as SessionId,
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            turnId: 'assistant-prompt-cancel-resolved',
+          });
+          expect(result).toEqual({ success: true });
+          return {};
+        }),
+        currentModel: undefined,
+      };
+      const session = {
+        sessionId: 'session-prompt-cancel-resolved' as SessionId,
+        acpSessionId: 'acp-prompt-cancel-resolved' as ACPSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-prompt-cancel-resolved'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const sessionManager = {
+        getSession: vi.fn(() => session),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        validateSessionCredentials: vi.fn(async () => {}),
+      } as unknown as SessionManager;
+      const deps = createBaseDeps({
+        sessionManager,
+        beginConversationTurn: vi.fn(() => {
+          activeTurnId = 'assistant-prompt-cancel-resolved';
+          return activeTurnId;
+        }),
+        getActiveTurnId: vi.fn(() => activeTurnId),
+        clearActiveTurnId: vi.fn((_sessionId, turnId) => {
+          if (activeTurnId === turnId) {
+            activeTurnId = undefined;
+          }
+        }),
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta,
+            getDocMeta: vi.fn(async () => ({
+              meta,
+            })),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
+        processMessageQueue: vi.fn(async () => {}),
+      });
 
-    const notificationFacts: TurnOutcomeFact[] = [];
-    deps.turnFinalization.onTurnOutcome = async (fact) => {
-      notificationFacts.push(fact);
-    };
-    let releaseRefresh = () => {};
-    const refresh = new Promise<void>((resolve) => {
-      releaseRefresh = resolve;
-    });
-    const refreshing = createDeferred<void>();
-    deps.turnFinalization.refreshCodeCollabSharedState = () => { refreshing.resolve(); return refresh; };
-    service = new SessionExecutionService(deps);
-    const execution = service.continueSession({
-      type: 'session/chat',
-      sessionId: 'session-prompt-cancel-resolved' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-prompt-cancel-resolved',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const notificationFacts: TurnOutcomeFact[] = [];
+      deps.turnFinalization.onTurnOutcome = async (fact) => {
+        notificationFacts.push(fact);
+      };
+      let releaseRefresh = () => {};
+      const refresh = new Promise<void>((resolve) => {
+        releaseRefresh = resolve;
+      });
+      const refreshing = createDeferred<void>();
+      deps.turnFinalization.refreshCodeCollabSharedState = () => {
+        refreshing.resolve();
+        return refresh;
+      };
+      service = new SessionExecutionService(deps);
+      const execution = service.continueSession({
+        type: 'session/chat',
+        sessionId: 'session-prompt-cancel-resolved' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-prompt-cancel-resolved',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
-    await refreshing.promise;
-    await vi.advanceTimersByTimeAsync(20_000);
-    await execution;
-    expect(
-      service.getExecutionSnapshot('session-prompt-cancel-resolved' as SessionId).hasActiveTurn
-    ).toBe(false);
-    releaseRefresh();
-    expect(notificationFacts.map((fact) => fact.outcome)).toEqual([{ kind: 'cancelled' }]);
-    expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel-resolved');
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
-      'session-prompt-cancel-resolved',
-      'assistant-prompt-cancel-resolved'
-    );
-    expect(deps.processMessageQueue).not.toHaveBeenCalled();
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel-resolved', {
-      lastHandledUserMsgId: 'turn-prompt-cancel-resolved',
-      processingUserMsgId: undefined,
-    });
-    } finally { vi.useRealTimers(); }
+      await refreshing.promise;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await execution;
+      expect(
+        service.getExecutionSnapshot('session-prompt-cancel-resolved' as SessionId).hasActiveTurn
+      ).toBe(false);
+      releaseRefresh();
+      expect(notificationFacts.map((fact) => fact.outcome)).toEqual([{ kind: 'cancelled' }]);
+      expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel-resolved');
+      expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
+      expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
+        'session-prompt-cancel-resolved',
+        'assistant-prompt-cancel-resolved'
+      );
+      expect(deps.processMessageQueue).not.toHaveBeenCalled();
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel-resolved', {
+        lastHandledUserMsgId: 'turn-prompt-cancel-resolved',
+        processingUserMsgId: undefined,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('accepts a stop request during turn finalization and skips completion follow-up', async () => {
@@ -12085,6 +12334,7 @@ describe('Operation Inbox execution boundary', () => {
       cancel: async () => {},
       prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks),
       currentModel: undefined,
+      getAutomationObservations: () => ({}),
     };
     const session = {
       sessionId,
@@ -12094,6 +12344,7 @@ describe('Operation Inbox execution boundary', () => {
       getWorkdir: () => '/tmp',
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
+      getProviderBinding: () => ({ bindingId: capabilityConfigId, fingerprint: 'frozen-launch' }),
       exec: async () => '',
       terminate: async () => {
         created = false;
@@ -12107,7 +12358,9 @@ describe('Operation Inbox execution boundary', () => {
     const deps = createBaseDeps({
       sessionManager: {
         getSession: () => liveSession,
-        detachSession: (old: typeof session) => { if (liveSession === old) liveSession = undefined; },
+        detachSession: (old: typeof session) => {
+          if (liveSession === old) liveSession = undefined;
+        },
         getPendingSession: () => null,
         createSession: vi.fn(),
         setSessionError: vi.fn(),
@@ -12253,6 +12506,549 @@ describe('Operation Inbox execution boundary', () => {
     };
   }
 
+  it.each([
+    'automation-first',
+    'cancelled-accepted',
+    'schedule-first',
+    'concurrent',
+    'schedule-concurrent',
+    'unassociated',
+    'resumed',
+  ] as const)('accepts only the first associated quota continuation (%s)', async (first) => {
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace-1', 'machine-1');
+    const sessionId = f.message.sessionId;
+    const reset = Date.parse('2026-10-12T05:00:00Z');
+    const identity = quotaReservationIdentity('workspace-1', sessionId, reset, 'human-input');
+    const scheduleId = identity.scheduleId;
+    const run = {
+      workspaceId: 'workspace-1',
+      sessionId,
+      scheduleId,
+      manual: false,
+      message: { inputBlocks: [{ type: 'text', text: 'continue' }] },
+      definition: {
+        scheduleId,
+        activationId: first === 'resumed' ? 'resumed-activation' : identity.activationId,
+        activeFrom: reset + 1000,
+        trigger: { kind: 'once', at: new Date(reset + 1000).toISOString() },
+        destination: { kind: 'existing_session', sessionId },
+      },
+    } as unknown as import('../src/lib/schedules/schedule-store').ScheduleRun<
+      import('../src/lib/prepared-session-input').PreparedSessionInput
+    >;
+    const scheduledTurn = {
+      id: 'scheduled-turn',
+      role: 'user' as const,
+      userId: 'user-1',
+      status: 'prepared' as const,
+      timestamp: '2026-10-12T00:00:00Z',
+      items: [{ type: 'text' as const, text: 'continue' }],
+      inputConfig: f.message.acpSessionConfig,
+      finished: true,
+      fileDiff: [],
+    };
+    const prepared = {
+      sessionId,
+      userTurn: scheduledTurn,
+      meta: {},
+    } as unknown as import('../src/lib/prepared-session-input').PreparedSessionInput;
+    const workId = 'quota-work';
+    const admissionEntered = createDeferred();
+    const releaseAdmission = createDeferred();
+    const scheduleEntered = createDeferred();
+    const releaseSchedule = createDeferred();
+    try {
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+        latestUserMsgId: 'human-input',
+      });
+      await (await createSessionBackend(f.doc)).appendHistoryTurn(scheduledTurn);
+      configureSessionPolicies(ledger, sessionId, 'user-1', { recoverCapacity: true }, 1);
+      ledger.recordWork(
+        {
+          id: workId,
+          ownerUserId: 'user-1',
+          updatedAt: 2,
+          sessionId,
+          turnId: 'human-input',
+          nativeSessionId: 'acp-inbox',
+          bindingId: capabilityConfigId,
+          fingerprint: 'frozen-launch',
+          inputRef: 'human-input',
+          confirmedBoundary: 'assistant:human-input',
+          unresolvedEffects: false,
+          release: 'released',
+          state: 'blocked_on_capacity',
+          attempts: 0,
+        },
+        {
+          id: workId,
+          source: 'session/test',
+          type: 'provider.quota.exhausted',
+          version: 1,
+          subject: workId,
+          observedAt: 2,
+          scope: { workspaceId: 'workspace-1', sessionId },
+          data: { workId },
+          provenance: 'callback',
+          completeness: 'observed',
+          depth: 0,
+        }
+      );
+      const delivery = ledger.deliveries()[0];
+      if (!delivery) throw new Error('missing quota delivery');
+      const intent = internalPolicy(delivery)[0];
+      if (!intent) throw new Error('missing recovery intent');
+      const receipt = ledger.accept(delivery, intent, 3);
+      expect(ledger.claimWork(workId, receipt.id)).toBe(true);
+      const origin = {
+        invocationId: receipt.id,
+        ruleId: receipt.rule.id,
+        ruleRevision: receipt.rule.revision,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+        workIntentId: workId,
+      };
+      f.service.setAutomationAdmission(
+        async () => true,
+        () => true,
+        async () => {
+          if (first === 'concurrent') {
+            admissionEntered.resolve();
+            await releaseAdmission.promise;
+          }
+          return (await f.doc.getMetaState())?.latestUserMsgId === 'human-input';
+        }
+      );
+      const automatic = () =>
+        f.service.acceptAutomationInput({
+          sessionId,
+          turnId: receipt.turnId,
+          userId: 'user-1',
+          config: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+      const authority = {
+        guardInput: (
+          id: SessionId,
+          userId: string,
+          body: () => Promise<'dispatched' | 'discarded'>
+        ) => f.service.guardAutomationAction([id], userId, body),
+        inputAccepted: (id: SessionId, userId: string, turnId: string) =>
+          f.service.automationInputAccepted(id, userId, turnId),
+      } as unknown as import('../src/session/session-automation-authority').SessionAutomationAuthority;
+      const scheduled = () =>
+        dispatchQuotaSchedule({
+          run,
+          prepared,
+          userId: 'user-1',
+          ledger,
+          manager: f.deps.workspaceDocument,
+          authority,
+        });
+      if (first === 'automation-first' || first === 'cancelled-accepted') {
+        expect(await automatic()).toBe(true);
+        if (first === 'cancelled-accepted') {
+          f.store.inbox.abandonInput('workspace-1', sessionId, receipt.turnId);
+          expect(
+            f.store.inbox.inputKind(
+              { workspaceId: 'workspace-1', sessionId, userId: 'user-1' },
+              receipt.turnId
+            )
+          ).toBeUndefined();
+        }
+        const reopened = new LodyOperationStore(f.storePath);
+        try {
+          expect(
+            reopened.inbox.acceptedAutomationInput(
+              { workspaceId: 'workspace-1', sessionId, userId: 'user-1' },
+              receipt.turnId
+            )
+          ).toBe(true);
+        } finally {
+          reopened.close();
+        }
+        expect(await scheduled()).toBe('discarded');
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('human-input');
+      } else if (first === 'schedule-first' || first === 'resumed') {
+        expect(await scheduled()).toBe('dispatched');
+        expect(await automatic()).toBe(false);
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('scheduled-turn');
+      } else if (first === 'concurrent') {
+        const accepted = automatic();
+        await admissionEntered.promise;
+        const attempted = scheduled();
+        expect(
+          await f.service.guardAutomationAction(
+            ['other-session' as SessionId],
+            'user-1',
+            async () => 'independent'
+          )
+        ).toBe('independent');
+        releaseAdmission.resolve();
+        expect(await accepted).toBe(true);
+        expect(await attempted).toBe('discarded');
+      } else if (first === 'schedule-concurrent') {
+        const repo = f.deps.workspaceDocument.repo;
+        const upsert = repo.upsertDocMeta.bind(repo);
+        vi.spyOn(repo, 'upsertDocMeta').mockImplementation(async (...args) => {
+          scheduleEntered.resolve();
+          await releaseSchedule.promise;
+          return upsert(...args);
+        });
+        const attempted = scheduled();
+        await scheduleEntered.promise;
+        const accepted = automatic();
+        releaseSchedule.resolve();
+        expect(await attempted).toBe('dispatched');
+        expect(await accepted).toBe(false);
+      } else {
+        await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          latestUserMsgId: 'newer-user-input',
+        });
+        expect(await scheduled()).toBe('discarded');
+        expect((await f.doc.getMetaState())?.latestUserMsgId).toBe('newer-user-input');
+      }
+    } finally {
+      releaseAdmission.resolve();
+      releaseSchedule.resolve();
+      ledger.close();
+      await f.close();
+    }
+  });
+
+  it.each([true, false])(
+    'checks the live private provider binding at final automation admission (match=%s)',
+    async (matches) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const origin = {
+        invocationId: 'invocation',
+        ruleId: 'rule',
+        ruleRevision: 1,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+        workIntentId: 'work',
+        nativeSessionId: 'acp-inbox',
+      };
+      const observed: Array<string | undefined> = [];
+      f.service.setAutomationAdmission(
+        async () => true,
+        (_session, _turn, _origin, binding) => {
+          observed.push(binding?.fingerprint);
+          return matches && binding?.fingerprint === 'frozen-launch';
+        },
+        async () => true
+      );
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+        expect(observed).toEqual(['frozen-launch']);
+        expect(prompts).toHaveLength(matches ? 1 : 0);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(matches ? 'handled' : 'failed');
+        expect(JSON.stringify(input?.inputConfig)).not.toContain('frozen-launch');
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it.each([true, false])(
+    'checks current worktree HEAD before delivering CI evidence (match=%s)',
+    async (matches) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const head = 'a'.repeat(40);
+      f.session.exec = async (...args: unknown[]) => {
+        const command = JSON.stringify(args);
+        return command.includes('--is-inside-work-tree')
+          ? 'true'
+          : command.includes('HEAD')
+            ? head
+            : '';
+      };
+      f.service.setAutomationAdmission(
+        async () => true,
+        () => true
+      );
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: {
+            ...f.message.acpSessionConfig,
+            _lodyAutomation: {
+              invocationId: 'ci',
+              ruleId: 'wait',
+              ruleRevision: 1,
+              eventRef: 'ci-result',
+              authorizationUserId: 'user-1',
+              expectedHeads: [
+                { repository: 'owner/repo', headSha: matches ? head : 'b'.repeat(40) },
+              ],
+            },
+          },
+        });
+        expect(prompts).toHaveLength(matches ? 1 : 0);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(matches ? 'handled' : 'failed');
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it('keeps a parent archive barrier unavailable until its child execution releases', async () => {
+    const started = createDeferred();
+    const finish = createDeferred();
+    const f = inboxExecutionFixture(async () => {
+      started.resolve();
+      await finish.promise;
+      return { stopReason: 'end_turn' };
+    });
+    const parentId = 'parent' as SessionId;
+    const originalMeta = f.doc.getMetaState.bind(f.doc);
+    f.doc.getMetaState = async () =>
+      ({ ...(await originalMeta()), parentSessionId: parentId }) as SessionMeta;
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await started.promise;
+      expect(f.service.tryAcquireSessionRewriteBarrier(parentId)).toBeNull();
+      finish.resolve();
+      await running;
+      const release = f.service.tryAcquireSessionRewriteBarrier(parentId);
+      expect(release).toBeTypeOf('function');
+      release?.();
+    } finally {
+      finish.resolve();
+      await f.close();
+    }
+  });
+
+  it('keeps the parent archive barrier while a failed child release still owns raw prompt work', async () => {
+    const started = createDeferred();
+    const finish = createDeferred();
+    const nativeCompletion = createDeferred();
+    const cleanup = createDeferred();
+    const f = inboxExecutionFixture(async () => {
+      started.resolve();
+      await finish.promise;
+      return { stopReason: 'end_turn' };
+    });
+    const parentId = 'parent' as SessionId;
+    const originalMeta = f.doc.getMetaState.bind(f.doc);
+    f.doc.getMetaState = async () =>
+      ({ ...(await originalMeta()), parentSessionId: parentId }) as SessionMeta;
+    Object.assign(f.client, { pendingPromptCompletion: nativeCompletion.promise });
+    f.session.terminate = async () => {
+      await cleanup.promise;
+    };
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await started.promise;
+      const execution = f.service as unknown as {
+        turnRuntimeBySession: Map<SessionId, { releaseFailure?: unknown; turnId: string }>;
+        freeTurnSlot(runtime: { releaseFailure?: unknown; turnId: string }): void;
+      };
+      const owner = execution.turnRuntimeBySession.get(f.message.sessionId);
+      if (!owner) throw new Error('missing child execution');
+      owner.releaseFailure = new Error('unconfirmed child release');
+      execution.freeTurnSlot(owner);
+      expect(f.service.tryAcquireSessionRewriteBarrier(parentId)).toBeNull();
+      finish.resolve();
+      await running;
+      expect(f.service.tryAcquireSessionRewriteBarrier(parentId)).toBeNull();
+      nativeCompletion.resolve();
+      await nativeCompletion.promise;
+      const release = f.service.tryAcquireSessionRewriteBarrier(parentId);
+      expect(release).toBeTypeOf('function');
+      release?.();
+    } finally {
+      finish.resolve();
+      nativeCompletion.resolve();
+      cleanup.resolve();
+      await f.close();
+    }
+  });
+
+  it('upgrades an existing capacity setting without changing its enabled state', () => {
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace-1', 'machine-1');
+    try {
+      configureSessionPolicies(ledger, 'session-1', 'user-1', { recoverCapacity: true }, 1);
+      const rule = ledger.rules()[0];
+      if (!rule) throw new Error('missing recovery rule');
+      const {
+        revision,
+        ownerUserId: _ownerUserId,
+        ownerMachineId: _ownerMachineId,
+        activationSequence: _activationSequence,
+        createdAt: _createdAt,
+        updatedAt: _updatedAt,
+        ...draft
+      } = rule;
+      ledger.upsert(
+        { ...draft, selector: { types: ['provider.quota.exhausted'] } },
+        'user-1',
+        2,
+        revision
+      );
+      upgradeCapacityPolicies(ledger, 'user-1', 3);
+      expect(ledger.rule(rule.id)).toMatchObject({
+        enabled: true,
+        selector: { types: ['provider.quota.exhausted', 'provider.model.overloaded'] },
+      });
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it.each([
+    { error: 'usageLimitExceeded', failure: 'quota_exhausted', event: 'provider.quota.exhausted' },
+    {
+      error: 'serverOverloaded',
+      failure: 'provider_overloaded',
+      event: 'provider.model.overloaded',
+    },
+  ])(
+    'recovers a staged $failure result after its delivery acknowledgement is lost',
+    async ({ error, failure, event }) => {
+      const submitted: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        submitted.push(blocks);
+        throw new RequestError(-32603, 'capacity unavailable', { codexErrorInfo: error });
+      });
+      const filename = path.join(path.dirname(f.storePath), 'automations.sqlite');
+      let ledger = new AutomationLedger(
+        { kind: 'disk', path: filename },
+        'workspace-1',
+        'machine-1'
+      );
+      configureSessionPolicies(ledger, f.message.sessionId, 'user-1', { recoverCapacity: true }, 0);
+      const scope = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+      };
+      let stagedBeforeRelease = false;
+      try {
+        f.service.setAutomationObservations({
+          stage: (fact) => {
+            ledger.stageTurn(fact);
+            stagedBeforeRelease =
+              f.store.inbox.executionRelease(scope, fact.assistantTurnId) === undefined;
+          },
+          turn: async () => {
+            throw new Error('lost post-release delivery');
+          },
+          capacity: async () => {},
+        });
+        await f.accept();
+        await f.service.continueSession(f.message);
+        expect(stagedBeforeRelease).toBe(true);
+        const staged = ledger.stagedTurns();
+        expect(staged).toHaveLength(1);
+        expect(staged[0]?.fact).toMatchObject({
+          capacityFailure: failure,
+          released: false,
+          finalized: true,
+          nativeSessionId: 'acp-inbox',
+          outcome: 'failed',
+        });
+        ledger.close();
+        ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
+        const failures: unknown[] = [];
+        await reconcileSessionTurnsLegacy(
+          ledger,
+          f.deps.workspaceDocument,
+          (fact) => f.store.inbox.executionRelease(scope, fact.assistantTurnId),
+          (cause) => failures.push(cause)
+        );
+        expect(failures).toEqual([]);
+        expect(ledger.stagedTurns()).toEqual([]);
+        const workId = (await import('../src/automations/storage/ledger')).automationIdentity(
+          f.message.sessionId,
+          'human-input',
+          'assistant:human-input',
+          'pending-work'
+        );
+        expect(ledger.work(workId)).toMatchObject({
+          state: 'blocked_on_capacity',
+          release: 'released',
+          nativeSessionId: 'acp-inbox',
+          unresolvedEffects: false,
+          inputRef: 'human-input',
+        });
+        const delivery = ledger.deliveries().find((item) => item.event.type === event);
+        if (!delivery) throw new Error('missing recovery delivery');
+        expect(internalPolicy(delivery)).toMatchObject([
+          { action: { kind: 'agent.invoke', parameters: { input: { ref: workId } } } },
+        ]);
+        if (failure === 'provider_overloaded') {
+          const fact = staged[0]?.fact;
+          if (!fact) throw new Error('missing staged observation');
+          let previousId = workId;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            const turnId = `retry-${attempt}`;
+            const invocationId = `invocation-${attempt}`;
+            expect(ledger.claimWork(previousId, invocationId)).toBe(true);
+            await f.deps.workspaceDocument.repo.upsertDocMeta('fixture', {
+              latestUserMsgId: turnId,
+            });
+            await observeSessionTurnLegacy(ledger, f.deps.workspaceDocument, {
+              ...fact,
+              turnId,
+              released: true,
+              observedAt: fact.observedAt + attempt * 1000,
+              inputConfig: {
+                ...fact.inputConfig,
+                _lodyAutomation: {
+                  invocationId,
+                  ruleId: 'rule',
+                  ruleRevision: 1,
+                  eventRef: 'event',
+                  authorizationUserId: 'user-1',
+                  workIntentId: previousId,
+                },
+              },
+            });
+            previousId = (await import('../src/automations/storage/ledger')).automationIdentity(
+              f.message.sessionId,
+              turnId,
+              fact.assistantTurnId,
+              'pending-work'
+            );
+            expect(ledger.work(previousId)).toMatchObject({
+              attempts: attempt,
+              state: attempt === 3 ? 'failed' : 'blocked_on_capacity',
+              notBefore: fact.observedAt + attempt * 1000 + 5_000 * 2 ** Math.min(attempt, 2),
+            });
+          }
+          expect(ledger.claimWork(previousId, 'extra')).toBe(false);
+        }
+        expect(submitted).toHaveLength(1);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        f.service.setAutomationObservations(undefined);
+        ledger.close();
+        await f.close();
+      }
+    }
+  );
+
   it('starts dispatch and executes ordinary human input when the Inbox database cannot open', async () => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
@@ -12357,22 +13153,48 @@ describe('Operation Inbox execution boundary', () => {
       const prior = f.store.inbox.activeExecution('workspace-1', f.message.sessionId);
       expect(prior).toMatchObject({ executionId: 'assistant:human-input', inputId: 'human-input' });
       // Retire only the facade registration; transport and the SQLite owner remain live.
-      const internals = f.service as unknown as { releaseTurnRuntime(sessionId: SessionId, turnId: string): void };
+      const internals = f.service as unknown as {
+        releaseTurnRuntime(sessionId: SessionId, turnId: string): void;
+      };
       internals.releaseTurnRuntime(f.message.sessionId, 'assistant:human-input');
       const config = { ...f.message.acpSessionConfig, prompt: 'WAITING_REQUEST' };
-      await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
-        id: 'waiting-input', role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
-        timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
-      } });
-      await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'waiting-input', userId: 'user-1', config });
-      const attempt = await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config }).catch((cause: unknown) => cause);
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'waiting-input',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          inputConfig: config,
+          timestamp: '2026-10-29T00:00:00Z',
+          items: [{ type: 'text', text: config.prompt }],
+          fileDiff: [],
+          finished: true,
+        },
+      });
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'waiting-input',
+        userId: 'user-1',
+        config,
+      });
+      const attempt = await f.service
+        .continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config })
+        .catch((cause: unknown) => cause);
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toEqual(prior);
       expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
       expect(attempt).toBeInstanceOf(InboxExecutionRejected);
       finish.resolve();
       await running;
-      await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config });
-      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }], [{ type: 'text', text: 'WAITING_REQUEST' }]]);
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: 'waiting-input',
+        acpSessionConfig: config,
+      });
+      expect(received).toEqual([
+        [{ type: 'text', text: 'CURRENT_REQUEST' }],
+        [{ type: 'text', text: 'WAITING_REQUEST' }],
+      ]);
     } finally {
       finish.resolve();
       await running;
@@ -12434,7 +13256,9 @@ describe('Operation Inbox execution boundary', () => {
           blocked: 0,
         });
         expect(
-          db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)
+          db
+            .prepare('SELECT outcome FROM inbox_releases WHERE session_id=?')
+            .all(f.message.sessionId)
         ).toEqual([{ outcome: 'failed' }]);
       } finally {
         db.close();
@@ -12635,7 +13459,9 @@ describe('Operation Inbox execution boundary', () => {
         notificationAudience: { kind: 'user' },
       });
       await settling.promise;
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        true
+      );
       expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
       await f.service.cancelSession({
         sessionId: f.message.sessionId,
@@ -12985,23 +13811,49 @@ describe('Operation Inbox execution boundary', () => {
       const f = inboxExecutionFixture(prompt);
       const db = new Database(f.storePath);
       const backgroundCanRelease = mode.startsWith('cleanup');
-      if (mode === 'cleanup-failed') f.session.terminate = async () => { throw new Error('terminate failed'); };
+      if (mode === 'cleanup-failed')
+        f.session.terminate = async () => {
+          throw new Error('terminate failed');
+        };
       const replacement = {
         ...f.session,
         acpSessionId: 'replacement-acp',
-        agentClient: { ...f.client, isCreated: () => true, prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks) },
+        agentClient: {
+          ...f.client,
+          isCreated: () => true,
+          prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks),
+        },
         createAgent: async () => 'replacement-acp',
         terminate: async () => {},
       };
       Object.assign(f.deps.sessionManager, { createSession: async () => replacement });
       const send = async (inputId: string) => {
         const config = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
-        await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
-          id: inputId, role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
-          timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
-        } });
-        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId, userId: 'user-1', config });
-        return f.service.continueSession({ ...f.message, userTurnId: inputId, acpSessionConfig: config });
+        await f.doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: inputId,
+            role: 'user',
+            userId: 'user-1',
+            status: 'pending',
+            inputConfig: config,
+            timestamp: '2026-10-29T00:00:00Z',
+            items: [{ type: 'text', text: config.prompt }],
+            fileDiff: [],
+            finished: true,
+          },
+        });
+        await f.service.acceptInboxHumanInput({
+          sessionId: f.message.sessionId,
+          inputId,
+          userId: 'user-1',
+          config,
+        });
+        return f.service.continueSession({
+          ...f.message,
+          userTurnId: inputId,
+          acpSessionConfig: config,
+        });
       };
       try {
         f.add('captured-before-outage');
@@ -13014,13 +13866,21 @@ describe('Operation Inbox execution boundary', () => {
         await f.service.continueSession(f.message);
         await f.service.drainInboxExecutions();
         expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
-        const active = () => db.prepare('SELECT active_execution FROM inbox_sessions WHERE session_id=?').get(f.message.sessionId);
-        expect(active()).toEqual({ active_execution: backgroundCanRelease ? null : 'assistant:human-input' });
+        const active = () =>
+          db
+            .prepare('SELECT active_execution FROM inbox_sessions WHERE session_id=?')
+            .get(f.message.sessionId);
+        expect(active()).toEqual({
+          active_execution: backgroundCanRelease ? null : 'assistant:human-input',
+        });
         if (mode === 'persistent') {
           await expect(send('rejected-input')).rejects.toBeInstanceOf(InboxExecutionRejected);
           const notices = (await (await createSessionBackend(f.doc)).readHistory())
-            .flatMap((turn) => turn.items ?? []).filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
-          expect(notices).toMatchObject([{ meta: { message: expect.stringContaining('the disk may be full') } }]);
+            .flatMap((turn) => turn.items ?? [])
+            .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+          expect(notices).toMatchObject([
+            { meta: { message: expect.stringContaining('the disk may be full') } },
+          ]);
           expect(received).toHaveLength(1);
         }
         db.exec('DROP TRIGGER release_outage');
@@ -13028,9 +13888,15 @@ describe('Operation Inbox execution boundary', () => {
         expect(received).toHaveLength(2);
         expect(received[1]).toEqual([{ type: 'text', text: 'FRESH_REQUEST' }]);
         expect(active()).toEqual({ active_execution: null });
-        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, f.message.userTurnId)).toBe(true);
-        expect((await (await createSessionBackend(f.doc)).readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
-        expect(f.store.inbox.historyReceipts('workspace-1')).toMatchObject([{ state: 'settled', memberCount: 1 }]);
+        expect(
+          f.store.inbox.inputEnded('workspace-1', f.message.sessionId, f.message.userTurnId)
+        ).toBe(true);
+        expect(
+          (await (await createSessionBackend(f.doc)).readTurn('fresh-input')).turn
+        ).toMatchObject({ status: 'handled' });
+        expect(f.store.inbox.historyReceipts('workspace-1')).toMatchObject([
+          { state: 'settled', memberCount: 1 },
+        ]);
       } finally {
         db.exec('DROP TRIGGER IF EXISTS release_outage');
         db.close();
@@ -13094,7 +13960,9 @@ describe('Operation Inbox execution boundary', () => {
       });
       expect(received).toHaveLength(1);
       expect(received[0]?.[0]).toEqual({ type: 'text', text: 'FRESH_REQUEST' });
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        true
+      );
       const backend = await createSessionBackend(f.doc);
       expect((await backend.readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
@@ -13121,14 +13989,25 @@ describe('Operation Inbox execution boundary', () => {
       return { stopReason: 'end_turn' };
     });
     const cleanupStarted = createDeferred<void>();
-    f.session.terminate = async () => { cleanupStarted.resolve(); throw new Error('Synthetic termination failure'); };
+    f.session.terminate = async () => {
+      cleanupStarted.resolve();
+      throw new Error('Synthetic termination failure');
+    };
     Object.defineProperty(f.client, 'pendingPromptCompletion', { get: () => raw.promise });
     const notices: string[] = [];
-    f.deps.recordSessionStopFailure = async (_sid, _turnId, failure) => { notices.push(failure.message); };
+    f.deps.recordSessionStopFailure = async (_sid, _turnId, failure) => {
+      notices.push(failure.message);
+    };
     const replacement = {
       ...f.session,
       acpSessionId: 'new-acp',
-      agentClient: { ...f.client, prompt: async () => { received.push('new'); return { stopReason: 'end_turn' }; } },
+      agentClient: {
+        ...f.client,
+        prompt: async () => {
+          received.push('new');
+          return { stopReason: 'end_turn' };
+        },
+      },
       createAgent: async () => 'new-acp',
       terminate: async () => {},
     };
@@ -13137,7 +14016,13 @@ describe('Operation Inbox execution boundary', () => {
       await f.accept();
       const running = f.service.continueSession(f.message);
       await started.promise;
-      await f.service.cancelSession({ type: 'session/cancel', sessionId: f.message.sessionId, machineId: f.message.machineId, workspaceId: f.message.workspaceId, turnId: 'assistant:human-input' });
+      await f.service.cancelSession({
+        type: 'session/cancel',
+        sessionId: f.message.sessionId,
+        machineId: f.message.machineId,
+        workspaceId: f.message.workspaceId,
+        turnId: 'assistant:human-input',
+      });
       await vi.advanceTimersByTimeAsync(5_000);
       await cleanupStarted.promise;
       await running;
@@ -13146,16 +14031,36 @@ describe('Operation Inbox execution boundary', () => {
       expect(notices).toContainEqual(expect.stringContaining('termination failure'));
       await expect(f.service.drainInboxExecutions()).resolves.toBeUndefined();
       const next = { ...f.message, userTurnId: 'fresh-human' };
-      await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
-        id: next.userTurnId, role: 'user', status: 'pending', userId: 'user-1',
-        timestamp: '2026-10-12T00:00:01Z', inputConfig: f.message.acpSessionConfig,
-        items: [{ type: 'text', text: 'FRESH' }], fileDiff: [], finished: true,
-      } });
-      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId, userId: 'user-1', config: next.acpSessionConfig });
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: next.userTurnId,
+          role: 'user',
+          status: 'pending',
+          userId: 'user-1',
+          timestamp: '2026-10-12T00:00:01Z',
+          inputConfig: f.message.acpSessionConfig,
+          items: [{ type: 'text', text: 'FRESH' }],
+          fileDiff: [],
+          finished: true,
+        },
+      });
+      await f.service.acceptInboxHumanInput({
+        sessionId: next.sessionId,
+        inputId: next.userTurnId,
+        userId: 'user-1',
+        config: next.acpSessionConfig,
+      });
       await f.service.continueSession(next);
       expect(received).toEqual(['old', 'new']);
-      expect((await (await createSessionBackend(f.doc)).readTurn(next.userTurnId)).turn).toMatchObject({ status: 'handled' });
-    } finally { raw.resolve(); await f.close(); vi.useRealTimers(); }
+      expect(
+        (await (await createSessionBackend(f.doc)).readTurn(next.userTurnId)).turn
+      ).toMatchObject({ status: 'handled' });
+    } finally {
+      raw.resolve();
+      await f.close();
+      vi.useRealTimers();
+    }
   });
 
   it('releases an Inbox turn whose failure handling also fails, so the next input runs', async () => {
@@ -13201,208 +14106,439 @@ describe('Operation Inbox execution boundary', () => {
   });
 
   async function finishFirstThenRunNext(
-    f: ReturnType<typeof inboxExecutionFixture>, first: Promise<unknown>,
-    gate: ReturnType<typeof createDeferred<void>>, next: typeof f.message, published?: Promise<void>
+    f: ReturnType<typeof inboxExecutionFixture>,
+    first: Promise<unknown>,
+    gate: ReturnType<typeof createDeferred<void>>,
+    next: typeof f.message,
+    published?: Promise<void>
   ) {
-    await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId,
-      userId: 'user-1', config: next.acpSessionConfig });
+    await f.service.acceptInboxHumanInput({
+      sessionId: next.sessionId,
+      inputId: next.userTurnId,
+      userId: 'user-1',
+      config: next.acpSessionConfig,
+    });
     // Exercise a successor immediately if admission has already been returned.
     const released = !f.service.getExecutionSnapshot(next.sessionId).hasActiveTurn;
-    if (released) { await f.service.continueSession(next); await published; }
+    if (released) {
+      await f.service.continueSession(next);
+      await published;
+    }
     gate.resolve();
     await first;
     if (!released) await f.service.continueSession(next);
   }
 
-  it.each(['edit evidence', 'Git fallback'])('keeps turn-one results before release (%s)', async (kind) => {
-    const root = createGitLocalProject(), file = path.join(root, 'one.txt');
-    const entered = createDeferred<void>(), finish = createDeferred<void>();
-    let n = 0, captured: unknown;
-    const f = inboxExecutionFixture(async () => {
-      fs.writeFileSync(file, ++n === 1 ? 'TURN_ONE\n' : 'TURN_TWO\n');
-      if (n === 2) fs.writeFileSync(path.join(root, 'two.txt'), 'second turn\n');
-      return { stopReason: 'end_turn' };
-    });
-    f.session.getWorkdir = () => root;
-    f.session.exec = async (_cmd, args) => execFileSync('/usr/bin/git', args, { cwd: root, encoding: 'utf8' });
-    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
-      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
-    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
-    f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
-      if (turn === 'assistant:human-input') {
-        entered.resolve(); await finish.promise;
-        if (kind === 'edit evidence') captured = await pendingEventFromAgentEditEvidence({ workspaceRoot: root,
-          edit: { path: file, changeType: 'update', contentOldText: 'BASE\n' }, latestText: { status: 'untracked' } });
+  it.each(['edit evidence', 'Git fallback'])(
+    'keeps turn-one results before release (%s)',
+    async (kind) => {
+      const root = createGitLocalProject(),
+        file = path.join(root, 'one.txt');
+      const entered = createDeferred<void>(),
+        finish = createDeferred<void>();
+      let n = 0,
+        captured: unknown;
+      const f = inboxExecutionFixture(async () => {
+        fs.writeFileSync(file, ++n === 1 ? 'TURN_ONE\n' : 'TURN_TWO\n');
+        if (n === 2) fs.writeFileSync(path.join(root, 'two.txt'), 'second turn\n');
+        return { stopReason: 'end_turn' };
+      });
+      f.session.getWorkdir = () => root;
+      f.session.exec = async (_cmd, args) =>
+        execFileSync('/usr/bin/git', args, { cwd: root, encoding: 'utf8' });
+      const post = new TurnPostProcessingService({
+        logger: f.deps.logger,
+        workspaceDocument: f.deps.workspaceDocument,
+        workspaceId: f.deps.workspaceId,
+        preferredBaseBranch: 'main',
+        prAssociation: null,
+      });
+      f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+      f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
+        if (turn === 'assistant:human-input') {
+          entered.resolve();
+          await finish.promise;
+          if (kind === 'edit evidence')
+            captured = await pendingEventFromAgentEditEvidence({
+              workspaceRoot: root,
+              edit: { path: file, changeType: 'update', contentOldText: 'BASE\n' },
+              latestText: { status: 'untracked' },
+            });
+        }
+        return kind === 'edit evidence';
+      };
+      const message = {
+        ...f.message,
+        project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },
+      };
+      try {
+        await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(message.sessionId), {
+          project: message.project,
+        });
+        await f.accept();
+        const first = f.service.continueSession(message);
+        await entered.promise;
+        await finishFirstThenRunNext(f, first, finish, { ...message, userTurnId: 'next' });
+        await f.service.drainInboxExecutions();
+        expect(n).toBe(2);
+        if (kind === 'edit evidence') {
+          expect(captured).toMatchObject({ newText: 'TURN_ONE\n' });
+          expect(JSON.stringify(captured)).not.toContain('TURN_TWO');
+        } else {
+          const history = await (await createSessionBackend(f.doc)).readHistory();
+          expect(
+            history
+              .find((turn) => turn.id === 'assistant:human-input')
+              ?.fileDiff?.map((diff) => diff.filePath)
+          ).toEqual(['one.txt']);
+        }
+      } finally {
+        finish.resolve();
+        await f.close();
+        fs.rmSync(root, { recursive: true, force: true });
       }
-      return kind === 'edit evidence';
-    };
-    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
-    try {
-      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(message.sessionId), { project: message.project });
-      await f.accept(); const first = f.service.continueSession(message); await entered.promise;
-      await finishFirstThenRunNext(f, first, finish, { ...message, userTurnId: 'next' });
-      await f.service.drainInboxExecutions();
-      expect(n).toBe(2);
-      if (kind === 'edit evidence') {
-        expect(captured).toMatchObject({ newText: 'TURN_ONE\n' });
-        expect(JSON.stringify(captured)).not.toContain('TURN_TWO');
-      } else {
-        const history = await (await createSessionBackend(f.doc)).readHistory();
-        expect(history.find((turn) => turn.id === 'assistant:human-input')?.fileDiff?.map((diff) => diff.filePath)).toEqual(['one.txt']);
-      }
-    } finally { finish.resolve(); await f.close(); fs.rmSync(root, { recursive: true, force: true }); }
-  });
+    }
+  );
 
-  it.each([false, true])('keeps newer dirty/unpushed flags after old stats (deadline=%s)', async (expires) => {
-    if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const started = createDeferred<void>(), finishOld = createDeferred<void>(), newerWritten = createDeferred<void>();
-    let dirty = false, firstMerge = true, n = 0;
-    const f = inboxExecutionFixture(async () => { if (++n === 2) dirty = true; return { stopReason: 'end_turn' }; });
-    const repo = f.deps.workspaceDocument.repo;
-    const upsert = repo.upsertDocMeta.bind(repo);
-    repo.upsertDocMeta = async (id, patch) => {
-      await upsert(id, patch);
-      if (patch.workspaceDirty === true) newerWritten.resolve();
-    };
-    const post = new TurnPostProcessingService({ logger: f.deps.logger, workspaceDocument: f.deps.workspaceDocument,
-      workspaceId: f.deps.workspaceId, preferredBaseBranch: 'main', prAssociation: null });
-    f.session.exec = async (_cmd, args) => {
-      const key = args.join(' ');
-      if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-      if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify')) return 'a'.repeat(40)+'\n';
-      if (args[0] === 'merge-base') {
-        if (firstMerge) { firstMerge = false; started.resolve(); await finishOld.promise; }
-        return 'a'.repeat(40)+'\n';
+  it.each([false, true])(
+    'keeps newer dirty/unpushed flags after old stats (deadline=%s)',
+    async (expires) => {
+      if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const started = createDeferred<void>(),
+        finishOld = createDeferred<void>(),
+        newerWritten = createDeferred<void>();
+      let dirty = false,
+        firstMerge = true,
+        n = 0;
+      const f = inboxExecutionFixture(async () => {
+        if (++n === 2) dirty = true;
+        return { stopReason: 'end_turn' };
+      });
+      const repo = f.deps.workspaceDocument.repo;
+      const upsert = repo.upsertDocMeta.bind(repo);
+      repo.upsertDocMeta = async (id, patch) => {
+        await upsert(id, patch);
+        if (patch.workspaceDirty === true) newerWritten.resolve();
+      };
+      const post = new TurnPostProcessingService({
+        logger: f.deps.logger,
+        workspaceDocument: f.deps.workspaceDocument,
+        workspaceId: f.deps.workspaceId,
+        preferredBaseBranch: 'main',
+        prAssociation: null,
+      });
+      f.session.exec = async (_cmd, args) => {
+        const key = args.join(' ');
+        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
+        if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify'))
+          return 'a'.repeat(40) + '\n';
+        if (args[0] === 'merge-base') {
+          if (firstMerge) {
+            firstMerge = false;
+            started.resolve();
+            await finishOld.promise;
+          }
+          return 'a'.repeat(40) + '\n';
+        }
+        if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
+        if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
+        return '';
+      };
+      f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+      const message = {
+        ...f.message,
+        project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },
+      };
+      try {
+        await upsert(getSessionRoomId(message.sessionId), {
+          project: message.project,
+          workspaceDirty: false,
+          workspaceUnpushed: false,
+        });
+        await f.accept();
+        const first = f.service.continueSession(message);
+        await started.promise;
+        if (expires) {
+          await vi.advanceTimersByTimeAsync(19_999);
+          expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeDefined();
+          await vi.advanceTimersByTimeAsync(1);
+          expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeUndefined();
+        }
+        const next = { ...message, userTurnId: 'newer' };
+        await finishFirstThenRunNext(f, first, finishOld, next, newerWritten.promise);
+        await newerWritten.promise;
+        expect(n).toBe(2);
+        expect(await f.doc.getMetaState()).toMatchObject({
+          workspaceDirty: true,
+          workspaceUnpushed: true,
+        });
+        finishOld.resolve();
+        await f.service.drainInboxExecutions();
+        expect(await f.doc.getMetaState()).toMatchObject({
+          workspaceDirty: true,
+          workspaceUnpushed: true,
+        });
+      } finally {
+        finishOld.resolve();
+        await f.close();
+        if (expires) vi.useRealTimers();
       }
-      if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
-      if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
-      return '';
-    };
-    f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
-    const message = { ...f.message, project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' } };
-    try {
-      await upsert(getSessionRoomId(message.sessionId), { project: message.project, workspaceDirty: false, workspaceUnpushed: false });
-      await f.accept(); const first = f.service.continueSession(message); await started.promise;
-      if (expires) {
-        await vi.advanceTimersByTimeAsync(19_999);
-        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeDefined();
-        await vi.advanceTimersByTimeAsync(1);
-        expect(f.store.inbox.activeExecution('workspace-1', message.sessionId)).toBeUndefined();
-      }
-      const next = { ...message, userTurnId: 'newer' };
-      await finishFirstThenRunNext(f, first, finishOld, next, newerWritten.promise); await newerWritten.promise;
-      expect(n).toBe(2);
-      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
-      finishOld.resolve(); await f.service.drainInboxExecutions();
-      expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty:true,workspaceUnpushed:true });
-    } finally { finishOld.resolve(); await f.close(); if (expires) vi.useRealTimers(); }
-  });
+    }
+  );
 
   it.each([
     { stage: 'diff', action: 'shutdown' },
     { stage: 'usage', action: 'shutdown' },
     { stage: 'diff', action: 'Stop' },
     { stage: 'usage', action: 'Stop' },
-  ] as const)('releases interrupted $stage persistence after $action within the original deadline', async ({ stage, action }) => {
+  ] as const)(
+    'releases interrupted $stage persistence after $action within the original deadline',
+    async ({ stage, action }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const shutdown = action === 'shutdown';
+      const entered = createDeferred<void>(),
+        raw = createDeferred<void>();
+      const signals: Array<AbortSignal | undefined> = [];
+      const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+      if (stage === 'diff')
+        f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, _turn, signal) => {
+          signals.push(signal);
+          entered.resolve();
+          await raw.promise;
+          return true;
+        };
+      else
+        f.deps.turnFinalization.flushSessionUsage = async () => {
+          entered.resolve();
+          await raw.promise;
+        };
+      let run: Promise<unknown> | undefined;
+      try {
+        await f.accept();
+        run = f.service.continueSession(f.message);
+        await entered.promise;
+        if (shutdown) f.service.quiesceInboxExecutions();
+        else {
+          await vi.advanceTimersByTimeAsync(19_000);
+          await f.service.cancelSession({
+            ...f.message,
+            type: 'session/cancel',
+            turnId: 'assistant:human-input',
+          });
+        }
+        const released = f.service.waitForInboxReleases();
+        await vi.advanceTimersByTimeAsync(shutdown ? 7_000 : 1_000);
+        expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+          true
+        );
+        const db = new Database(f.storePath, { readonly: true });
+        try {
+          expect(
+            db
+              .prepare('SELECT outcome FROM inbox_releases WHERE session_id=?')
+              .all(f.message.sessionId)
+          ).toEqual([{ outcome: 'user_stop' }]);
+        } finally {
+          db.close();
+        }
+        if (stage === 'diff') expect(signals.every((signal) => signal?.aborted)).toBe(true);
+        await released;
+      } finally {
+        raw.resolve();
+        await run;
+        await f.close();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each(['normal', 'shutdown', 'observation'])(
+    'bounds pending generated-image uploads (%s)',
+    async (mode) => {
+      const shutdown = mode === 'shutdown';
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const entered = createDeferred<void>(),
+        raw = createDeferred<void>(),
+        nextStarted = createDeferred<void>();
+      const uploads = new Map<string, Promise<void>>();
+      let prompts = 0;
+      const f = inboxExecutionFixture(async () => {
+        if (++prompts === 1) uploads.set('image', raw.promise);
+        else nextStarted.resolve();
+        return { stopReason: 'end_turn' };
+      });
+      const handler = Object.create(MessageHandler.prototype) as any;
+      handler.store = {
+        has: () => true,
+        get: () => ({
+          permissionWaitMs: 0,
+          acpUpdateBuffer: [],
+          imageGenerationUploads: uploads,
+          turn: {
+            phase: 'active',
+            turnId: 'assistant:human-input',
+            turnEpoch: 1,
+            hasVisibleOutput: false,
+          },
+        }),
+        getTurnId: () => undefined,
+        getCurrentACPUpdateTarget: () => undefined,
+      };
+      Object.assign(handler, {
+        executionService: f.service,
+        workspaceDocument: f.deps.workspaceDocument,
+        logger: f.deps.logger,
+        getSessionBackend: async (doc: typeof f.doc) => createSessionBackend(doc),
+        flushSessionContextWindowUsage: async () => {},
+        flushACPUpdatesNow: async () => {},
+        flushThreadGoalHistoryPersists: async () => {},
+      });
+      const drain = handler.flushCodexGeneratedImageUploads.bind(handler);
+      handler.flushCodexGeneratedImageUploads = async (...args: unknown[]) => {
+        entered.resolve();
+        await drain(...args);
+      };
+      f.deps.turnFinalization.finalizeACPState = (id, turn) => handler.finalizeACPState(id, turn);
+      if (mode === 'observation')
+        f.deps.observePromptContentForTurn = (id, turn) =>
+          handler.observePromptContentForTurn(id, turn);
+      let run: Promise<unknown> | undefined,
+        next: Promise<unknown> | undefined,
+        drainWork: Promise<void> | undefined;
+      try {
+        await f.accept();
+        run = f.service.continueSession(f.message);
+        await entered.promise;
+        if (shutdown) {
+          f.service.quiesceInboxExecutions();
+          const released = f.service.waitForInboxReleases();
+          await vi.advanceTimersByTimeAsync(7_000);
+          await released;
+        } else {
+          await vi.advanceTimersByTimeAsync(19_999);
+          expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined();
+          await vi.advanceTimersByTimeAsync(1);
+        }
+        expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+          true
+        );
+        const db = new Database(f.storePath, { readonly: true });
+        try {
+          expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toHaveLength(1);
+        } finally {
+          db.close();
+        }
+        let drained = false;
+        drainWork = f.service.drainInboxExecutions().then(() => {
+          drained = true;
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(drained).toBe(false);
+        if (!shutdown) {
+          await run;
+          await f.service.acceptInboxHumanInput({
+            sessionId: f.message.sessionId,
+            inputId: 'next',
+            userId: 'user-1',
+            config: f.message.acpSessionConfig,
+          });
+          next = f.service.continueSession({ ...f.message, userTurnId: 'next' });
+          await nextStarted.promise;
+        }
+      } finally {
+        uploads.clear();
+        raw.resolve();
+        await run;
+        await next;
+        await drainWork;
+        await f.close();
+        vi.useRealTimers();
+      }
+    }
+  );
+  it('forces a failed receipt only during shutdown when the finalization chain never settles', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const shutdown = action === 'shutdown';
-    const entered = createDeferred<void>(), raw = createDeferred<void>();
-    const signals: Array<AbortSignal | undefined> = [];
+    const entered = createDeferred<void>(),
+      raw = createDeferred<void>();
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
-    if (stage === 'diff') f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, _turn, signal) => {
-      signals.push(signal); entered.resolve(); await raw.promise; return true;
+    f.deps.turnFinalization.finalizeACPState = async () => {
+      entered.resolve();
+      await raw.promise;
     };
-    else f.deps.turnFinalization.flushSessionUsage = async () => { entered.resolve(); await raw.promise; };
     let run: Promise<unknown> | undefined;
     try {
+      f.add('shutdown-result');
       await f.accept();
       run = f.service.continueSession(f.message);
       await entered.promise;
-      if (shutdown) f.service.quiesceInboxExecutions();
-      else {
-        await vi.advanceTimersByTimeAsync(19_000);
-        await f.service.cancelSession({ ...f.message, type: 'session/cancel', turnId: 'assistant:human-input' });
-      }
-      const released = f.service.waitForInboxReleases();
-      await vi.advanceTimersByTimeAsync(shutdown ? 7_000 : 1_000);
-      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
-      const db = new Database(f.storePath, { readonly: true });
-      try {
-        expect(db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)).toEqual([{ outcome: 'user_stop' }]);
-      } finally { db.close(); }
-      if (stage === 'diff') expect(signals.every((signal) => signal?.aborted)).toBe(true);
-      await released;
-    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
-  });
-
-  it.each(['normal', 'shutdown', 'observation'])('bounds pending generated-image uploads (%s)', async (mode) => {
-    const shutdown = mode === 'shutdown';
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const entered = createDeferred<void>(), raw = createDeferred<void>(), nextStarted = createDeferred<void>();
-    const uploads = new Map<string, Promise<void>>(); let prompts = 0;
-    const f = inboxExecutionFixture(async () => { if (++prompts === 1) uploads.set('image', raw.promise); else nextStarted.resolve(); return { stopReason: 'end_turn' }; });
-    const handler = Object.create(MessageHandler.prototype) as any;
-    handler.store = { has: () => true, get: () => ({ permissionWaitMs: 0, acpUpdateBuffer: [], imageGenerationUploads: uploads, turn: { phase: 'active', turnId: 'assistant:human-input', turnEpoch: 1, hasVisibleOutput: false } }), getTurnId: () => undefined, getCurrentACPUpdateTarget: () => undefined };
-    Object.assign(handler, { executionService: f.service, workspaceDocument: f.deps.workspaceDocument, logger: f.deps.logger,
-      getSessionBackend: async (doc: typeof f.doc) => createSessionBackend(doc), flushSessionContextWindowUsage: async () => {}, flushACPUpdatesNow: async () => {}, flushThreadGoalHistoryPersists: async () => {} });
-    const drain = handler.flushCodexGeneratedImageUploads.bind(handler);
-    handler.flushCodexGeneratedImageUploads = async (...args: unknown[]) => { entered.resolve(); await drain(...args); };
-    f.deps.turnFinalization.finalizeACPState = (id, turn) => handler.finalizeACPState(id, turn);
-    if (mode === 'observation') f.deps.observePromptContentForTurn = (id, turn) => handler.observePromptContentForTurn(id, turn);
-    let run: Promise<unknown> | undefined, next: Promise<unknown> | undefined, drainWork: Promise<void> | undefined;
-    try {
-      await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
-      if (shutdown) {
-        f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
-        await vi.advanceTimersByTimeAsync(7_000); await released;
-      } else { await vi.advanceTimersByTimeAsync(19_999); expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined(); await vi.advanceTimersByTimeAsync(1); }
-      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
-      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toHaveLength(1); } finally { db.close(); }
-      let drained = false; drainWork = f.service.drainInboxExecutions().then(() => { drained = true; });
-      await vi.advanceTimersByTimeAsync(0); expect(drained).toBe(false);
-      if (!shutdown) {
-        await run;
-        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'next', userId: 'user-1', config: f.message.acpSessionConfig });
-        next = f.service.continueSession({ ...f.message, userTurnId: 'next' }); await nextStarted.promise;
-      }
-    } finally { uploads.clear(); raw.resolve(); await run; await next; await drainWork; await f.close(); vi.useRealTimers(); }
-  });
-  it('forces a failed receipt only during shutdown when the finalization chain never settles', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const entered = createDeferred<void>(), raw = createDeferred<void>();
-    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
-    f.deps.turnFinalization.finalizeACPState = async () => { entered.resolve(); await raw.promise; };
-    let run: Promise<unknown> | undefined;
-    try {
-      f.add('shutdown-result'); await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
-      const ordinary = f.service.waitForInboxReleases(); await vi.advanceTimersByTimeAsync(7_000); await ordinary;
+      const ordinary = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(7_000);
+      await ordinary;
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined();
-      f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
-      await vi.advanceTimersByTimeAsync(7_000); await released;
+      f.service.quiesceInboxExecutions();
+      const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(7_000);
+      await released;
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
       expect((f.service as any).liveInboxExecutionIds.size).toBe(0);
-      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toEqual([{ outcome: 'failed' }]); expect(db.prepare('SELECT state FROM inbox_batches').all()).toEqual([{ state: 'unknown' }]); } finally { db.close(); }
-    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
+      const db = new Database(f.storePath, { readonly: true });
+      try {
+        expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toEqual([
+          { outcome: 'failed' },
+        ]);
+        expect(db.prepare('SELECT state FROM inbox_batches').all()).toEqual([{ state: 'unknown' }]);
+      } finally {
+        db.close();
+      }
+    } finally {
+      raw.resolve();
+      await run;
+      await f.close();
+      vi.useRealTimers();
+    }
   });
   it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const started = [createDeferred<void>(), createDeferred<void>()];
     const raw = [createDeferred<void>(), createDeferred<void>()];
     const slow = createDeferred<void>();
-    const fixtures = raw.map((work, i) => inboxExecutionFixture(async () => {
-      started[i]?.resolve(); await work.promise; return { stopReason: 'end_turn' };
-    }, undefined, undefined, `shutdown-${i}` as SessionId));
-    const [f, other] = fixtures as [typeof fixtures[number], typeof fixtures[number]];
-    f.deps.workspaceDocument.getOrCreateSessionDoc = async (id) => id === f.message.sessionId ? f.doc : other.doc;
-    f.deps.sessionManager.getSession = (id) => (id === f.message.sessionId ? f.session : other.session) as never;
+    const fixtures = raw.map((work, i) =>
+      inboxExecutionFixture(
+        async () => {
+          started[i]?.resolve();
+          await work.promise;
+          return { stopReason: 'end_turn' };
+        },
+        undefined,
+        undefined,
+        `shutdown-${i}` as SessionId
+      )
+    );
+    const [f, other] = fixtures as [(typeof fixtures)[number], (typeof fixtures)[number]];
+    f.deps.workspaceDocument.getOrCreateSessionDoc = async (id) =>
+      id === f.message.sessionId ? f.doc : other.doc;
+    f.deps.sessionManager.getSession = (id) =>
+      (id === f.message.sessionId ? f.session : other.session) as never;
     let statisticsStarted = false;
-    f.deps.turnFinalization.syncWorkspaceGitState = async () => { statisticsStarted = true; await slow.promise; };
-    fixtures.forEach((fixture, i) => { fixture.session.terminate = async () => { raw[i]?.resolve(); }; });
+    f.deps.turnFinalization.syncWorkspaceGitState = async () => {
+      statisticsStarted = true;
+      await slow.promise;
+    };
+    fixtures.forEach((fixture, i) => {
+      fixture.session.terminate = async () => {
+        raw[i]?.resolve();
+      };
+    });
     try {
-      for (const fixture of fixtures) await f.service.acceptInboxHumanInput({ sessionId: fixture.message.sessionId,
-        inputId: 'human-input', userId: 'user-1', config: fixture.message.acpSessionConfig });
+      for (const fixture of fixtures)
+        await f.service.acceptInboxHumanInput({
+          sessionId: fixture.message.sessionId,
+          inputId: 'human-input',
+          userId: 'user-1',
+          config: fixture.message.acpSessionConfig,
+        });
       const turns = fixtures.map((fixture) => f.service.continueSession(fixture.message));
       await Promise.all(started.map((signal) => signal.promise));
       f.service.quiesceInboxExecutions();
@@ -13411,10 +14547,19 @@ describe('Operation Inbox execution boundary', () => {
       await Promise.all(turns);
       expect(statisticsStarted).toBe(false);
       for (const fixture of fixtures) {
-        expect(f.store.inbox.inputEnded('workspace-1', fixture.message.sessionId, 'human-input')).toBe(true);
-        expect(f.store.inbox.activeExecution('workspace-1', fixture.message.sessionId)).toBeUndefined();
+        expect(
+          f.store.inbox.inputEnded('workspace-1', fixture.message.sessionId, 'human-input')
+        ).toBe(true);
+        expect(
+          f.store.inbox.activeExecution('workspace-1', fixture.message.sessionId)
+        ).toBeUndefined();
       }
-    } finally { raw.forEach((work) => work.resolve()); slow.resolve(); await Promise.all(fixtures.map((fixture) => fixture.close())); vi.useRealTimers(); }
+    } finally {
+      raw.forEach((work) => work.resolve());
+      slow.resolve();
+      await Promise.all(fixtures.map((fixture) => fixture.close()));
+      vi.useRealTimers();
+    }
   });
 
   it('bounds a slow yielded finalization, retains its raw work and releases the next input', async () => {
@@ -13446,9 +14591,13 @@ describe('Operation Inbox execution boundary', () => {
       });
       expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
 
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        true
+      );
       let drained = false;
-      const drain = f.service.drainInboxExecutions().then(() => { drained = true; });
+      const drain = f.service.drainInboxExecutions().then(() => {
+        drained = true;
+      });
       await vi.advanceTimersByTimeAsync(0);
       expect(drained).toBe(false);
       finalization.resolve();
@@ -14074,6 +15223,33 @@ describe('Provider quota refresh', () => {
     }
   });
 
+  it('forwards pushed capacity snapshots with the originating binding to Automation', async () => {
+    const harness = quotaHarness();
+    const observed = createDeferred<{
+      bindingId: string;
+      fingerprint: string;
+      snapshot: typeof snapshot;
+      source: string;
+    }>();
+    harness.service.setAutomationObservations({
+      stage: () => {},
+      turn: async () => {},
+      capacity: async (binding, value, source) =>
+        observed.resolve({ ...binding, snapshot: value, source }),
+    });
+    harness.service.noteProviderRateLimitsUpdate(
+      capabilityConfigId,
+      { bindingId: capabilityConfigId, fingerprint: 'origin' },
+      snapshot
+    );
+    expect(await observed.promise).toEqual({
+      bindingId: capabilityConfigId,
+      fingerprint: 'origin',
+      snapshot,
+      source: 'push',
+    });
+  });
+
   it.each([
     ['codex', 'OPENAI_API_KEY'],
     ['claude', 'ANTHROPIC_BASE_URL'],
@@ -14142,7 +15318,7 @@ describe('Provider quota refresh', () => {
         const request = harness.service.refreshProviderRateLimits(capabilityConfigId);
         if (mode !== 'unsupported') await ready.promise;
         if (mode === 'push') {
-          harness.service.noteProviderRateLimitsUpdate(capabilityConfigId);
+          harness.service.noteProviderRateLimitsUpdate(capabilityConfigId, undefined, snapshot);
           harness.rows.set(key, 'newer-push');
         }
         if (mode === 'deleted') harness.remove();

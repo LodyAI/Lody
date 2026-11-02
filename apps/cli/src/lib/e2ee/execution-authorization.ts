@@ -5,7 +5,14 @@ import type { CloudE2eePort } from '@lody/platform';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
-  | { readonly _tag: 'Authorized'; readonly isCurrent?: () => boolean }
+  | {
+      readonly _tag: 'Authorized';
+      readonly isCurrent?: () => boolean;
+      /** Whose authority admitted the signer: the machine owner's own membership,
+       * or another member through the owner's sharing policy. Only `owner` may
+       * lend the turn's identity to derived work. */
+      readonly principal?: 'owner' | 'member';
+    }
   | {
       readonly _tag: 'Denied';
       readonly reason:
@@ -163,12 +170,14 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           return denied('not-authorized');
         }
         const sender = state.devices.get(requesterDevice);
-        if (
-          !sender ||
-          !Buffer.from(sender.membershipId.toBytes()).equals(
+        const principal =
+          sender &&
+          Buffer.from(sender.membershipId.toBytes()).equals(
             Buffer.from(local.membershipId.toBytes())
           )
-        ) {
+            ? ('owner' as const)
+            : ('member' as const);
+        if (principal === 'member') {
           grants.delete(requesterDevice);
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
@@ -177,7 +186,26 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             .pipe(Effect.catch(() => Effect.succeed({ allowed: false, isCurrent: undefined })));
           if (!shared.allowed) return denied('e2ee_machine_not_shared');
           policyCurrent = shared.isCurrent;
+          // The policy check yields, and verified records (a removal, revocation or
+          // role change) may land meanwhile. Pin the generation first, then recheck
+          // the requester and this machine against the ledger it names: a later
+          // ingest makes isCurrent() false, an earlier one is seen here.
           generation = options.runtime.executionGeneration();
+          const after = yield* options.runtime.executionLedger();
+          const latest = after.inspectState();
+          const machine = latest.devices.get(self);
+          const signer = latest.devices.get(requesterDevice);
+          if (
+            !machine ||
+            !latest.members.has(Buffer.from(machine.membershipId.toBytes()).toString('hex')) ||
+            !signer ||
+            Buffer.from(signer.membershipId.toBytes()).equals(
+              Buffer.from(machine.membershipId.toBytes())
+            ) ||
+            !(yield* Effect.fromResult(contentPermissions(after, requester.success)))
+              .mayWriteDocument
+          )
+            return denied('not-authorized');
         }
         if (!fresh(start, yield* stamp)) return denied('unavailable');
         // Revocation may arrive while a native check yields. Nothing may publish
@@ -189,6 +217,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (access !== 'execute') return { _tag: 'Authorized' };
         return {
           _tag: 'Authorized',
+          principal,
           isCurrent: () =>
             !closed &&
             options.runtime.executionGeneration() === generation &&

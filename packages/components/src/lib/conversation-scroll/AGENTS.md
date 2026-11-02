@@ -13,7 +13,13 @@ Design, invariants I1–I8 and the coverage lemma:
   `ConversationListHandle`.
 - Every written position is derived from an anchor (`read`, `follow`, `sent`, glide
   frames interpolate `screenY`). Layout compensation in `read` is relative
-  (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.
+  (`scrollBy`), navigation absolute.
+  On iOS hosts with native `scrollend`, positive read compensation during touch
+  scrolling shifts the content origin upward instead of writing the offset.
+  Absorb that shift at scroll end, physical top, cancellation or navigation;
+  shrinkage still writes immediately. Snapshot `contentTop` includes the shift.
+  Handle offsets, sizes and `onScroll` use unshifted coordinates; `contentOffset`
+  supplies their item origin. Native input checks use physical offsets.
   Relative writes use the raw host offset as their baseline, while anchors and
   movement use bounded offsets; elasticity alone must not cause a write.
 - The WebKit DOM adapter commits `overflow-y: hidden` around relative compensation

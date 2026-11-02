@@ -14,6 +14,7 @@ import {
   wipeRecoveryPackage,
   generateRecoveryPackage,
   vaultCiphertextDigest,
+  deriveRecoveryAccessCredential,
 } from '@lody/e2ee-core/protocol';
 import {
   createRecoveryVault,
@@ -258,6 +259,74 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('seals formatVersion 1 packages and rejects other versions or non-RFC 8410 private keys before storage', async () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const file = join(dir, 'vault.sqlite'),
+              storage = yield* makeLabRecoveryVaultStore({ path: file, mode: 'create' }),
+              f = yield* fixture();
+            const { vault } = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              ...storage,
+            });
+            const bundle = yield* generateRecoveryPackage({
+              genesis: hex(f.initial.genesis.toBytes()),
+              membershipId: hex(f.membership.toBytes()),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.initial.record,
+                head: hex(f.view().head.toBytes()),
+                length: 1,
+              },
+            });
+            const entries = () =>
+              (() => {
+                const db = new Database(file, { readonly: true });
+                try {
+                  return db.prepare('SELECT count(*) n FROM vault_entries').get();
+                } finally {
+                  db.close();
+                }
+              })();
+            try {
+              expect(bundle.formatVersion).toBe(1);
+              const before = entries();
+              const swapped = {
+                ...bundle,
+                signingPrivate: bundle.encryptionPrivate,
+                encryptionPrivate: bundle.signingPrivate,
+              };
+              const appended = {
+                ...bundle,
+                signingPrivate: new Uint8Array([...bundle.signingPrivate, 0]),
+              };
+              const { formatVersion: _omitted, ...unversioned } = bundle;
+              for (const invalid of [
+                { ...bundle, formatVersion: 2 },
+                unversioned,
+                swapped,
+                appended,
+              ]) {
+                const rejected = yield* Effect.result(vault.upload(invalid as typeof bundle));
+                expect(Result.isFailure(rejected)).toBe(true);
+                if (Result.isFailure(rejected))
+                  expect(rejected.failure).toMatchObject({ code: 'invalid-input' });
+              }
+              expect(entries()).toEqual(before);
+              const ref = yield* vault.upload(bundle);
+              const read = yield* vault.readEntry(ref);
+              expect(read.formatVersion).toBe(1);
+              wipeRecoveryPackage(read);
+            } finally {
+              wipeRecoveryPackage(bundle);
+            }
+          })
+        )
+      );
+    }));
   it('resumes four setup boundaries without a second R, uses real P09/HPKE/protected storage, restores independent C, and rejects revoked R', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
@@ -314,8 +383,16 @@ describe('encrypted recovery vault and genuine workflow', () => {
             ).pipe(Effect.map((context) => Context.get(context, SubmissionJournal)));
             let stopAt: 'candidate' | 'indexed' | 'registered' | 'envelope' | 'commit' | null =
               'candidate';
-            const submit = (record: Uint8Array) =>
+            const registrations: { record: string; hash: string | null }[] = [];
+            const submit = (
+              record: Uint8Array,
+              registration: { readonly recoveryCredentialHash: Uint8Array } | null = null
+            ) =>
               Effect.gen(function* () {
+                registrations.push({
+                  record: hex(record),
+                  hash: registration ? hex(registration.recoveryCredentialHash) : null,
+                });
                 const result = yield* submitRecord(f.initial.genesis, record).pipe(
                   Effect.provideService(SubmissionJournal, journal),
                   Effect.provideService(LedgerLog, f.remote)
@@ -422,11 +499,40 @@ describe('encrypted recovery vault and genuine workflow', () => {
             expect((yield* workflow.test()).recoverable).toBe(true);
             const beforeReplacement = yield* created.vault.readIndex();
             const oldRef = beforeReplacement.value.entries.find((ref) => !ref.retired)!;
+            // R's admission (including its post-crash reconciliation) carries the hash
+            // of the credential derived from R's own package; nothing else does.
+            const hashOf = (ref: typeof oldRef) =>
+              Effect.acquireUseRelease(
+                created.vault.readEntry(ref),
+                (bundle) =>
+                  Effect.sync(() => {
+                    const derived = deriveRecoveryAccessCredential(bundle);
+                    derived.credential.fill(0);
+                    return hex(derived.credentialHash);
+                  }),
+                (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
+              );
+            const expectedHash = yield* hashOf(oldRef);
+            const registered = registrations.filter((row) => row.hash !== null);
+            expect(registered.length).toBeGreaterThanOrEqual(2);
+            expect(new Set(registered.map((row) => row.hash))).toEqual(new Set([expectedHash]));
+            expect(new Set(registered.map((row) => row.record)).size).toBe(1);
+            expect(registrations.every((row) => row.hash !== null)).toBe(true);
+            const beforeReplace = registrations.length;
             expect(
               (yield* workflow.replace({ requestId: 'routine-one', compromised: false }))
                 .recoverable
             ).toBe(true);
             const afterReplacement = yield* created.vault.readIndex();
+            const newHash = yield* hashOf(
+              afterReplacement.value.entries.find((ref) => !ref.retired)!
+            );
+            const replacing = registrations.slice(beforeReplace);
+            // The new R's admission registers its own credential; the old R's revocation registers none.
+            expect(replacing.some((row) => row.hash === newHash)).toBe(true);
+            expect(replacing.some((row) => row.hash === null)).toBe(true);
+            expect(replacing.every((row) => row.hash === null || row.hash === newHash)).toBe(true);
+            expect(newHash).not.toBe(expectedHash);
             expect(
               afterReplacement.value.entries.find((ref) => ref.entryId === oldRef.entryId)?.retired
             ).toBe(true);
@@ -444,7 +550,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
             wipeRecoveryPackage(original);
             const result = yield* workflow.restoreFromRecovery({
               personal: { ...f.personal, encryptionPublicKey: f.personal.enc },
-              submitOriginalAsRecovery: submit,
+              submitOriginalAsRecovery: (record) => submit(record, null),
             });
             expect(result.outcome).toBe('Committed');
             expect(f.view().inspectState().devices.size).toBe(3);
@@ -470,7 +576,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
             const refused = yield* Effect.result(
               workflow.restoreFromRecovery({
                 personal: { ...f.personal, encryptionPublicKey: f.personal.enc },
-                submitOriginalAsRecovery: submit,
+                submitOriginalAsRecovery: (record) => submit(record, null),
               })
             );
             expect(Result.isFailure(refused)).toBe(true);
