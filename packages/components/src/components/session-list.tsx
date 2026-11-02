@@ -89,7 +89,6 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
-  SessionRowSubtitle,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -861,13 +860,16 @@ const SessionGroupRow = memo(function SessionGroupRow({
     t,
     onToggleOpenedBySessions ? () => onToggleOpenedBySessions(session.sessionId) : undefined
   );
-  // Desktop repo rows that are not nested carry a second line (branch and time),
+  // Desktop repo rows that are not nested carry a second line (branch/time and PR state),
   // so the first child's trunk has to climb past it to reach its opener's
-  // chevron. Chats, nested children, mobile rows and rows whose branch detail
+  // chevron. Chats, nested children, mobile rows and rows whose branch/PR detail
   // line is turned off stay one line.
   const showBranchNames = useAtomValue(sidebarShowBranchNamesAtom);
   const showMetaLine =
-    showBranchNames && !isMobile && !isChatSession && baseOpenedByTreeSlot?.kind !== 'child';
+    (showBranchNames || hasPr) &&
+    !isMobile &&
+    !isChatSession &&
+    baseOpenedByTreeSlot?.kind !== 'child';
   const openedByTreeSlot =
     baseOpenedByTreeSlot?.kind === 'child' && !isMobile && !isChatSession
       ? {
@@ -878,13 +880,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       : baseOpenedByTreeSlot;
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
-  const isNestedChild = node.depth === 1;
-  const isOpener = openedByOpener !== null;
-  const hasLeadingTreeAffordance = isNestedChild || isOpener;
-  const showLeadingPr = hasPr && !hasLeadingTreeAffordance;
-  const showTrailingPr = hasPr && hasLeadingTreeAffordance;
-  const showRowSubtitle = hasPr && !isMobile && baseOpenedByTreeSlot?.kind !== 'child';
-  const hasSecondLine = (showRowSubtitle || showMetaLine) && !isMobile && !isChatSession;
+  const hasSecondLine = showMetaLine;
   const hasStandardMenuActions = Boolean(
     onRenameSession ||
     onTogglePinSession ||
@@ -1142,11 +1138,6 @@ const SessionGroupRow = memo(function SessionGroupRow({
             showMenuButton={hasMenuActions}
             menuLabel={moreActionsLabel}
             openedByTree={openedByTreeSlot}
-            prIcon={
-              showLeadingPr ? (
-                <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} />
-              ) : undefined
-            }
           />
         </div>
         <div className={hasSecondLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
@@ -1176,20 +1167,16 @@ const SessionGroupRow = memo(function SessionGroupRow({
             ) : null}
             {renderTitle()}
           </div>
-          {showRowSubtitle ? (
-            <SessionRowSubtitle
-              prNumber={prNumber}
-              prStatus={prStatus}
-              branchName={session.branchName}
-            />
-          ) : showMetaLine ? (
+          {showMetaLine ? (
             <SidebarSessionMetaLine
-              branchName={session.branchName}
+              branchName={showBranchNames ? session.branchName : null}
               latestMessageAt={session.latestMessageAt}
+              prNumber={prNumber}
+              prStatus={hasPr ? prStatus : null}
             />
           ) : null}
         </div>
-        {/* Keep PR at the right edge when not shown leading. Line totals stay in the hover card. */}
+        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <div className={hasSecondLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
@@ -1204,7 +1191,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                     className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
                   />
                 </span>
-              ) : showTrailingPr || showMergeablePill || isMobile ? (
+              ) : hasPr || showMergeablePill || isMobile ? (
                 <span
                   className={cn(
                     SIDEBAR_CAPTION_TEXT_CLASS,
@@ -1219,7 +1206,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                     />
                   ) : null}
                   {showMergeablePill ? <SessionMergeablePill /> : null}
-                  {showTrailingPr ? (
+                  {hasPr ? (
                     <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
                   ) : null}
                 </span>

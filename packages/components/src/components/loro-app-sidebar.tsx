@@ -619,6 +619,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             <SidebarSessionMetaLine
               branchName={session.branchName}
               latestMessageAt={effectiveLatestMessageAt}
+              prNumber={prInfo.number}
+              prStatus={showPr ? prStatus : null}
             />
           ) : null}
         </div>

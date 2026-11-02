@@ -7,7 +7,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { sessionSendStatusesAtom } from '../src/atoms/session-send-status';
 import { SessionList } from '../src/components/session-list';
-import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
+import {
+  SessionPrIcon,
+  SidebarRowEndSlot,
+  SidebarSessionMetaLine,
+} from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
 import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
@@ -204,23 +208,24 @@ describe('SessionList PR badge', () => {
     expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
     expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
 
-    // Leading slot contains the PR icon for standalone sessions
-    const leadingPr = rowWithPr?.querySelector('[data-session-leading-pr]');
-    expect(leadingPr).not.toBeNull();
-    expect(leadingPr?.contains(passedPrIcon!)).toBe(true);
+    // Leading slot maintains existing hierarchy and flat-list alignment (no PR icon in leading slot)
+    expect(rowWithPr?.querySelector('[data-session-leading-pr]')).toBeNull();
 
-    // Trailing slot does not duplicate the PR icon on standalone rows
+    // Trailing slot displays the PR icon with CI verdict for sessions with a PR
     const endSlot = rowWithPr?.querySelector('[data-session-row-end-slot]');
-    expect(endSlot?.querySelector('[data-pr-ci-verdict]')).toBeNull();
+    expect(endSlot?.contains(passedPrIcon!)).toBe(true);
 
-    // Subtitle displays PR number and status label
-    const subtitle = rowWithPr?.querySelector('[data-session-row-subtitle]');
-    expect(subtitle).not.toBeNull();
-    expect(subtitle?.textContent).toContain('#42');
-    expect(subtitle?.textContent).toContain('Open');
+    // Meta line displays branch, time, and PR state
+    const metaLine = rowWithPr?.querySelector('[data-sidebar-session-meta]');
+    expect(metaLine).not.toBeNull();
+    const prSegment = metaLine?.querySelector('[data-sidebar-pr-segment]');
+    expect(prSegment).not.toBeNull();
+    expect(prSegment?.textContent).toContain('#42');
+    expect(prSegment?.textContent).toContain('Open');
+    expect(prSegment?.querySelector('.text-github-open')?.textContent).toBe('Open');
   });
 
-  it('renders merged PR status icon and subtitle with correct styling', () => {
+  it('renders merged PR status icon in trailing slot and PR state in metadata line', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -251,17 +256,22 @@ describe('SessionList PR badge', () => {
     });
 
     const row = container.querySelector('[data-sidebar-session-id="session-merged"]');
-    const leadingPr = row?.querySelector('[data-session-leading-pr]');
-    expect(leadingPr).not.toBeNull();
-    const mergeIcon = leadingPr?.querySelector('.lucide-git-merge');
+    // Leading slot does not render PR icon
+    expect(row?.querySelector('[data-session-leading-pr]')).toBeNull();
+
+    // Trailing slot contains merged PR icon
+    const endSlot = row?.querySelector('[data-session-row-end-slot]');
+    const mergeIcon = endSlot?.querySelector('.lucide-git-merge');
     expect(mergeIcon).not.toBeNull();
     expect(mergeIcon?.classList.contains('text-pr-merged')).toBe(true);
 
-    const subtitle = row?.querySelector('[data-session-row-subtitle]');
-    expect(subtitle).not.toBeNull();
-    expect(subtitle?.textContent).toContain('#99');
-    expect(subtitle?.textContent).toContain('Merged');
-    const statusText = subtitle?.querySelector('.text-pr-merged');
+    // Meta line displays PR state with #99 and Merged in status color
+    const metaLine = row?.querySelector('[data-sidebar-session-meta]');
+    const prSegment = metaLine?.querySelector('[data-sidebar-pr-segment]');
+    expect(prSegment).not.toBeNull();
+    expect(prSegment?.textContent).toContain('#99');
+    expect(prSegment?.textContent).toContain('Merged');
+    const statusText = prSegment?.querySelector('.text-pr-merged');
     expect(statusText?.textContent).toBe('Merged');
   });
 
@@ -625,5 +635,32 @@ describe('SessionList PR badge', () => {
     expect(
       container!.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')
     ).toBe('2 working · 1 sending');
+  });
+
+  it('formats SidebarSessionMetaLine with branch, time, and PR state', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SidebarSessionMetaLine, {
+          branchName: 'scope/branch-name',
+          latestMessageAt: '2026-04-22T00:00:00.000Z',
+          prNumber: 1449,
+          prStatus: 'merged',
+        })
+      );
+    });
+
+    const meta = container.querySelector('[data-sidebar-session-meta]');
+    expect(meta).not.toBeNull();
+    expect(meta?.textContent).toContain('scope/branch-name');
+    expect(meta?.querySelector('.lucide-git-branch')).not.toBeNull();
+    const prSegment = meta?.querySelector('[data-sidebar-pr-segment]');
+    expect(prSegment).not.toBeNull();
+    expect(prSegment?.textContent).toContain('#1449');
+    expect(prSegment?.textContent).toContain('Merged');
+    expect(prSegment?.querySelector('.text-pr-merged')).not.toBeNull();
   });
 });

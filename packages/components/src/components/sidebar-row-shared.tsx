@@ -1082,9 +1082,44 @@ export function SidebarBranchSegment({ branchName }: { branchName?: string | nul
 }
 
 /**
- * The second line of a two-line session row: the branch, then the relative time.
- * The branch is the one that gives way (it truncates), the time never does.
- * Chats have no branch and stay one line, so they never render this. Rows that carry it use
+ * One PR segment of a row meta line: displays the PR state at the same hierarchical level
+ * as the branch name and the timestamp.
+ */
+export function SidebarPrSegment({
+  prNumber,
+  prStatus,
+  className,
+}: {
+  prNumber?: number | null;
+  prStatus?: PrStatus | null;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  const hasPr = typeof prNumber === 'number' || Boolean(prStatus);
+  if (!hasPr) return null;
+
+  const status = prStatus ?? 'open';
+  const statusMeta = PR_STATUS_META[status] ?? PR_STATUS_META.open;
+  const statusLabel = t(statusMeta.labelKey, statusMeta.labelFallback);
+  const prLabel = typeof prNumber === 'number' ? `#${prNumber}` : null;
+
+  return (
+    <span
+      data-sidebar-pr-segment=""
+      className={cn('flex shrink-0 items-center gap-1 select-none tabular-nums', className)}
+    >
+      {prLabel ? <span className="font-medium">{prLabel}</span> : null}
+      {prLabel ? <span className="opacity-60">·</span> : null}
+      <span className={statusMeta.iconColorClassName}>{statusLabel}</span>
+    </span>
+  );
+}
+
+/**
+ * The second line of a two-line session row: the branch, the relative time,
+ * and the PR state when present.
+ * The branch is the one that gives way (it truncates), the time and PR state never do.
+ * Chats have no branch/PR and stay one line, so they never render this. Rows that carry it use
  * `sidebarSurface.tall`; the 4px gap and one footnote line are what
  * `session-row-leading-slot.tsx` adds to the first child's trunk, so keep them
  * in step. The label ticks here, in the leaf, not in the memoized row around it.
@@ -1092,12 +1127,17 @@ export function SidebarBranchSegment({ branchName }: { branchName?: string | nul
 export function SidebarSessionMetaLine({
   branchName,
   latestMessageAt,
+  prNumber,
+  prStatus,
 }: {
   branchName?: string | null;
   latestMessageAt: RelativeTimeValue;
+  prNumber?: number | null;
+  prStatus?: PrStatus | null;
 }) {
   const now = useStableNow();
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
+  const hasPr = typeof prNumber === 'number' || Boolean(prStatus);
   return (
     <div
       data-sidebar-session-meta=""
@@ -1109,6 +1149,7 @@ export function SidebarSessionMetaLine({
     >
       <SidebarBranchSegment branchName={branchName} />
       <span className="shrink-0 select-none tabular-nums">{relativeTime}</span>
+      {hasPr ? <SidebarPrSegment prNumber={prNumber} prStatus={prStatus} /> : null}
     </div>
   );
 }
