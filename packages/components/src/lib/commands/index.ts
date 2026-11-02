@@ -11,7 +11,7 @@ export {
 } from './shortcut-analytics';
 export { useCommand, useCommands, useKeyScope } from './use-commands';
 export { useKeyCapture, eventToBindingString } from './key-capture';
-export type { KeyCaptureStatus, KeyCaptureControls } from './key-capture';
+export type { KeyCaptureCancelReason, KeyCaptureControls, KeyCaptureStatus } from './key-capture';
 export { registerBuiltInCommands, unregisterBuiltInCommands } from './built-ins';
 export {
   COMMAND_SHORTCUTS,

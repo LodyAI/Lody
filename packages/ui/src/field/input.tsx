@@ -21,7 +21,12 @@ export interface InputProps extends Omit<BaseProps, 'className' | 'size' | 'rend
    * own content and states no edge: the well rings on `:focus-within`.
    */
   leading?: ReactNode;
-  /** Lands on the control: the input, or the shell once there is a `leading`. */
+  /**
+   * The same slot at the well's end, for a control that acts on the value — a
+   * toggle that changes what the field searches by. It draws no edge either.
+   */
+  trailing?: ReactNode;
+  /** Lands on the control: the input, or the shell once there is a slot. */
   className?: string;
   /** Lands on the `<input>` inside the shell, for a constraint only the value takes. */
   inputClassName?: string;
@@ -50,7 +55,7 @@ const styles = stylex.create({
 });
 
 /**
- * A well holding something before the value. The slot is a square as tall as
+ * A well holding something before or after the value. A slot is a square as tall as
  * the well less the inset a nested part keeps from its container, so a pressable
  * thing in it sits as far from the well's edge as a tab sits from its track, and
  * a character in it — a `/` — is centred where the value's padding would be.
@@ -59,32 +64,34 @@ const INSET = space[1];
 const shellStyles = stylex.create({
   // The slot's content and the value are two things in one control: the gap
   // keeps a glyph from touching the first letter without splitting them apart.
-  shell: { gap: space[1.5], paddingInlineStart: INSET },
-  leading: {
+  shell: { gap: space[1.5] },
+  leadingInset: { paddingInlineStart: INSET },
+  trailingInset: { paddingInlineEnd: INSET },
+  slot: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
     color: field.icon,
   },
-  leadingSmall: {
+  slotSmall: {
     width: `calc(${field.heightSmall} - 2 * ${INSET})`,
     height: `calc(${field.heightSmall} - 2 * ${INSET})`,
   },
-  leadingMedium: {
+  slotMedium: {
     width: `calc(${field.heightMedium} - 2 * ${INSET})`,
     height: `calc(${field.heightMedium} - 2 * ${INSET})`,
   },
-  leadingLarge: {
+  slotLarge: {
     width: `calc(${field.heightLarge} - 2 * ${INSET})`,
     height: `calc(${field.heightLarge} - 2 * ${INSET})`,
   },
 });
 
-const leadingSizeStyles = {
-  small: shellStyles.leadingSmall,
-  medium: shellStyles.leadingMedium,
-  large: shellStyles.leadingLarge,
+const slotSizeStyles = {
+  small: shellStyles.slotSmall,
+  medium: shellStyles.slotMedium,
+  large: shellStyles.slotLarge,
 };
 
 const sizeStyles = {
@@ -93,12 +100,33 @@ const sizeStyles = {
   large: styles.large,
 };
 
+function shellProps(
+  size: InputSize,
+  leading: ReactNode,
+  trailing: ReactNode,
+  { invalid = false, disabled = false }: { invalid?: boolean; disabled?: boolean } = {}
+) {
+  return stylex.props(
+    well.shell,
+    sizeStyles[size],
+    shellStyles.shell,
+    leading != null && shellStyles.leadingInset,
+    trailing != null && shellStyles.trailingInset,
+    invalid && well.shellInvalid,
+    disabled && well.dimmed
+  );
+}
+
+function Slot({ size, children }: { size: InputSize; children: ReactNode }) {
+  return <span {...stylex.props(shellStyles.slot, slotSizeStyles[size])}>{children}</span>;
+}
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { size = 'medium', leading, className, inputClassName, ...rest },
+  { size = 'medium', leading, trailing, className, inputClassName, ...rest },
   ref
 ) {
   const ariaInvalid = rest['aria-invalid'];
-  if (leading != null) {
+  if (leading != null || trailing != null) {
     // Built from the input's own `render`, as `PasswordInput` builds its shell:
     // the input stays the field's one control, so a `Field.Label` still points
     // at it and its validity and disabled state are what the shell shows.
@@ -107,24 +135,22 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         ref={ref}
         {...rest}
         render={(props, state) => {
-          const shell = stylex.props(
-            well.shell,
-            sizeStyles[size],
-            shellStyles.shell,
-            isInvalid(state.valid, ariaInvalid) && well.shellInvalid,
-            state.disabled && well.dimmed
-          );
+          const shell = shellProps(size, leading, trailing, {
+            invalid: isInvalid(state.valid, ariaInvalid),
+            disabled: state.disabled,
+          });
           return (
             <div
               data-size={size}
               className={appendClassName(shell.className, className)}
               style={shell.style}
             >
-              <span {...stylex.props(shellStyles.leading, leadingSizeStyles[size])}>{leading}</span>
+              {leading != null && <Slot size={size}>{leading}</Slot>}
               <input
                 {...props}
                 className={appendClassName(stylex.props(well.bare).className, inputClassName)}
               />
+              {trailing != null && <Slot size={size}>{trailing}</Slot>}
             </div>
           );
         }}
@@ -148,5 +174,40 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         )
       }
     />
+  );
+});
+
+export interface InputShellProps extends Omit<ComponentProps<'div'>, 'className'> {
+  size?: InputSize;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  /** Lands on the shell, which is the well: a width or a grid placement. */
+  className?: string;
+}
+
+/**
+ * The well an `Input` with a slot draws, around a value that is not typed: a
+ * recorded key combo shown as caps. It lays out exactly as `Input` does, so a
+ * surface can swap one for the other in place without the edge moving. The
+ * children are the value: they grow, state no edge and take focus themselves,
+ * and the well rings on `:focus-within`.
+ */
+export const InputShell = forwardRef<HTMLDivElement, InputShellProps>(function InputShell(
+  { size = 'medium', leading, trailing, className, children, ...rest },
+  ref
+) {
+  const shell = shellProps(size, leading, trailing);
+  return (
+    <div
+      ref={ref}
+      data-size={size}
+      {...rest}
+      className={appendClassName(shell.className, className)}
+      style={shell.style}
+    >
+      {leading != null && <Slot size={size}>{leading}</Slot>}
+      {children}
+      {trailing != null && <Slot size={size}>{trailing}</Slot>}
+    </div>
   );
 });
