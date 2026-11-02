@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 
@@ -175,4 +176,68 @@ export const ScopeTokens: Story = {
       <Board {...args} />
     </div>
   ),
+};
+
+const nativeControlStyles = stylex.create({
+  opaque: { display: 'grid', width: 173, resize: 'vertical', color: 'rgb(17, 57, 89)', zIndex: 47 },
+});
+
+function NativeFieldControl({ caller = 'default' }: { caller?: 'default' | 'utility' | 'opaque' }) {
+  const [value, setValue] = useState(SHORT.text);
+  const [mentions, setMentions] = useState(SHORT.mentions);
+  const [disabled, setDisabled] = useState(false);
+  const [readonly, setReadonly] = useState(false);
+  const inputClass =
+    caller === 'utility'
+      ? 'block w-56 resize-y text-destructive'
+      : caller === 'opaque'
+        ? stylex.props(nativeControlStyles.opaque).className
+        : undefined;
+  return (
+    <div data-native-mention-control={caller} style={{ padding: 20, maxWidth: 760 }}>
+      <button
+        type="button"
+        data-native-disabled
+        onClick={() => setDisabled((previous) => !previous)}
+      >
+        Toggle disabled
+      </button>
+      <button
+        type="button"
+        data-native-readonly
+        onClick={() => setReadonly((previous) => !previous)}
+      >
+        Toggle readonly
+      </button>
+      <Mention
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        getMentionChip={getComposerMentionChip}
+        triggers={[]}
+        disabled={disabled}
+        readonly={readonly}
+      >
+        <MentionLabel>Visible native composer</MentionLabel>
+        <MentionInput
+          value={value}
+          rows={3}
+          className={inputClass}
+          aria-label="Native mention control"
+        />
+      </Mention>
+      <output data-native-mention-state>
+        {JSON.stringify({ value, mentions, disabled, readonly })}
+      </output>
+    </div>
+  );
+}
+
+export const NativeFields: Pick<Story, 'render'> = { render: () => <NativeFieldControl /> };
+export const NativeFieldUtilityCaller: Pick<Story, 'render'> = {
+  render: () => <NativeFieldControl caller="utility" />,
+};
+export const NativeFieldOpaqueCaller: Pick<Story, 'render'> = {
+  render: () => <NativeFieldControl caller="opaque" />,
 };

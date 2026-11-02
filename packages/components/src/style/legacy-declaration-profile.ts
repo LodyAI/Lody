@@ -114,6 +114,15 @@ export const legacyDeclarations = [
   { key: 'sidebarRightZero', alias: 'right-0', js: 'right', css: 'right' },
   { key: 'sidebarRailIndex', alias: 'z-20', js: 'zIndex', css: 'z-index' },
   { key: 'sidebarRailWidth', alias: 'w-4', js: 'width', css: 'width' },
+  {
+    key: 'commandDialogIndex',
+    alias: 'z-[var(--z-command-palette,85)]',
+    js: 'zIndex',
+    css: 'z-index',
+  },
+  { key: 'commandDialogMaximum', alias: 'max-w-2xl', js: 'maxWidth', css: 'max-width' },
+  { key: 'commandDialogCorner', alias: 'rounded-xl', js: 'borderRadius', css: 'border-radius' },
+  { key: 'mentionCaretRaised', alias: 'z-30', js: 'zIndex', css: 'z-index' },
 ] as const;
 
 export const legacyBindings = {
@@ -237,4 +246,11 @@ export const legacyBindings = {
     'sidebarHidden',
     'sidebarRailWidth',
   ],
+  commandDialogFrameClass: ['commandDialogIndex', 'commandDialogMaximum', 'composerTransparent'],
+  commandDialogBackdropClass: ['commandDialogIndex'],
+  commandDialogCornerClass: ['commandDialogCorner'],
+  mentionLabelBlockClass: ['projectBlockOneHalf'],
+  mentionInputFlowClass: ['row', 'fullWidth'],
+  mentionRaisedCaretClass: ['mentionCaretRaised'],
+  mentionRestCaretClass: ['dragIndex'],
 } as const;

@@ -1,3 +1,9 @@
+import {
+  sidebarRelativeClass,
+  mentionRaisedCaretClass,
+  mentionRestCaretClass,
+  composerTransparentClass,
+} from '@/style/legacy-defaults.stylex';
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
@@ -859,7 +865,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   }, [context, onMentionUpdate, updateCaretLayer]);
 
   return (
-    <div className={cn('relative', containerClassName)}>
+    <div className={cn(sidebarRelativeClass, containerClassName)}>
       <MentionHighlighter
         className={highlighterClassName}
         renderValue={mentionRenderValue}
@@ -884,10 +890,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         ref={composedRef}
         value={renderedInputValue}
         className={cn(
-          'relative',
-          showNativeCaretAboveChip ? 'z-30' : 'z-10',
+          sidebarRelativeClass,
+          showNativeCaretAboveChip ? mentionRaisedCaretClass : mentionRestCaretClass,
           inputProps.className,
-          'bg-transparent'
+          composerTransparentClass
         )}
         style={
           showNativeCaretAboveChip

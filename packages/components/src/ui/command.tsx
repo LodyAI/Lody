@@ -4,6 +4,11 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import {
+  commandDialogFrameClass,
+  commandDialogBackdropClass,
+  commandDialogCornerClass,
+} from '../style/legacy-defaults.stylex';
 import { Dialog } from './dialog';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
@@ -159,16 +164,20 @@ const CommandDialog = ({
         gap="none"
         className={cn(
           stylex.props(styles.dialogPanel).className,
-          'z-[var(--z-command-palette,85)] max-w-2xl bg-transparent shadow-none'
+          commandDialogFrameClass,
+          'shadow-none'
         )}
         backdropClassName={cn(
           stylex.props(styles.dialogBackdrop).className,
-          'z-[var(--z-command-palette,85)]'
+          commandDialogBackdropClass
         )}
       >
         <Command
           shouldFilter={shouldFilter}
-          className="rounded-xl border border-border/60 shadow-2xl [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-input]]:h-12"
+          className={cn(
+            commandDialogCornerClass,
+            'border border-border/60 shadow-2xl [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-input]]:h-12'
+          )}
         >
           {children}
         </Command>

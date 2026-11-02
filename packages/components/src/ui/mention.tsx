@@ -1,3 +1,8 @@
+import {
+  mentionLabelBlockClass,
+  mentionInputFlowClass,
+  composerInputInkClass,
+} from '@/style/legacy-defaults.stylex';
 import * as MentionPrimitive from './mention/index';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -36,7 +41,7 @@ function MentionLabel({
   return (
     <MentionPrimitive.Label
       data-slot="mention-label"
-      className={cn('px-0.5 py-1.5 font-semibold text-sm', className)}
+      className={cn(`px-0.5 ${mentionLabelBlockClass} font-semibold text-sm`, className)}
       {...props}
     />
   );
@@ -51,7 +56,7 @@ const MentionInput = React.forwardRef<
       ref={ref}
       data-slot="mention-input"
       className={cn(
-        'flex w-full resize-none text-input-foreground placeholder:text-input-placeholder focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50',
+        `${mentionInputFlowClass} resize-none ${composerInputInkClass} placeholder:text-input-placeholder focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50`,
         className
       )}
       {...props}

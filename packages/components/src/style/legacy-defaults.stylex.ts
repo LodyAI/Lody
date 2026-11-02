@@ -95,6 +95,10 @@ const styles = stylex.create({
   sidebarRightZero: { right: 'calc(var(--spacing) * 0)' },
   sidebarRailIndex: { zIndex: 20 },
   sidebarRailWidth: { width: 'calc(var(--spacing) * 4)' },
+  commandDialogIndex: { zIndex: 'var(--z-command-palette,85)' },
+  commandDialogMaximum: { maxWidth: '42rem' },
+  commandDialogCorner: { borderRadius: 'var(--radius-xl)' },
+  mentionCaretRaised: { zIndex: 30 },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -408,3 +412,25 @@ export const sidebarRailGeometryClass = legacyClass(
     styles.sidebarRailWidth
   ).className
 );
+
+export const commandDialogFrameClass = legacyClass(
+  stylex.props(styles.commandDialogIndex, styles.commandDialogMaximum, styles.composerTransparent)
+    .className
+);
+export const commandDialogBackdropClass = legacyClass(
+  stylex.props(styles.commandDialogIndex).className
+);
+export const commandDialogCornerClass = legacyClass(
+  stylex.props(styles.commandDialogCorner).className
+);
+
+export const mentionLabelBlockClass = legacyClass(
+  stylex.props(styles.projectBlockOneHalf).className
+);
+export const mentionInputFlowClass = legacyClass(
+  stylex.props(styles.row, styles.fullWidth).className
+);
+export const mentionRaisedCaretClass = legacyClass(
+  stylex.props(styles.mentionCaretRaised).className
+);
+export const mentionRestCaretClass = legacyClass(stylex.props(styles.dragIndex).className);

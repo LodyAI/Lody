@@ -2616,15 +2616,15 @@ Six redundant size/shrink occurrences remain separate cleanup; restored native
 compiler-trial defaults receive zero credit. The declaration bridge transfers
 ownership while retaining legacy output.
 
-The integrated241/242/244 component cut recognizes1,086 AST occurrences in141
-files and1,004 unresolved expressions across1,399 production sources. Helper222
+The integrated243/245 component cut recognizes1,072 AST occurrences in140
+files and1,024 unresolved expressions across1,399 production sources. Helper222
 remains191 occurrences/eight files/21 unresolved expressions across30 sources.
-Their v2 union is1,277 occurrences/149 files/1,025 unresolved expressions. Known
-bridge output is245 positions across sixteen owners; four bridge-only consumers
-are outside the AST utility file list. The **conservative compatibility lower
-bound is1,522 occurrences in153 files**. This continuation transfers31 ownership
-positions with zero net dependency removal, using87 keys/88 physical declarations/
-104 bindings. Scope243 is excluded.
+Their v2 union is1,263 occurrences/148 files/1,045 unresolved expressions. Known
+bridge output is259 positions across nineteen source owners; five bridge-only
+consumers are outside the AST utility file list. The **conservative compatibility
+lower bound remains1,522 occurrences in153 files**. This continuation transfers
+fourteen ownership positions with zero net dependency removal, using91 keys/
+92 physical declarations/111 bindings. Private246 remains excluded.
 
 The earlier240 lower bound remains frozen at1,516. The increase of six records
 previously omitted padding literals returned by two window-drag helper functions;
@@ -2632,16 +2632,18 @@ they are now explicit retained bridge outputs. Thirty-one transferred positions
 reduce the AST count by only25. The scanner method and source scope are unchanged;
 this is more complete accounting of existing dependencies, not six new utilities.
 Unresolved values include ordinary StyleX/runtime expressions and imported bindings,
-not1,025 confirmed utilities or a completion percentage.
+not1,045 confirmed utilities or a completion percentage.
 
-`inventory-source-root241242244-integrated-proof.json` and
-`inventory-v2-root241242244-integrated-fullsrc.json` own all1,399 hashed production
+`inventory-source-root243245-integrated-proof.json` and
+`inventory-v2-root243245-integrated-fullsrc.json` own all1,399 hashed production
 inputs; helper remains its frozen222 cut. Stories are excluded from inventory but
-can affect CSS scanning. Qualified Root236–240 has50 pairs/44 exact PNGs, six pixel
-OPENs and three hover-state differences, with620 files/6,257 tests passing against
-stable inputs. That evidence belongs to the prior69-key source cut. Current
-241/242/244 composition requires separate qualification; no prior paint, focus,
-hover-field, cleanup or device limitation is closed.
+can affect CSS scanning. Qualified241/242/244 has30 formal pairs/27 exact PNGs,
+three pixel OPENs and one separate exact Home control. Its stable620-file/
+6,257-test run belongs to that87-key cut. Current243/245 has six successful builds
+and108 exact CSS pairs; its isolated Command and Mention reports retain six
+paint OPENs, one mirror-field OPEN, one caret-pixel OPEN and a dark readonly gap.
+The combination has its own browser evidence and does not close prior paint,
+focus, hover-field, cleanup or device limitations.
 The [bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
 owns the compiler/caller boundary, per-unit evidence and actual rejected candidates;
 the [font-pair decision](2026-11-03-stylex-font-writer-pair.md) owns the sole

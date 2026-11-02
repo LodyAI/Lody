@@ -1854,22 +1854,23 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
 六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-已集成241／242／244切面的components在1,399产品源识别1,086处AST／141文件／1,004未解析。
-helper222仍为30源／191处／八文件／21未解析；v2合计1,277处／149文件／1,025未解析表达式。
-十六个owner的已知桥输出245处，另四个仅桥consumer不在AST utility文件列表。
-**保守兼容下界为1,522处／153文件**。本组转移31个声明归属位置，净依赖移除零；
-87key／88物理声明／104绑定。不包含243。
+已集成243／245切面的components在1,399产品源识别1,072处AST／140文件／1,024未解析。
+helper222仍为30源／191处／八文件／21未解析；v2合计1,263处／148文件／1,045未解析表达式。
+十九个源码owner的已知桥输出259处，另五个仅桥consumer不在AST utility文件列表。
+**保守兼容下界仍为1,522处／153文件**。本次再转移十四个声明归属位置，净依赖移除零；
+91key／92物理声明／111绑定。私有246尚未包含。
 
 此前240下界1,516保持冻结。新增六是两个window-drag helper函数返回的六个padding literal
 原未被扫描器识别，现在成为明确保留的桥输出；31个转移位置只使AST减少25。扫描方法与源码范围
 均未变，这是对既有依赖的补计，不是新增六个utility。未解析含正常StyleX／runtime及import绑定，
-不是1,025个已确认utility或完成率。
+不是1,045个已确认utility或完成率。
 
-inventory-source-root241242244-integrated-proof.json及inventory-v2-root241242244-integrated-fullsrc.json
+inventory-source-root243245-integrated-proof.json及inventory-v2-root243245-integrated-fullsrc.json
 拥有全部1,399份已hash产品输入；helper仍为冻结222切面。库存排除story，但其literal可影响CSS扫描。
-已验Root236–240有50对／44PNG同，保六像素OPEN与三个hover字段差；620文件／6,257测试
-在稳定输入下通过。资格属于此前69key切面；当前241／242／244组合须另验，不关闭旧paint、
-focus、hover字段、cleanup或device限制。
+已验241／242／244有30正式对／27PNG同、三像素OPEN及另一个独立Home对同，620文件／6,257测试
+属于该87key切面。当前243／245六个真实构建成功，108份CSS同；隔离Command与Mention报告仍保
+六paint OPEN、一个mirror字段OPEN、一个caret像素OPEN及dark readonly缺格。组合另有真实浏览器
+证据，不关闭任何旧paint、focus、hover字段、cleanup或device限制。
 [桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有compiler／调用方边界、
 各单元证据与真实拒绝候选；[字重pair决定](2026-11-03-stylex-font-writer-pair.zh.md)拥有唯一多字段例外。
 历史库存切面不回写。

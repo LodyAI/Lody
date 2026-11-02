@@ -31,6 +31,7 @@ const originalSource = () => {
   const opaque = (color: string) => color.replace('<alpha-value>', '1');
   const theme = `@theme inline {
     --container-xs: ${maximum};
+    --container-2xl: ${defaultTheme.maxWidth({ theme: () => ({}), colors: defaultTheme.colors })['2xl']};
     --radius-lg: ${radius};
     --radius-md: ${mediumRadius};
     --color-muted: ${opaque(colors.muted.DEFAULT)};
@@ -43,7 +44,7 @@ const originalSource = () => {
     --color-sidebar-border: ${opaque(colors.sidebar.border)};
   }`;
   return (
-    '@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; --radius-2xl: 1rem; --font-weight-medium: 500; }' +
+    '@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; --radius-2xl: 1rem; --radius-xl: .75rem; --font-weight-medium: 500; }' +
     theme
   );
 };
@@ -73,6 +74,8 @@ describe('closed legacy declaration bridge', () => {
     expect(cn(actualBindings.sidebarRailGeometryClass, 'relative z-0')).toBe(
       'inset-y-0 hidden w-4 relative z-0'
     );
+    expect(cn(actualBindings.mentionInputFlowClass, 'w-56')).toBe('flex w-56');
+    expect(cn(actualBindings.mentionLabelBlockClass, 'py-2')).toBe('py-2');
     // This cn-only input must not add a production CSS candidate through test scanning.
     const minHeightCaller = `[${['min-height', '60px'].join(':')}]`;
     expect(cn(actualBindings.sidebarContentLayoutClass, minHeightCaller)).toBe(

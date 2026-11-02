@@ -9,16 +9,16 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of eighty-six single-field keys and one closed font-weight pair with one hundred and four authored bindings used at two hundred and forty-five utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions and window-drag geometry, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of ninety single-field keys and one closed font-weight pair with one hundred and eleven authored bindings used at two hundred and fifty-nine utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions, window-drag geometry, CommandDialog and the two Mention field owners, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
-| Owner                                                                                                          | Responsibility                                                                                                                                |
-| -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Eighty-seven StyleX keys, eighty-eight physical declarations and one hundred and four authored scalar/group class bindings.                   |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its eighty-seven aliases. |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                                 |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                             |
+| Owner                                                                                                          | Responsibility                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Ninety-one StyleX keys, ninety-two physical declarations and one hundred and eleven authored scalar/group class bindings.                   |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its ninety-one aliases. |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                               |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                           |
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal single-field declarations, the closed font-weight pair and the one hundred and four approved `stylex.props`
+It accepts literal single-field declarations, the closed font-weight pair and the one hundred and eleven approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -98,8 +98,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Two hundred and forty-five consumer utility positions becoming imported bindings are not that many fewer
-remaining legacy occurrences. The eighty-seven aliases and two hundred and forty-five compiled output occurrences
+Two hundred and fifty-nine consumer utility positions becoming imported bindings are not that many fewer
+remaining legacy occurrences. The ninety-one aliases and two hundred and fifty-nine compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -336,16 +336,38 @@ pre/post objects are stable on each side. Its six builds preserve108 CSS pairs a
 the stable component regression passes620 files/6,257 tests. That qualification
 belongs to its frozen69-key/70-declaration/89-binding source cut.
 
-The next integrated241/242/244 cut transfers31 positions with zero net removal,
+The qualified241/242/244 cut transfers31 positions with zero net removal,
 using87 keys/88 physical declarations/104 bindings over40 distinct properties.
 Its245 outputs retain their legacy contracts; its combined validation is separate
-from these isolated reports. Scope243 is excluded.
+from these isolated reports. That frozen cut excludes243 and245.
 
 | Unit                  | Real acceptance                                                                                                                                                                | Retained limits                                                                                                                                                                                                                                                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Window geometry241    | Eight final reduced pairs are PNG/RGBA exact over944 body/72 targets;107 CSS pairs match. All public exported types remain exact.                                              | Original14-position candidate is rejected despite26 exact PNGs: two exported constants widened literal types to string. Three positions remain raw constants; caption padding also stays Tailwind after raw-value mismatch. Synthetic IPC geometry does not prove native OS dragging or fullscreen.                    |
 | Existing font pair242 | Four consumers reuse the existing pair at five positions;108 CSS pairs and complete compiled bank remain equal. Thirty of35 formal PNGs match.                                 | Five OPENs total216,383 raw/66,585 threshold pixels. One natural mobile Back endpoint has27 linked focus/highlight fields; its timing history was not captured. One separate Back→Home pair is exact and does not close that endpoint.                                                                                 |
 | Sidebar frame/Rail244 | Fifteen positions;28/30 PNGs exact,3,988 body/117 targets and107 CSS pairs match. Final unowned-format restoration has identical actual production JS and389 Oxide candidates. | Two UA Drawer OPENs total32,151 raw/zero threshold pixels, maximum channel delta1. Both viewport-height aliases retain their additional supports fallback. The rejected Provider-omission candidate and invalid first AST visitor remain evidence, not acceptance. Legacy Sidebar is absent from the actual App graph. |
+
+The integrated243/245 continuation transfers fourteen more positions through
+four new keys and seven bindings, producing91 keys/92 physical declarations/
+111 bindings and259 retained outputs across nineteen source owners. CommandDialog
+keeps the actual42rem maximum rather than substituting a container token; z-index
+and radius read their element-local variables. Mention changes only class bindings,
+leaving caret, selection, range and mirror synchronization code intact. No compiler
+grammar or net dependency-removal scope is added.
+
+Its isolated Command report has37 pairs/31 exact PNGs and six OPENs totaling120
+raw/120 threshold pixels. Mention has21 pairs/20 exact PNGs, but one exact image
+still has fourteen mirror-height fields differing and another has20 differing
+pixels. Dark readonly could not stabilize and has no paired visual credit. One
+separate naturally initialized mirror pair is exact; it does not replace either
+OPEN. Combined validation is owned separately by the Root243/245 report.
+
+The common Mention fixture had two real lint errors from shadowed updater
+parameters. Only those local bindings and formatter whitespace changed after capture. Actual Oxc
+lowered whole ASTs match after precisely those two bound-identifier renames, and
+all244 Oxide candidates match; lowered JS bytes differ. This is qualified alpha
+equivalence, not a new final-source build or screenshot. Original errors and source
+versions remain in the evidence.
 
 The full AST checker visits every child with a void callback and retains JSX text;
 a mutation in the second statement and the omitted Provider class both reject.
