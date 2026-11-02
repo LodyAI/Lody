@@ -2616,30 +2616,36 @@ Six redundant size/shrink occurrences remain separate cleanup; restored native
 compiler-trial defaults receive zero credit. The declaration bridge transfers
 ownership while retaining legacy output.
 
-The integrated240 component cut recognizes1,111 AST occurrences in141 files and
-969 unresolved expressions across1,399 production sources. Helper222 remains191
-occurrences/eight files/21 unresolved expressions across30 sources. Their v2 union
-is1,302 occurrences/149 files/990 unresolved expressions. Known bridge output is214
-positions across fifteen owners; four bridge-only consumers are outside the AST
-utility file list. The **conservative compatibility lower bound remains1,516
-occurrences in153 files**. The236–240 continuation transfers thirty declaration
-ownership positions and removes zero net Tailwind dependencies. Its69 keys
-represent70 physical declarations and89 bindings, including the closed font pair.
-Unresolved values include ordinary StyleX/runtime expressions and imported bindings,
-not990 confirmed utilities or a completion percentage.
+The integrated241/242/244 component cut recognizes1,086 AST occurrences in141
+files and1,004 unresolved expressions across1,399 production sources. Helper222
+remains191 occurrences/eight files/21 unresolved expressions across30 sources.
+Their v2 union is1,277 occurrences/149 files/1,025 unresolved expressions. Known
+bridge output is245 positions across sixteen owners; four bridge-only consumers
+are outside the AST utility file list. The **conservative compatibility lower
+bound is1,522 occurrences in153 files**. This continuation transfers31 ownership
+positions with zero net dependency removal, using87 keys/88 physical declarations/
+104 bindings. Scope243 is excluded.
 
-`inventory-source-through240-integrated-proof.json` and
-`inventory-v2-through240-integrated-fullsrc.json` own all1,399 hashed production
+The earlier240 lower bound remains frozen at1,516. The increase of six records
+previously omitted padding literals returned by two window-drag helper functions;
+they are now explicit retained bridge outputs. Thirty-one transferred positions
+reduce the AST count by only25. The scanner method and source scope are unchanged;
+this is more complete accounting of existing dependencies, not six new utilities.
+Unresolved values include ordinary StyleX/runtime expressions and imported bindings,
+not1,025 confirmed utilities or a completion percentage.
+
+`inventory-source-root241242244-integrated-proof.json` and
+`inventory-v2-root241242244-integrated-fullsrc.json` own all1,399 hashed production
 inputs; helper remains its frozen222 cut. Stories are excluded from inventory but
-can affect CSS scanning. Original230–240 matrices and each combined Root cut
-retain their independent scope. The qualified230–235 combined run has18 pairs,
-16 PNGs exact and two OPENs1,668raw/18threshold; its620-file/6,246-test regression
-precedes the later compiler extension. Current236–240 composition needs separate
-qualification. No prior paint, hover-field, cleanup or device limitation is closed.
+can affect CSS scanning. Qualified Root236–240 has50 pairs/44 exact PNGs, six pixel
+OPENs and three hover-state differences, with620 files/6,257 tests passing against
+stable inputs. That evidence belongs to the prior69-key source cut. Current
+241/242/244 composition requires separate qualification; no prior paint, focus,
+hover-field, cleanup or device limitation is closed.
 The [bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
-owns the compiler/caller boundary and per-unit evidence; the
-[font-pair decision](2026-11-03-stylex-font-writer-pair.md) owns the sole multi-field
-exception. Earlier inventory cuts remain frozen rather than rewritten.
+owns the compiler/caller boundary, per-unit evidence and actual rejected candidates;
+the [font-pair decision](2026-11-03-stylex-font-writer-pair.md) owns the sole
+multi-field exception. Earlier inventory cuts remain frozen rather than rewritten.
 
 Earlier204 template-class removals changed unresolved counts without extra utility
 removal. Scope185 removes twenty manually audited literals but only seven were in

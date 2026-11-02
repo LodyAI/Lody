@@ -23,6 +23,7 @@ import {
   loroRecoveryFrameClass,
   loroSwitcherGapClass,
   sidebarInkClass,
+  acpMediumWeightClass,
 } from '@/style/legacy-defaults.stylex';
 import { clsx } from 'clsx';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
@@ -1497,7 +1498,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           className={cn(
             SIDEBAR_HELPER_TEXT_CLASS,
             loroRecoveryFrameClass,
-            'font-medium',
+            acpMediumWeightClass,
             sidebarInkClass,
             'shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
           )}

@@ -1,3 +1,11 @@
+import {
+  sidebarDockFrameClass,
+  sidebarLeadingZeroClass,
+  sidebarTrailingZeroClass,
+  sidebarUncollapsedGeometryClass,
+  sidebarVariableWidthClass,
+  sidebarRailGeometryClass,
+} from '@/style/legacy-defaults.stylex';
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva, VariantProps } from 'class-variance-authority';
@@ -33,6 +41,7 @@ import {
   sidebarJustifyClass,
   sidebarSquareClass,
   sidebarPointerNoneClass,
+  acpMediumWeightClass,
 } from '@/style/legacy-defaults.stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -221,7 +230,7 @@ function Sidebar({
         className={cn(
           sidebarSurfaceClass,
           sidebarFlexClass,
-          'h-full w-(--sidebar-width)',
+          sidebarUncollapsedGeometryClass,
           sidebarColumnClass,
           className
         )}
@@ -248,7 +257,7 @@ function Sidebar({
           // scrolling column, so it takes the panel without the panel's padding
           // and without the cross: the way out is the overlay or the trigger.
           closeButton={false}
-          className={`${sidebarSurfaceClass} w-(--sidebar-width) ${sidebarPaddingZeroClass}`}
+          className={`${sidebarSurfaceClass} ${sidebarVariableWidthClass} ${sidebarPaddingZeroClass}`}
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
@@ -290,10 +299,10 @@ function Sidebar({
       <div
         data-slot="sidebar-container"
         className={cn(
-          'fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex',
+          `${sidebarDockFrameClass} h-svh ${sidebarVariableWidthClass} transition-[left,right,width] duration-200 ease-linear md:flex`,
           side === 'left'
-            ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]'
-            : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
+            ? `${sidebarLeadingZeroClass} group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]`
+            : `${sidebarTrailingZeroClass} group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]`,
           // Adjust the padding for floating and inset variants.
           variant === 'floating' || variant === 'inset'
             ? `${sidebarPaddingClass} group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]`
@@ -352,7 +361,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<'button'>) {
       onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
-        'hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex',
+        `hover:after:bg-sidebar-border ${sidebarRailGeometryClass} -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex`,
         'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
         '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
         'hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full',
@@ -467,7 +476,7 @@ function SidebarGroupLabel({
         `${sidebarHeightEightClass}`,
         sidebarLabelShrinkClass,
         sidebarItemsCenterClass,
-        `${sidebarCornerMediumClass} px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
+        `${sidebarCornerMediumClass} px-2 text-xs ${acpMediumWeightClass} outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         'group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0',
         className
       )}
@@ -654,7 +663,7 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) 
         sidebarFlexClass,
         `${sidebarHeightFiveClass} min-w-5`,
         sidebarItemsCenterClass,
-        `${sidebarJustifyClass} ${sidebarCornerMediumClass} px-1 text-xs font-medium tabular-nums select-none`,
+        `${sidebarJustifyClass} ${sidebarCornerMediumClass} px-1 text-xs ${acpMediumWeightClass} tabular-nums select-none`,
         'peer-hover/menu-button:text-sidebar-hover-foreground peer-data-[active=true]/menu-button:text-sidebar-selection-foreground',
         'peer-data-[size=sm]/menu-button:top-1',
         'peer-data-[size=default]/menu-button:top-1.5',

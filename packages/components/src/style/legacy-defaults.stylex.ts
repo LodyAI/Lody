@@ -77,6 +77,24 @@ const styles = stylex.create({
     '--tw-font-weight': 'var(--font-weight-medium)',
     fontWeight: 'var(--font-weight-medium)',
   },
+  windowsBorderBottom: { paddingBottom: '7px' },
+  windowsBottom: { paddingBottom: 'calc(var(--spacing) * 2)' },
+  macFrameBorderBottom: { paddingBottom: '5px' },
+  macFrameBottom: { paddingBottom: '6px' },
+  macBorderTop: { paddingTop: '3px' },
+  macTop: { paddingTop: '2px' },
+  dragFixed: { position: 'fixed' },
+  dragAbsolute: { position: 'absolute' },
+  dragInline: { insetInline: 'calc(var(--spacing) * 0)' },
+  dragTop: { top: 'calc(var(--spacing) * 0)' },
+  dragIndex: { zIndex: 10 },
+  sidebarViewportInset: { insetBlock: 'calc(var(--spacing) * 0)' },
+  sidebarHidden: { display: 'none' },
+  sidebarVariableWidth: { width: 'var(--sidebar-width)' },
+  sidebarLeftZero: { left: 'calc(var(--spacing) * 0)' },
+  sidebarRightZero: { right: 'calc(var(--spacing) * 0)' },
+  sidebarRailIndex: { zIndex: 20 },
+  sidebarRailWidth: { width: 'calc(var(--spacing) * 4)' },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -346,3 +364,47 @@ export const messageFooterLayoutClass = legacyClass(
 );
 
 export const acpMediumWeightClass = legacyClass(stylex.props(styles.mediumWeight).className);
+
+export const windowWindowsBorderClass = legacyClass(
+  stylex.props(styles.windowsBorderBottom).className
+);
+export const windowWindowsPlainClass = legacyClass(stylex.props(styles.windowsBottom).className);
+export const windowMacFrameBorderClass = legacyClass(
+  stylex.props(styles.macFrameBorderBottom).className
+);
+export const windowMacFramePlainClass = legacyClass(stylex.props(styles.macFrameBottom).className);
+export const windowMacBorderClass = legacyClass(stylex.props(styles.macBorderTop).className);
+export const windowMacPlainClass = legacyClass(stylex.props(styles.macTop).className);
+export const windowFixedClass = legacyClass(stylex.props(styles.dragFixed).className);
+export const windowAbsoluteClass = legacyClass(stylex.props(styles.dragAbsolute).className);
+export const windowStripInsetsClass = legacyClass(
+  stylex.props(styles.dragInline, styles.dragTop, styles.dragIndex).className
+);
+
+export const sidebarDockFrameClass = legacyClass(
+  stylex.props(
+    styles.dragFixed,
+    styles.sidebarViewportInset,
+    styles.dragIndex,
+    styles.sidebarHidden
+  ).className
+);
+export const sidebarLeadingZeroClass = legacyClass(stylex.props(styles.sidebarLeftZero).className);
+export const sidebarTrailingZeroClass = legacyClass(
+  stylex.props(styles.sidebarRightZero).className
+);
+export const sidebarUncollapsedGeometryClass = legacyClass(
+  stylex.props(styles.heightFull, styles.sidebarVariableWidth).className
+);
+export const sidebarVariableWidthClass = legacyClass(
+  stylex.props(styles.sidebarVariableWidth).className
+);
+export const sidebarRailGeometryClass = legacyClass(
+  stylex.props(
+    styles.dragAbsolute,
+    styles.sidebarViewportInset,
+    styles.sidebarRailIndex,
+    styles.sidebarHidden,
+    styles.sidebarRailWidth
+  ).className
+);

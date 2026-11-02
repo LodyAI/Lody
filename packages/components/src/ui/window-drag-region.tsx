@@ -1,3 +1,14 @@
+import {
+  windowWindowsBorderClass,
+  windowWindowsPlainClass,
+  windowMacFrameBorderClass,
+  windowMacFramePlainClass,
+  windowMacBorderClass,
+  windowMacPlainClass,
+  windowFixedClass,
+  windowAbsoluteClass,
+  windowStripInsetsClass,
+} from '@/style/legacy-defaults.stylex';
 import { cn } from '@/lib/utils';
 import {
   isElectronRenderer,
@@ -41,7 +52,7 @@ export function useWindowsCaptionRowPadClass({
 }: { bottomBorder?: boolean } = {}): string | undefined {
   const fullscreen = useElectronFullscreen();
   if (!isWindowsElectronRenderer() || fullscreen) return undefined;
-  return bottomBorder ? 'pb-[7px]' : 'pb-2';
+  return bottomBorder ? windowWindowsBorderClass : windowWindowsPlainClass;
 }
 
 // macOS traffic lights are centered at y=23 (`trafficLightPosition.y` 16 + 7px
@@ -58,8 +69,9 @@ export function useMacTrafficLightRowPadClass({
   // their content back onto the fixed y=23 native centreline while retaining
   // a real gap between 28px controls and the card edge. A bordered h-11 row
   // has one fewer content pixel, so it needs one fewer padding pixel.
-  if (insideWorkspaceFrame) return bottomBorder ? 'pb-[5px]' : 'pb-[6px]';
-  return bottomBorder ? 'pt-[3px]' : 'pt-[2px]';
+  if (insideWorkspaceFrame)
+    return bottomBorder ? windowMacFrameBorderClass : windowMacFramePlainClass;
+  return bottomBorder ? windowMacBorderClass : windowMacPlainClass;
 }
 
 export function WindowDragStrip({
@@ -78,8 +90,8 @@ export function WindowDragStrip({
       className={cn(
         WINDOW_DRAG_REGION_CLASS,
         WINDOW_DRAG_REGION_HEIGHT_CLASS,
-        position === 'fixed' ? 'fixed' : 'absolute',
-        'inset-x-0 top-0 z-10',
+        position === 'fixed' ? windowFixedClass : windowAbsoluteClass,
+        windowStripInsetsClass,
         className
       )}
     />

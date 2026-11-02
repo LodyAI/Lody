@@ -63,6 +63,16 @@ describe('closed legacy declaration bridge', () => {
       'flex w-full items-center [width:0px]'
     );
     expect(cn(actualBindings.sidebarStackLayoutClass, 'gap-4 p-0')).toBe('flex flex-col gap-4 p-0');
+    expect(cn(actualBindings.windowFixedClass, 'absolute')).toBe('absolute');
+    expect(cn(actualBindings.windowStripInsetsClass, 'inset-x-4 z-30')).toBe(
+      'top-0 inset-x-4 z-30'
+    );
+    expect(cn(actualBindings.sidebarDockFrameClass, 'relative w-9')).toBe(
+      'inset-y-0 z-10 hidden relative w-9'
+    );
+    expect(cn(actualBindings.sidebarRailGeometryClass, 'relative z-0')).toBe(
+      'inset-y-0 hidden w-4 relative z-0'
+    );
     // This cn-only input must not add a production CSS candidate through test scanning.
     const minHeightCaller = `[${['min-height', '60px'].join(':')}]`;
     expect(cn(actualBindings.sidebarContentLayoutClass, minHeightCaller)).toBe(

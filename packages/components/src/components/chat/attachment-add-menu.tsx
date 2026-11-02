@@ -11,6 +11,7 @@ import {
   attachmentMobileRowClass,
   attachmentMobileBlockClass,
   attachmentIntrinsicWidthClass,
+  acpMediumWeightClass,
 } from '@/style/legacy-defaults.stylex';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
@@ -249,7 +250,7 @@ export function AttachmentAddMenu({
           // from the right, the root returns from the left.
           <div key="mcp" {...stylex.props(styles.panelFromRight)}>
             <Menu.Item
-              className={cn(itemClass, 'font-medium')}
+              className={cn(itemClass, acpMediumWeightClass)}
               closeOnClick={false}
               onClick={() => setView('root')}
               icon={ChevronLeft}

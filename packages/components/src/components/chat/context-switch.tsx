@@ -13,6 +13,7 @@ import {
   contextMaximumClass,
   contextCornerClass,
   contextMutedClass,
+  acpMediumWeightClass,
 } from '@/style/legacy-defaults.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -173,7 +174,7 @@ export function ContextSwitch({
   const triggerClassName = cn(
     stylex.props(styles.tabTypography).className,
     contextRemainderClass,
-    'rounded-md py-1.5 font-medium transition-all',
+    `rounded-md py-1.5 ${acpMediumWeightClass} transition-all`,
     triggerJustifyClassName,
     isDark
       ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'

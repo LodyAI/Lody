@@ -9,16 +9,16 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过八十九个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu及message actions共二百一十四个utility位置使用的六十八个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
+把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百零四个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions及window-drag几何共二百四十五个utility位置使用的八十六个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
 
 ## 归属与编译
 
-| Owner                                                                                                          | 职责                                                                      |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 六十九个StyleX key、七十条物理声明及八十九个源码scalar／group class绑定。 |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留六十九alias。  |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                               |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                            |
+| Owner                                                                                                          | 职责                                                                          |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 八十七个StyleX key、八十八条物理声明及一百零四个源码scalar／group class绑定。 |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留八十七alias。      |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                                   |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                                |
 
 ```mermaid
 flowchart LR
@@ -31,7 +31,7 @@ flowchart LR
   N[普通StyleX收集器] --> P[普通StyleX产物]
 ```
 
-pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及八十九个批准的
+pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及一百零四个批准的
 stylex.props绑定，以锁定原生compiler折叠后输出原有顺序的旧class字符串。动态值、条件、
 namespace逃逸、混合class构造及不安全query loader均拒绝；缺少adapter时源码模块直接抛错。
 
@@ -74,7 +74,7 @@ Babel7.29.7、StyleX0.19.0、PostCSS8.5.6，trace-mapping0.3.31核map；版本�
 StyleX、祖先及真正Radix Slot的优先级。原366px container query及冻结transition utility沿用旧路径。
 DOM、ref、事件、disabled及响应式行为不迁入adapter。
 
-二百一十四个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。六十九alias及二百一十四个编译后输出出现次数
+二百四十五个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。八十七alias及二百四十五个编译后输出出现次数
 仍是明确兼容依赖。v2 scanner仍只报告它识别的AST次数；桥的已知输出另列，并加回保守剩余边界。
 精确源码切面及数字由[迁移Note](2026-10-22-tailwind-to-stylex-migration.zh.md#公开调用方与剩余层叠边界)负责。
 
@@ -211,9 +211,9 @@ consumer信用。
 unsettled-await失败；该检查产生的源码已保留并恢复为锁定字节，不据此声称正常cleanup。
 
 236–240继续转移三十个声明归属位置，净utility移除为零：Composer底色七处、LoroSidebar十处、
-AttachmentAddMenu五处、message-action chrome七处及ACP字重pair一处。当前bank为69 key、
+AttachmentAddMenu五处、message-action chrome七处及ACP字重pair一处。236–240的bank为69 key、
 70物理声明、89绑定、32种CSS属性（含私有字重writer），214个保留输出仍依赖原Tailwind alias
-与排序。当前Root组合构建／浏览器资格与以下隔离单元报告分列。
+与排序。该Root组合构建／浏览器资格与以下隔离单元报告分列。
 
 | 单元               | 真实验收                                                     | 保留限制                                                                                                                                                                      |
 | ------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -225,6 +225,23 @@ AttachmentAddMenu五处、message-action chrome七处及ACP字重pair一处。�
 
 leaves236至leaves240的delivery、HTML及独审保留实际输入、URL载体、原失败及cleanup结果。
 新PNG／CSS同不关闭原像素、hover字段或device限制。message resting opacity保持精确raw的0%。
+
+已验236–240 Root组合有50真实对，44PNG同、六像素OPEN共30,840raw／201threshold，
+另一个dark Drawer有三个hover状态字段差。175个精确URL载体已验，双侧pre／post完整对象稳定；
+六build保持108CSS对同，稳定组件回归620文件／6,257测试通过。资格属于冻结69key／70声明／89绑定切面。
+
+下一已集成241／242／244切面转移31位置，净移除零；87key／88物理声明／104绑定覆盖40种属性，
+245输出继续保旧合同。其组合验证与以下隔离报告分列，不包含243。
+
+| 单元                   | 真实验收                                                                                                 | 保留限制                                                                                                                                                                                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Window几何241          | 最终缩小八对PNG／RGBA同，944body／72target；107CSS同，全部公开导出类型精确保持。                         | 原14位置虽26PNG同，两个公开常量literal拓宽string而被拒；三位置保原常量，caption padding因raw不等亦保TW。合成IPC几何不证明OS拖拽／fullscreen。                                           |
+| 既有字重pair242        | 四consumer五位置复用既有pair；108CSS及完整编译bank同，35正式对30PNG同。                                  | 五OPEN共216,383raw／66,585threshold，一个自然mobile Back端点有27个相连focus／高亮字段差，原时序未采；另一个Back→Home对同不关闭原端点。                                                  |
+| Sidebar frame／Rail244 | 十五位置，30对28PNG同，3,988body／117target与107CSS同；最终无关格式复原的实际prod JS及389个Oxide候选同。 | 两UA Drawer OPEN共32,151raw／零阈值，最大通道差1；两个viewport高度alias有额外supports回退，仍保TW。误删Provider候选和失效的首次AST visitor均保留，非验收。legacy Sidebar不在实际App图。 |
+
+完整AST checker以void callback遍历每个child，保JSX text；第二statement变异与误删Provider均拒。
+整文件逆还原保护未拥有源码字节；后置纯格式资格不是新final-source build、截图或debug map字节同。
+各delivery与独审拥有精确版本、raw对照、负控及报告自身修正。
 
 ## 仍约束设计的被拒路径
 
