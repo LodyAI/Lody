@@ -1,10 +1,17 @@
 import { parseGitHubPullRequestUrl } from './github-url';
-import type {
-  PrStatus,
-  SessionMeta,
-  SessionPullRequestLifecycle,
-  SessionPullRequestLifecycleFields,
-  SessionPullRequestMeta,
+import { resolveProjectGitHubRepo } from './project';
+import {
+  deriveSessionPullRequestReadiness,
+  getSessionPullRequestLegacyFields,
+  type PrStatus,
+  type SessionMeta,
+  type SessionPullRequestCiState,
+  type SessionPullRequestLifecycle,
+  type SessionPullRequestLifecycleFields,
+  type SessionPullRequestMergeState,
+  type SessionPullRequestMeta,
+  type SessionPullRequestReadiness,
+  type SessionPullRequestStateMeta,
 } from './schema';
 
 // GitHub revisions have second precision. Conflicting observations of the same
@@ -92,4 +99,112 @@ export function resolveSessionPullRequests(
     const lifecycle = readPullRequestLifecycle(meta ?? undefined, pr.url);
     return lifecycle && lifecycle.s !== pr.status ? { ...pr, status: lifecycle.s } : pr;
   });
+}
+
+/**
+ * Everything a surface needs to summarize one associated PR. Every summary
+ * (sidebar, task list, Info Bar, actions) reads these views, so two surfaces
+ * showing the same metadata cannot disagree. Live detail reads never feed them.
+ */
+export type SessionPullRequestView = {
+  url: string;
+  repoFullName: string | null;
+  number: number | null;
+  status: PrStatus;
+  ci: SessionPullRequestCiState | null;
+  merge: SessionPullRequestMergeState | null;
+  readiness: SessionPullRequestReadiness | null;
+  /** The last associated PR of its repository: the reconciler's current PR. */
+  current: boolean;
+  /** Resolved association entry, legacy detail fields included. */
+  pr: SessionPullRequestMeta;
+  state: SessionPullRequestStateMeta | null;
+};
+
+/**
+ * The metadata the views derive from. Explicit subscribe/unsubscribe records
+ * join this type and are merged with the discovered association list in
+ * `resolveSessionPullRequestViews` only.
+ */
+export type SessionPullRequestViewSource = SessionPullRequestSource &
+  Partial<Pick<SessionMeta, 'pullRequestState' | 'project' | 'projectRun' | 'repoFullName'>>;
+
+export function resolveSessionPullRequestViews(
+  meta: SessionPullRequestViewSource | null | undefined
+): SessionPullRequestView[] {
+  const prs = resolveSessionPullRequests(meta);
+  const lastIndexByRepo = new Map<string, number>();
+  const parsed = prs.map((pr) => parseGitHubPullRequestUrl(pr.url));
+  parsed.forEach((parts, index) => {
+    if (parts) lastIndexByRepo.set(parts.repoFullName.toLowerCase(), index);
+  });
+  return prs.map((pr, index) => {
+    const parts = parsed[index];
+    const legacy = getSessionPullRequestLegacyFields(pr);
+    const state = meta?.pullRequestState?.[pr.url] ?? null;
+    return {
+      url: pr.url,
+      repoFullName: legacy.repository?.trim() || parts?.repoFullName || null,
+      number:
+        typeof legacy.number === 'number' && Number.isFinite(legacy.number)
+          ? legacy.number
+          : (parts?.prNumber ?? null),
+      status: pr.status,
+      ci: state?.s ?? null,
+      merge: state?.m ?? null,
+      readiness: deriveSessionPullRequestReadiness(state),
+      current: !!parts && lastIndexByRepo.get(parts.repoFullName.toLowerCase()) === index,
+      pr,
+      state,
+    };
+  });
+}
+
+/**
+ * The PR a single-PR surface shows. `repository` undefined keeps the legacy
+ * whole-session rule (newest legacy `reportedAt`, else the last association);
+ * a name restricts it to that repository; `null` means a Member without a
+ * GitHub repository, which has no PR.
+ */
+export function selectPrimarySessionPullRequest(
+  views: readonly SessionPullRequestView[],
+  repository?: string | null
+): SessionPullRequestView | null {
+  if (repository === null) return null;
+  const target = repository?.trim().toLowerCase();
+  const candidates = target
+    ? views.filter(
+        (view) => parseGitHubPullRequestUrl(view.url)?.repoFullName.toLowerCase() === target
+      )
+    : views;
+  if (!candidates.some((view) => getSessionPullRequestLegacyFields(view.pr).reportedAt)) {
+    return candidates[candidates.length - 1] ?? null;
+  }
+  return (
+    [...candidates].sort((a, b) =>
+      (getSessionPullRequestLegacyFields(b.pr).reportedAt ?? '').localeCompare(
+        getSessionPullRequestLegacyFields(a.pr).reportedAt ?? ''
+      )
+    )[0] ?? null
+  );
+}
+
+/**
+ * The session's primary PR as the Info Bar describes it by default. A Project
+ * group, or a caller naming the active repository, describes one repository;
+ * otherwise the whole session's latest PR.
+ */
+export function resolveSessionPrimaryPullRequest(
+  meta: SessionPullRequestViewSource | null | undefined,
+  activeRepository?: string | null
+): SessionPullRequestView | null {
+  const legacyRepository =
+    (resolveProjectGitHubRepo(meta?.project) ?? meta?.repoFullName)?.trim() || null;
+  const repository =
+    activeRepository !== undefined
+      ? activeRepository?.trim() || null
+      : meta?.projectRun
+        ? legacyRepository
+        : undefined;
+  return selectPrimarySessionPullRequest(resolveSessionPullRequestViews(meta), repository);
 }
