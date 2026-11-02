@@ -153,6 +153,21 @@ describe('session PR views', () => {
     ]);
   });
 
+  it('identifies each PR by its URL even when legacy fields disagree', () => {
+    const views = resolveSessionPullRequestViews({
+      pullRequests: [
+        { url: api, status: 'open', repository: 'example/web', number: 99 },
+      ] as SessionMeta['pullRequests'],
+    });
+    expect([views[0]?.repoFullName, views[0]?.number, views[0]?.current]).toEqual([
+      'example/api',
+      7,
+      true,
+    ]);
+    expect(selectPrimarySessionPullRequest(views, 'example/api')?.url).toBe(api);
+    expect(selectPrimarySessionPullRequest(views, 'example/web')).toBeNull();
+  });
+
   it('keeps legacy reportedAt ordering when choosing the primary PR', () => {
     const views = resolveSessionPullRequestViews({
       pullRequests: [

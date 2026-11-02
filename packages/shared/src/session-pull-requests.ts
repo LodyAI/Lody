@@ -101,11 +101,8 @@ export function resolveSessionPullRequests(
   });
 }
 
-/**
- * Everything a surface needs to summarize one associated PR. Every summary
- * (sidebar, task list, Info Bar, actions) reads these views, so two surfaces
- * showing the same metadata cannot disagree. Live detail reads never feed them.
- */
+/** Summary of one associated PR. Identity comes from its URL; deprecated legacy
+ *  `repository`/`number` fields apply only when the URL does not parse. */
 export type SessionPullRequestView = {
   url: string;
   repoFullName: string | null;
@@ -121,11 +118,6 @@ export type SessionPullRequestView = {
   state: SessionPullRequestStateMeta | null;
 };
 
-/**
- * The metadata the views derive from. Explicit subscribe/unsubscribe records
- * join this type and are merged with the discovered association list in
- * `resolveSessionPullRequestViews` only.
- */
 export type SessionPullRequestViewSource = SessionPullRequestSource &
   Partial<Pick<SessionMeta, 'pullRequestState' | 'project' | 'projectRun' | 'repoFullName'>>;
 
@@ -133,27 +125,34 @@ export function resolveSessionPullRequestViews(
   meta: SessionPullRequestViewSource | null | undefined
 ): SessionPullRequestView[] {
   const prs = resolveSessionPullRequests(meta);
+  const identities = prs.map((pr) => {
+    const parts = parseGitHubPullRequestUrl(pr.url);
+    const legacy = getSessionPullRequestLegacyFields(pr);
+    return {
+      repoFullName: parts?.repoFullName ?? (legacy.repository?.trim() || null),
+      number:
+        parts?.prNumber ??
+        (typeof legacy.number === 'number' && Number.isFinite(legacy.number)
+          ? legacy.number
+          : null),
+    };
+  });
   const lastIndexByRepo = new Map<string, number>();
-  const parsed = prs.map((pr) => parseGitHubPullRequestUrl(pr.url));
-  parsed.forEach((parts, index) => {
-    if (parts) lastIndexByRepo.set(parts.repoFullName.toLowerCase(), index);
+  identities.forEach(({ repoFullName }, index) => {
+    if (repoFullName) lastIndexByRepo.set(repoFullName.toLowerCase(), index);
   });
   return prs.map((pr, index) => {
-    const parts = parsed[index];
-    const legacy = getSessionPullRequestLegacyFields(pr);
+    const { repoFullName, number } = identities[index]!;
     const state = meta?.pullRequestState?.[pr.url] ?? null;
     return {
       url: pr.url,
-      repoFullName: legacy.repository?.trim() || parts?.repoFullName || null,
-      number:
-        typeof legacy.number === 'number' && Number.isFinite(legacy.number)
-          ? legacy.number
-          : (parts?.prNumber ?? null),
+      repoFullName,
+      number,
       status: pr.status,
       ci: state?.s ?? null,
       merge: state?.m ?? null,
       readiness: deriveSessionPullRequestReadiness(state),
-      current: !!parts && lastIndexByRepo.get(parts.repoFullName.toLowerCase()) === index,
+      current: !!repoFullName && lastIndexByRepo.get(repoFullName.toLowerCase()) === index,
       pr,
       state,
     };
@@ -173,9 +172,7 @@ export function selectPrimarySessionPullRequest(
   if (repository === null) return null;
   const target = repository?.trim().toLowerCase();
   const candidates = target
-    ? views.filter(
-        (view) => parseGitHubPullRequestUrl(view.url)?.repoFullName.toLowerCase() === target
-      )
+    ? views.filter((view) => view.repoFullName?.toLowerCase() === target)
     : views;
   if (!candidates.some((view) => getSessionPullRequestLegacyFields(view.pr).reportedAt)) {
     return candidates[candidates.length - 1] ?? null;

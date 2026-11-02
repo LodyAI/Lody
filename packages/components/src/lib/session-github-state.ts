@@ -41,19 +41,18 @@ export type SessionGitHubState = {
 
 export const getPullRequestNumber = (
   pr: SessionPullRequestMeta | null | undefined
-): number | null =>
-  typeof getSessionPullRequestLegacyFields(pr).number === 'number' &&
-  Number.isFinite(getSessionPullRequestLegacyFields(pr).number)
-    ? (getSessionPullRequestLegacyFields(pr).number ?? null)
-    : pr?.url
-      ? (parseGitHubPullRequestUrl(pr.url)?.prNumber ?? null)
-      : null;
+): number | null => {
+  const parsed = pr?.url ? parseGitHubPullRequestUrl(pr.url)?.prNumber : undefined;
+  if (parsed !== undefined) return parsed;
+  const legacy = getSessionPullRequestLegacyFields(pr).number;
+  return typeof legacy === 'number' && Number.isFinite(legacy) ? legacy : null;
+};
 
 export const getPullRequestRepoFullName = (
   pr: SessionPullRequestMeta | null | undefined
 ): string | null =>
-  getSessionPullRequestLegacyFields(pr).repository?.trim() ||
-  (pr?.url ? (parseGitHubPullRequestUrl(pr.url)?.repoFullName ?? null) : null);
+  (pr?.url ? parseGitHubPullRequestUrl(pr.url)?.repoFullName : undefined) ??
+  (getSessionPullRequestLegacyFields(pr).repository?.trim() || null);
 
 export const resolveWorkspaceOwnerSession = (
   session: SessionMeta | null | undefined,
