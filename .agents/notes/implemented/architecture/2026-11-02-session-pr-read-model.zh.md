@@ -23,10 +23,11 @@ Translation: current
 3. **多仓库一致**：多仓库项目会话的侧边栏行显示其旧版仓库（`project` 的仓库，否则 `repoFullName`）的 PR，即 Info Bar 未选择成员时显示的那个 PR。
 4. **订阅接口点**：将来的显式订阅/退订记录会加入 `SessionPullRequestViewSource`，并且只在 `resolveSessionPullRequestViews` 内部与发现的关联列表合并。目前还没有相应字段、存储或订阅行为。
 5. **Info Bar 只显示主 PR**；显示多个 PR 留待后续。
-6. **CI 状态标记**：标记的结论和弹层标题使用元数据 CI 代码（`s` 通过；`f`/`e` 失败；`p`/`x` 运行中），实时 run 只用于列出各项检查。元数据没有 CI 代码时，结论退回由 run 计算；此时侧边栏不显示 CI，二者不会矛盾。
+6. **CI 状态标记**：标记的结论和弹层标题使用元数据 CI 代码（`s` 通过；`f`/`e` 失败；`p`/`x` 运行中），与侧边栏图标和 Fix CI 的显示条件读取同一个代码。实时 run 只用于列出各项检查；元数据没有 CI 代码时，标记不给结论。
 7. **提速**：打开会话会发布查看状态，协调器把该会话放入高频档：到期的目标在约 1 秒防抖后立即查询，之后每 20 秒一次。托管 webhook 几乎即时写入生命周期寄存器。档位和协调器配置都没有改动。
-8. **拉取 hook**：挂载时和服务端失效时的读取都传 `{ cache: 'reload' }`，使 PR 标签页和 run 列表与轮询同样及时。
-9. **操作后的一致性**：`use-awaited-pr-status.ts` 在合并或标记 ready 成功后让按钮保持进行中，直到元数据状态到达目标，最多 15 秒；切换到别的 PR 时不会继承这个等待。
+8. **拉取 hook**：每个分片的读取都传 `{ cache: 'reload' }`；hook 不再提供缓存模式参数，所以绕过缓存的读取不会并入一条走缓存的在途请求，也就不会把旧内容记成新读取。
+9. **操作后的一致性**：`mergePullRequest` 和 `markReadyForReview` 只在 GitHub 确实合并了 PR、或 ready 转换确实生效时返回 `true`。只有这时，`use-awaited-pr-status.ts` 才让按钮保持进行中，直到元数据状态到达目标，最多 15 秒；切换到别的 PR 时不会继承这个等待。
+10. **身份**：视图的仓库和编号取自 URL；已废弃的 `repository`/`number` 字段只在 URL 无法解析时使用。判断当前 PR、选择主 PR 和项目成员行都使用同一个仓库键。
 
 ## 备选方案
 
@@ -44,7 +45,8 @@ Translation: current
 
 - `packages/shared/tests/session-pull-requests.test.ts`（"session PR views"）：多仓库、旧版 `reportedAt` 排序、生命周期寄存器胜出、缺失 `pullRequestState`、多仓库项目的主 PR。
 - `packages/components/tests/session-list-rows.test.ts`：侧边栏行、任务列表和 `getSessionGitHubState` 指向同一个多仓库项目 PR。
-- `packages/components/tests/session-info-context-actions.test.tsx`：即使实时 run 失败，chip 仍显示元数据中的 CI 结论。
-- `packages/components/tests/use-github-pr-details.test.ts`：挂载和失效触发的读取使用 `cache: 'reload'`。
+- `packages/components/tests/session-info-context-actions.test.tsx`：即使实时 run 失败，chip 仍显示元数据中的 CI 结论；没有元数据时不给结论；PR 标签使用 URL 中的编号。
+- `packages/components/tests/session-project-members.test.ts` 和共享视图测试：过时的旧版 `repository`/`number` 字段不会让 PR 归到错误的仓库。
+- `packages/components/tests/use-github-pr-details.test.ts`：挂载、失效触发和可合并性轮询的读取都使用 `cache: 'reload'`；合并和 ready 只在确实完成时报告完成。
 - `packages/components/tests/use-awaited-pr-status.test.tsx`（假时钟）：状态到达目标或超时后等待结束，且不会跨 PR 延续。
 - 未验证：运行中的托管应用、真实 webhook 和轮询延迟，以及归档行（没有渲染测试；它调用的是已测试的选择函数）。

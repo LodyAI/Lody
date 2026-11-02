@@ -67,19 +67,25 @@ client's 15 s poll to the reconciler's 20 s high lane; this is not measured.
 5. **The Info Bar shows only the primary PR**; listing several is follow-up
    work.
 6. **CI pill.** The pill's verdict and the popover header use the metadata CI
-   code (`s` passed; `f`/`e` failed; `p`/`x` running). Live runs only list the
-   checks. When metadata has no CI code, the verdict falls back to the runs;
-   the sidebar then shows no CI, so they do not contradict.
+   code (`s` passed; `f`/`e` failed; `p`/`x` running), the same code the
+   sidebar icon and the Fix CI gate read. Live runs only list the checks; with
+   no metadata code the pill gives no verdict.
 7. **Speed.** Opening a session publishes viewing presence. The reconciler
    moves the session to the high lane: a due target is polled after the ~1 s
    viewer debounce, then every 20 s. Hosted webhooks write lifecycle registers
    almost immediately. Neither the lanes nor the reconciler configuration
    changed.
-8. **Fetch hook.** Mount and server-invalidation reads pass
-   `{ cache: 'reload' }`, so the PR tab and run rows are as timely as the poll.
-9. **Agreement after actions.** `use-awaited-pr-status.ts` keeps a successful
-   merge or ready-for-review pending until the metadata status reaches its
-   target, for at most 15 s. A different PR never inherits the wait.
+8. **Fetch hook.** Every slice read passes `{ cache: 'reload' }`; the hook has
+   no cache-mode option, so a reload read can never join a cached in-flight
+   read and record a stale body as fresh.
+9. **Agreement after actions.** `mergePullRequest` and `markReadyForReview`
+   resolve `true` only when GitHub merged the PR or the ready transition
+   landed. Only then does `use-awaited-pr-status.ts` keep the button pending
+   until the metadata status reaches its target, for at most 15 s. A different
+   PR never inherits the wait.
+10. **Identity.** A view's repository and number come from its URL; the
+    deprecated `repository`/`number` fields apply only when the URL does not
+    parse. Currency, primary selection and Member rows use that same key.
 
 ## Alternatives
 
@@ -113,9 +119,13 @@ client's 15 s poll to the reconciler's 20 s high lane; this is not measured.
 - `packages/components/tests/session-list-rows.test.ts`: sidebar row, task
   list and `getSessionGitHubState` name the same Project-group PR.
 - `packages/components/tests/session-info-context-actions.test.tsx`: the chip
-  renders the metadata CI verdict even when a live run fails.
-- `packages/components/tests/use-github-pr-details.test.ts`: mount and
-  invalidation reads use `cache: 'reload'`.
+  renders the metadata CI verdict even when a live run fails, gives none
+  without metadata, and labels the PR with its URL number.
+- `packages/components/tests/session-project-members.test.ts` and the shared
+  view test: a stale legacy `repository`/`number` never moves a PR.
+- `packages/components/tests/use-github-pr-details.test.ts`: mount,
+  invalidation and mergeability-poll reads use `cache: 'reload'`; merge and
+  ready report completion only when it happened.
 - `packages/components/tests/use-awaited-pr-status.test.tsx` (fake clock):
   the wait ends when status agrees or after the timeout, and never crosses PRs.
 - Not verified: the running hosted app, real webhook and poller latency, and
