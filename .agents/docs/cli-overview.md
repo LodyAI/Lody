@@ -52,6 +52,13 @@ lookups still resolve flat sibling files; dependency chunks may remain in `chunk
 The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30-internal-mcp-command-loading.md)
 records the measured scope and why process isolation is retained.
 
+Production CLI builds emit imported WASM binaries under `dist/assets/`. Their ESM
+wrappers read module-relative file URLs, and both the npm package and embedded
+desktop copy carry those files. Electron packaging compares their bytes against
+the staged assets on every target. `zstd.wasm` retains its separate entry-relative
+loader and copy step. The [WASM asset decision](../notes/implemented/architecture/2026-11-02-cli-wasm-assets.md)
+explains the resident-memory cost of embedding these binaries in JavaScript.
+
 The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
 manifest that actually gets published (cloud builds point it at the private composing package). A
 relative `../package.json` import bakes the stale OSS version into the published bundle — that is

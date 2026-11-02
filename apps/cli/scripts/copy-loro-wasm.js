@@ -18,8 +18,8 @@ function copyWasm() {
   const outputDir = path.resolve(__dirname, '..', 'dist');
   ensureDir(outputDir);
 
-  // Vite embeds flock-wasm and emits loro-crdt wasm as a JS chunk, but streams-crdt
-  // expects zstd.wasm to exist next to the bundled CLI entry at runtime.
+  // The build emits imported Loro/Flock WASM under assets/, while streams-crdt
+  // expects zstd.wasm next to the bundled CLI entry at runtime.
   const zstdEntrypoint = fileURLToPath(import.meta.resolve('@loro-dev/streams-crdt/zstd'));
   const zstdSourcePath = path.join(path.dirname(zstdEntrypoint), 'zstd.wasm');
   const zstdDestinationPath = path.join(outputDir, 'zstd.wasm');
