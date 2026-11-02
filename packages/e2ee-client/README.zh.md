@@ -7,8 +7,10 @@
 每次重开都重新验签，并核对原快照的 head、数量和同位状态。审批原件、快照字节和 offset、
 feed 与回滚 pin 均不改变。旧快照安装首次接入该能力时需要联网补证一次，之后可用保存的
 证明离线重开。坏证明不保存，也不触发重置。未提供此可选能力的 host 保留既有快照合同。
-控制页用真实 ledger view 中已验证的前缀哈希检查连续性；稀疏导出缺少原始记录正文不等于
-分叉。Reset history position 只清页面观察位置，既不补证，也不删除 host 的持久 pin。
+runtime 导出合并已保存的审批原件和本地后缀，每个绝对位置都对照 host 的真实 view 核验。
+保留状态序列化不含旧哈希，因此原件齐全时，页面在相同导出 head 和 state digest 下重放
+原件以恢复前缀证明；稀疏导出不虚构前缀。Reset history position 只清页面观察位置，既不
+补证，也不删除 host 的持久 pin。
 
 `@lody/e2ee-client` 是可选的平台中立产品组合，使用现有 `@lody/e2ee-core`。
 包内没有 Node、Electron、文件系统、SQLite、默认账号或云端地址。桌面消费共享的

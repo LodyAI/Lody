@@ -149,8 +149,11 @@ proof is never saved or treated as permission to reset. Hosts without this optio
 capability retain their existing snapshot-only contract.
 
 Control-page continuity checks use the genuine ledger view, including its verified
-prefix hashes. A snapshot feed may omit raw record bodies from its sparse export;
-their absence is not evidence of a fork. Reset history position only clears renderer
+prefix hashes. Runtime exports merge retained approval originals with the local suffix;
+each absolute position is checked against the host's genuine view. When complete
+originals are available, the renderer replays them against the same exported head and
+state digest because retained-state serialization omits older hashes. Sparse exports
+do not invent a prefix. Reset history position only clears renderer
 observations; it neither supplies missing proof nor removes the host's durable pin.
 
 `personalLedgerControl({ approval })` composes a persistent `LedgerFeed` over

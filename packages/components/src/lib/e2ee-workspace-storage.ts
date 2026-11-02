@@ -1,9 +1,5 @@
 import type { WorkspaceAdmissionDescriptor, WorkspaceModeDescriptor } from '@lody/cloud-api';
-import {
-  bytesToHex,
-  type ObservedLedgerCheckpoint,
-  type VerifiedLedgerHistory,
-} from './e2ee-ledger-history';
+import type { ObservedLedgerCheckpoint, VerifiedLedgerHistory } from './e2ee-ledger-history';
 import { Result } from 'effect';
 import * as Hex from 'effect/encoding/Hex';
 import { Bytes, hasVerifiedCheckpoint } from '@lody/e2ee-core/protocol';
@@ -500,7 +496,7 @@ export function retainObservedLedgerCheckpoint(
       throw conflict('Ledger history changed');
   }
   if (pending) return false;
-  const head = bytesToHex(history.view.head.toBytes());
+  const head = Hex.encode(history.view.head.toBytes());
   if (!head || history.page.workspaceId !== workspaceId)
     throw new Error('Invalid verified history');
   // Immutable per-checkpoint keys keep another window's newer observation even

@@ -56,6 +56,7 @@ it.each(
       let page = await context.newPage();
       await page.goto(pathToFileURL(file).href);
       await page.evaluate(async (fixtureScenario) => {
+        localStorage.setItem('empty-local-originals', 'true');
         if (fixtureScenario !== 'saved-snapshot')
           localStorage.setItem('qualify-approval-history', 'true');
         await (globalThis as Surface).HostFixture.boot();
@@ -91,6 +92,7 @@ it.each(
         await good(page, 'claim');
       }
       expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
       expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
       await good(page, 'close');
       await context.close();
@@ -103,6 +105,7 @@ it.each(
         await (globalThis as Surface).HostFixture.bootRuntime();
       });
       expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
       await good(page, 'close');
     } finally {
       await context?.close();

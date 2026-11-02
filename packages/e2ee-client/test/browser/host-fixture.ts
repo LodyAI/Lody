@@ -1315,9 +1315,11 @@ export async function bootRuntime(withSharing = false) {
           : Effect.succeed({ userId: runtimeAccount, source: 'offline' as const }),
       ledgerRecords: (checked) =>
         Effect.succeed(
-          records
-            .slice(checked.historyStart, checked.length)
-            .map((record, index) => ({ position: checked.historyStart + index, record }))
+          localStorage.getItem('empty-local-originals')
+            ? []
+            : records
+                .slice(checked.historyStart, checked.length)
+                .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);

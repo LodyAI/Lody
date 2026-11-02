@@ -686,6 +686,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           })
         ),
       ledger: () => run(ledger()),
+      /** Public signed proof already verified and retained for this approval. */
+      approvalOriginals: () =>
+        run(
+          Effect.sync(() =>
+            approval.kind === 'history'
+              ? approval.pages.flatMap((page) => page.recordsHex.map(fromHex))
+              : []
+          )
+        ),
       refresh: () => run(serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())))),
       keyRound: () => run(keyRound()),
       status: () => run(status()),
