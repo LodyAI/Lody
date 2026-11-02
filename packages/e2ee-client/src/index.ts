@@ -1,5 +1,5 @@
 /** Platform-neutral personal-device product composition. No app activation or authenticated backend is supplied by default. */
-export { makePersonalDeviceHost } from './host';
+export { makePersonalDeviceHost, accountPairingOffer, ACCOUNT_PAIRING_ENDORSER } from './host';
 export {
   PersonalHostPlatform,
   PersonalHostRemote,

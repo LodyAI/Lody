@@ -4,6 +4,8 @@ import type { E2eeAccountPairingRuntime, E2eeWorkspaceRuntime } from '@lody/plat
 import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import type { AccountPairingRequesterWorkspace } from './account-pairing';
 import { verifyPersonalHistory } from './admission';
+import type { makePersonalDeviceHost } from './host';
+import { decodePersonalRequest } from './pairing';
 import { fromHex, toHex } from './bytes';
 
 /**
@@ -52,6 +54,37 @@ export interface AccountPairingIdentityHost {
   }): Effect.Effect<void, unknown>;
   /** Optional: open, refresh and run one key round right after installing. */
   activate?(): Effect.Effect<void, unknown>;
+}
+
+/** The portable personal device host of one workspace, as account pairing uses it.
+ * Identity protection stays with the host's platform custody. */
+export function personalHostAccountPairing(
+  host: Effect.Success<ReturnType<typeof makePersonalDeviceHost>>
+): AccountPairingIdentityHost {
+  return {
+    workspaceId: host.scope.workspaceId,
+    genesisHash: toHex(host.scope.genesis.toBytes()),
+    prepareAccountIdentity: (pin) =>
+      Effect.map(host.prepareAccount(pin), (prepared) => {
+        const request = decodePersonalRequest(prepared.requestHex);
+        return {
+          signingPublicKey: fromHex(request.signingPublicKey),
+          encryptionPublicKey: fromHex(request.encryptionPublicKey),
+          possessionProof: fromHex(request.possessionSignature),
+          credentialHash: fromHex(request.credentialHash),
+        };
+      }),
+    // Not tracked on portable hosts yet: an unfinished per-workspace join there is
+    // not reported as blocked (recorded limit).
+    pendingPersonalJoin: () => Effect.succeed(null),
+    acceptAccountInvitation: (input) =>
+      host.acceptAccount({
+        genesisRecordHex: input.genesisRecordHex,
+        membershipId: input.membershipId,
+        invitationHex: input.invitationHex,
+        endorser: input.endorser,
+      }),
+  };
 }
 
 export interface AccountPairingWorkspaceHint {

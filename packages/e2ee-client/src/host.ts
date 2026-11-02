@@ -49,8 +49,31 @@ import {
 import { openPersonalSession } from './session';
 import { fail } from './errors';
 import { toHex, fromHex } from './bytes';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
+/** Account-wide pairing has no per-workspace offer: the identity is prepared before
+ * any approver is known. Its fixed offer carries this placeholder endorser; the real
+ * one comes, tag-authenticated, with the approval and replaces it when verifying. */
+export const ACCOUNT_PAIRING_ENDORSER = '00'.repeat(32);
+/** The fixed per-workspace offer behind an account-pairing identity, so every later
+ * request and reopen finds the same identity and journal. */
+export function accountPairingOffer(
+  scope: { readonly workspaceId: string; readonly genesis: Bytes.GenesisHash },
+  pin: { readonly genesisRecordHex: string; readonly membershipId: string }
+): PersonalPairingOffer {
+  return {
+    version: 1,
+    workspaceId: scope.workspaceId,
+    genesisHash: toHex(scope.genesis.toBytes()),
+    genesisRecordHex: pin.genesisRecordHex,
+    endorser: ACCOUNT_PAIRING_ENDORSER,
+    membershipId: pin.membershipId,
+    pairingSessionId: toHex(
+      sha256(new TextEncoder().encode(`lody-e2ee/account-pairing-session/v1\0${scope.workspaceId}`))
+    ).slice(0, 32),
+  };
+}
 const parse = <A>(v: Uint8Array) =>
   Effect.try({ try: () => decode(v) as A, catch: (cause) => fail('corrupt', cause) });
 const key = (p: PreparedPersonalIdentity, purpose: 'claim' | 'approval') => ({
@@ -176,6 +199,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       kind: string;
       invitationHex?: string;
       origin?: { invitationHex: string; endorser: string };
+      /** Account pairing only: the approver named by the authenticated approval. */
+      endorser?: string;
     },
     pages?: unknown
   ) =>
@@ -187,7 +212,11 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           try: () => decodePersonalInvitation(descriptor.invitationHex!),
           catch: (cause) => fail('invalid-input', cause),
         });
-        const checked = yield* Effect.fromResult(verifyPersonalApproval(p.offer, invitation));
+        const endorser =
+          p.offer.endorser === ACCOUNT_PAIRING_ENDORSER ? descriptor.endorser : p.offer.endorser;
+        if (!endorser) return yield* fail('approval-required');
+        const pinned = { ...p.offer, endorser };
+        const checked = yield* Effect.fromResult(verifyPersonalApproval(pinned, invitation));
         approval = {
           kind: 'snapshot',
           offer: p.offer,
@@ -195,7 +224,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           view: checked.view,
           originalOrigin: {
             invitation,
-            endorser: Result.getOrThrow(Bytes.signingPublicKey(fromHex(p.offer.endorser))),
+            endorser: Result.getOrThrow(Bytes.signingPublicKey(fromHex(endorser))),
           },
         };
       } else if (descriptor.kind === 'history' && Array.isArray(pages)) {
@@ -228,6 +257,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           kind: string;
           invitationHex?: string;
           origin?: { invitationHex: string; endorser: string };
+          endorser?: string;
         }>(row.original);
         if (
           saved.version !== 1 ||
@@ -450,8 +480,38 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       );
       return undefined;
     });
+  /** Account pairing: verify an invitation for the given endorser against this
+   * device's prepared identity, and retain it as the approval original. */
+  const acceptAccount = (input: {
+    genesisRecordHex: string;
+    membershipId: string;
+    invitationHex: string;
+    endorser: string;
+  }) =>
+    Effect.gen(function* () {
+      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
+      const descriptor = {
+        kind: 'snapshot' as const,
+        invitationHex: input.invitationHex,
+        endorser: input.endorser,
+      };
+      const approval = yield* withIdentity(p, () => verifyApproval(p, descriptor));
+      yield* pairings.compareAndSet(key(p, 'approval'), null, {
+        revision: 1,
+        original: encode({ version: 1, offer: p.offer, requestHex: p.requestHex, ...descriptor }),
+        receipt: null,
+      });
+      return approval;
+    });
   return Object.freeze({
     close: () => close,
+    /** Account pairing: create or reuse this workspace's identity for a verified
+     * genesis record and membership. Protection comes from the platform's custody. */
+    prepareAccount: (pin: { genesisRecordHex: string; membershipId: string }) =>
+      run(prepare(accountPairingOffer(platform.scope, pin)).pipe(Effect.map(publicPrepared))),
+    acceptAccount: (input: Parameters<typeof acceptAccount>[0]) =>
+      run(Effect.asVoid(acceptAccount(input))),
     prepare: (offer: PersonalPairingOffer, replacement = false) =>
       run(prepare(offer, replacement).pipe(Effect.map(publicPrepared))),
     begin: (offer: PersonalPairingOffer, replacement = false) =>
