@@ -88,7 +88,7 @@ function WorkspaceControlRoute() {
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
   const scopeRef = useRef(scope);
-  const readOwner = useRef<object | null>(null);
+  const readOwner = useRef<{ publish?: () => Promise<void> } | null>(null);
   scopeRef.current = scope;
   const [state, setState] = useState<{
     scope: string;
@@ -154,7 +154,7 @@ function WorkspaceControlRoute() {
           }
     );
     if (!port || !accountId) return undefined;
-    const owner = {};
+    const owner: NonNullable<typeof readOwner.current> = {};
     readOwner.current = owner;
     void (async () => {
       try {
@@ -235,10 +235,12 @@ function WorkspaceControlRoute() {
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            let publication = 0;
             const publish = async () => {
               if (disposed) return;
+              const revision = ++publication;
               const exported = await runtime.ledgerView(workspaceId);
-              if (disposed) return;
+              if (disposed || revision !== publication) return;
               const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
@@ -253,6 +255,7 @@ function WorkspaceControlRoute() {
                   failure: null,
                 });
             };
+            owner.publish = publish;
             await publish();
             // A saved local view is visible before the first network request.
             try {
@@ -469,6 +472,27 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  const manageMember = async (work: () => Promise<void>) => {
+    const owner = readOwner.current;
+    if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
+    await work();
+    if (scopeRef.current !== scope || readOwner.current !== owner) return;
+    // A management result already advanced the native ledger. Read and verify it
+    // on this reader; rebuilding the effect creates an unnecessary no-reader gap.
+    setState((previous) => ({ ...previous, loading: true, failure: null }));
+    try {
+      await owner.publish();
+    } catch (error) {
+      if (scopeRef.current === scope && readOwner.current === owner)
+        setState((previous) => ({
+          ...previous,
+          loading: false,
+          failure: classifyE2eeControlFailure(error),
+          nativeStatus: undefined,
+        }));
+      throw error;
+    }
+  };
   const diagnostics = () => {
     let localPin: string | null = null;
     let observed: { length: number; headHash: string } | null = null;
@@ -557,7 +581,10 @@ function WorkspaceControlRoute() {
         )}
       <E2eeWorkspaceControlPage
         memberManagement={
-          current?.nativeStatus?.deviceKind === 'personal' &&
+          current?.scope === scope &&
+          !current.loading &&
+          !current.failure &&
+          current.nativeStatus?.deviceKind === 'personal' &&
           current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
@@ -565,14 +592,10 @@ function WorkspaceControlRoute() {
           port.runtime.setMemberRole
             ? {
                 actorRole: current.nativeStatus.memberRole,
-                remove: async (membershipId) => {
-                  await port.runtime!.removeMember!(workspaceId, membershipId);
-                  if (scopeRef.current === scope) refresh();
-                },
-                setRole: async (membershipId, role) => {
-                  await port.runtime!.setMemberRole!(workspaceId, membershipId, role);
-                  if (scopeRef.current === scope) refresh();
-                },
+                remove: (membershipId) =>
+                  manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
+                setRole: (membershipId, role) =>
+                  manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
               }
             : undefined
         }
