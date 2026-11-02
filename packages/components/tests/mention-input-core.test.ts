@@ -7,6 +7,7 @@ import {
   findMentionBeforeCursorForDeletion,
   getMentionValuesFromMentions,
   getTextDiff,
+  remapDismissedTrigger,
   removeMentionText,
   resolveMentionInsertPrefix,
 } from '../src/ui/mention/mention-input-core';
@@ -227,5 +228,23 @@ describe('resolveMentionInsertPrefix', () => {
     expect(resolveMentionInsertPrefix('hi\n', 3, true)).toBe('');
     expect(resolveMentionInsertPrefix('', 0, true)).toBe('');
     expect(resolveMentionInsertPrefix('hi', 2, false)).toBe('');
+  });
+
+  it('carries a dismissed trigger through edits by the mention range rule', () => {
+    const dismissed = { trigger: '@', index: 4, value: 'user@gm' };
+
+    expect(remapDismissedTrigger(dismissed, 'user@gm')).toBe(dismissed);
+    expect(remapDismissedTrigger(dismissed, 'user@gmail')).toEqual({
+      ...dismissed,
+      value: 'user@gmail',
+    });
+    expect(remapDismissedTrigger(dismissed, 'my user@gm')).toEqual({
+      ...dismissed,
+      index: 7,
+      value: 'my user@gm',
+    });
+    expect(remapDismissedTrigger(dismissed, 'usergm')).toBeNull();
+    expect(remapDismissedTrigger(dismissed, 'user')).toBeNull();
+    expect(remapDismissedTrigger(dismissed, '')).toBeNull();
   });
 });

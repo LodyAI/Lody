@@ -21,6 +21,52 @@ export function findTriggerCandidates(
   return candidates;
 }
 
+const EMAIL_LOCAL_PART_RE = /[A-Za-z0-9._%+-]$/;
+const EMAIL_DOMAIN_RE = /^(?:[A-Za-z0-9-]+\.)+[A-Za-z]*$/;
+
+/**
+ * Whether a trigger sits glued to non-whitespace text before it
+ * (`price$100`) rather than standing alone at the start of the input or after
+ * a space (`$review`, `hey $review`).
+ *
+ * Consumers: the word guard shared by every trigger the menu does not open
+ * mid-word (`$`, `/`, `、`) treats a glued trigger as part of code.
+ */
+export function isTriggerGluedToWord(value: string, triggerIndex: number): boolean {
+  const charBeforeTrigger = value[triggerIndex - 1] ?? '';
+  return charBeforeTrigger !== '' && !/\s/.test(charBeforeTrigger);
+}
+
+/**
+ * Whether the trigger and the query after it read as an email address being
+ * typed — an ASCII local part right against the trigger, then dotted domain
+ * labels whose last label is letters only, possibly still empty:
+ * `gabi@example.`, `gabi@example.co`, `me@mail.co.uk.`.
+ *
+ * Typing one is not a mention attempt: once the first dot is in, the menu gives
+ * up and stays closed through the rest of the address, so it is never matched
+ * against skills, files, or sessions and does not reopen on `example.com.`.
+ * Both halves must hold, so a mention is not mistaken for an address:
+ * - the character before the trigger must be a local-part character, which
+ *   keeps `请@README.md` and `我想@GPT-5.6-Code-Reviewer` (CJK before the
+ *   trigger, the very case this menu exists for) and any standalone `@README.md`
+ *   open;
+ * - the query must be a run of `label.` segments plus a letters-only tail, which
+ *   keeps a path (`bug@src/a.b`) or a name with a non-letter last label
+ *   (`bug@GPT-5.6-Code-Reviewer`) open.
+ *
+ * The partial query before any dot (`user@example`) is deliberately left alone —
+ * it is still ambiguous, and mid-sentence mentions after an English word
+ * (`fix this bug@alpha`) must keep working.
+ */
+export function looksLikeEmailAddress(
+  value: string,
+  triggerIndex: number,
+  search: string
+): boolean {
+  return EMAIL_LOCAL_PART_RE.test(value[triggerIndex - 1] ?? '') && EMAIL_DOMAIN_RE.test(search);
+}
+
 const NAMESPACE_SEARCH_RE = /^([a-z][a-z0-9-]*):(.*)$/;
 
 /**
