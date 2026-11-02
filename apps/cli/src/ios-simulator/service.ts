@@ -17,7 +17,7 @@ type Dependencies = {
   iceServers?: (
     sessionId: string
   ) => Promise<{ iceServers: SimulatorIceServer[]; expiresAt: number }>;
-  authorize(request: IosSimulatorRequest): Promise<void>;
+  authorize(request: IosSimulatorRequest): Promise<void | string>;
   onAgentPreviewStarted?: (sessionId: string, operationId: string) => Promise<void>;
   leases?: SimulatorControlLeases;
   now?: () => number;

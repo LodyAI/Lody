@@ -1188,15 +1188,19 @@ it('uses Android capability on Linux and renders configured AVDs without touchin
   expect(machine.commands).toEqual([]);
 });
 
-it.each([false, true])(
-  'starts balanced and switches quality while previewing only on capable hosts (supported=%s)',
-  async (supported) => {
+it.each([
+  { supported: false, local: true },
+  { supported: true, local: true },
+  { supported: true, local: false },
+])(
+  'starts at the connection quality and allows switching ($supported, local=$local)',
+  async ({ supported, local }) => {
     const machine = createFakeMachine({ devices: [] });
     let started: unknown;
     await renderPanel({
       machine,
       platform: 'android',
-      localMachine: true,
+      localMachine: local,
       meta: macMeta({ androidEmulator: 1, ...(supported ? { androidEmulatorQuality: 1 } : {}) }),
       androidControl: async ({ command }) => {
         if (command.action === 'start') started = command;
@@ -1249,7 +1253,7 @@ it.each([false, true])(
     expect(started).toEqual({
       action: 'start',
       id: 'Pixel_A',
-      ...(supported ? { quality: 'balanced' } : {}),
+      ...(supported ? { quality: local ? 'clear' : 'balanced' } : {}),
     });
     expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
     expect(text()).not.toContain('Preview quality');
@@ -1263,7 +1267,11 @@ it.each([false, true])(
       await click('Stop preview');
       expect(await openQualityMenu()).toBeNull();
       await click('Preview');
-      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'balanced' });
+      expect(started).toEqual({
+        action: 'start',
+        id: 'Pixel_A',
+        quality: local ? 'clear' : 'balanced',
+      });
     } else {
       expect(await openQualityMenu()).toBeNull();
     }

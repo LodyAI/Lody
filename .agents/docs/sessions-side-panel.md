@@ -108,8 +108,8 @@ synchronous merge endpoint. Local PR summary access still opens GitHub externall
   confirmation means committed `HEAD` only; never imply that uncommitted or untracked files move.
   Browser side-panel state and the mobile deep link are named `browser` / `?browser=1`; the removed
   `preview` values are not migrated. The iOS Simulator is a separate fixed panel beside it
-  (`ios-simulator` / `?simulator=1`), offered only when the tab Session's target machine is a Mac;
-  it shares no state with Browser, stays mounted once opened like Browser, polls only while a
+  (`ios-simulator` / `?simulator=1`), offered only when the main conversation's target machine is a Mac;
+  child tabs and Side Chats share that main conversation binding. It shares no state with Browser, stays mounted once opened like Browser, polls only while a
   preview is preparing and on screen, and tells its still-mounted viewer when it is hidden. Its rules live in
   [ios-simulator/AGENTS.md](../../packages/components/src/components/sessions/ios-simulator/AGENTS.md). Once opened, keep `SessionBrowserPanel` mounted while other fixed side-panel
   tabs are active so managed DOM state and Electron native-view history survive tab switches.

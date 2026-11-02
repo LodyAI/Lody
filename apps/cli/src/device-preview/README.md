@@ -3,6 +3,10 @@
 `DevicePreviewService` owns ephemeral operations, per-platform session queues,
 lease generations, idle expiry and authenticated local/remote endpoints. Each
 platform has its own service instance, so iOS and Android can coexist in a session.
+Child tabs and Side Chats resolve to the main conversation after both identities
+pass authorization; operations, occupancy and agent discovery hints use that owner.
+Responses still name the requesting session, and closing a child leaves the shared
+preview running.
 Machine-wide lease keys include platform and the adapter's normalized device ID.
 The iOS wrapper preserves its original UUID/UDID wire contract; Android has a
 separate case-sensitive AVD contract and capability. Browser preview remains an

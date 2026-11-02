@@ -79,8 +79,8 @@ export async function openAndroidConnection(
     const reader = video.stream.getReader();
     const viewers = new Set<AndroidStream>();
     let finishIdle = () => {};
-    const idleClosed = new Promise<void>((resolve) => {
-      finishIdle = resolve;
+    const idleClosed = new Promise<'idle'>((resolve) => {
+      finishIdle = () => resolve('idle');
     });
     const idle = createAndroidViewerIdleTimeout(() => finishIdle());
     let configuration: Buffer | undefined;
