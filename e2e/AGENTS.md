@@ -9,6 +9,8 @@ also applies.
   Electron. A browser-only renderer test belongs in `packages/components`.
 - Build once before a run. Scenarios consume `apps/electron/out/main/index.js`
   and the synced CLI under `apps/electron/resources/cli`; they never rebuild.
+  `LODY_E2E_BUILD_PROFILE=test-build` explicitly selects marked artifacts under
+  `.test-build/electron/out`; missing or mismatched markers fail without a release fallback.
 - Use a real Electron main process, preload, renderer, IPC graph, and bundled
   CLI. Only an external model/provider wire may be simulated.
 - Every run owns a temporary Electron user-data directory, Lody data directory,

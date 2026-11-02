@@ -39,12 +39,15 @@ if (result.signal) throw new Error(`Test build terminated by ${result.signal}`)
 process.exitCode = result.status ?? 1
 if (result.status === 0) {
   const root = fileURLToPath(new URL('../../../.test-build/electron/', import.meta.url))
-  const target = fileURLToPath(new URL('../node_modules', import.meta.url))
+  const electron = fileURLToPath(new URL('../', import.meta.url))
   mkdirSync(root, { recursive: true })
-  try {
-    symlinkSync(target, root + '/node_modules', 'junction')
-  } catch (error) {
-    if (error.code !== 'EEXIST' || realpathSync(root + '/node_modules') !== realpathSync(target))
-      throw error
+  for (const name of ['node_modules', 'resources', 'package.json']) {
+    const target = resolve(electron, name)
+    const link = resolve(root, name)
+    try {
+      symlinkSync(target, link, name === 'package.json' ? 'file' : 'junction')
+    } catch (error) {
+      if (error.code !== 'EEXIST' || realpathSync(link) !== realpathSync(target)) throw error
+    }
   }
 }
