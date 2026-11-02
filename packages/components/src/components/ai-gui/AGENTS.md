@@ -26,8 +26,8 @@ Ownership: [README.md](README.md).
   caches can hide the first user row. Keep activity labels/tones and one header inset.
 - Creation cards: [contract](README.md#creation-progress). Bind status to the
   target Turn and subscribe only to its title; `progressMessageId` prevents
-  duplicates. Consecutive creation records share a five-card scroller with
-  disclosure; retain their full hydration range. Legacy successes keep cards.
+  duplicates. Share a five-card scroller; retain full hydration.
+  Keep concrete cards; hide contentless successes and their empty batch rows.
 
 ## Turn Folding And Layout
 
@@ -35,23 +35,23 @@ Ownership: [README.md](README.md).
   streaming turns stay expanded.
 - The final answer is the contiguous text run before trailing never-collapsed
   items. Walk backward over adjacent text blocks to the first non-text boundary.
-- Plan approval cuts an `AssistantTurnRenderSegment` in a live turn. Match ACP
-  kind `switch_mode`, never a title (`plan-surface.ts`). Keep `workBlockKeys`,
-  `hasVisibleFinalContent`, last-item visibility and `expandedWorkedGroups` per
-  segment; expansion keys include it. Only the last segment shows duration;
-  earlier ones say "Finished working".
+- Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
+  `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
+  Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
+  keys per segment. Only the last segment shows duration; earlier segments say
+  "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove
   completion alone. A reused entry reopening upstream
   must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
-- Thought and tool rows share one compact transparent timeline, 13px, no glyphs:
-  the verb says the kind of step. Execute calls are not cards. Disclosure labels
-  lead; the chevron trails (desktop: hover-only, body type, no fill). Only builtin DeepSeek Harness retains thought rows in expandable
-  activity groups; pure thoughts default open unless explicitly collapsed. Other providers
-  keep thoughts hidden.
-  Assistant footers show config, not author identity.
+- Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label
+  steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
+  (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
+  separate groups default thoughts open and tools closed; explicit toggles win.
+  DSH thought prose uses answer typography, secondary ink and shared work folding. Other providers
+  hide thoughts. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop
@@ -67,7 +67,7 @@ Ownership: [README.md](README.md).
   Fork controls and loading need a finished turn.
 - `ConversationColumn` owns the gutter; row shells add no horizontal pad. EVERY
   row shares one rail: prose, process labels/steps, live status and the mobile
-  footer sit at `conversation.railInset`; expansion never shifts content right.
+  footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
@@ -82,10 +82,15 @@ Ownership: [README.md](README.md).
 
 ## Content Contracts
 
-- Child cancel needs subagentCancellation v1 and an exact parent turn; never
-  Stop the parent or invent terminal state. Runs also need subagentEvents v1
-  and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
-  [task rows and dialog](README.md#subagent-tasks).
+- Conversation file-path candidates become interactive only for an absolute path
+  or an exact match in the owning Session's file index. Unconfirmed relative paths
+  keep their text/code presentation. Open known targets directly; copy actions use
+  the authored path without file resolution or a worktree picker.
+
+- Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
+  and an exact parent turn; never Stop the parent or invent state. Dialogs reuse
+  parent renderers/grouping, one scroller, and read run bodies only while open:
+  [task/dialog contract](README.md#subagent-tasks).
 
 - Text roles: `@lody/ui`; prose: `conversation.readingLeading`; compact prose/code:
   subheadline, no nested `em`. Message sizes: `conversation-font-size-classes.ts`;

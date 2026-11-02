@@ -112,7 +112,11 @@ export class GitHubCredentialResolver {
    * authenticate — gh-missing only disables the harvest fallback, while
    * gh-not-authed disables the ambient credential scope (both logged once).
    */
-  async resolve(repoFullName: string): Promise<ResolvedGitHubCredential | null> {
+  async resolve(
+    repoFullName: string,
+    nativeCredentials = false
+  ): Promise<ResolvedGitHubCredential | null> {
+    if (nativeCredentials) return this.resolveAmbientGh();
     const managed = await this.resolveManaged(repoFullName);
     if (managed) {
       return managed;

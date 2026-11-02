@@ -4,6 +4,7 @@ import * as Bytes from '../foundation/bytes';
 import { decodeCbor, encodeCbor, type CborValue } from '../foundation/cbor';
 import { concat } from '../foundation/concat';
 import { LedgerError, type LedgerErrorCode } from './errors';
+import { decodeMachineId, encodeMachineId } from './machine-id';
 
 /** Member role. */
 export type Role = 'owner' | 'admin' | 'member' | 'guest';
@@ -36,8 +37,13 @@ export type Operation =
       readonly signingPublicKey: Bytes.SigningPublicKey;
       readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
       readonly possessionSignature: Bytes.Signature;
+      /** Machine binding signed by the approving device; forbidden on other kinds. */
+      readonly machineId?: string;
+      /** Exact current machine key replaced atomically, or null for a first binding. */
+      readonly replaces?: Bytes.SigningPublicKey | null;
     }
   | { readonly type: 'revokeDevice'; readonly target: Bytes.SigningPublicKey }
+  | { readonly type: 'removeMember'; readonly membershipId: Bytes.MembershipId }
   | { readonly type: 'transferOwner'; readonly successorMembershipId: Bytes.MembershipId }
   | {
       readonly type: 'publishEpoch';
@@ -51,7 +57,15 @@ export type Operation =
       readonly epoch: Bytes.EpochNumber;
       readonly commitment: Bytes.EpochCommitment;
       readonly previousEpochKey: Uint8Array;
+    }
+  | {
+      /** Monotonic protocol extension gate: later records may use these capabilities. */
+      readonly type: 'declareCapabilities';
+      /** Strictly ascending nonzero u32 capability codes, at most sixteen. */
+      readonly capabilities: readonly number[];
     };
+/** Most capability codes one declaration may carry. */
+export const MAX_DECLARED_CAPABILITIES = 16;
 /** Unverified decoded record body (genesis or ordinary). */
 export type RecordBody =
   | {
@@ -117,7 +131,7 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           membershipId: yield* lift(Bytes.membershipId(p[1])),
           request: yield* parseJoin(p[2]!),
         });
-      // Tag 2 is retired. Member removal is only the atomic tag 8 operation.
+      // Tag 2 stays retired. Independent removal uses capability-gated tag 10.
       case 3: {
         yield* array(p, 3);
         const role = p[2] === 1 ? 'admin' : p[2] === 2 ? 'member' : p[2] === 3 ? 'guest' : null;
@@ -129,16 +143,24 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
         });
       }
       case 4: {
-        yield* array(p, 5);
         const kind =
           p[1] === 0 ? 'personal' : p[1] === 1 ? 'machine' : p[1] === 2 ? 'recovery' : null;
         if (kind === null) return yield* fail('invalid-operation');
+        yield* array(p, kind === 'machine' ? 7 : 5);
+        const binding =
+          kind === 'machine'
+            ? {
+                machineId: yield* decodeMachineId(p[5]),
+                replaces: p[6] === null ? null : yield* lift(Bytes.signingPublicKey(p[6])),
+              }
+            : {};
         return Object.freeze({
           type: 'admitDevice',
           kind,
           signingPublicKey: yield* lift(Bytes.signingPublicKey(p[2])),
           encryptionPublicKey: yield* lift(Bytes.encryptionPublicKey(p[3])),
           possessionSignature: yield* lift(Bytes.signature(p[4])),
+          ...binding,
         });
       }
       case 5:
@@ -178,6 +200,34 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           previousEpochKey: new Uint8Array(p[4]),
         });
       }
+      case 9: {
+        // v1 knows this shape permanently; support for each code is decided at replay.
+        yield* array(p, 2);
+        const codes = yield* array(p[1]!);
+        if (codes.length < 1 || codes.length > MAX_DECLARED_CAPABILITIES)
+          return yield* fail('invalid-operation');
+        const capabilities: number[] = [];
+        for (const code of codes) {
+          const capability = yield* uint(code);
+          if (
+            capability < 1 ||
+            capability > 0xffff_ffff ||
+            capability <= (capabilities.at(-1) ?? 0)
+          )
+            return yield* fail('invalid-operation');
+          capabilities.push(capability);
+        }
+        return Object.freeze({
+          type: 'declareCapabilities',
+          capabilities: Object.freeze(capabilities),
+        });
+      }
+      case 10:
+        yield* array(p, 2);
+        return Object.freeze({
+          type: 'removeMember',
+          membershipId: yield* lift(Bytes.membershipId(p[1])),
+        });
       default:
         return yield* fail('unknown-operation');
     }
@@ -250,17 +300,23 @@ export function possessionSigningBytes(input: {
   readonly signingPublicKey: Bytes.SigningPublicKey;
   readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
   readonly kind: DeviceKind;
+  readonly machineId?: string;
 }) {
-  return Result.map(
-    lift(
+  return Result.gen(function* () {
+    if (input.kind !== 'personal' && input.kind !== 'machine' && input.kind !== 'recovery')
+      return yield* fail('canonical');
+    if (input.kind !== 'machine' && input.machineId !== undefined) return yield* fail('canonical');
+    const machine = input.kind === 'machine' ? [yield* encodeMachineId(input.machineId)] : [];
+    const body = yield* lift(
       encodeCbor([
         input.genesis.toBytes(),
         input.targetMembershipId.toBytes(),
         input.signingPublicKey.toBytes(),
         input.encryptionPublicKey.toBytes(),
         input.kind === 'personal' ? 0 : input.kind === 'machine' ? 1 : 2,
+        ...machine,
       ])
-    ),
-    (body) => concat([domain('possess/v2'), body])
-  );
+    );
+    return concat([domain('possess/v2'), body]);
+  });
 }

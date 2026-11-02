@@ -1,7 +1,7 @@
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '@lody/shared';
 import { decodeJson } from '@loro-dev/roost';
 import { applicationJsonText, toApplicationJson } from '@loro-dev/roost/lody-history';
-import type { RoostNodeStream } from '@loro-dev/roost-node';
+import type { IndexPut, RoostNodeStream } from '@loro-dev/roost-node';
 
 /** Local derived index; the event cursor fences the signed history it summarizes. */
 const key = { table: 'lody_goal_projection_v1', key: new Uint8Array() };
@@ -22,6 +22,36 @@ export const projectLatestGoal = (
     if (goal) return { turnId: entry.id, position: start + position, goal };
   }
   return null;
+};
+
+/** Pure staging uses the same rules as the installed projection. Unknown history
+ * stays unknown; removing the current goal requires authoritative rediscovery. */
+export const projectChangedGoal = (
+  current: RoostGoalProjection | undefined,
+  entry: { readonly id: string; readonly items?: unknown },
+  position: number | undefined,
+  count: number
+): { latest: RoostGoalProjection | undefined; invalidated: boolean } => {
+  const latest = projectLatestGoal([entry], position ?? 0);
+  if (position === undefined) {
+    return latest || current?.turnId === entry.id
+      ? { latest: undefined, invalidated: true }
+      : { latest: current, invalidated: false };
+  }
+  if (latest) {
+    return {
+      latest:
+        current === null ||
+        (current !== undefined && position >= current.position) ||
+        position === count - 1
+          ? latest
+          : current,
+      invalidated: false,
+    };
+  }
+  return current?.turnId === entry.id
+    ? { latest: undefined, invalidated: true }
+    : { latest: current, invalidated: false };
 };
 
 export const readGoalProjection = async (
@@ -56,6 +86,13 @@ export const readGoalProjection = async (
   }
 };
 
+export const goalProjectionPut = (cursor: bigint, latest: RoostGoalProjection): IndexPut => ({
+  ...key,
+  value: new TextEncoder().encode(
+    applicationJsonText({ version: 1, cursor: cursor.toString(), latest })
+  ),
+});
+
 export const writeGoalProjection = (
   host: RoostNodeStream,
   cursor: bigint,
@@ -65,12 +102,5 @@ export const writeGoalProjection = (
     expectedEventCursor: cursor,
     // This projection adds no history event or command receipt. A failed CAS
     // leaves it absent/stale; the next guarded edit reads authoritative history.
-    indexPuts: [
-      {
-        ...key,
-        value: new TextEncoder().encode(
-          applicationJsonText({ version: 1, cursor: cursor.toString(), latest })
-        ),
-      },
-    ],
+    indexPuts: [goalProjectionPut(cursor, latest)],
   });

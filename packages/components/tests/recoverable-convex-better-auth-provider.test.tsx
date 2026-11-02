@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConvexReactClient } from 'convex/react';
 import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
+import { requestCurrentConvexJwt } from '../src/lib/convex-jwt';
 
 const providerMocks = vi.hoisted(() => ({
   auth: null as null | {
@@ -89,6 +90,105 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     expect(token).toHaveBeenCalledTimes(1);
 
     await expect(providerMocks.auth!.fetchAccessToken()).resolves.toBe('jwt-1');
+    expect(token).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one JWT request between Convex refresh and GitHub token recovery', async () => {
+    window.history.replaceState({}, '', '/');
+    let sessionId = 'session-a';
+    let resolveToken!: (value: { data: { token: string } }) => void;
+    const token = vi.fn().mockReturnValueOnce(
+      new Promise<{ data: { token: string } }>((resolve) => {
+        resolveToken = resolve;
+      })
+    );
+    const authClient = {
+      useSession: () => ({
+        data: { session: { id: sessionId, token: `better-auth-${sessionId}` } },
+        isPending: false,
+      }),
+      convex: { token },
+      crossDomain: { oneTimeToken: { verify: vi.fn() } },
+      getSession: vi.fn(),
+      updateSession: vi.fn(),
+      signOut: vi.fn(),
+    } as unknown as LodyAuthClient;
+    const renderProvider = () => (
+      <RecoverableConvexBetterAuthProvider
+        authClient={authClient}
+        client={{} as ConvexReactClient}
+        recoveryGeneration={0}
+      >
+        <div />
+      </RecoverableConvexBetterAuthProvider>
+    );
+    await act(async () => {
+      root.render(renderProvider());
+    });
+
+    const recovery = requestCurrentConvexJwt(authClient);
+    const refresh = providerMocks.auth!.fetchAccessToken({ forceRefreshToken: true });
+    resolveToken({ data: { token: 'jwt-a' } });
+    await act(async () => {
+      await expect(refresh).resolves.toBe('jwt-a');
+    });
+    await expect(recovery).resolves.toBe('jwt-a');
+    expect(token).toHaveBeenCalledTimes(1);
+
+    // A recovery that outlives its session never hands back the old session's JWT.
+    let resolveStale!: (value: { data: { token: string } }) => void;
+    token.mockReset().mockReturnValueOnce(
+      new Promise<{ data: { token: string } }>((resolve) => {
+        resolveStale = resolve;
+      })
+    );
+    const staleRecovery = requestCurrentConvexJwt(authClient);
+    sessionId = 'session-b';
+    await act(async () => {
+      root.render(renderProvider());
+    });
+    resolveStale({ data: { token: 'jwt-a-late' } });
+    await expect(staleRecovery).resolves.toBeNull();
+  });
+
+  it('keeps a recovery JWT when Convex auth restarts for the same session', async () => {
+    window.history.replaceState({}, '', '/');
+    let resolveToken!: (value: { data: { token: string } }) => void;
+    const token = vi.fn().mockReturnValueOnce(
+      new Promise<{ data: { token: string } }>((resolve) => {
+        resolveToken = resolve;
+      })
+    );
+    const authClient = {
+      useSession: () => ({
+        data: { session: { id: 'session-a', token: 'better-auth-session-a' } },
+        isPending: false,
+      }),
+      convex: { token },
+      crossDomain: { oneTimeToken: { verify: vi.fn() } },
+      getSession: vi.fn(),
+      updateSession: vi.fn(),
+      signOut: vi.fn(),
+    } as unknown as LodyAuthClient;
+    const renderProvider = (recoveryGeneration: number) => (
+      <RecoverableConvexBetterAuthProvider
+        authClient={authClient}
+        client={{} as ConvexReactClient}
+        recoveryGeneration={recoveryGeneration}
+      >
+        <div />
+      </RecoverableConvexBetterAuthProvider>
+    );
+    await act(async () => {
+      root.render(renderProvider(0));
+    });
+    const recovery = requestCurrentConvexJwt(authClient);
+    // Convex auth recovery restarts the provider while GitHub recovery waits.
+    await act(async () => {
+      root.render(renderProvider(1));
+    });
+    resolveToken({ data: { token: 'jwt-a' } });
+    await expect(recovery).resolves.toBe('jwt-a');
     expect(token).toHaveBeenCalledTimes(1);
   });
 

@@ -8,7 +8,7 @@ This list covers shipped production dependencies plus vendored third-party asset
 
 ## Summary
 
-- Bundled assets: 14
+- Bundled assets: 16
 - Production dependencies: 963
 - Unique license expressions: 22
 
@@ -28,6 +28,13 @@ This list covers shipped production dependencies plus vendored third-party asset
 - Assets: Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, Catppuccin Latte
 - Notice file: `packages/components/src/lib/vscode-theme/bundled/themes/catppuccin/LICENSE`
 - Notes: Bundled VSCode color themes.
+### curve25519-dalek and subtle
+- License: BSD-3-Clause
+- Author: Isis Lovecruft, Henry de Valence and dalek-cryptography contributors
+- Source: https://github.com/dalek-cryptography/curve25519-dalek
+- Assets: curve25519-dalek 4.1.3, subtle 2.6.1
+- Notice file: `packages/e2ee-core/wasm/ed25519-strict/licenses/BSD-3-Clause.txt`
+- Notes: Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.
 ### Dracula Theme Official
 - License: MIT
 - Author: Dracula
@@ -63,6 +70,13 @@ This list covers shipped production dependencies plus vendored third-party asset
 - Assets: Rosé Pine, Rosé Pine (no italics), Rosé Pine Moon, Rosé Pine Moon (no italics), Rosé Pine Dawn, Rosé Pine Dawn (no italics)
 - Notice file: `packages/components/src/lib/vscode-theme/bundled/themes/rose-pine/LICENSE`
 - Notes: Bundled VSCode color themes.
+### RustCrypto SHA-2 and support crates
+- License: MIT
+- Author: RustCrypto Developers and crate authors
+- Source: https://github.com/RustCrypto/hashes
+- Assets: sha2 0.10.9, digest 0.10.7, block-buffer 0.10.4, crypto-common 0.1.7, cpufeatures 0.2.17, generic-array 0.14.7, typenum 1.20.1, cfg-if 1.0.5
+- Notice file: `packages/e2ee-core/wasm/ed25519-strict/licenses/MIT.txt`
+- Notes: Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.
 ### Tokyo Night
 - License: MIT
 - Author: Enkia

@@ -10,7 +10,8 @@
   rows; never serialize items, plans, or provider extension metadata. Input configuration projects on first read and memoizes: the
   projection is a schema parse per user turn. Latest-turn queries use reverse
   directory pages when available, visiting older pages only until a readable match;
-  non-paged readers scan directory scalars. Targeted reads materialize only the selected turn. Status queries use
+  non-paged readers scan directory scalars. Display reads project child runs to a bounded latest-step preview; only an opened run
+  reads its transcript via `readSubagentRun`. Authoritative `readTurn`/`readAll` stay complete. Status queries use
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
@@ -45,24 +46,33 @@
   conflict marker never upgrades the stored cursor by implication.
 - `user-status` writes every stored copy of a duplicated user turn through
   `updateCopies`: the last copy gates guarded writes, settled copies never regress,
-  and any started or settled copy vetoes a requeue.
+  and any started or settled copy vetoes a requeue. `onlyAwaitingStart` settles only
+  while every copy is still pending or seen.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.
 - Test the real Loro reader and writer. Delayed reads use small injected Promise
   gates; there is no test-only implementation of the complete command API.
+- Roost content patches require independent capability negotiation and an exact
+  cached base checkpoint bound to every retained body. Unprotected cache writes
+  invalidate patch eligibility; a retained recovery cursor permits only complete
+  change replies. Older cache writers must stay isolated. Prepare detached bodies and commit them with membership
+  and checkpoint atomically; unusable patches require checkpoint-protected body
+  reads. Never reinterpret raw segment edits as logical state/permission projection.
 - Normalized subagent events persist inside `subagent_task.run`, keyed by root ACP
   session plus run id. Bind the initiating turn once; child output never changes root
   turn identity, plan, tools, or accounting. Ignore unregistered/terminal output,
   reject lineage cycles, and retain incomplete observation across snapshots. Declare
   nested transcript streaming fields in `schema.ts`; legacy rows stay unchanged.
-- New root/child tool content drops ACP images and image blobs and clears unused
-  non-image resource blob bytes through `acp/tool-call-history.ts`; replay shares
-  the rule. Keep resource/download identity, audio, readable output, complete diffs
-  and sparse semantics. Child raw input retains its displayed plan; scalar/array
-  raw output has one readable copy, never a duplicate in metadata; array copies
-  drop image entries by the same rule. Permission enrichment preserves stored
-  content; malformed new values reach writer validation.
+- Root and normalized child ACP tools share `buildToolCallMessageForHistory` and
+  `mergeToolCallMessage` in `acp/history-apply.ts`: omit read bodies/edit diff text,
+  strip images/unused resource bytes, and bound terminal commands/output identically.
+  Derive paths before filtering; preserve omitted vs explicitly cleared lists and
+  monotonic status. Keep only displayed switch-mode plans and scheduling raw fields,
+  not generic raw or provider metadata copies. Permission enrichment preserves stored
+  content except unanswered switch-mode reviews, whose supplied review content replaces
+  streamed argument previews; malformed new retained values reach writer validation. CLI edit evidence
+  consumes enriched notifications with the original owning turn, not stored diff bodies.
 
 - Submissions append on the live doc as local commits; transports upload only
   local events. Never author on a fork and import the export: it misses upload,
@@ -79,9 +89,12 @@
   Receipt projections target its exact turn and batch, preserve user text/config and do not
   rewrite unchanged status. Full result bodies remain in the scoped orchestration repository.
 
-- Roost incremental reads bind a complete logical change interval to one owner checkpoint.
+- Native owns Roost history publication; control documents never publish its revisions.
+  Roost incremental reads bind a complete logical change interval to one owner checkpoint.
   Missing or foreign checkpoint evidence requires explicit reset, never trusting the last hint.
   Persist repaired bodies, membership and checkpoint atomically; the cache grants no write receipt.
+  Reset replaces the latest window atomically; invalidated older pages load on demand,
+  never through an automatic whole-history sweep.
   Independently negotiated checkpoint observation covers admission gaps and missed hints.
   Park bounded waits outside foreground/native execution; resume the same catch-up flow.
 

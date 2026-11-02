@@ -36,14 +36,8 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
 import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
@@ -122,16 +116,6 @@ const styles = stylex.create({
     height: '20px',
     color: colors.tertiaryLabel,
   },
-  /** A note in a menu: it wraps, so it is not a row's one line. */
-  note: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    maxWidth: '18rem',
-    paddingBlock: space[1.5],
-    whiteSpace: 'normal',
-    fontWeight: 400,
-  },
 });
 
 /* Option-only submenus hug the longest label instead of inheriting the
@@ -142,12 +126,14 @@ const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
 function OptionItem({
+  identity,
   icon,
   label,
   selected,
   disabled,
   onSelect,
 }: {
+  identity?: Pick<AgentConfigMeta, 'id' | 'machineId'>;
   icon?: ReactNode;
   label: string;
   selected: boolean;
@@ -156,6 +142,9 @@ function OptionItem({
 }) {
   return (
     <Menu.Item
+      data-testid={identity ? 'chat-agent-option' : undefined}
+      data-agent-config-id={identity?.id}
+      data-machine-id={identity?.machineId}
       disabled={disabled}
       role="menuitemradio"
       aria-checked={selected}
@@ -280,6 +269,7 @@ export function DesktopMachineMenu({
       <Menu.Trigger
         disabled={isDisabled}
         title={disabledReason}
+        data-testid="chat-machine-trigger"
         aria-label={t('chat.machineSelector.placeholder', 'Machine')}
         render={<Button type="button" variant="secondary" size="mini" />}
       >
@@ -300,6 +290,8 @@ export function DesktopMachineMenu({
         {options.map((option) => (
           <Menu.Item
             key={option.value}
+            data-testid="chat-machine-option"
+            data-machine-id={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             icon={Monitor}
@@ -500,11 +492,6 @@ export function DesktopRunConfigMenu({
         : null;
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType ?? fallbackAgent?.cliType,
-    agentType: selectedAgentConfig?.agentType ?? fallbackAgent?.agentType,
-    modelId: modelValue,
-  });
   const handleModelSelect = (value: string) => {
     if (modelOptions.length > 0) {
       onModelChange?.(value);
@@ -704,6 +691,8 @@ export function DesktopRunConfigMenu({
                 aria-label={runConfigButtonAriaLabel}
                 aria-disabled
                 data-run-config-trigger=""
+                data-agent-config-id={selectedAgentConfig?.id}
+                data-machine-id={selectedAgentConfig?.machineId}
                 {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
               >
                 {triggerFace}
@@ -716,6 +705,8 @@ export function DesktopRunConfigMenu({
         <Menu.Trigger
           aria-label={runConfigButtonAriaLabel}
           data-run-config-trigger=""
+          data-agent-config-id={selectedAgentConfig?.id}
+          data-machine-id={selectedAgentConfig?.machineId}
           className={triggerClassName}
           render={<button type="button" />}
         >
@@ -818,6 +809,7 @@ export function DesktopRunConfigMenu({
                   {agentOptions.map(({ config }) => (
                     <OptionItem
                       key={`${config.id}:${config.machineId}`}
+                      identity={config}
                       icon={
                         <AgentIcon
                           cliType={config.cliType}
@@ -912,26 +904,6 @@ export function DesktopRunConfigMenu({
                 </div>
               </Menu.Content>
             </Menu.Submenu>
-          ) : null}
-
-          {showDeepSeekDelegationWarning ? (
-            <Menu.Item
-              render={
-                <a
-                  href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-                  }}
-                >
-                  <span {...stylex.props(styles.note)}>
-                    <DeepSeekDelegationWarningContent />
-                  </span>
-                </a>
-              }
-            />
           ) : null}
 
           {interactionSelector ? (

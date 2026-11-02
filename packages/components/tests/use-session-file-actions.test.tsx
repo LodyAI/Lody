@@ -6,10 +6,8 @@
 //    owning machine". While that machine's path metadata loads, the local-host
 //    actions can only fail — and the download that would have worked must not
 //    be hidden behind them.
-// 2. The remote download reads through the preview API's ONE bounded response,
-//    so it cannot serve a file past those limits — exactly the file whose error
-//    card sent the user looking. It must SAY that: a generic "could not
-//    download" reads as a glitch worth retrying.
+// 2. Oversized remote downloads use the paid chunk path when available;
+//    unsupported machines retain the explicit size-limit explanation.
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -131,8 +129,11 @@ describe('remote file download action', () => {
     container = undefined;
   });
 
-  const runDownload = async (openResult: FileWorkspaceOpenResult): Promise<void> => {
-    const fileProvider = { openFile: async () => openResult };
+  const runDownload = async (
+    openResult: FileWorkspaceOpenResult,
+    downloadFile?: () => Promise<Uint8Array | null>
+  ): Promise<void> => {
+    const fileProvider = { openFile: async () => openResult, downloadFile };
     let download: ((filePath: string) => void) | null = null;
     function Probe() {
       download = useSessionFileActions({ session, fileProvider }).download;
@@ -245,6 +246,13 @@ describe('remote file download action', () => {
     expect(sharedBytes).toEqual(bytes);
     expect(downloadBytesAsFile).not.toHaveBeenCalled();
     nativeShell = false;
+  });
+
+  it('downloads original bytes through the paid path when preview refuses a large file', async () => {
+    const bytes = Uint8Array.of(0, 255, 128, 13, 10);
+    await runDownload({ status: 'unavailable', reason: 'blob-too-large' }, async () => bytes);
+    expect(downloadBytesAsFile).toHaveBeenCalledWith('docs/huge.log', bytes);
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it('names the real ceiling when the file is past what one response carries', async () => {

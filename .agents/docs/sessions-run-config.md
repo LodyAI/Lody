@@ -54,12 +54,6 @@ this page is the full text of the rules summarised there.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:
   [run-config submenu placement](../../specs/composer-run-config-submenu-placement.md).
-  Builtin DeepSeek Harness sessions using a non-Pro model show the same linked
-  delegation-cost warning here and in `MobileRunConfigSheet`: until upstream DSH
-  fixes child-route inheritance, a delegated child may use the session's
-  creation-time DeepSeek-V4-Pro seed rather than the parent's visible model.
-  Keep the warning tied to that agent/model combination and its upstream
-  discussion rather than turning it into a global banner.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`
@@ -286,8 +280,10 @@ this page is the full text of the rules summarised there.
   its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
   or queued Turn. ACP `config_option_update`/`current_mode_update` events update
   the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
-  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
-  an older runtime event. Apply that shared baseline only to composer fields the
+  the driving `userTurnId`. The composer checks that identity against indexed
+  configuration sources, so unloaded message bodies cannot discard a valid runtime
+  baseline and revive an older Plan request. A queued Turn and a newer accepted Turn
+  always beat an older runtime event. Apply that shared baseline only to composer fields the
   local user has not edited; local unsent choices remain a private draft until
   send freezes them into a Turn. Never infer runtime config from a permission
   click or its history outcome: consent is not proof that the agent applied the

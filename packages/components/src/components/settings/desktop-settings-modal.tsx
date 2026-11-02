@@ -1,3 +1,5 @@
+import { WorkspaceSettings } from './e2ee/workspace-security';
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -17,7 +19,7 @@ import {
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
 } from '@/atoms';
-import { ScrollArea } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -252,7 +254,12 @@ function SettingsModalBody() {
   const { activeOrganization } = useOrganization();
   const { data: session } = useStableSession();
   const resolvedTheme = useResolvedTheme();
-  const platformTabs = useVisibleSettingsTabs();
+  const shortcutsAllowed = useWorkspaceFeature('shortcuts');
+  const sharingAllowed = useWorkspaceFeature('sharing');
+  const platformTabs = useVisibleSettingsTabs().filter(
+    (tab) =>
+      (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed)
+  );
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
@@ -555,7 +562,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
     case 'account':
       return <AccountSettingsComponent surface="account" />;
     case 'workspace':
-      return <AccountSettingsComponent surface="workspace" />;
+      return <WorkspaceSettings />;
     case 'people':
       return <AccountSettingsComponent surface="workspace" />;
     case 'billing':

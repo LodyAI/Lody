@@ -16,6 +16,25 @@ session's workspace root; absolute/home paths need no root. Remote targets retai
 bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 [implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
 
+Conversation Markdown treats relative paths as candidates until the owning Session's
+index confirms an exact file; absolute paths need no index. Clicking opens the
+known target directly, without Git worktree discovery. Invalid targets copy the
+original path and show copy feedback. The context-menu Copy Path action also copies
+the authored path directly, independent of index/daemon availability. Line anchors
+are navigation metadata, not part of the copied path. The
+[nested-worktree discovery protocol](../notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md)
+remains available to explicit protocol callers; conversation clicks and menus do
+not invoke it. A failed conversation index attempt records the original error and
+releases its optional cache lease, so the next Files/Changes acquire can rebuild
+the failed resource. Link confirmation resumes when the conversation is shown
+again; it does not run a background retry loop.
+
+Rendered Markdown file previews enable Session links only when their caller supplies
+the navigation switch. SessionDetail derives it from the same callback used by chat.
+SessionFileContentView wraps both file-provider paths in SessionLinkProvider, which
+dispatches exact destinations through the existing deep-link mechanism. Standalone
+viewers default to inert links. [Decision and limits](../notes/implemented/bug-fix/2026-10-22-markdown-preview-session-links.md).
+
 - Diff page: `session-conversation-diff-panel.tsx`, data from
   `use-session-conversation-diff-data.ts`. Each file title copies the
   workspace-relative path and, when wired, opens a file-preview viewer tab
@@ -31,6 +50,13 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   diff's state, with its hidden reads paused. Direct conversation-file and comment
   navigation still enters the precise diff directly. Both levels share one modal
   and the existing enclosing-session popup host.
+- All Changes compares the resolved merge-base against disk by default. Its header
+  can switch to an uncommitted scope (`HEAD` against disk, including staged,
+  unstaged and untracked non-ignored files) and names the resolved base in both
+  modes. The control is hidden when the machine does not advertise
+  `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
+  unavailable state
+  ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct
@@ -159,7 +185,9 @@ bounded Machine RPC reads. Indexing and saving still require the daemon. See the
   notice with its file actions. The viewer starts at fit width and offers page
   thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
   and expandable search. Thumbnail rendering follows the visible sidebar range;
-  file actions remain in the existing side-panel menu.
+  file actions remain in the existing side-panel menu. The PDF viewer owns its
+  scrollport in a definite-height panel and reapplies fit zoom on resize; see
+  [PDF side-panel layout](../notes/implemented/bug-fix/2026-10-24-pdf-side-panel-layout.md).
   Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
   export for the main-thread fallback. Clear the viewer document before aborting
   its lifetime. The PDF.js patch makes global selection listeners belong to all

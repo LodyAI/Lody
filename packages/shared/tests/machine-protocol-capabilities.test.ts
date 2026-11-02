@@ -16,11 +16,65 @@ import {
   machineSupportsSessionInputDispatch,
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistoryWatch,
+  machineSupportsSessionHistoryPatches,
 } from '../src/machine-protocol-capabilities';
 import {
   MachineAcpCapabilitiesRefreshRequestSchema,
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
+
+it('admits local Session automation only when the daemon advertises it', () => {
+  for (const machine of [
+    undefined,
+    { protocolCapabilities: {} },
+    { protocolCapabilities: { schedules: 3, remoteAutomationControl: 1 } },
+  ]) {
+    expect(machineSupportsProtocolCapability(machine, 'sessionAutomations')).toBe(false);
+  }
+  expect(
+    machineSupportsProtocolCapability(
+      { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      'sessionAutomations'
+    )
+  ).toBe(true);
+});
+
+it('negotiates content patches independently and keeps old history requests valid', () => {
+  for (const machine of [
+    undefined,
+    { protocolCapabilities: { sessionHistoryIncremental: 1 } },
+    { protocolCapabilities: { sessionHistoryPatches: 1 } },
+  ])
+    expect(machineSupportsSessionHistoryPatches(machine)).toBe(false);
+  expect(
+    machineSupportsSessionHistoryPatches({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+  const request = {
+    type: 'session/history-read',
+    machineId: 'synthetic-machine',
+    workspaceId: 'synthetic-workspace',
+    sessionId: 'synthetic-session',
+    query: { kind: 'readChanges', checkpoint: 'synthetic-checkpoint' },
+  };
+  for (const query of [
+    request.query,
+    { ...request.query, withPatches: true },
+    { ...request.query, kind: 'watchChanges', waitMs: 15_000, withPatches: true },
+  ])
+    expect(safeParseLocalSessionControlRequest(JSON.stringify({ ...request, query })).success).toBe(
+      true
+    );
+  expect(
+    safeParseLocalSessionControlRequest(
+      JSON.stringify({
+        ...request,
+        query: { ...request.query, withPatches: false },
+      })
+    ).success
+  ).toBe(false);
+});
 
 it('requires independent checkpoint observation and validates its bounded wait', () => {
   expect(machineSupportsSessionHistoryWatch(undefined)).toBe(false);

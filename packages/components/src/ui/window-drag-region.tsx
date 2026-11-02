@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { isNativeAppShell } from '@/lib/native-platform';
 import {
   isElectronRenderer,
   isMacOSElectronRenderer,
@@ -45,14 +46,25 @@ export function useWindowsCaptionRowPadClass({
 }
 
 // macOS traffic lights are centered at y=23 (`trafficLightPosition.y` 16 + 7px
-// radius in apps/electron/src/main/window.ts). A border-box h-11 row centers its
-// controls at y=22 (21.5 with a 1px bottom border); top padding moves that
-// center onto the lights so every window-top row lines up with them.
+// radius in apps/electron/src/main/window.ts). Desktop web shares this row
+// geometry so the sidebar and workspace headers align across the 4px frame.
 export function useMacTrafficLightRowPadClass({
   bottomBorder = false,
-}: { bottomBorder?: boolean } = {}): string | undefined {
+  insideWorkspaceFrame = false,
+  includeDesktopWeb = false,
+}: {
+  bottomBorder?: boolean;
+  insideWorkspaceFrame?: boolean;
+  includeDesktopWeb?: boolean;
+} = {}): string | undefined {
   const fullscreen = useElectronFullscreen();
-  if (!isMacOSElectronRenderer() || fullscreen) return undefined;
+  const desktopWeb = includeDesktopWeb && !isElectronRenderer() && !isNativeAppShell();
+  if (!desktopWeb && (!isMacOSElectronRenderer() || fullscreen)) return undefined;
+  // Workspace rows begin below the frame's 4px top rim. Bottom padding lifts
+  // their content back onto the fixed y=23 native centreline while retaining
+  // a real gap between 28px controls and the card edge. A bordered h-11 row
+  // has one fewer content pixel, so it needs one fewer padding pixel.
+  if (insideWorkspaceFrame) return bottomBorder ? 'pb-[5px]' : 'pb-[6px]';
   return bottomBorder ? 'pt-[3px]' : 'pt-[2px]';
 }
 

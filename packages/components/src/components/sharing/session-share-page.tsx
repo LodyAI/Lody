@@ -169,7 +169,15 @@ const styles = stylex.create({
     padding: space[2],
     backgroundColor: colors.secondaryBackground,
   },
-  treeRows: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  treeRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    // The row box below: `py-1` around one body line. The connector in
+    // `session-row-leading-slot.tsx` draws itself from this, so the reader's
+    // rows may differ from the app's without breaking the line into dashes.
+    '--sidebar-row-height': `calc(8px + ${text.bodyLeading})`,
+  },
   treeRow: { display: 'flex', alignItems: 'center' },
   /**
    * The title box alone takes the tint, never the connector gutter beside it:
@@ -543,11 +551,11 @@ export function SessionShareSurface(props: {
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
   const treeRows = () => (
-    // The connector in `session-row-leading-slot.tsx` is drawn for the app's row
-    // box: it reaches 8px above and 9px below the 14px slot, which spans exactly
-    // one 30px row plus the list's 1px gap. Rows here are that box — `py-1` and a
-    // 20px title line — so a trunk ends where the next one starts and the tree
-    // reads as one line instead of a dash per row.
+    // The connector in `session-row-leading-slot.tsx` reaches half the row's
+    // free height above and below the 14px slot, plus the list's 1px gap. Rows
+    // here are `py-1` around one body line and `treeRows` publishes that height,
+    // so a trunk ends where the next one starts and the tree reads as one line
+    // instead of a dash per row.
     <div {...stylex.props(styles.treeRows)}>
       {tree.map((node) => {
         // A child Tab is named by the tab strip, so the tree marks the root the

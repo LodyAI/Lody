@@ -4,6 +4,7 @@ import {
   getChatLandingAgentSelectionsForMachine,
   getChatLandingDefaultsStorageKey,
   readChatLandingDefaults,
+  recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
   writeChatLandingDefaults,
 } from '../src/lib/chat-landing-defaults';
@@ -156,6 +157,36 @@ describe('chat landing defaults storage', () => {
 
     expect(readChatLandingDefaults('workspace-1')).toBeNull();
     expect(() => writeChatLandingDefaults('workspace-1', { contextType: 'chat' })).not.toThrow();
+  });
+});
+
+describe('last accepted project', () => {
+  it.each([
+    { kind: 'github', repoFullName: 'org/repo' },
+    { kind: 'local', machineId: 'machine-a', localProjectId: 'project-a' },
+    { kind: 'group', projectId: 'group-a' },
+    { kind: 'none' },
+  ] as const)('remembers $kind separately from mutable composer defaults', (project) => {
+    installWindowStorage();
+    writeChatLandingDefaults('workspace-a', { agentId: 'agent-a', contextType: 'chat' });
+    recordChatLandingProjectUse('workspace-a', project);
+    expect(readChatLandingDefaults('workspace-a')).toMatchObject({
+      agentId: 'agent-a',
+      lastUsedProject: project,
+    });
+    expect(readChatLandingDefaults('workspace-b')).toBeNull();
+  });
+  it('discards a corrupt remembered target without losing existing agent defaults', () => {
+    installWindowStorage();
+    localStorage.setItem(
+      getChatLandingDefaultsStorageKey('workspace-a'),
+      JSON.stringify({
+        agentId: 'agent-a',
+        lastUsedProject: { kind: 'local', localProjectId: 'incomplete' },
+      })
+    );
+    expect(readChatLandingDefaults('workspace-a')).toMatchObject({ agentId: 'agent-a' });
+    expect(readChatLandingDefaults('workspace-a')?.lastUsedProject).toBeUndefined();
   });
 });
 

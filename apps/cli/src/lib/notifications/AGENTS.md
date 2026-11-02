@@ -9,6 +9,13 @@
   Stop check. Release the prompt slot before awaiting `onTurnOutcome`; the existing Host
   work drain owns delivery through shutdown, independently of Inbox launch. Never retry the callback
   or re-run Agent work to notify.
+- `session/turn-completion.ts` gates successful completion publication after release:
+  persist the actual history backend, then confirm its history/control sync for an
+  attached remote generation. Local-only needs local durability, not cloud sync.
+  Only confirmation retries, for at most 30s; unconfirmed completion logs a warning
+  and publishes neither unread nor success. Failure attention stays independent.
+  Freeze activity time before waking successors; never lower activity metadata.
+  Shutdown cancels confirmation before the Host drain; begun writes remain owned.
 - MessageHandler consumes the actual AttentionItem (source, scope, outcome) and
   `notifyTurnOutcome` submits mobile through the legacy-named cloud adapter. It
   projects user terminal outcomes into a latest control-document
@@ -30,7 +37,7 @@
 - Permission push and silent Live Activity sync are independent. Provider
   acceptance cannot suppress an ordinary permission alert.
 - Best-effort delivery is intentional. No notification database, outbox, pending
-  TTL, background retry, reconnect replay, lock-to-mobile handoff or exactly-once
+  TTL, notification-send retry, reconnect replay, lock-to-mobile handoff or exactly-once
   protocol. Existing execution/Operation persistence and recovery are unchanged.
 - Never await notification work before the provider prompt. Outcomes belong at
   finalization; errors, cancellations and unknown results are not success/idle.
@@ -40,7 +47,11 @@
 - Presentation reads at most 32 exact originating inputs after execution release,
   under a document lease; larger/mixed batches use the conversation name. Resolve
   project display names locally, never GitHub or full filesystem paths. Mobile
-  display names cross the cloud/provider boundary; raw tool inputs/errors do not.
+  display names and optional reply excerpts cross the cloud/provider boundary.
+  `TurnOutcomeFact.assistantTurnId` freezes the actual output entry before release;
+  `MessageHandler.buildNotificationPresentation` reads that one entry for the excerpt,
+  never the latest reply or the original delegated input. Missing/unreadable output
+  preserves existing context. Raw tool inputs/errors are not separately attached.
 - Scheduled prepared user turns use ordinary result policy; do not special-case
   `SessionMeta.scheduleId` or parse prompt text to choose whether to notify.
 - Public `notifySessionCompleted` cloud/IPC names remain compatibility boundaries.

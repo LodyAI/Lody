@@ -1,6 +1,7 @@
+import { useSessionManagementGuard } from './use-session-management-guard';
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import type {
@@ -120,7 +121,7 @@ export function countSessionMentions(items: SessionHistoryInput['items']): Sessi
   for (const item of items ?? []) {
     if (item.type !== 'text' || typeof item.text !== 'string') continue;
     for (const span of sanitizeMessageTextSpans(item.text, item.spans) ?? []) {
-      if (span.kind === 'pasted_text') continue;
+      if (span.kind === 'pasted_text' || span.kind === 'message_quote') continue;
       counts[span.kind] += 1;
     }
   }
@@ -220,13 +221,6 @@ async function deleteMachineFlockRowsBestEffort(
   }
 }
 
-/** Only PR auto-archive supplies this cancellation check and progress receipt. */
-type AutoArchiveSessionOptions = {
-  /** False retires a superseded request before any archive writes. */
-  shouldContinue: (targets: readonly SessionMeta[]) => boolean;
-  accepted: Set<SessionId>;
-};
-
 export type SessionActions = {
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
@@ -249,7 +243,16 @@ export type SessionActions = {
     userTurnId: string,
     options?: { inputConfig?: SessionTurnInputConfig; machineId?: MachineId | null }
   ) => Promise<void>;
-  requestSessionCancel: (sessionId: SessionId, turnId: string) => Promise<void>;
+  /**
+   * Stop by default. `interrupt` only ends the turn so queued input runs next
+   * (interrupt-and-send): it carries no Stop identity, so no daemon pauses the
+   * Inbox or cancels the queued input's eligibility.
+   */
+  requestSessionCancel: (
+    sessionId: SessionId,
+    turnId: string,
+    options?: { interrupt?: boolean }
+  ) => Promise<void>;
   requestSessionSteer: (
     sessionId: SessionId,
     expectedTurnId: string,
@@ -270,13 +273,18 @@ export type SessionActions = {
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+  updateSessionMetadata: (sessionId: SessionId, patch: Record<string, unknown>) => Promise<void>;
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
-  archiveSession: (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => Promise<void>;
+  /** Archives contained Tabs; opened Sessions only with `includeOpenedSessions`. */
+  archiveSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
   setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -340,7 +348,8 @@ function buildSessionActivityPatch(
 async function upsertSessionActivityPatch(
   runtime: WorkspaceRuntime,
   sessionId: SessionId,
-  proposal: SessionActivityProposal
+  proposal: SessionActivityProposal,
+  assertCanManage?: (ids: readonly SessionId[]) => Promise<void>
 ): Promise<SessionMeta | undefined> {
   const roomId = getSessionRoomId(sessionId);
   const existing = await runtime.repo.getDocMeta(roomId);
@@ -351,6 +360,7 @@ async function upsertSessionActivityPatch(
   if (!meta?.id && runtime.pendingSends?.hasPendingCreation(sessionId)) return undefined;
   const patch = buildSessionActivityPatch(meta, proposal);
   if (Object.keys(patch).length > 0) {
+    await assertCanManage?.([sessionId]);
     await runtime.writer.upsertDocMeta(roomId, patch as RepoDocMetaPatch);
   }
   return meta;
@@ -359,17 +369,27 @@ async function upsertSessionActivityPatch(
 export async function touchSessionActivityMeta(
   runtime: WorkspaceRuntime,
   sessionId: SessionId,
-  proposal: SessionActivityProposal
+  proposal: SessionActivityProposal,
+  assertCanManage?: (ids: readonly SessionId[]) => Promise<void>
 ): Promise<void> {
-  const meta = await upsertSessionActivityPatch(runtime, sessionId, proposal);
+  if (assertCanManage) {
+    const target = (await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as
+      | SessionMeta
+      | undefined;
+    await assertCanManage(
+      target?.parentSessionId ? [sessionId, target.parentSessionId] : [sessionId]
+    );
+  }
+  const meta = await upsertSessionActivityPatch(runtime, sessionId, proposal, assertCanManage);
   const parentSessionId = meta?.parentSessionId;
   if (parentSessionId && parentSessionId !== sessionId) {
-    await upsertSessionActivityPatch(runtime, parentSessionId, proposal);
+    await upsertSessionActivityPatch(runtime, parentSessionId, proposal, assertCanManage);
   }
 }
 
 export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const assertCanManageSessions = useSessionManagementGuard(runtime);
   const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
   const store = useStore();
@@ -381,7 +401,7 @@ export function useSessionActions(): SessionActions {
   );
   const postHog = usePostHog();
   const { isAuthenticated: isConvexAuthenticated, requestAuthRecovery } = useAuthenticatedConvex();
-  const recordMyWorkspaceDailyActiveUser = useCloudMutation(
+  const recordMyWorkspaceDailyActiveUser = useLegacyWorkspaceMutation(
     cloudOperations.activity.recordMyWorkspaceDailyActiveUser
   );
 
@@ -472,6 +492,15 @@ export function useSessionActions(): SessionActions {
     ]
   );
 
+  const updateSessionMetadata = useCallback(
+    async (sessionId: SessionId, patch: Record<string, unknown>) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      await assertCanManageSessions([sessionId]);
+      await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
+    },
+    [runtime, assertCanManageSessions]
+  );
+
   const updateSessionStatus = useCallback(
     async (sessionId: SessionId, status: SessionStatus) => {
       if (!runtime) {
@@ -495,19 +524,21 @@ export function useSessionActions(): SessionActions {
       if (prevStatus && nextStatus === prevStatus) {
         return;
       }
-      await runtime.writer.upsertDocMeta(roomId, { status: nextStatus } as Partial<SessionMeta>);
+      await updateSessionMetadata(sessionId, { status: nextStatus } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata]
   );
 
   const requestSessionCancel = useCallback(
-    async (sessionId: SessionId, turnId: string) => {
+    async (sessionId: SessionId, turnId: string, options?: { interrupt?: boolean }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      await assertCanManageSessions([sessionId]);
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      const interrupt = options?.interrupt === true;
       const meta = existing?.meta as SessionMeta | undefined;
       const machineId = meta?.machineId;
       const machine = machineId
@@ -518,13 +549,14 @@ export function useSessionActions(): SessionActions {
         MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
         OPERATION_INBOX_PROTOCOL_VERSION
       );
-      const cancelId = supportsInbox ? crypto.randomUUID() : undefined;
+      const cancelId = supportsInbox && !interrupt ? crypto.randomUUID() : undefined;
       if (machineId) {
         // RPC and the durable control request share an identity, even if either arrives late.
         void runtime
           .requestSessionCancel(machineId, sessionId, turnId, {
             timeoutMs: 2_000,
             ...(cancelId ? { cancelId } : {}),
+            ...(interrupt && supportsInbox ? { pauseInbox: false } : {}),
           })
           .then((response) => {
             if (response && !response.success) {
@@ -543,11 +575,11 @@ export function useSessionActions(): SessionActions {
         });
         await runtime.repo.flush();
       }
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         lastCanceledTurn: cancelId ? getSessionCancelRequestMarker(cancelId) : turnId,
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata, assertCanManageSessions]
   );
 
   const requestSessionGoal = useCallback(
@@ -585,9 +617,15 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const now = getServerNow();
-      await touchSessionActivityMeta(runtime, sessionId, { lastMessageAt: now, lastReadAt: now });
+      await assertCanManageSessions([sessionId]);
+      await touchSessionActivityMeta(
+        runtime,
+        sessionId,
+        { lastMessageAt: now, lastReadAt: now },
+        assertCanManageSessions
+      );
     },
-    [runtime]
+    [runtime, assertCanManageSessions]
   );
 
   const updateSessionTitle = useCallback(
@@ -602,12 +640,12 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         title: nextTitle,
         titleSource: 'user',
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata]
   );
 
   /**
@@ -628,11 +666,11 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         userId,
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata]
   );
 
   const markSessionRead = useCallback(
@@ -641,9 +679,15 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
-      await touchSessionActivityMeta(runtime, sessionId, { lastReadAt: readAt });
+      await assertCanManageSessions([sessionId]);
+      await touchSessionActivityMeta(
+        runtime,
+        sessionId,
+        { lastReadAt: readAt },
+        assertCanManageSessions
+      );
     },
-    [runtime]
+    [runtime, assertCanManageSessions]
   );
 
   const markSessionUnread = useCallback(
@@ -667,11 +711,11 @@ export function useSessionActions(): SessionActions {
       // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
       // only this receipt behind the latest known message; do not touch the
       // activity timestamp, which would reorder the sidebar.
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         lastReadAt: lastMessageAt - 1,
       } as Partial<SessionMeta>);
     },
-    [runtime, store]
+    [runtime, store, updateSessionMetadata]
   );
 
   const invalidateExternalHistoryCatalog = useCallback(
@@ -738,6 +782,7 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      await assertCanManageSessions([sessionId]);
       const draftOwner = store.get(sessionRunConfigDraftAccountAtom);
       const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
@@ -755,6 +800,7 @@ export function useSessionActions(): SessionActions {
 
       // Held sends never write after this: cancellation joins any in-flight write.
       await runtime.pendingSends?.cancelSessions([sessionId]);
+      await assertCanManageSessions([sessionId]);
       await runtime.writer.deleteDoc(sessionRoomId);
       if (runtime.accountId) {
         store.set(clearSessionRunConfigDraftsAtom, {
@@ -767,7 +813,7 @@ export function useSessionActions(): SessionActions {
       await runtime.repo.flush();
       await runtime.releaseSessionStore(sessionId);
     },
-    [invalidateExternalHistoryCatalog, runtime, store]
+    [invalidateExternalHistoryCatalog, runtime, store, assertCanManageSessions]
   );
 
   const deleteSessions = useCallback(
@@ -775,15 +821,17 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      await assertCanManageSessions(sessionIds);
       await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
-    [runtime, deleteSessionDocuments]
+    [runtime, deleteSessionDocuments, assertCanManageSessions]
   );
 
   const setTreeCollaborationStopped = useCallback(
     async (sessionId: SessionId, stopped: boolean) => {
       if (!runtime) throw new Error('Runtime not ready');
       const targets = await runtime.readSessionOperationTargets(sessionId, 'collaboration');
+      await assertCanManageSessions(targets.map((target) => target.id));
       for (const machineId of new Set(targets.map((target) => target.machineId))) {
         const machine = await runtime.repo.getDocMeta(getMachineRoomId(machineId));
         if (
@@ -801,47 +849,48 @@ export function useSessionActions(): SessionActions {
       }
       // Stop the root first, so late descendants inherit its barrier. Restore it last.
       for (const target of stopped ? targets : [...targets].reverse()) {
-        await runtime.writer.upsertDocMeta(getSessionRoomId(target.id), {
+        await updateSessionMetadata(target.id, {
           collaborationStopped: stopped,
         } as Partial<SessionMeta>);
       }
       if (stopped) await runtime.pendingSends?.cancelSessions(targets.map((target) => target.id));
     },
-    [runtime, store]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const archiveSession = useCallback(
-    async (sessionId: SessionId, autoArchive?: AutoArchiveSessionOptions) => {
-      log('[session-archive] start', { sessionId });
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      const includeOpenedSessions = options?.includeOpenedSessions === true;
+      log('[session-archive] start', { sessionId, includeOpenedSessions });
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      // Automatic intents come only from durable metadata. Keep manual archive's
-      // held-creation cancellation, but let an automatic retry validate its
-      // snapshot before it can cancel any newly held follow-up.
-      if (!autoArchive) {
-        const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
+      const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
+      if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
+        // Only a runtime-owned, uncommitted creation is cancelled here; no Repo mutation.
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime)
+          throw new Error('Workspace changed before archiving');
         await runtime.pendingSends?.cancelSessions([sessionId]);
-        if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
-          log('[session-archive] canceled unwritten conversation', { sessionId });
-          return;
-        }
+        log('[session-archive] canceled unwritten conversation', { sessionId });
+        return;
       }
-      const archiveTargets = await runtime.readSessionOperationTargets(sessionId, 'archive');
+      const archiveTargets = await runtime.readSessionOperationTargets(
+        sessionId,
+        includeOpenedSessions ? 'archive-tree' : 'archive'
+      );
+      await assertCanManageSessions(archiveTargets.map((target) => target.id));
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before archiving');
       }
-      if (autoArchive && !autoArchive.shouldContinue(archiveTargets)) return;
       // Held follow-ups would otherwise be written into archived conversations.
       await runtime.pendingSends?.cancelSessions(archiveTargets.map((session) => session.id));
       for (const session of archiveTargets) {
         // The archived state is the whole request: the owning machine observes
         // it, releases the runtime, and reconciles the worktree directory.
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+        await updateSessionMetadata(session.id, {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
-        autoArchive?.accepted.add(session.id);
         if (typeof window !== 'undefined') {
           // Cleanup failure cannot undo the accepted archive state.
           try {
@@ -857,7 +906,7 @@ export function useSessionActions(): SessionActions {
         targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const restoreSession = useCallback(
@@ -868,6 +917,7 @@ export function useSessionActions(): SessionActions {
       }
 
       const restoreTargets = await runtime.readSessionOperationTargets(sessionId, 'restore');
+      await assertCanManageSessions(restoreTargets.map((target) => target.id));
       const [sessionMeta] = restoreTargets;
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
@@ -875,7 +925,7 @@ export function useSessionActions(): SessionActions {
       }
       // Restore is a lifecycle change only; every tab keeps its close flag.
       for (const session of restoreTargets) {
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+        await updateSessionMetadata(session.id, {
           isArchived: false,
         } as Partial<SessionMeta>);
       }
@@ -884,7 +934,7 @@ export function useSessionActions(): SessionActions {
         targetSessionIds: restoreTargets.map((session) => session.id),
       });
     },
-    [runtime, store]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const setSessionTabClosed = useCallback(
@@ -895,9 +945,9 @@ export function useSessionActions(): SessionActions {
       if (isLoroRepoDocDeleted(entry)) throw new Error('Session was deleted');
       const meta = entry?.meta ?? store.get(sessionMetaCacheAtom)[roomId];
       if (!meta) throw new Error('Session metadata is still loading');
-      await runtime.writer.upsertDocMeta(roomId, { isTabClosed: closed });
+      await updateSessionMetadata(sessionId, { isTabClosed: closed });
     },
-    [runtime, store]
+    [runtime, store, updateSessionMetadata]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -915,6 +965,7 @@ export function useSessionActions(): SessionActions {
       log('[session-delete] start', { sessionId });
       if (!runtime) throw new Error('Runtime not ready');
       const deleteTargets = await runtime.readSessionOperationTargets(sessionId, 'delete');
+      await assertCanManageSessions(deleteTargets.map((target) => target.id));
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before deleting');
       }
@@ -927,7 +978,7 @@ export function useSessionActions(): SessionActions {
         targetSessionIds: deleteTargets.map((session) => session.id),
       });
     },
-    [runtime, store, deleteArchivedSessionMeta]
+    [runtime, store, deleteArchivedSessionMeta, assertCanManageSessions]
   );
 
   const setSessionPinned = useCallback(
@@ -938,11 +989,11 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         isPinned,
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata]
   );
 
   return {
@@ -956,6 +1007,7 @@ export function useSessionActions(): SessionActions {
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
+    updateSessionMetadata,
     setSessionTabClosed,
     transferSessionOwner,
     markSessionRead,

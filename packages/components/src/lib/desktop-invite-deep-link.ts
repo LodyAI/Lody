@@ -1,3 +1,4 @@
+import { parseMemberOffer, memberJoinPath } from './e2ee-member-offer';
 import { isIOSRuntimeEnvironment, isNativeAppShell } from '@/lib/native-platform';
 
 const ANDROID_BROWSER_PATTERN = /Android/i;
@@ -21,6 +22,11 @@ export function resolveDesktopInviteDeepLinkPath(deepLinkUrl: string): string | 
 
   const action = parsed.pathname.replace(/^\/+|\/+$/g, '');
   if (action === 'open') {
+    const encodedOffer = parsed.searchParams.get('memberOffer');
+    if (encodedOffer !== null) {
+      const offer = parseMemberOffer(encodedOffer);
+      return offer ? memberJoinPath(offer) : null;
+    }
     const invitationId = parsed.searchParams.get('invitationId')?.trim();
     if (!invitationId) {
       return null;

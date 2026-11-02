@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Identity } from '@loro-dev/roost';
 import { fromApplicationJson } from '@loro-dev/roost/lody-history';
 
@@ -19,6 +19,158 @@ const content = (text: string) =>
   });
 
 describe('local Roost active branch adapter contract', () => {
+  it.each(['next', 'epoch'])(
+    'atomically rejects an index-only %s change racing content/receipts',
+    async (kind) => {
+      const [{ RoostNativeClient }, { RoostHistoryGeneration }] = await Promise.all([
+        import('@loro-dev/roost-node'),
+        import('../src/session/roost-history-generation'),
+      ]);
+      const directory = await mkdtemp(join(tmpdir(), 'lody-generation-cas-'));
+      const seed = new Uint8Array(32).fill(8),
+        owner = Identity.fromSeed(seed).owner();
+      const client = new RoostNativeClient({
+        dbPath: join(directory, 'history.db'),
+        seed,
+        allowedOwners: [owner],
+        clockMs: 1_700_000_000_000n,
+        maxQueuedRequests: 16,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      });
+      try {
+        await client.ready;
+        const generation = new RoostHistoryGeneration(client, owner, 'pointer-race');
+        const created = await generation.history.accept({
+          ...identity('reply'),
+          parents: [],
+          content: content('assistant'),
+        });
+        const cursor = await generation.history.observedEventCursor();
+        const raw = client.stream('lody-session:pointer-race');
+        const receipt = {
+          table: 'app_synthetic_receipts',
+          key: new TextEncoder().encode('r'),
+          value: new Uint8Array([1]),
+        };
+        const pointer =
+          kind === 'next'
+            ? { table: 'lody_history_generation_v1', key: new TextEncoder().encode('next') }
+            : { table: 'lody_history_epoch_v1', key: new TextEncoder().encode('current') };
+        const original = client.request;
+        let armed = true;
+        const race = vi.spyOn(client, 'request').mockImplementation(async function (...args) {
+          if (armed && args[0].method === 'writeBatch') {
+            armed = false;
+            await raw.compareAndWriteIndex([], [{ ...pointer, value: new Uint8Array(16).fill(1) }]);
+          }
+          return original.apply(this, args);
+        });
+        try {
+          await expect(
+            generation.host.writeBatch(
+              [
+                {
+                  kind: 'edit',
+                  turnId: created.turnId,
+                  expectedNextSeq: 1n,
+                  ops: [
+                    {
+                      kind: 'appendText',
+                      path: [{ key: 'content' }, { key: 'items' }, { index: 0n }, { key: 'text' }],
+                      text: 'bad',
+                    },
+                  ],
+                },
+              ],
+              { expectedEventCursor: cursor, indexPuts: [receipt] }
+            )
+          ).rejects.toMatchObject({ code: 'stale' });
+        } finally {
+          race.mockRestore();
+        }
+        expect(await raw.readTurn(created.turnId)).toMatchObject({
+          kind: 'found',
+          turn: { nextSeq: 1n },
+        });
+        expect(await raw.readIndex([{ table: receipt.table, key: receipt.key }])).toEqual([null]);
+        expect(await raw.eventsAfter(cursor, 10n)).toEqual([]);
+      } finally {
+        await client.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['next', 'epoch'])(
+    'rejects an index-only %s change during generation preparation without activating its child',
+    async (kind) => {
+      const [{ RoostNativeClient }, { RoostHistoryGeneration }] = await Promise.all([
+        import('@loro-dev/roost-node'),
+        import('../src/session/roost-history-generation'),
+      ]);
+      const directory = await mkdtemp(join(tmpdir(), 'lody-generation-activation-cas-'));
+      const seed = new Uint8Array(32).fill(8),
+        owner = Identity.fromSeed(seed).owner();
+      const client = new RoostNativeClient({
+        dbPath: join(directory, 'history.db'),
+        seed,
+        allowedOwners: [owner],
+        maxQueuedRequests: 16,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      });
+      try {
+        await client.ready;
+        const generation = new RoostHistoryGeneration(client, owner, 'activation-race');
+        const created = await generation.history.accept({
+          ...identity('original'),
+          parents: [],
+          content: content('assistant'),
+        });
+        const cursor = await generation.history.observedEventCursor();
+        const raw = client.stream('lody-session:activation-race');
+        const pointer =
+          kind === 'next'
+            ? { table: 'lody_history_generation_v1', key: new TextEncoder().encode('next') }
+            : { table: 'lody_history_epoch_v1', key: new TextEncoder().encode('current') };
+        const foreign = new Uint8Array(16).fill(1);
+        const request = client.request;
+        let armed = true;
+        const race = vi.spyOn(client, 'request').mockImplementation(async function (...args) {
+          if (
+            armed &&
+            args[0].stream === 'lody-session:activation-race' &&
+            args[0].method === 'writeBatch' &&
+            args[0].indexPuts?.some((put) => put.table === 'lody_history_generation_v1')
+          ) {
+            armed = false;
+            await raw.compareAndWriteIndex([], [{ ...pointer, value: foreign }]);
+          }
+          return request.apply(this, args);
+        });
+        try {
+          await expect(
+            generation.replace(
+              [{ id: 'replacement', role: 'assistant', timestamp: 'synthetic', items: [] }],
+              'replace-race',
+              cursor
+            )
+          ).rejects.toMatchObject({ code: 'stale' });
+        } finally {
+          race.mockRestore();
+        }
+        expect(await raw.readIndex([pointer])).toEqual([foreign]);
+        expect(await raw.eventsAfter(cursor, 100n)).toEqual([]);
+        expect(await raw.readTurn(created.turnId)).toMatchObject({
+          kind: 'found',
+          turn: { nextSeq: 1n },
+        });
+      } finally {
+        await client.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('keeps sealed history immutable and makes branch operations CAS/idempotent', async () => {
     const [{ RoostNativeClient }, { NodeLodyHistory }] = await Promise.all([
       import('@loro-dev/roost-node'),

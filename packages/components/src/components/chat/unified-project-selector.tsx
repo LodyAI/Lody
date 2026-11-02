@@ -1,7 +1,9 @@
+import { compareUnifiedProjectOptions } from './chat-landing-derived';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
+  Folders,
   ChevronDown,
   CircleSlash2,
   FolderOpen,
@@ -12,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -31,23 +34,45 @@ import { withClassName } from '@/lib/stylex';
 import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Button } from '@lody/ui/button';
 
-function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
+const ownerAvatarStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+});
+
+export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
-  const [failed, setFailed] = useState(false);
+  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
+  const [failedOwner, setFailedOwner] = useState<string | null>(null);
 
-  if (!ownerHandle || failed) {
+  if (!ownerHandle || failedOwner === ownerHandle) {
     return <Github className="h-4 w-4 shrink-0 opacity-70" />;
   }
 
   return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(ownerHandle)}
-      alt=""
-      aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-      onError={() => setFailed(true)}
-    />
+    <span {...stylex.props(ownerAvatarStyles.frame)}>
+      {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
+      <CachedAvatarImg
+        key={ownerHandle}
+        src={getGitHubOwnerAvatarUrl(ownerHandle)}
+        alt=""
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-0 h-4 w-4 rounded-sm object-cover',
+          loadedOwner !== ownerHandle && 'opacity-0'
+        )}
+        onLoad={() => setLoadedOwner(ownerHandle)}
+        onError={() => setFailedOwner(ownerHandle)}
+      />
+    </span>
   );
 }
 
@@ -59,7 +84,21 @@ export interface LocalProjectSelection {
 export type UnifiedProjectSelection =
   | { kind: 'none' }
   | ({ kind: 'local' } & LocalProjectSelection)
-  | { kind: 'github'; repoFullName: string };
+  | { kind: 'github'; repoFullName: string }
+  | { kind: 'group'; projectId: string };
+
+/** A Project group offered beside single projects. */
+export type UnifiedProjectGroupOption = {
+  projectId: string;
+  name: string;
+  /** Number of repositories, shown as the option's description. */
+  memberCount: number;
+  lastUsedAt?: number;
+  /** Why this group cannot start a conversation on the selected machine. */
+  disabledReason?: string;
+  /** What the selected machine lacks, e.g. "2 cloned on start". */
+  availability?: string;
+};
 
 type UnifiedProjectOption = {
   value: string;
@@ -69,6 +108,7 @@ type UnifiedProjectOption = {
   selection: Exclude<UnifiedProjectSelection, { kind: 'none' }>;
   lastUsedAt?: number;
   sharing?: SessionSharingState;
+  disabledReason?: string;
 };
 
 export const UNIFIED_PROJECT_OPTION_RENDER_LIMIT = 20;
@@ -83,20 +123,7 @@ export type UnifiedLocalProjectOption = {
   sharing?: SessionSharingState;
 };
 
-export function compareUnifiedProjectOptions(
-  left: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>,
-  right: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>
-): number {
-  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
-    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
-  } else if (left.lastUsedAt !== undefined) {
-    return -1;
-  } else if (right.lastUsedAt !== undefined) {
-    return 1;
-  }
-  const labelComparison = left.label.localeCompare(right.label);
-  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
-}
+export { compareUnifiedProjectOptions } from './chat-landing-derived';
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
@@ -227,6 +254,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
   'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
 > {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
+  /** Project groups; omitted by surfaces that cannot start multi-repository work. */
+  projectGroups?: ReadonlyArray<UnifiedProjectGroupOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
   /**
@@ -249,6 +278,10 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
    * available source, while search still evaluates the complete option list.
    */
   renderLimit?: number;
+  /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
+  onCreateProject?: () => void;
+  /** Opens a project group in the editor; the group rows offer it on hover. */
+  onEditProjectGroup?: (projectId: string) => void;
 }
 
 function ProjectAccessStatus({
@@ -328,6 +361,8 @@ function getSelectionValue(selection: UnifiedProjectSelection): string | null {
       return `local:${selection.machineId}:${selection.localProjectId}`;
     case 'github':
       return `github:${selection.repoFullName}`;
+    case 'group':
+      return `group:${selection.projectId}`;
     case 'none':
       return null;
   }
@@ -379,6 +414,7 @@ export function UnifiedProjectSelectorView({
   value,
   onChange,
   localProjects,
+  projectGroups,
   repositories,
   className,
   latestMessageAtByRepo,
@@ -391,6 +427,8 @@ export function UnifiedProjectSelectorView({
   contentClassName,
   contentStyle,
   renderLimit,
+  onCreateProject,
+  onEditProjectGroup,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -401,6 +439,26 @@ export function UnifiedProjectSelectorView({
 
   const options = useMemo<UnifiedProjectOption[]>(() => {
     const combined: UnifiedProjectOption[] = [];
+    for (const group of projectGroups ?? []) {
+      combined.push({
+        value: `group:${group.projectId}`,
+        label: group.name,
+        description:
+          group.disabledReason ??
+          [
+            t('chat.projectPicker.groupMembers', '{{count}} repositories', {
+              count: group.memberCount,
+            }),
+            group.availability,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        icon: <Folders className="h-4 w-4 shrink-0 opacity-70" />,
+        selection: { kind: 'group', projectId: group.projectId },
+        lastUsedAt: group.lastUsedAt,
+        disabledReason: group.disabledReason,
+      });
+    }
     for (const project of localProjects) {
       combined.push({
         value: `local:${project.machineId}:${project.localProjectId}`,
@@ -427,7 +485,7 @@ export function UnifiedProjectSelectorView({
       });
     }
     return combined.sort(compareUnifiedProjectOptions);
-  }, [latestMessageAtByRepo, localProjects, repositories]);
+  }, [latestMessageAtByRepo, localProjects, projectGroups, repositories, t]);
 
   const selectedValue = getSelectionValue(value);
   const selectedOption = useMemo(
@@ -444,6 +502,8 @@ export function UnifiedProjectSelectorView({
     selectedOption?.icon ??
     (value.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} />
+    ) : value.kind === 'group' ? (
+      <Folders className="h-4 w-4 opacity-70" />
     ) : (
       <FolderOpen className="h-4 w-4 opacity-70" />
     ));
@@ -453,7 +513,9 @@ export function UnifiedProjectSelectorView({
       ? value.repoFullName
       : value.kind === 'local'
         ? value.localProjectId
-        : placeholder);
+        : value.kind === 'group'
+          ? t('chat.projectPicker.removedGroup', 'Removed project group')
+          : placeholder);
   const selectedSharing =
     selectedOption?.selection.kind === 'local' ? selectedOption.sharing : undefined;
   const selectedPrivateSharing = shouldShowPrivateSharingStatus(selectedSharing)
@@ -611,12 +673,16 @@ export function UnifiedProjectSelectorView({
                 }}
               >
                 {filteredOptions.map((option) => {
-                  // Local projects show only the name; the path lives in a hover
-                  // tooltip. GitHub repos keep their inline description line.
+                  // Local and GitHub projects show only the name; local paths
+                  // live in a hover tooltip. Groups keep their member summary.
                   const localPath =
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
-                    option.selection.kind === 'github' ? option.description : undefined;
+                    option.selection.kind === 'group' ? option.description : undefined;
+                  const editProjectId =
+                    option.selection.kind === 'group' && onEditProjectGroup
+                      ? option.selection.projectId
+                      : undefined;
                   const labelNode = (
                     <span
                       className={cn('truncate', option.value === selectedValue && 'font-medium')}
@@ -628,16 +694,40 @@ export function UnifiedProjectSelectorView({
                     <Menu.RadioItem
                       key={option.value}
                       value={option.value}
+                      disabled={option.disabledReason !== undefined}
                       indicator="check"
                       indicatorSide="end"
-                      className={cn(
-                        'gap-2 py-1.5',
-                        inlineDescription ? 'items-start' : 'items-center'
-                      )}
+                      className="group/option items-center gap-2 py-1.5"
+                      endContent={
+                        editProjectId !== undefined ? (
+                          <Button
+                            variant="ghost"
+                            size="mini"
+                            tabIndex={-1}
+                            aria-label={t('chat.projectPicker.editGroup', 'Edit {{name}}', {
+                              name: option.label,
+                            })}
+                            className={cn(
+                              'opacity-0 focus-visible:opacity-100',
+                              'group-hover/option:opacity-100 group-data-[highlighted]/option:opacity-100'
+                            )}
+                            // The row selects on press; the button only edits.
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onMouseUp={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setOpen(false);
+                              onEditProjectGroup?.(editProjectId);
+                            }}
+                          >
+                            {t('common.edit', 'Edit')}
+                          </Button>
+                        ) : null
+                      }
                     >
-                      <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
-                        {option.icon}
-                      </span>
+                      <span className="shrink-0">{option.icon}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         {localPath ? (
                           <Tooltip.Root>
@@ -672,6 +762,11 @@ export function UnifiedProjectSelectorView({
           <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
             {clearLabel}
           </Menu.Item>
+          {onCreateProject ? (
+            <Menu.Item icon={Folders} onClick={onCreateProject}>
+              {t('chat.projectPicker.createProject', 'Create project')}
+            </Menu.Item>
+          ) : null}
           <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
             {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>

@@ -1,3 +1,4 @@
+import type { WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 
@@ -38,6 +39,7 @@ export type EagerSyncAuthContext = {
 export type EagerSyncWorkerInput =
   | {
       type: 'start';
+      content: WorkspaceStreamsMode;
       scope: string;
       workspaceId: string;
       roomId: string;

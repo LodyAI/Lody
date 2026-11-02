@@ -1,11 +1,12 @@
 import type { LoroRepo } from 'loro-repo';
 import { getSessionIdFromRoomId, SESSION_DOC_PREFIX } from './index';
 import { isLoroRepoDocDeleted } from './repo-doc-meta';
-import { collectSessionArchiveTargets } from './session-archive-targets';
+import { collectSessionArchiveTargets, collectSessionTreeTargets } from './session-archive-targets';
 import type { SessionId } from './ids';
 import type { SessionMeta } from './schema';
 
-export type SessionOperation = 'archive' | 'restore' | 'delete' | 'collaboration';
+/** `archive-tree` also archives opened Sessions; only an explicit user choice selects it. */
+export type SessionOperation = 'archive' | 'archive-tree' | 'restore' | 'delete' | 'collaboration';
 
 /**
  * Caller establishes source readiness before this read. Root and descendants
@@ -43,11 +44,13 @@ export async function readSessionOperationTargets(
   }
 
   const descendants =
-    operation === 'archive' || operation === 'collaboration'
-      ? collectSessionArchiveTargets(sessionId, sessions)
-      : sessions.filter(
-          (session) => session.id !== sessionId && session.parentSessionId === sessionId
-        );
+    operation === 'collaboration' || operation === 'archive-tree'
+      ? collectSessionTreeTargets(sessionId, sessions)
+      : operation === 'archive'
+        ? collectSessionArchiveTargets(sessionId, sessions)
+        : sessions.filter(
+            (session) => session.id !== sessionId && session.parentSessionId === sessionId
+          );
   return [root, ...descendants];
 }
 

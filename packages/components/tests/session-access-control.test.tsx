@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionAccessControl } from '../src/components/session-sharing';
+import { Copy, Image } from 'lucide-react';
+import {
+  SessionAccessControl,
+  type SessionShareEditorContext,
+} from '../src/components/session-sharing';
 import type { SessionPublicShareStatus, SessionSharingState } from '../src/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -45,6 +49,12 @@ describe('SessionAccessControl', () => {
       configurable: true,
       value: TestPointerEvent,
     });
+    // jsdom has none; the tab strip measures its indicator.
+    globalThis.ResizeObserver ??= class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -57,7 +67,10 @@ describe('SessionAccessControl', () => {
 
   async function render(props: {
     state?: SessionSharingState;
-    publicShare?: { status: SessionPublicShareStatus; onOpen: () => void };
+    publicShare?: {
+      status: SessionPublicShareStatus;
+      renderEditor: (context: SessionShareEditorContext) => ReactNode;
+    };
   }) {
     await act(async () => {
       root.render(
@@ -74,27 +87,67 @@ describe('SessionAccessControl', () => {
     return button!;
   }
 
-  async function openMenu(): Promise<void> {
-    await act(async () => {
-      trigger().dispatchEvent(
-        new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
+  async function openPanel(): Promise<void> {
+    await act(async () => trigger().click());
   }
 
-  function menuItem(label: string): HTMLElement {
-    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+  function panel(): HTMLElement {
+    const popup = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(popup).toBeInstanceOf(HTMLElement);
+    return popup!;
+  }
+
+  function stops(): HTMLElement[] {
+    return Array.from(panel().querySelectorAll<HTMLElement>('[role="tab"]'));
+  }
+
+  function stop(label: string): HTMLElement {
+    const found = stops().find((candidate) => candidate.textContent === label);
+    expect(found, label).toBeDefined();
+    return found!;
+  }
+
+  const isDisabled = (el: HTMLElement) =>
+    el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
+
+  function backButton(): HTMLButtonElement {
+    const found = panel().querySelector<HTMLButtonElement>('button[aria-label="Back"]');
+    expect(found).toBeInstanceOf(HTMLButtonElement);
+    return found!;
+  }
+
+  function panelButton(label: string): HTMLButtonElement {
+    const found = Array.from(panel().querySelectorAll<HTMLButtonElement>('button')).find(
       (candidate) => candidate.textContent === label
     );
-    expect(item, label).toBeDefined();
-    return item!;
+    expect(found, label).toBeDefined();
+    return found!;
   }
 
-  it('renders the access control for a private conversation', async () => {
-    await render({ state: { ...baseState, visibility: 'private', privateReason: 'project' } });
+  /** What the page hands the panel: a stand-in editor that can report a publication under way. */
+  const editorBody = (onBusyChange?: (busy: boolean) => void, onClose?: () => void) => (
+    <div data-testid="editor">
+      <button type="button" onClick={() => onBusyChange?.(true)}>
+        Start publishing
+      </button>
+      <button type="button" onClick={() => onClose?.()}>
+        Cancel editor
+      </button>
+    </div>
+  );
+  const renderEditor = () => <p>Editor body</p>;
 
-    expect(trigger().textContent).toContain('Private');
+  const privateState: SessionSharingState = {
+    ...baseState,
+    visibility: 'private',
+    privateReason: 'project',
+  };
+
+  it('labels the private control with the verb and keeps the state for assistive tech', async () => {
+    await render({ state: privateState });
+
+    expect(trigger().textContent).toContain('Share');
+    expect(trigger().textContent).not.toContain('Private');
     expect(trigger().getAttribute('aria-label')).toContain('Private to you');
   });
 
@@ -108,30 +161,145 @@ describe('SessionAccessControl', () => {
     }
   );
 
-  it('offers a direct share button when the conversation is not private', async () => {
-    const onOpen = vi.fn();
-    await render({
-      state: { ...baseState, visibility: 'team' },
-      publicShare: { status: 'none', onOpen },
+  it('answers who can open a private conversation and marks only you', async () => {
+    await render({ state: privateState, publicShare: { status: 'none', renderEditor } });
+
+    await openPanel();
+    expect(panel().querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe(
+      'Who can open this'
+    );
+    expect(panel().textContent).toContain('Private to you');
+    // The mocked translator does not interpolate, so assert the reason text
+    // the private branch resolved rather than the project name it names.
+    expect(panel().textContent).toContain('is not shared with the team.');
+    expect(stops().map((el) => el.textContent)).toEqual(['Only you', 'Team', 'Web']);
+    expect(stop('Only you').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('hands team sharing to the page and closes, without moving the selection', async () => {
+    const onShareWithTeam = vi.fn();
+    await act(async () => {
+      root.render(
+        <Tooltip.Provider>
+          <SessionAccessControl state={privateState} onShareWithTeam={onShareWithTeam} />
+        </Tooltip.Provider>
+      );
     });
 
-    expect(trigger().textContent).toContain('Share');
-    expect(trigger().getAttribute('aria-haspopup')).toBeNull();
+    await openPanel();
+    await act(async () => stop('Team').click());
+    expect(onShareWithTeam).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
 
+  it('opens the publication editor inside the panel instead of a dialog', async () => {
+    await render({ state: privateState, publicShare: { status: 'none', renderEditor } });
+
+    await openPanel();
+    expect(panel().textContent).not.toContain('Editor body');
+    await act(async () => stop('Web').click());
+    // Still the one popover: the editor replaced the front, nothing else opened.
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(panel().textContent).toContain('Publish to the web');
+    expect(panel().textContent).toContain('Editor body');
+    expect(stops()).toHaveLength(0);
+  });
+
+  it('goes back to the front from the editor, and reopens at the front', async () => {
+    await render({ state: privateState, publicShare: { status: 'none', renderEditor } });
+
+    await openPanel();
+    await act(async () => stop('Web').click());
+    await act(async () => backButton().click());
+    expect(stops().map((el) => el.textContent)).toEqual(['Only you', 'Team', 'Web']);
+
+    await act(async () => stop('Web').click());
     await act(async () => trigger().click());
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    await openPanel();
+    expect(stops()).toHaveLength(3);
   });
 
-  it('offers the share button before any team visibility resolves', async () => {
-    await render({ publicShare: { status: 'none', onOpen: vi.fn() } });
+  it('closes the editor when it asks to, returning to the front', async () => {
+    await render({
+      state: privateState,
+      publicShare: {
+        status: 'none',
+        renderEditor: ({ onClose }) => editorBody(undefined, onClose),
+      },
+    });
 
-    expect(trigger().textContent).toContain('Share');
+    await openPanel();
+    await act(async () => stop('Web').click());
+    await act(async () => panelButton('Cancel editor').click());
+    expect(stops()).toHaveLength(3);
   });
 
-  it('reports a published conversation as shared without a menu', async () => {
+  it('keeps the panel open and the way back disabled while a publication is under way', async () => {
+    await render({
+      state: privateState,
+      publicShare: {
+        status: 'none',
+        renderEditor: ({ onBusyChange }) => editorBody(onBusyChange),
+      },
+    });
+
+    await openPanel();
+    await act(async () => stop('Web').click());
+    await act(async () => panelButton('Start publishing').click());
+    expect(backButton().disabled).toBe(true);
+
+    // An outside press and Escape both ask to close; neither may dismiss it now.
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('marks the team for a team-visible conversation and never offers to narrow it', async () => {
     await render({
       state: { ...baseState, visibility: 'team' },
-      publicShare: { status: 'shared', onOpen: vi.fn() },
+      publicShare: { status: 'none', renderEditor },
+    });
+
+    await openPanel();
+    expect(panel().textContent).toContain('Shared with team');
+    expect(stop('Team').getAttribute('aria-selected')).toBe('true');
+    expect(isDisabled(stop('Only you'))).toBe(true);
+  });
+
+  it('reads a solo workspace as only you and still offers the web', async () => {
+    await render({ publicShare: { status: 'none', renderEditor } });
+
+    expect(trigger().textContent).toContain('Share');
+    await openPanel();
+    expect(panel().textContent).toContain('Private to you');
+    expect(panel().textContent).not.toContain('Shared with team');
+    expect(stops().map((el) => el.textContent)).toEqual(['Only you', 'Web']);
+    expect(stop('Only you').getAttribute('aria-selected')).toBe('true');
+
+    await act(async () => stop('Web').click());
+    expect(panel().textContent).toContain('Editor body');
+  });
+
+  it('does not claim privacy while the visibility is still being resolved', async () => {
+    await render({
+      state: { ...baseState, visibility: 'unknown' },
+      publicShare: { status: 'none', renderEditor },
+    });
+
+    await openPanel();
+    expect(panel().textContent).toContain('Checking visibility…');
+    // One audience is not a choice, so there is no strip to slide.
+    expect(stops()).toHaveLength(0);
+  });
+
+  it('reports a published conversation as shared', async () => {
+    await render({
+      state: { ...baseState, visibility: 'team' },
+      publicShare: { status: 'shared', renderEditor },
     });
 
     expect(trigger().textContent).toBe('Shared');
@@ -140,41 +308,74 @@ describe('SessionAccessControl', () => {
   it('does not claim a conversation is shared before the status resolves', async () => {
     await render({
       state: { ...baseState, visibility: 'team' },
-      publicShare: { status: 'unknown', onOpen: vi.fn() },
+      publicShare: { status: 'unknown', renderEditor },
     });
 
     expect(trigger().textContent).toContain('Share');
+    expect(trigger().textContent).not.toContain('Shared');
   });
 
-  it('keeps publishing inside the menu of a private conversation', async () => {
-    const onOpen = vi.fn();
-    await render({
-      state: { ...baseState, visibility: 'private', privateReason: 'project' },
-      publicShare: { status: 'none', onOpen },
-    });
-
-    expect(trigger().textContent).toContain('Private');
-
-    await openMenu();
-    expect(menuItem('Share project with team…')).toBeDefined();
-    await act(async () => menuItem('Share').click());
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it('reports a published private conversation as shared and still explains the private scope', async () => {
-    await render({
-      state: { ...baseState, visibility: 'private', privateReason: 'project' },
-      publicShare: { status: 'shared', onOpen: vi.fn() },
-    });
+  it('reads a published private conversation as web and offers to manage the link', async () => {
+    await render({ state: privateState, publicShare: { status: 'shared', renderEditor } });
 
     expect(trigger().textContent).toContain('Shared');
     expect(trigger().getAttribute('aria-label')).toContain('Anyone with the link');
 
-    await openMenu();
-    const menu = document.querySelector<HTMLElement>('[role="menu"]');
-    expect(menu?.textContent).toContain('Private to you');
-    // The mocked translator does not interpolate, so assert the reason text
-    // the private branch resolved rather than the project name it names.
-    expect(menu?.textContent).toContain('is not shared with the team.');
+    await openPanel();
+    expect(stop('Web').getAttribute('aria-selected')).toBe('true');
+    await act(async () => panelButton('Manage link').click());
+    expect(panel().textContent).toContain('Editor body');
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  });
+
+  it('disables the team for someone who does not own the device and says why', async () => {
+    await render({
+      state: { ...baseState, canManage: false, visibility: 'private', privateReason: 'machine' },
+      publicShare: { status: 'none', renderEditor },
+    });
+
+    await openPanel();
+    expect(isDisabled(stop('Team'))).toBe(true);
+    expect(panel().textContent).toContain('Only the device owner can share');
+  });
+
+  it('copies the link and closes the panel', async () => {
+    const onCopyLink = vi.fn();
+    await act(async () => {
+      root.render(
+        <Tooltip.Provider>
+          <SessionAccessControl state={privateState} onCopyLink={onCopyLink} />
+        </Tooltip.Provider>
+      );
+    });
+
+    await openPanel();
+    await act(async () => panelButton('Copy URL').click());
+    expect(onCopyLink).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('lists the copies that leave the conversation and closes after one', async () => {
+    const onMarkdown = vi.fn();
+    const onImage = vi.fn();
+    await act(async () => {
+      root.render(
+        <Tooltip.Provider>
+          <SessionAccessControl
+            state={privateState}
+            exportActions={[
+              { id: 'md', label: 'Copy as Markdown', icon: Copy, onSelect: onMarkdown },
+              { id: 'image', label: 'Share as image…', icon: Image, onSelect: onImage },
+            ]}
+          />
+        </Tooltip.Provider>
+      );
+    });
+
+    await openPanel();
+    await act(async () => panelButton('Share as image…').click());
+    expect(onImage).toHaveBeenCalledTimes(1);
+    expect(onMarkdown).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });

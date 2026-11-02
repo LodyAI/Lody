@@ -16,7 +16,7 @@ PR: https://github.com/LodyAI/Lody/pull/1398
 ## 决定
 
 此次收紧[指令归属决定](2026-09-08-scoped-agent-instructions.zh.md)保留的 Spec
-触发条件，同时保留[Note 触发规则](2026-09-07-explicit-agent-note-triggers.zh.md)、
+触发条件，同时保留[Note 触发规则](../../archived/process/2026-09-07-explicit-agent-note-triggers.zh.md)、
 双语维护和每个评审版 Spec 的批准要求。根指令和收尾流程统一遵循
 `specs/AGENTS.md` 的选择规则；Note 不再隐含需要配套 Spec。
 

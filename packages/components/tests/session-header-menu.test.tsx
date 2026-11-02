@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { initI18n } from '../src/i18n';
 
 import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -6,7 +8,7 @@ import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
-import { experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
+import { conversationWideModeAtom, experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -44,7 +46,8 @@ describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     vi.useFakeTimers();
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
@@ -75,6 +78,7 @@ describe('SessionHeaderMenu', () => {
         new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
+          detail: 1,
           pointerType: 'mouse',
         })
       );
@@ -120,6 +124,101 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
+
+  it.each(['Copy URL', 'Copy deeplink'])(
+    'dispatches %s independently from the other link action',
+    async (label) => {
+      let copied = '';
+      await act(async () => {
+        root?.render(
+          <SessionHeaderMenu
+            session={session}
+            onCopyUrl={() => {
+              copied = 'https://lody.ai/acme/sessions/child';
+            }}
+            onCopyDeepLink={() => {
+              copied = 'lody://session/child?workspace=ws';
+            }}
+            t={translate}
+          />
+        );
+      });
+      await openMenu();
+      const copySubmenu = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      ).find((item) => item.textContent === 'Copy');
+      expect(copySubmenu).toBeDefined();
+      await act(async () => copySubmenu!.click());
+      expect(menuItem('Copy URL')).toBeDefined();
+      expect(menuItem('Copy deeplink')).toBeDefined();
+      await act(async () => menuItem(label).click());
+      expect(copied).toBe(
+        label === 'Copy URL'
+          ? 'https://lody.ai/acme/sessions/child'
+          : 'lody://session/child?workspace=ws'
+      );
+    }
+  );
+
+  it('leaves pointer-opened actions unhighlighted and toggles full width only on activation', async () => {
+    const store = createStore();
+    store.set(conversationWideModeAtom, false);
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ForkMenuHarness />
+        </Provider>
+      );
+    });
+    await openMenu();
+
+    const menu = document.querySelector('[role="menu"]');
+    const fullWidth = menuItem('Full width');
+    const toggle = fullWidth.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(document.activeElement).toBe(menu);
+    expect(menu?.querySelector('[data-highlighted]')).toBeNull();
+    expect(store.get(conversationWideModeAtom)).toBe(false);
+
+    await act(async () => {
+      menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    expect(document.activeElement).toBe(fullWidth);
+    expect(fullWidth.hasAttribute('data-highlighted')).toBe(true);
+
+    await act(async () => {
+      fullWidth.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(store.get(conversationWideModeAtom)).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBe(menu);
+
+    await act(async () => toggle.click());
+    expect(store.get(conversationWideModeAtom)).toBe(false);
+    expect(document.querySelector('[role="menu"]')).toBe(menu);
+  });
+
+  it('focuses the first action when the menu is opened with the keyboard', async () => {
+    await act(async () => root?.render(<ForkMenuHarness />));
+    const trigger = container!.querySelector<HTMLButtonElement>(
+      'button[aria-label="More actions"]'
+    )!;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    const fullWidth = menuItem('Full width');
+    expect(document.activeElement).toBe(fullWidth);
+    expect(fullWidth.hasAttribute('data-highlighted')).toBe(true);
+
+    await act(async () => {
+      fullWidth.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
 
   it('opens the submenu and forks to a new tab', async () => {
     await act(async () => root?.render(<ForkMenuHarness />));
@@ -321,5 +420,66 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
+  });
+  it('allows encrypted sharing, local export and preview while keeping unsupported operations restricted', async () => {
+    let exported = false;
+    let shareOpened = false;
+    const store = createStore();
+    store.set(workspaceContentModeAtom, {
+      accountId: 'user',
+      workspaceSlug: 'encrypted',
+      workspaceId: 'workspace',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <ForkMenuHarness
+            onOpenPublicShare={() => {
+              shareOpened = true;
+            }}
+            onShareWithTeam={() => {
+              throw new Error('must not share with team');
+            }}
+            sharing={{
+              visibility: 'private',
+              privateReason: 'machine',
+              canManage: true,
+              machineId: session.machineId,
+              localProjectId: null,
+              machineName: 'remote',
+              projectName: null,
+            }}
+            onShareAsImage={() => {
+              exported = true;
+            }}
+          />
+        </Provider>
+      )
+    );
+    await openMenu();
+    for (const reason of ['Encrypted workspaces do not yet support remote machine operations.']) {
+      const item = menuItem(reason);
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      await act(async () => item.click());
+    }
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support remote preview.'
+    );
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support sharing.'
+    );
+    await act(async () => menuItem('Share').click());
+    expect(shareOpened).toBe(true);
+    await openMenu();
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await act(async () => menuItem('Fork session').click());
+    await act(async () => menuItem('Copy context as Markdown').click());
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await openMenu();
+    await act(async () => menuItem('Share as image').click());
+    expect(exported).toBe(true);
   });
 });

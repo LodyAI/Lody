@@ -9,8 +9,9 @@ type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
  * rendered turn — so this module is the one place that knows, and every agent's
  * plan reaches the SAME panel from here.
  *
- *   Claude (`ExitPlanMode`, `acp-extension-claude/src/tools.ts`)
- *     kind `switch_mode`, plan as a `content` text block.
+ *   Claude (`ExitPlanMode`, `tool-calls/reporters/interaction.ts`)
+ *     kind `switch_mode`, plan in `rawInput.plan` and initially in `content`.
+ *     Rejection replaces `content` with an error; the input retains the plan.
  *   Kimi (`ExitPlanMode`, `acp-extension-kimi` `convert.ts` `plan_review`)
  *     plan as a `content` text block, optionally prefixed `Plan saved to: …`.
  *   Codex (`CodexAcpServer.requestPlanImplementationPermission`)
@@ -24,16 +25,19 @@ type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
  */
 
 /**
- * Plan text carried by the approval card itself, if any.
+ * Plan text carried by the approval card itself, if any. Prefer explicit plan
+ * input: tool result content can replace the original plan with a status message.
  *
  * The FIRST text block, not all of them joined: Kimi builds its approval card as
  * `[plan, "Requesting approval to <action>"]`
  * (`acp-adapter/src/approval.ts` `buildPermissionToolCallUpdate`), so joining
- * would paste its action summary into the plan. Claude sends the plan as its
- * only block, and Codex sends none, so the first block is the plan for every
- * adapter that carries one.
+ * would paste its action summary into the plan. This fallback also supports
+ * older content-only Claude cards; Codex sends no content.
  */
 export const resolvePlanExitMarkdown = (toolCall: ToolCallMessage): string | null => {
+  const rawPlan = (toolCall.rawInput as { plan?: unknown } | undefined)?.plan;
+  if (typeof rawPlan === 'string' && rawPlan.trim()) return rawPlan.trim();
+
   const fromContent = (toolCall.content ?? []).find(
     (block) =>
       block.type === 'content' && block.content.type === 'text' && block.content.text.trim()
@@ -41,10 +45,6 @@ export const resolvePlanExitMarkdown = (toolCall: ToolCallMessage): string | nul
   if (fromContent?.type === 'content' && fromContent.content.type === 'text') {
     return fromContent.content.text.trim();
   }
-
-  // Codex's carrier. Read defensively: `rawInput` is agent-supplied.
-  const rawPlan = (toolCall.rawInput as { plan?: unknown } | undefined)?.plan;
-  if (typeof rawPlan === 'string' && rawPlan.trim()) return rawPlan.trim();
 
   return null;
 };

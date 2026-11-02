@@ -89,6 +89,7 @@ export interface FileWorkspaceProvider {
   searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]>;
   getFile(pathOrFileId: string): Promise<FileWorkspaceProviderEntry | null>;
   openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   saveText(pathOrFileId: string, text: string): Promise<FileWorkspaceOpenResult>;
   updateLiveText?(pathOrFileId: string, text: string): Promise<void>;
   subscribeText?(pathOrFileId: string, callback: (text: string) => void): () => void;

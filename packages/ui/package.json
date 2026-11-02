@@ -36,6 +36,8 @@
     "./preview-card": "./src/popover/preview-card.tsx",
     "./progress": "./src/feedback/progress.tsx",
     "./radio": "./src/field/radio.tsx",
+    "./scroll-area": "./src/scroll-area/scroll-area.tsx",
+    "./scroll-area/scroll-area.tokens.stylex": "./src/scroll-area/scroll-area.tokens.stylex.ts",
     "./select": "./src/field/select.tsx",
     "./separator": "./src/separator/separator.tsx",
     "./skeleton": "./src/feedback/skeleton.tsx",

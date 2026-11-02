@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import * as ConvexReact from 'convex/react';
 import { getFunctionName, type FunctionReference } from 'convex/server';
-import { ConvexError, convexToJson, type Value } from 'convex/values';
+import { convexToJson, type Value } from 'convex/values';
 import { isConvexUnauthenticatedError } from '@lody/shared';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
+import { isTransientConvexQueryError } from '@/lib/authed-convex-query';
 
 type QuerySnapshot = {
   authSessionId: string | null;
@@ -13,15 +14,6 @@ type QuerySnapshot = {
 
 const QUERY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const QUERY_HEALTHY_RESET_MS = 30_000;
-
-// Structured application/permission errors need their own handling. An opaque
-// server failure may be transient, but the client cannot infer its cause.
-function isRetryableQueryError(error: Error): boolean {
-  return (
-    !(error instanceof ConvexError) &&
-    /^\[CONVEX Q\([^\n]+\)\](?: \[Request ID: [^\]]+\])? Server Error(?:\n|$)/.test(error.message)
-  );
-}
 
 type QuerySource = {
   subscribe: (listener: () => void) => () => void;
@@ -111,7 +103,7 @@ function getQuerySource(
         healthyTimer = undefined;
       }
       if (value instanceof Error) {
-        if (isRetryableQueryError(value) && attempts < QUERY_RETRY_DELAYS_MS.length) {
+        if (isTransientConvexQueryError(value) && attempts < QUERY_RETRY_DELAYS_MS.length) {
           serverFailure = true;
           pendingRetryDelay = QUERY_RETRY_DELAYS_MS[attempts++];
           stopWatch();
@@ -200,6 +192,15 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   query: Query,
   ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
 ): Query['_returnType'] | undefined {
+  const result = useOptionalRecoverableConvexQuery(query, ...args);
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+export function useOptionalRecoverableConvexQuery<Query extends FunctionReference<'query'>>(
+  query: Query,
+  ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
+): { data: Query['_returnType'] | undefined; error: Error | null } {
   const { authSessionId, confirmedUnauthenticated, isAuthenticated, requestAuthRecovery } =
     useAuthenticatedConvex();
   const client = ConvexReact.useConvex();
@@ -242,11 +243,15 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   }, [authSessionId, queryKey, queryName, result, skip]);
 
   if (result instanceof Error) {
-    if (!authError) throw result;
+    if (!authError) return { data: undefined, error: result };
     const snapshot = snapshotRef.current;
-    return source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)
-      ? (snapshot.value as Query['_returnType'])
-      : undefined;
+    return {
+      data:
+        source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)
+          ? (snapshot.value as Query['_returnType'])
+          : undefined,
+      error: null,
+    };
   }
 
   // Retain the last committed value whenever the subscription is transiently
@@ -261,11 +266,11 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   if (skip && !callerSkipped && !confirmedUnauthenticated) {
     const snapshot = snapshotRef.current;
     if (source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)) {
-      return snapshot.value as Query['_returnType'];
+      return { data: snapshot.value as Query['_returnType'], error: null };
     }
   }
 
-  return result;
+  return { data: result, error: null };
 }
 
 /** Public queries must run before authentication, so they cannot use the

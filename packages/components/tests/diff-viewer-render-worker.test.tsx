@@ -3,8 +3,13 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
-import { stripParsedFileDiffFullText } from '../src/lib/code-collab-diff-metadata-bounds';
+import { parseDiffFromFile as parseDiff, type FileDiffMetadata } from '@pierre/diffs';
+
+const parseDiffFromFile: typeof parseDiff = (...args) => {
+  const result = parseDiff(...args);
+  result.lang ??= args[0]?.name.split('.').at(-1) as FileDiffMetadata['lang'];
+  return JSON.parse(JSON.stringify(result));
+};
 
 const workerMocks = vi.hoisted(() => {
   const pool = { kind: 'shared-diff-render-worker' };
@@ -46,7 +51,7 @@ vi.mock('@pierre/diffs/react', async () => {
           'data-render-worker': workerPool === workerMocks.pool ? 'shared' : 'main-thread',
           'data-diff-metadata': JSON.stringify(fileDiff),
         },
-        fileDiff.newLines?.join(''),
+        fileDiff.additionLines?.join(''),
         React.createElement('textarea', { 'aria-label': 'Comment' })
       );
     },
@@ -121,60 +126,64 @@ describe('DiffViewer render worker routing', () => {
       Array.from({ length: 128 }, (_, index) => `before ${index}`).join('\n'),
       Array.from({ length: 128 }, (_, index) => `after ${index}`).join('\n'),
     ],
-  ])('renders and remounts %s while the shared parse worker is busy', async (_, oldText, newText) => {
-    let finish!: (diff: FileDiffMetadata) => void;
-    workerMocks.parse.mockImplementation(({ path, oldText: before, newText: after }) =>
-      path === 'busy.ts'
-        ? new Promise((resolve) => (finish = resolve))
-        : Promise.resolve(
-            parseDiffFromFile({ name: path, contents: before }, { name: path, contents: after })
-          )
-    );
-    const smallProps = { path: 'snippet.ts', oldText, newText, showHeader: false };
-    const expected = parseDiffFromFile(
-      { name: smallProps.path, contents: oldText },
-      { name: smallProps.path, contents: newText }
-    );
-    const viewers = (showSmall: boolean) =>
-      createElement(
-        'div',
-        null,
-        createElement(DiffViewer, {
-          path: 'busy.ts',
-          oldText: 'before',
-          newText: 'after',
-          preferParseWorker: true,
-          showHeader: false,
-        }),
-        showSmall &&
-          createElement(
-            'div',
-            { 'data-testid': 'small-viewer' },
-            createElement(DiffViewer, smallProps)
-          )
+  ])(
+    'renders and remounts %s while the shared parse worker is busy',
+    async (_, oldText, newText) => {
+      let finish!: (diff: FileDiffMetadata) => void;
+      workerMocks.parse.mockImplementation(({ path, oldText: before, newText: after }) =>
+        path === 'busy.ts'
+          ? new Promise((resolve) => (finish = resolve))
+          : Promise.resolve(
+              parseDiffFromFile({ name: path, contents: before }, { name: path, contents: after })
+            )
       );
-    try {
-      await act(async () => root.render(viewers(true)));
-      const readSmall = () => container.querySelector<HTMLElement>('[data-testid="small-viewer"]')!;
-      expect(container.textContent).toContain('Preparing diff');
-      expect(readRenderedDiff(readSmall())).toEqual(expected);
-      expect(readSmall().textContent).not.toContain('Preparing diff');
-      await act(async () => root.render(viewers(false)));
-      await act(async () => root.render(viewers(true)));
-      expect(readRenderedDiff(readSmall())).toEqual(expected);
-      expect(readSmall().textContent).not.toContain('Preparing diff');
-    } finally {
-      await act(async () =>
-        finish(
-          parseDiffFromFile(
-            { name: 'busy.ts', contents: 'before' },
-            { name: 'busy.ts', contents: 'after' }
-          )
-        )
+      const smallProps = { path: 'snippet.ts', oldText, newText, showHeader: false };
+      const expected = parseDiffFromFile(
+        { name: smallProps.path, contents: oldText },
+        { name: smallProps.path, contents: newText }
       );
-      await act(async () => root.render(null));
+      const viewers = (showSmall: boolean) =>
+        createElement(
+          'div',
+          null,
+          createElement(DiffViewer, {
+            path: 'busy.ts',
+            oldText: 'before',
+            newText: 'after',
+            preferParseWorker: true,
+            showHeader: false,
+          }),
+          showSmall &&
+            createElement(
+              'div',
+              { 'data-testid': 'small-viewer' },
+              createElement(DiffViewer, smallProps)
+            )
+        );
+      try {
+        await act(async () => root.render(viewers(true)));
+        const readSmall = () =>
+          container.querySelector<HTMLElement>('[data-testid="small-viewer"]')!;
+        expect(container.textContent).toContain('Preparing diff');
+        expect(readRenderedDiff(readSmall())).toEqual(expected);
+        expect(readSmall().textContent).not.toContain('Preparing diff');
+        await act(async () => root.render(viewers(false)));
+        await act(async () => root.render(viewers(true)));
+        expect(readRenderedDiff(readSmall())).toEqual(expected);
+        expect(readSmall().textContent).not.toContain('Preparing diff');
+      } finally {
+        await act(async () =>
+          finish(
+            parseDiffFromFile(
+              { name: 'busy.ts', contents: 'before' },
+              { name: 'busy.ts', contents: 'after' }
+            )
+          )
+        );
+        await act(async () => root.render(null));
+      }
     }
-  });
+  );
 
   it('waits for a default standalone parse and retains all unchanged context and CRLF endings', async () => {
     const path = 'standalone-context.ts';
@@ -203,7 +212,7 @@ describe('DiffViewer render worker routing', () => {
     );
     expect(container.textContent).toContain('Preparing diff');
     expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
-    await act(async () => finish(stripParsedFileDiffFullText(parsed)));
+    await act(async () => finish(parsed));
     expect(readRenderedDiff(container)).toEqual(parsed);
 
     await act(async () => root.render(null));
@@ -242,13 +251,9 @@ describe('DiffViewer render worker routing', () => {
         { name: path, contents: oldText },
         { name: path, contents: `${oldText}${path}\n` }
       );
-    await act(async () =>
-      jobs.get('obsolete.ts')!(stripParsedFileDiffFullText(diff('obsolete.ts')))
-    );
+    await act(async () => jobs.get('obsolete.ts')!(diff('obsolete.ts')));
     expect(container.querySelector('[data-testid="file-diff"]')).toBeNull();
-    await act(async () =>
-      jobs.get('selected.ts')!(stripParsedFileDiffFullText(diff('selected.ts')))
-    );
+    await act(async () => jobs.get('selected.ts')!(diff('selected.ts')));
     expect(readRenderedDiff(container)).toEqual(diff('selected.ts'));
     expect(container.textContent).not.toContain('obsolete.ts');
   });
@@ -298,7 +303,7 @@ describe('DiffViewer render worker routing', () => {
         { name: path, contents: oldText },
         { name: path, contents: newText }
       );
-      workerMocks.parse.mockResolvedValue(stripParsedFileDiffFullText(parsed));
+      workerMocks.parse.mockResolvedValue(parsed);
       await act(async () =>
         root.render(createElement(DiffViewer, { path, oldText, newText, showHeader: false }))
       );

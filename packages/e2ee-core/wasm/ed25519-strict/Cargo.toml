@@ -1,0 +1,20 @@
+[package]
+name = "lody-ed25519-strict"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Strict Ed25519 verification for @lody/e2ee-core (canonical, nonzero, prime-subgroup A and R; S < L)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+curve25519-dalek = { version = "4.1", default-features = false, features = ["alloc", "precomputed-tables"] }
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

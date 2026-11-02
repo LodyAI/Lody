@@ -1,7 +1,89 @@
 # MCP transport and orchestration background
 
+## Local authorization
+
+Workspace MCP definitions remain shared. Authentication values are local to the
+executing machine and account: `authentication/service.ts` owns OAuth attempts, refresh
+serialization, and session relay scopes; `authentication/io.ts` adapts the MCP SDK, browser
+callback and HTTP streams. The deprecated Promise facade connects the existing
+SessionManager and local Machine RPC to this native Effect service. Shutdown stops
+sessions before closing the service.
+
+The system credential store uses `@napi-rs/keyring` (Keychain, Credential Manager,
+or Linux Secret Service), with no plaintext fallback. Discovery checks an actual
+Bearer challenge and validates protected-resource and issuer metadata before
+reporting OAuth support. Authorization opens only after a user action, uses PKCE,
+and discards state/code/verifier on completion, cancellation or ten-minute expiry.
+Provider consent and secure-store availability remain provider/host dependent.
+
+Selected HTTP servers receive per-runtime loopback connections. Agents get a local
+capability rather than upstream credentials; Linux also verifies socket ownership.
+Unlike the built-in Lody MCP host, this relay preserves upstream GET/SSE streaming.
+It forwards only MCP protocol headers, rejects redirects, bounds requests/queues,
+and sanitizes failures. Session retirement and sign-out close these connections.
+Stdio credentials go only to the selected local process environment. A requester
+change retires an MCP-bearing Session before another user can reuse its processes.
+
+Manual token/header/env values are split before shared writes. Exact `${VAR}`
+references may remain shared and resolve only from the executing owner's environment.
+Legacy shared values are stripped on read, without silent credential import or a
+claim to erase old CRDT history. Existing shared credentials require explicit
+reconfiguration. Sign-out forgets the local authorization; provider-side consent
+revocation is not implemented. The [decision and validation limits](../../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md)
+record synthetic coverage and unverified host/provider behavior.
+
 Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
 and lifecycle decisions behind them; it does not introduce additional requirements.
+
+## Skills over MCP
+
+The built-in `lody` server publishes the
+[Skills extension](https://skills.extensions.modelcontextprotocol.io/) from
+[one bundled catalog](skills/automations.ts). `skills/list` and `skills/get` return
+frontmatter and complete file manifests with SHA-256 digests and UTF-8 byte lengths.
+`resources/read` returns individual files. The App's modern HTTP handler advertises
+the extension through `server/discover`.
+
+| Boundary                       | Owner                                                 | Behavior                                                                          |
+| ------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Protocol discovery and content | [MCP registration](skills/server.ts)                  | Publishes skill entries and resources; server instructions point to the entry URI |
+| Manifest construction          | [Bundle construction](skills/catalog.ts)              | Parses SKILL.md frontmatter and hashes the exact resource bytes                   |
+| Automation workflow            | [Automations skill](skills/lody-automations/SKILL.md) | Routes conditions, settings and inspection to focused references                  |
+| Exact API parameters           | [Automation bundle](skills/automations.ts)            | Generates JSON Schema resources from the executing shared schemas                 |
+
+The MCP host discovers entries through `skills/list`, exposes names and descriptions
+in its native skill catalog, and uses its skill-loading path to verify and activate
+the selected content. `skills/get` resolves an entry given only its URI; a listed
+entry already contains its complete manifest. Supporting files load on demand via
+`resources/read`. Identity includes both the originating server and the resource URI.
+An ordinary resource read alone does not activate a skill.
+
+The [ACP startup owner](../agent/agent-client.ts) passes the built-in server through
+standard `mcpServers`, using the existing HTTP or stdio transport. The Agent owns
+its MCP connection and Skills extension consumption. ACP carries no additional skill
+metadata; Lody does not open a second client, install local snapshots, modify native
+plugin configuration or inject the guide into prompts.
+
+Automatic summary discovery requires an MCP host implementing the Skills extension.
+Supporting MCP tools or ACP alone does not establish that support. Hosts without the
+extension can see ordinary resources, but Lody does not label that as native skill
+activation. Protocol tests establish server interoperability, not native runtime
+support or model selection. With a synthetic stdio server advertising the extension,
+Codex 0.160.1 and Claude Agent SDK 0.3.293 connected and listed tools but did not
+request `skills/list` during initialization; the test skill did not appear in their
+native skill/command lists. In a Codex turn explicitly asking for the test skill,
+Codex listed and read its MCP resource and followed its instructions. This confirms
+resource access, not native skill activation. A Claude turn could not be tested
+because the SDK runtime was not logged in. HTTP transport, the full ACP path and
+other versions remain unverified. Native automatic discovery remains unconfirmed.
+
+Markdown and the existing runnable CI example are imported as raw text and embedded
+in both Vite production and esbuild development bundles. Generated schema resources
+are stable within that bundle. Discovery metadata is parsed from the skill's YAML
+frontmatter, rather than maintained separately. Supporting references
+use paths relative to the skill directory, including generated schema and example files.
+Unknown identities and paths fail rather than falling back to filesystem reads.
+The catalog is immutable for the process lifetime; a new CLI bundle publishes updates.
 
 ## Stdio lifetime
 
@@ -19,6 +101,11 @@ migration covers the stdio host, not HTTP, daemon or tool orchestration.
 See the [decision and verification](../../../../.agents/notes/implemented/bug-fix/2026-10-14-mcp-stdio-lifetime.md).
 
 ## HTTP and loopback
+
+The built-in host starts with the daemon and uses module-scoped immutable tool
+schemas while creating fresh servers, transports and callbacks for each request.
+The [request memory decision](../../../../.agents/notes/implemented/architecture/2026-10-30-mcp-request-allocation.md)
+records the measurements and why subprocess/request isolation remains necessary.
 
 - The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
   never-completing response as a transport failure, not an MCP error. Every request must
@@ -41,6 +128,10 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   actor tag adds no information. Recovery uses the Operation's owner Machine plus current
   authorization; it does not freeze the daemon account that originally accepted the Operation.
   Every MCP Session path rejects a runtime invocation without userId.
+  Chat sender checks use the active Turn's frozen audience when it is known. Goal
+  turns therefore need no user history row to delegate. Unresolved senders retain
+  the exact-input history check; sender provenance never grants user authority.
+  This sender snapshot stays inside the daemon; legacy socket responses are unchanged.
 
 ## Machine presence
 
@@ -51,6 +142,16 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
   backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
 
+## Session placement guidance
+
+Single and batch create descriptions tell agents to explicitly set
+`useCurrentSessionAsParent=false` for sidebar sub-conversations; batch calls can
+set it in `defaults`. Use `true` only for an explicitly requested Tab within the
+current conversation. This is caller guidance: runtime defaults remain unchanged,
+including same-machine Local Project Role creation choosing a Tab when the field
+and `workContext` are omitted. An independent conversation can use `workContext`
+to select its project. See [session relations](../../../../specs/session-relations.md).
+
 ## Operation acceptance
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
@@ -59,6 +160,10 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
   the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
   is a temporary adapter new callers must not use.
+- Single create can outlast a client's tool timeout, and Agents then tend to retry under a fresh
+  id. While the original is active, an identical create from the same source Turn adopts it and
+  returns its snapshot with a `notice` instead of creating a second Session
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-10-21-mcp-create-fresh-id-retry.md)).
 
 ## Machine catalog retry guidance
 
@@ -66,6 +171,17 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   and the local catalog could not validate a selection. It does not prove that an id is
   valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
   failures and explicit validation errors retain their existing non-retryable classification.
+- Daemon-hosted Session and catalog reads, including `lody_session_create_options`,
+  `lody_session_list`, and `lody_session_status_many`, use the daemon replica. They do not
+  call Streams for the request. Background catalog sync stays with the daemon. Create
+  options return local machines, agent configs, projects, and the current work context
+  when those rows are present. While the daemon baseline is not ready, an empty
+  agent-config catalog or a missing current or queried selection is retryable
+  `SYNC_UNAVAILABLE`, so absence is not reported as a definitive empty result. A ready
+  baseline may return an empty catalog. Role validation, explicit fresh-catalog discovery,
+  and Operation acceptance keep their existing freshness requirements. Authorization and
+  three-state presence are unchanged. Standalone CLI reads keep their own sync and
+  `--offline` contracts.
 - Without an active Operation handle, an Agent must wait at least 5 seconds between calls
   and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
   Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.
@@ -101,6 +217,17 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   incompatible inherited selectors; fill builtin mode only when still empty.
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
 
+MCP create/chat (including batches) accept optional `mcpServerIds`. Explicit `[]`
+selects none. Creation without ids resolves target-project defaults, or workspace
+defaults when the project has no preference; continuation without ids inherits the
+target conversation's selection. Acceptance records ids in the existing per-target
+Operation configuration, so materialization/recovery does not reread edited defaults.
+Batch item values override batch defaults, including an explicit empty selection;
+omitted values preserve the existing target-default behavior.
+Role pins do not override an explicit MCP selection. CLI create/chat expose the same
+choice as `--mcp-server-ids '<JSON array>'`. See the
+[project default Spec](../../../../specs/project-default-mcp.md).
+
 ## Daemon routing
 
 - Session/catalog tools route through `session/call-tool` to the daemon's
@@ -115,6 +242,10 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   a child `lody` CLI. Calls keep a ten-minute IPC bound; legacy `wait: true` adds
   its maximum wait. See
   the [decision](../../../../.agents/notes/implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md).
+- A cloud daemon command takes its workspace description from the Fleet access
+  verdict (live subscription, else the cached bootstrap entry), not from listing
+  every workspace of the login; only confirmed revocation or token rejection denies.
+  See the [resolution decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-daemon-command-workspace-access.md).
 
 ## Bounded collaboration
 
@@ -197,7 +328,6 @@ and `promptPrefix`. An update file contains only the changed `name`, `descriptio
 or `promptPrefix`; an empty string clears description/instructions. Neither accepts
 credentials, MCP selections, ownership, visibility, or run configuration. The command
 prints the requestId and pending result; it does not claim the Role was saved.
-
 
 `role.json`:
 

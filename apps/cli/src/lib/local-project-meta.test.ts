@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,6 +16,7 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import {
   readMachineLocalProjects,
@@ -141,6 +143,144 @@ function createRepo(flock: FakeMachineFlock) {
 }
 
 describe('local project root path publishing', () => {
+  it('preserves display state during catalog refresh and promotes only on explicit add', async () => {
+    const { repo } = createRepo(new FakeMachineFlock());
+    const sync = { markMachineFlockDocDirty() {} };
+    const read = async () =>
+      (await readMachineLocalProjects(repo, workspaceId, machineId))[projectMeta.id];
+    await upsertMachineLocalProject(
+      repo,
+      workspaceId,
+      machineId,
+      { ...projectMeta, standaloneVisible: false },
+      1,
+      { sync }
+    );
+    await upsertMachineLocalProject(repo, workspaceId, machineId, projectMeta, 2, { sync });
+    expect((await read())?.standaloneVisible).toBe(false);
+    await upsertMachineLocalProject(repo, workspaceId, machineId, projectMeta, 3, {
+      sync,
+      standaloneVisible: true,
+    });
+    expect((await read())?.standaloneVisible).toBe(true);
+    // A stale history/catalog writer must not undo the explicit addition.
+    await upsertMachineLocalProject(
+      repo,
+      workspaceId,
+      machineId,
+      { ...projectMeta, standaloneVisible: false },
+      4,
+      { sync }
+    );
+    expect((await read())?.standaloneVisible).toBe(true);
+  });
+
+  it('publishes, refreshes and removes GitHub identity without losing it on other row writes', async () => {
+    const rootPath = mkdtempSync(join(tmpdir(), 'local-remote-'));
+    const git = (args: string[]) =>
+      execFileSync('git', args, { cwd: rootPath, env: { ...process.env, GIT_CONFIG_COUNT: '0' } });
+    try {
+      git(['init']);
+      git(['remote', 'add', 'origin', 'https://github.com/example/first.git']);
+      const { repo } = createRepo(new FakeMachineFlock());
+      const project = { ...projectMeta, rootPath };
+      const sync = { markMachineFlockDocDirty() {} };
+      const read = async () =>
+        (await readMachineLocalProjects(repo, workspaceId, machineId))[project.id];
+      await upsertMachineLocalProject(repo, workspaceId, machineId, project, 1, {
+        sync,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+      });
+      expect((await read())?.githubRepoFullName).toBe('example/first');
+      await upsertMachineLocalProject(
+        repo,
+        workspaceId,
+        machineId,
+        { ...project, name: 'Renamed' },
+        2,
+        { sync }
+      );
+      expect((await read())?.githubRepoFullName).toBe('example/first');
+      git(['remote', 'set-url', 'origin', 'git@github.com:example/second.git']);
+      await reconcileMachineLocalProjectRootPaths(repo, workspaceId, machineId, sync);
+      expect((await read())?.githubRepoFullName).toBe('example/second');
+      expect((await read())?.name).toBe('Renamed');
+      git(['remote', 'remove', 'origin']);
+      await reconcileMachineLocalProjectRootPaths(repo, workspaceId, machineId, sync);
+      expect((await read())?.githubRepoFullName).toBeUndefined();
+      await upsertMachineLocalProject(
+        repo,
+        workspaceId,
+        machineId,
+        { ...project, githubRepoFullName: 'example/first' },
+        3,
+        { sync }
+      );
+      expect((await read())?.githubRepoFullName).toBeUndefined();
+    } finally {
+      rmSync(rootPath, { recursive: true, force: true });
+    }
+  });
+
+  it('stops the startup scan between projects and refreshes a multi-project catalog', async () => {
+    const rootPath = mkdtempSync(join(tmpdir(), 'local-project-scan-'));
+    const flock = new FakeMachineFlock();
+    const { repo } = createRepo(flock);
+    const stop = new AbortController();
+    try {
+      for (let index = 0; index < 12; index++) {
+        const root = join(rootPath, String(index));
+        mkdirSync(root);
+        execFileSync('git', ['init', '-q'], { cwd: root });
+        execFileSync(
+          'git',
+          ['remote', 'add', 'origin', `https://github.com/example/repo-${index}.git`],
+          { cwd: root }
+        );
+        const id = `project-${index}` as LocalProjectId;
+        writeMachineFlockRowToFlock(
+          flock,
+          { key: machineFlockKeys.localProject(id), value: { ...projectMeta, id, rootPath: root } },
+          1
+        );
+      }
+      await reconcileMachineLocalProjectRootPaths(
+        repo,
+        workspaceId,
+        machineId,
+        {
+          markMachineFlockDocDirty() {
+            stop.abort();
+          },
+        },
+        stop.signal
+      );
+      expect(
+        Object.values(await readMachineLocalProjects(repo, workspaceId, machineId)).filter(
+          (project) => project.githubRepoFullName
+        )
+      ).toHaveLength(1);
+      const start = performance.now();
+      await reconcileMachineLocalProjectRootPaths(repo, workspaceId, machineId, {
+        markMachineFlockDocDirty() {},
+      });
+      const elapsedMs = performance.now() - start;
+      expect(
+        Object.values(await readMachineLocalProjects(repo, workspaceId, machineId))
+          .map((project) => project.githubRepoFullName)
+          .sort()
+      ).toEqual(Array.from({ length: 12 }, (_, index) => `example/repo-${index}`).sort());
+      if (process.env.PROJECT_SCAN_MEASUREMENTS)
+        writeFileSync(
+          process.env.PROJECT_SCAN_MEASUREMENTS,
+          JSON.stringify({ projects: 12, elapsedMs })
+        );
+    } finally {
+      rmSync(rootPath, { recursive: true, force: true });
+    }
+  });
+
   it('repairs an older symlink row and canonicalizes later writes without changing its identity', async () => {
     const temp = mkdtempSync(join(tmpdir(), 'lody-project-path-'));
     try {
@@ -289,6 +429,43 @@ describe('resolveWorkspaceLocalProjectWithSyncOnMiss', () => {
 });
 
 describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
+  it('ignores an encrypted registry row whose path no longer hashes to its project ID', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'lody-project-identity-')));
+    try {
+      const shared = join(root, 'shared');
+      const privateRoot = join(root, 'private');
+      mkdirSync(shared);
+      mkdirSync(privateRoot);
+      const sharedId = localProjectsLegacy.createLocalProjectId(shared);
+      const flock = new FakeMachineFlock();
+      const write = (rootPath: string) =>
+        writeMachineFlockRowToFlock(
+          flock,
+          {
+            key: machineFlockKeys.localProject(sharedId),
+            value: { id: sharedId, name: 'Shared', rootPath, createdAtMs: 1 },
+          },
+          1
+        );
+      const { repo } = createRepo(flock);
+      const resolve = (verifyProjectIdentity: boolean) =>
+        resolveWorkspaceLocalProjectRootPathWithRetry(repo, workspaceId, machineId, sharedId, {
+          verifyProjectIdentity,
+          sleep: instantSleep(),
+          maxAttempts: 1,
+        });
+      write(shared);
+      expect(await resolve(true)).toBe(shared);
+      // Another member rewrites the synced row to point at a private directory.
+      write(privateRoot);
+      expect(await resolve(true)).toBeNull();
+      // Ordinary workspaces keep their existing behavior.
+      expect(await resolve(false)).toBe(privateRoot);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('resolves on the first read without syncing or sleeping', async () => {
     const flock = new FakeMachineFlock();
     seedLocalProject(flock);
@@ -413,5 +590,31 @@ describe('resolveWorkspaceLocalProjectRootPathWithRetry', () => {
     expect(openFlockDoc).toHaveBeenCalledTimes(3);
     expect(requestSync).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives a row that is still syncing at least 30s by default before failing', async () => {
+    vi.useFakeTimers();
+    try {
+      const flock = new FakeMachineFlock();
+      const { repo } = createRepo(flock);
+      const requestSync = vi.fn(() => new Promise<never>(() => {}));
+      let settled = false;
+      const resolving = resolveWorkspaceLocalProjectRootPathWithRetry(
+        repo,
+        workspaceId,
+        machineId,
+        localProjectId,
+        { requestSync, sleep: instantSleep() }
+      ).finally(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await resolving).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

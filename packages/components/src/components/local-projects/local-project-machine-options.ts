@@ -36,6 +36,11 @@ export function buildAddLocalProjectMachineOptions({
       name: meta.name || machineId,
       online: machineId === localMachineId || onlineMachineIds.has(machineId),
       canAddProjects: ownerUserId === currentUserId,
+      supportsProjectFolderSelection: machineSupportsProtocolCapability(
+        meta,
+        MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection,
+        1
+      ),
       supportsCreateDirectory: machineSupportsProtocolCapability(
         meta,
         MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory,

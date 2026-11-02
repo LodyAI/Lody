@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -34,10 +35,11 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
+import { WorkingGrid } from '@/ui/working-grid';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import { Menu } from '@/ui/menu';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   AppWindow,
   Archive,
@@ -60,7 +62,6 @@ import {
 } from 'lucide-react';
 import { MynauiEditOne } from '@lody/ui';
 import { CuidaSidebarExpandOutline } from './icons/cuida-sidebar-expand-outline';
-import { Spinner } from '@lody/ui/spinner';
 import {
   SessionList,
   type SessionListProps,
@@ -75,6 +76,7 @@ import {
 } from './sidebar-updated-session-list';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
+import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -275,6 +277,7 @@ export interface LoroSidebarProps {
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
+  settingsIcon?: ReactNode;
   onDocsClicked?: () => void;
   onGithubClicked?: () => void;
   onJoinCommunityClicked?: () => void;
@@ -307,8 +310,41 @@ export interface LoroSidebarProps {
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
 
+const resizeStyles = stylex.create({
+  handle: {
+    position: 'absolute',
+    right: '-3.5px',
+    top: radius.large,
+    bottom: `calc(${space[8]} + ${space[2]})`,
+    zIndex: 20,
+    width: '7px',
+    cursor: 'col-resize',
+    touchAction: 'none',
+    color: colors.label,
+    '--sidebar-resize-opacity': {
+      default: 0,
+      ':hover': 0.42,
+    },
+  },
+  dragging: {
+    '--sidebar-resize-opacity': 0.56,
+  },
+  feedback: {
+    position: 'absolute',
+    insetBlock: 0,
+    left: '50%',
+    width: '1px',
+    transform: 'translateX(-50%)',
+    borderRadius: radius.full,
+    backgroundImage: 'linear-gradient(to bottom, transparent, currentColor, transparent)',
+    pointerEvents: 'none',
+    opacity: 'var(--sidebar-resize-opacity)',
+  },
+});
+
 const footerStyles = stylex.create({
   desktop: { columnGap: space[1] },
+  workspace: { display: 'flex', minWidth: 0, flex: 1, alignItems: 'center' },
   actions: {
     display: 'flex',
     alignItems: 'center',
@@ -494,7 +530,7 @@ function ConnectionPill({
   return (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
-      icon={isLoading ? <Spinner className="h-3 w-3" label={null} /> : undefined}
+      icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
@@ -843,6 +879,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onArchiveClicked,
   onSchedulesClicked,
   onSettingsClicked,
+  settingsIcon,
   onDocsClicked,
   onGithubClicked,
   onJoinCommunityClicked,
@@ -853,9 +890,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   onRequestCollapse,
   overlay = false,
 }: LoroSidebarProps) {
+  const schedulesAllowed = useWorkspaceFeature('schedules');
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ includeDesktopWeb: true });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const store = useStore();
@@ -1140,6 +1178,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1153,6 +1192,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1318,29 +1358,18 @@ export const LoroSidebar = memo(function LoroSidebar({
           : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
       }
     >
-      {!isMobile &&
-        !overlay && (
-          // VSCode-style sash: a 12px pointer hit area straddling the border
-          // (6px inside + 6px outside, so hovering ON or just past the edge
-          // still triggers); the visible affordance is a thin 2px line covering
-          // the border itself. Slight hover delay so it doesn't flash when the
-          // cursor merely passes over the edge.
-          <div
-            className={cn(
-              'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-              // 2px line covers the panel's `border-r` for the full height.
-              'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
-              'after:bg-transparent after:transition-colors after:duration-150',
-              isResizing
-                ? 'after:bg-sidebar-ring/70'
-                : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
-            )}
-            onPointerDown={handleResizeStart}
-            onPointerMove={handleResizeMove}
-            onPointerUp={handleResizeEnd}
-            onPointerCancel={handleResizeEnd}
-          />
-        )}
+      {!isMobile && !overlay && (
+        <div
+          data-sidebar-resize-handle
+          {...stylex.props(resizeStyles.handle, isResizing && resizeStyles.dragging)}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+        >
+          <div aria-hidden="true" {...stylex.props(resizeStyles.feedback)} />
+        </div>
+      )}
 
       <div className="relative flex h-full flex-col overflow-hidden">
         <div
@@ -1353,7 +1382,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           {isMobile ? (
-            renderWorkspaceControl('bottom')
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('bottom')}
+              <AuthRecoveryEntrySlot />
+            </div>
           ) : isElectron ? (
             <span className="min-w-0 flex-1" />
           ) : (
@@ -1431,7 +1463,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<MynauiEditOne className="h-4 w-4" />}
             onClick={onHomeClicked}
           />
-          {onSchedulesClicked ? (
+          {onSchedulesClicked && schedulesAllowed ? (
             <NavButton
               active={activeNav === 'schedules'}
               isMobile={isMobile}
@@ -1457,17 +1489,11 @@ export const LoroSidebar = memo(function LoroSidebar({
             // first group is set off like the 16px between the groups below it.
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-3'
           )}
-          // Overlay only while the list is scrolling. Radix defaults to `hover`,
+          // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
           // which paints the thumb as soon as the pointer enters the sidebar.
-          type="scroll"
-          scrollbarClassName={!isMobile ? 'w-2 p-px' : undefined}
-          scrollbarThumbClassName={
-            !isMobile
-              ? 'bg-[hsl(var(--muted-foreground)/0.35)] hover:bg-[hsl(var(--muted-foreground)/0.45)] active:bg-[hsl(var(--muted-foreground)/0.55)]'
-              : undefined
-          }
+          visibility="scroll"
           // The horizontal gutter must live on the *viewport*, not the ScrollArea
-          // root. Radix's viewport is the scroll/clip container; with rows at
+          // root. The viewport is the scroll/clip container; with rows at
           // `w-full` and the gutter on the root, the selected row's 1px `outline`
           // (painted outside the box) sits flush against the viewport's clip edge
           // and gets shaved on the left/right — only the sides, since the viewport
@@ -1661,7 +1687,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
           data-sidebar-footer
         >
-          {!isMobile ? renderWorkspaceControl('top') : null}
+          {!isMobile ? (
+            <div {...stylex.props(footerStyles.workspace)}>
+              {renderWorkspaceControl('top')}
+              <AuthRecoveryEntrySlot />
+            </div>
+          ) : null}
           <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger
@@ -1671,7 +1702,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   </IconButton>
                 }
               />
-              <Menu.Content side="top" align="end" className="min-w-[160px]">
+              <Menu.Content side={isMobile ? 'top' : 'right'} align="end" className="min-w-[160px]">
                 <Menu.Item icon={BookOpen} onClick={() => onDocsClicked?.()}>
                   {mergedLabels.docs}
                 </Menu.Item>
@@ -1723,7 +1754,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings className="size-full" strokeWidth={1.5} />
+              {settingsIcon ?? <Settings className="size-full" strokeWidth={1.5} />}
             </IconButton>
           </div>
 

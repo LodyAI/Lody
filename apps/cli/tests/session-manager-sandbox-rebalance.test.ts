@@ -73,6 +73,7 @@ const createWorkspaceDocument = (): LoroDocumentManager =>
   ({
     repo: { getDocMeta: vi.fn(async () => ({ meta: { userId: 'user-1' } })) },
     getOrCreateSessionDoc: vi.fn(async () => ({
+      getMetaState: async () => ({}),
       setRepoFullName: vi.fn(async () => {}),
     })),
     cleanUp: vi.fn(async () => {}),
@@ -396,6 +397,7 @@ describe('SessionManager identity preflight', () => {
       const doc = createWorkspaceDocument();
       let persistedId: string | undefined;
       vi.mocked(doc.getOrCreateSessionDoc).mockResolvedValue({
+        getMetaState: async () => ({}),
         setRepoFullName: async () => {},
         setACPSessionId: async (id: string) => {
           persistedId = id;

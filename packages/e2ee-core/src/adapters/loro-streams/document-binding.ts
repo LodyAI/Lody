@@ -16,14 +16,19 @@ export interface StreamsDocumentBindingOptions {
 }
 
 /**
- * The payload-protection binding a `@loro-dev/streams-crdt` 0.17 document uses
+ * The payload-protection binding a current catalog `@loro-dev/streams-crdt` document uses
  * to seal updates (header 3) and snapshots (header 4) and to open what it
  * reads, wired to this composition's services: the device signer, the verified
  * ledger and installed epoch keys (including recovered history).
  *
  * Every seal checks current write permission before encryption and again after
  * signing; every open verifies the historical signature before requesting a
- * key and the AEAD after. Lives in the caller's Scope, which awaits active
+ * key and the AEAD after. Snapshot reads additionally require the signer to be
+ * a current writer, including after decryption; old update reads remain valid.
+ * `openAuthenticated` additionally returns the verified historical author; its
+ * owned plaintext must be cleared by the caller. Neither open grants execution
+ * authority, and a snapshot signer is not the origin of every embedded turn.
+ * Lives in the caller's Scope, which awaits active
  * operations on close. See {@link makeStreamsUpdateBinding} for the callback form.
  *
  * Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger` and

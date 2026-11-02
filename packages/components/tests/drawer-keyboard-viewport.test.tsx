@@ -8,6 +8,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
 import { SessionMobileDiffDrawer } from '../src/components/sessions/session-mobile-diff-drawer';
+import { MobileSessionMenuSheet } from '../src/components/mobile/mobile-session-menu-sheet';
+import { MobileFilterDrawer } from '../src/components/mobile/mobile-filter-drawer';
+import { MobileDeleteWorkspaceSheet } from '../src/components/mobile/mobile-delete-workspace-sheet';
+import { MobileNewChatSheet } from '../src/components/mobile/mobile-new-chat-sheet';
+import { MobileWorkspaceSwitcherSheet } from '../src/components/mobile/mobile-workspace-switcher-sheet';
+import { MobileSessionTabSheet } from '../src/components/mobile/mobile-session-tab-sheet';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
 vi.mock('../src/lib/native-platform', () => ({
@@ -44,6 +50,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  delete window.__LODY_HORIZONTAL_DIVISION__;
+  document.documentElement.style.removeProperty('--native-keyboard-height');
 });
 
 function renderDrawer(repositionInputs = true) {
@@ -147,11 +155,62 @@ describe('native side-drawer keyboard layout', () => {
     expect(drawer.style.bottom).toBe('0px');
   });
 
-  it.each(['ios', 'disabled'] as const)('does not take over %s positioning', (mode) => {
-    runtime.native = true;
-    runtime.ios = mode === 'ios';
-    const drawer = renderDrawer(mode !== 'disabled');
+  it('keeps iOS side drawers sized by CSS through keyboard-open folding and dismissal', () => {
+    runtime.ios = true;
+    const drawer = renderDrawer();
+    const input = drawer.querySelector('textarea')!;
+    input.value = 'Unsent resize draft';
+    for (const [layoutHeight, visualHeight] of [
+      [800, 480],
+      [1200, 880],
+      [678, 378],
+      [678, 678],
+    ]) {
+      resize(layoutHeight, visualHeight);
+      expect(drawer.style.height).toBe('');
+      expect(drawer.style.bottom).toBe('');
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe('Unsent resize draft');
+    }
+  });
+
+  it('does not take over explicitly disabled positioning', () => {
+    const drawer = renderDrawer(false);
+    resize(800, 480);
     expect(drawer.style.bottom).toBe('');
+  });
+});
+
+describe('fold-aware confirmation dialogs', () => {
+  it('places a root confirmation on the lower panel and restores its regular position', () => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() =>
+      root.render(
+        <AlertDialog.Root open>
+          <AlertDialog.Content>
+            <AlertDialog.Title>Confirm action</AlertDialog.Title>
+            <AlertDialog.Description>Review this action first.</AlertDialog.Description>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
+      )
+    );
+    const dialog = document.querySelector<HTMLElement>('[data-lody-dialog-content]')!;
+    expect(dialog.style.insetBlockStart).toBe('723.25px');
+    expect(dialog.style.maxHeight).toBe('423.5px');
+    expect(dialog.textContent).toContain('Review this action first.');
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 300 } }));
+    });
+    expect(dialog.style.insetBlockStart).toBe('');
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '0px');
+      window.__LODY_HORIZONTAL_DIVISION__ = null;
+      window.dispatchEvent(new Event('lody:division-change'));
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 0 } }));
+    });
+    expect(dialog.style.insetBlockStart).toBe('');
+    expect(dialog.style.maxHeight).toBe('');
   });
 });
 
@@ -320,4 +379,213 @@ describe('drawer floating controls', () => {
       expect(drawer.getAttribute('data-state')).toBe('open');
     }
   );
+});
+
+describe('session menu on a horizontal fold', () => {
+  it('keeps all actions in a scrollable lower panel and restores full height when opened', () => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() => {
+      root.render(
+        <MobileSessionMenuSheet
+          open
+          onOpenChange={() => {}}
+          title="Session menu"
+          infoRows={[]}
+          actions={[
+            { id: 'first', label: 'First action', icon: null, onClick: () => {} },
+            { id: 'last', label: 'Last action', icon: null, onClick: () => {} },
+          ]}
+        />
+      );
+    });
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    expect(drawer.style.maxHeight).toBe('455.5px');
+    expect(drawer.textContent).toContain('First action');
+    expect(drawer.textContent).toContain('Last action');
+    expect(drawer.querySelector('.overflow-y-auto')).not.toBeNull();
+    act(() => {
+      window.__LODY_HORIZONTAL_DIVISION__ = null;
+      window.dispatchEvent(new Event('lody:division-change'));
+    });
+    expect(drawer.style.maxHeight).toBe('85dvh');
+  });
+  it('fits workspace switching on the lower panel and restores its regular height when unfolded', () => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() => {
+      root.render(
+        <MobileWorkspaceSwitcherSheet
+          open
+          onOpenChange={() => {}}
+          onSelect={() => {}}
+          workspaces={[
+            { id: 'a', name: 'Alpha', isActive: true },
+            { id: 'b', name: 'Beta' },
+          ]}
+        />
+      );
+    });
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    expect(drawer.style.maxHeight).toBe('455.5px');
+    expect(drawer.textContent).toContain('Alpha');
+    expect(drawer.textContent).toContain('Beta');
+    expect(drawer.querySelector('.overflow-y-auto')).not.toBeNull();
+    act(() => {
+      window.__LODY_HORIZONTAL_DIVISION__ = null;
+      window.dispatchEvent(new Event('lody:division-change'));
+    });
+    expect(drawer.style.maxHeight).toBe('80dvh');
+  });
+  it('moves the new-chat composer below the fold without losing its draft', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({ top: 0, bottom: 951, left: 0, right: 669, width: 669, height: 951 }) as DOMRect
+    );
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() =>
+      root.render(
+        <MobileNewChatSheet
+          open
+          onOpenChange={() => {}}
+          targetNode={<span>Machine</span>}
+          composer={<textarea aria-label="Draft" defaultValue="Unsent draft" />}
+        />
+      )
+    );
+    const lower = document.querySelector<HTMLElement>('[data-new-chat-fold-lower]')!;
+    const draft = lower.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(lower.style.top).toBe('495.5px');
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 300 } }));
+    });
+    expect(lower.style.display).toBe('contents');
+    expect(lower.querySelector('textarea')).toBe(draft);
+    expect(draft.value).toBe('Unsent draft');
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '0px');
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 0 } }));
+    });
+    expect(lower.style.top).toBe('495.5px');
+    expect(draft.value).toBe('Unsent draft');
+  });
+  it('keeps the workspace confirmation draft while the keyboard takes over', () => {
+    const confirm = vi.fn(async () => {});
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() =>
+      root.render(
+        <MobileDeleteWorkspaceSheet
+          open
+          onOpenChange={() => {}}
+          workspaceName="Example"
+          onConfirm={confirm}
+        />
+      )
+    );
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    const input = drawer.querySelector<HTMLInputElement>('input')!;
+    expect(drawer.style.maxHeight).toContain('min(455.5px,');
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 300 } }));
+    });
+    expect(drawer.style.maxHeight).toContain('min(92dvh,');
+    expect(drawer.querySelector('input')).toBe(input);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+  it('keeps the browser filter search above an overlay keyboard', () => {
+    runtime.native = false;
+    act(() =>
+      root.render(
+        <MobileFilterDrawer
+          open
+          onOpenChange={() => {}}
+          pills={[
+            {
+              kind: 'multi',
+              id: 'projects',
+              label: 'Projects',
+              options: Array.from({ length: 9 }, (_, index) => ({
+                id: `${index}`,
+                label: `Project ${index}`,
+              })),
+              selectedIds: new Set(),
+              defaultIds: new Set(),
+              onChange: () => {},
+            },
+          ]}
+        />
+      )
+    );
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    const button = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+      node.textContent?.includes('Projects')
+    )!;
+    act(() => button.click());
+    const input = drawer.querySelector<HTMLInputElement>('input')!;
+    vi.spyOn(drawer, 'getBoundingClientRect').mockReturnValue({ height: 704, top: 96 } as DOMRect);
+    act(() => input.focus());
+    resize(800, 480);
+    expect(drawer.style.bottom).toBe('320px');
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('preserves filter search while switching from the fold to the keyboard layout', () => {
+    const update = vi.fn();
+    const options = Array.from({ length: 9 }, (_, index) => ({
+      id: `${index}`,
+      label: `Project ${index}`,
+    }));
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() =>
+      root.render(
+        <MobileFilterDrawer
+          open
+          onOpenChange={() => {}}
+          pills={[
+            {
+              kind: 'multi',
+              id: 'projects',
+              label: 'Projects',
+              options,
+              selectedIds: new Set(),
+              defaultIds: new Set(),
+              onChange: update,
+            },
+          ]}
+        />
+      )
+    );
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    expect(drawer.style.maxHeight).toContain('min(455.5px,');
+    const button = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+      node.textContent?.includes('Projects')
+    )!;
+    act(() => button.click());
+    const input = drawer.querySelector<HTMLInputElement>('input')!;
+    expect(input).toBeTruthy();
+    act(() => {
+      document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+      window.dispatchEvent(new CustomEvent('lody:keyboard-resize', { detail: { height: 300 } }));
+    });
+    expect(drawer.style.maxHeight).toContain('min(88dvh,');
+    expect(drawer.querySelector('input')).toBe(input);
+    expect(update).not.toHaveBeenCalled();
+  });
+  it('keeps the conversation tabs sheet below the fold', () => {
+    window.__LODY_HORIZONTAL_DIVISION__ = { top: 455.5, height: 40, viewportHeight: 951 };
+    act(() => {
+      root.render(
+        <MobileSessionTabSheet
+          open
+          onOpenChange={() => {}}
+          conversations={[]}
+          viewers={[]}
+          onSelectConversation={() => {}}
+          onSelectViewer={() => {}}
+        />
+      );
+    });
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    expect(drawer.style.maxHeight).toBe('455.5px');
+    expect(drawer.querySelector('.overflow-y-auto')).not.toBeNull();
+  });
 });

@@ -90,6 +90,10 @@ export const feedbackSurface = stylex.create({
     translate: 'var(--toast-swipe-movement-x, 0) var(--toast-swipe-movement-y, 0)',
     opacity: 1,
     pointerEvents: 'auto',
+    // Portalled toasts overlap Electron's titlebar drag strip without being
+    // its descendants. Exclude the card from native dragging so close and
+    // action buttons receive pointer events, even over the window header.
+    WebkitAppRegion: 'no-drag',
     transitionProperty: 'opacity, translate',
     transitionDuration: duration.regular,
     transitionTimingFunction: ease.standard,

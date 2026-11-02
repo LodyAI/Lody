@@ -1,16 +1,15 @@
 # CLI library
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. File index:
+`CLAUDE.md` aliases this file. Index:
 [README.md](README.md). Scoped rules: [acp](acp/AGENTS.md),
 [code-collab](code-collab/AGENTS.md), [file-preview](file-preview/AGENTS.md),
 [loro](loro/AGENTS.md), [pr-poller](pr-poller/AGENTS.md).
 
-**Before dispatch/sync changes, read context/message-flow.md.** The WS/DO control-plane path is DEPRECATED; do not add to it.
+**Before dispatch/sync read context/message-flow.md; before catalog/Fleet changes read [E2EE rules](e2ee/AGENTS.md).** WS/DO is deprecated; do not extend it.
 
 ## Composition and transports
 
 - Daemon commands borrow its replica; command cleanup failures never fence.
-
 - GitHub auth: conversation-owner personal → matching-owner machine → repo App,
   once per source. Failures advance without a policy RPC; local context grants
   machine eligibility. Never persist managed tokens or replay uncertain writes.
@@ -23,12 +22,18 @@
   fail at their public boundary, and only contractually
   best-effort background effects may skip. Both halves are enforced by
   `scripts/check-platform-boundaries.mjs` + `tests/local-platform-zero-cloud.test.ts`.
+- A `--paired-workspace` machine port reads only its own workspace plan, with its device
+  credential (`e2eeMachinePairing.workspaceEntitlement`), for the cooperative quotas;
+  it never borrows an account API key.
 - Client-visible RPC references come from public `@lody/cloud-api`; generated server
   declarations and private workspace packages are forbidden. Prime the token provider
   before reading `getGatewayBaseUrl()`, and never let runtime transports or Machine RPC
   require `LODY_LORO_STREAMS_BASE_URL` as a parallel hidden composition path.
 - `cloud-pr-association.ts`: use `authSiteUrl`, not `authBaseUrl` (internal proxy).
   Six failures/workspace/repo, no eviction; reset on client recreation. Log once.
+- Local control queue cancellation must bypass session main work. Health reads,
+  per-config refreshes and per-agent installs must use independent lanes; restart
+  and upgrade stay serialized together. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 - Local control negotiates NDJSON or legacy buffered JSON, preserving intermediate
   replies. `MachineRuntime` may collect responses but forwards each as sent. Cancel
   parked history watches before shutdown drain; preserve shared writers.
@@ -48,6 +53,21 @@
 - INVARIANT: agent PATH merges keep the session's `gh` shim dir first
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
 
+## Encrypted workspace catalog
+
+- `local-workspace-catalog.ts` keeps encrypted discovery in account/machine-bound
+  `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
+  Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
+  the sidecar or account/machine-bound `.e2ee-invalid` marker.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
+  Persist ordinary remote-list results; return degraded receipts with current auth/revocation
+  checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
+  writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
+  v1 fields; stale sidecars cannot bootstrap. Fleet keeps scoped recoverable issues, bounded
+  retries and pending signature until healthy receipt.
+
 ## Local Loro data plane
 
 Read [loro/AGENTS.md](loro/AGENTS.md) before enumerating rooms, publishing presence,
@@ -57,7 +77,11 @@ writing machine Flock rows, or reacting to reconnection. Before changing
 `LoroDocumentManager` options, scheduler and bulk-writer limits, sender-enforced
 framing, the RAW-chunk `createJsonLineSplitter` requirement, renderer room lifetime.
 The room engine remains explicitly Legacy; outbound work uses the single native
-process writer facade, and cleanup awaits its release receipt. Two are never negotiable: a renderer joining a Session Doc room must not call
+process writer facade, and cleanup awaits its release receipt. Workspace engines share that
+writer, so Fleet shutdown closes it only after every workspace runtime and data-plane
+connection owner has released, and a retained failed owner keeps it open for recovery
+([ordering](../../../../.agents/notes/implemented/architecture/2026-10-12-effect-local-presence-writer.md)).
+Two are never negotiable: a renderer joining a Session Doc room must not call
 `getOrCreateSessionDoc` or retain a live cloud room, and the CLI's cloud room status is
 never pushed to renderers as local room health.
 
@@ -71,6 +95,7 @@ never pushed to renderers as local room health.
   [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
   native work: never clean `running`, cap background waits. Post-turn output resets
   it only for `sessionActivity` agents.
+  Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen
@@ -100,15 +125,14 @@ never pushed to renderers as local room health.
   lists its source; never replace a binding or merge another account's native ID.
   Refresh loads through the import's own binding. Every import write records the
   load-reported selection on the last imported user turn via `applyAcpRuntimeConfigPatch`.
-- Removing a local project archives every unarchived Session for that machine/project
-  before deleting the project row, found through the existence and metadata indexes
-  rather than by opening every Session document; a failed archive keeps the delete
-  command queued for a later scan. Worktree cleanup covers only Lody-created Session
-  worktrees of that project: inspect every worktree before submission and again
-  immediately before deletion, never force-delete or backup-commit a dirty worktree, and
-  record per-worktree deleted/kept/failed results. The original project directory is
-  never a deletion target, and cleanup failures must complete the command with a visible
-  result rather than leave removal pending.
+- Local-project deletion retains registrations referenced by Projects or group runs;
+  disable standalone display without archiving their Sessions. Catalog read/sync
+  failure keeps the command queued. Otherwise archive all unarchived machine/project
+  Sessions via existence/metadata indexes before removing the row; archive failure
+  retains the command. Explicit cleanup covers only Lody-created Session worktrees:
+  inspect before submission and deletion, never force-delete or backup-commit dirty
+  worktrees, record deleted/kept/failed results, and complete with visible results
+  even on cleanup failure. Never delete the original project directory.
 - Before changing `provider-setup-manager.ts`, read its
   [rules](../../../../.agents/docs/cli-lib-provider-setup.md): row ownership and the
   single publish commit, cancellation, when the queue may start in cloud versus OSS

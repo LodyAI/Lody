@@ -1,3 +1,4 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -20,11 +21,6 @@ import {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
-import {
-  DEEPSEEK_DELEGATION_DISCUSSION_URL,
-  DeepSeekDelegationWarningContent,
-  shouldShowDeepSeekDelegationWarning,
-} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
@@ -32,7 +28,6 @@ import {
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -113,22 +108,6 @@ const styles = stylex.create({
   emoji: { flexShrink: 0, fontSize: text.headlineSize, lineHeight: 1 },
   /** The mark a picker's value carries: an icon at rest, so a little quieter. */
   valueMark: { opacity: 0.8 },
-  /** A warning about the pick: a tint and a mark, never a fill or a border. */
-  warning: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: '10px',
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: {
-      default: `color-mix(in oklab, ${colors.warning} 8%, transparent)`,
-      ':active': `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
-    },
-    color: colors.label,
-    textDecoration: 'none',
-  },
 });
 
 /**
@@ -201,14 +180,15 @@ export function MobileRunConfigSheet({
      provider can fill with dozens of entries). Tapping one puts the caret at the
      bottom of the screen, exactly where the soft keyboard lands. */
   const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(85, true);
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
+        className={cn('h-auto! rounded-t-2xl border-border/60', keyboard.contentClassName)}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
@@ -407,11 +387,6 @@ function MobileRunConfigSheetRows({
     () => modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue,
     [modelPickerOptions, modelValue]
   );
-  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
-    cliType: selectedAgentConfig?.cliType,
-    agentType: selectedAgentConfig?.agentType,
-    modelId: modelValue,
-  });
 
   /* ── Provider-specific interaction mode (for example Grok Agent / Plan / Ask) ── */
   const interactionSelector = interactionModeSelectors[0];
@@ -662,21 +637,6 @@ function MobileRunConfigSheetRows({
             }
           />
         </RunConfigRow>
-      ) : null}
-
-      {showDeepSeekDelegationWarning ? (
-        <a
-          href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => {
-            event.preventDefault();
-            void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-          }}
-          {...stylex.props(styles.warning)}
-        >
-          <DeepSeekDelegationWarningContent />
-        </a>
       ) : null}
 
       {interactionSelector && interactionOptions.length > 0 ? (

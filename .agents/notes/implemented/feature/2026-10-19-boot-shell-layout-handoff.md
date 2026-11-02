@@ -9,6 +9,12 @@ Translation: current
 
 Matching loading marks alone did not keep the startup frame aligned with the real workspace card across redirects and loading gates. Static startup and the real card now share geometry, while one React presentation coordinator carries the frame across committed gates. Readiness still belongs to the gates and router: pending navigation retains the last committed presentation if Suspense cleans up its owner, and the frame releases when no owners remain and navigation has settled. The trade-off is a dormant mounted frame and an explicit owner protocol; seven browser tests cover geometry and handoff behavior, while startup timing remains unmeasured.
 
+## Geometry follow-up
+
+The later [thin workspace frame correction](../bug-fix/2026-10-23-thin-workspace-frame.md)
+changes the shared 8px/10px geometry recorded below to a 4px rim and 14px radius. It
+preserves this note's shared-geometry and readiness ownership decisions.
+
 ## Decision and ownership
 
 This is a partial follow-up to the [first-paint decision](2026-09-26-boot-shell-first-paint.md), revising its rejection of a retained overlay protocol while preserving its static first-paint approach. No new Spec is needed: the startup guarantees described in [default app entry](../../../../specs/app-startup-landing.md) remain unchanged; this note does not approve that draft Spec.

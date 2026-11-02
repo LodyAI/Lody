@@ -22,7 +22,6 @@ import {
 import { useAtom, useAtomValue } from 'jotai';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
-import { AutoArchiveSection } from './auto-archive-setting';
 import { ExperimentalFeatureRows } from './experimental-features-setting';
 import {
   getOneSignalPermissionState,
@@ -39,7 +38,6 @@ import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settin
 import { PathLaunchersSettings } from './path-launchers-setting';
 import { QueuedMessageBehaviorControl } from './queued-message-behavior-control';
 import { CliDaemonSetting } from './cli-daemon-setting';
-import { useAppCapability } from '@/lib/app-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
 
@@ -131,7 +129,6 @@ export function GeneralSettingsComponent() {
   const codeChangesHelperId = `${preferenceId}-code-changes-helper`;
   const notificationLabelId = `${preferenceId}-notification-label`;
   const notificationHelperId = `${preferenceId}-notification-helper`;
-  const githubIntegrationAvailable = useAppCapability('githubIntegration');
   const postHog = usePostHog();
   const user = useAtomValue(userAtom);
   const [electronCompletionNotificationsEnabled, setElectronCompletionNotificationsEnabled] =
@@ -814,8 +811,6 @@ export function GeneralSettingsComponent() {
             </div>
           </CompactSection>
         )}
-
-        {githubIntegrationAvailable ? <AutoArchiveSection /> : null}
 
         {/* Clear local cache stays last in General settings. */}
         <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>

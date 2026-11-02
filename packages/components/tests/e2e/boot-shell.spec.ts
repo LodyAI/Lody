@@ -53,8 +53,8 @@ for (const theme of ['light', 'dark']) {
     await phase(page, 'workspace');
     const loading = await frame(page);
     expect(loading.x).toBe(280);
-    expect(loading.y).toBe(8);
-    expect(loading.radius).toBe('10px');
+    expect(loading.y).toBe(4);
+    expect(loading.radius).toBe('14px');
     expect(
       await page.evaluate(
         () => (window as any).startupMark === document.querySelector('.lody-boot-shell__mark')
@@ -173,8 +173,8 @@ for (const mobile of [false, true]) {
         'data-sidebar',
         'hidden'
       );
-      expect((await frame(page)).x).toBe(mobile ? 0 : 8);
-      expect((await frame(page)).radius).toBe(mobile ? '0px' : '10px');
+      expect((await frame(page)).x).toBe(mobile ? 0 : 4);
+      expect((await frame(page)).radius).toBe(mobile ? '0px' : '14px');
     } finally {
       await context.close();
     }

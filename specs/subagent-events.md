@@ -160,10 +160,15 @@ HistoryWriter owner. As in root tool history, discard ACP image blocks and embed
 image blob resources from child tool content. Clear unused non-image resource blob
 bytes while retaining the resource and its download URI; data-URI references retain
 their display label with an empty URI because the UI already disallows that scheme.
-Retain audio, readable output, complete diffs and tool state. Child raw input keeps
-its displayed plan; scalar/array raw output has one readable copy without an opaque
-metadata duplicate. Permission enrichment preserves existing stored content, and
-malformed new fields must be rejected atomically rather than silently omitted.
+Root and child tool history use the same preprocessing and merge policy: omit read
+bodies and full edit diff/text blocks, retain paths and tool state, and apply the
+same bounded terminal command/output projection. Generic raw output and provider
+metadata are not additional transcript copies. Switch-mode raw input retains only
+the displayed plan; scheduling tools retain the fields their history-derived panel
+requires. Preserve omitted fields, explicit list clears and permission enrichment.
+Edit evidence is captured from execution notifications with its original turn owner,
+independently of the filtered history. Malformed new retained fields are rejected
+atomically rather than silently omitted.
 This storage projection does not change the provider's execution output or
 ordinary conversation image attachments. Model per-run transcripts within the owning Lody
 session; native grandchildren can nest there without creating extra Lody child

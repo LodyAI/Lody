@@ -315,7 +315,7 @@ export interface LedgerFeedContents {
  * Durable local copy of a workspace's ledger: an origin plus the original
  * records after it, so a restart re-verifies locally instead of downloading the
  * whole history. Holds no secrets; the `LedgerFeed` workflow re-verifies every
- * byte on open and decides what to append.
+ * suffix byte on open (retained origins restore local v2 state) and decides what to append.
  *
  * Each write is atomic and conditional on the stored tail, so two writers can
  * never interleave appends.
@@ -331,6 +331,13 @@ export class LedgerFeedStore extends Context.Service<
     tail(): Effect.Effect<LedgerFeedTail | null, LocalStoreError>;
     /** Store the origin of an empty feed (`conflict` if already initialized). */
     initialize(
+      origin: Uint8Array,
+      originCount: number,
+      tail: LedgerFeedTail
+    ): Effect.Effect<void, LocalStoreError>;
+    /** Replace the cached origin and discard its covered records atomically, only at expectedTail; the caller must persist its pin first. */
+    rebase(
+      expectedTail: LedgerFeedTail,
       origin: Uint8Array,
       originCount: number,
       tail: LedgerFeedTail

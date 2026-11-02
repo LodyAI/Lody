@@ -7,14 +7,13 @@ import { DocumentStyle } from './document-style';
 
 const styles = stylex.create({
   /**
-   * The content area is a card set into the sidebar's ground: the sidebar's colour
-   * runs under the whole window and the page sits on it with a gutter all round
-   * (the left is the sidebar's own edge). Pages therefore start 8px below the window
-   * top.
+   * The content area is separated from the window ground by a thin rim rather than
+   * floating in a wide gutter. The left edge still anchors directly to a visible
+   * sidebar; the other edges keep one spacing step of shell colour around the page.
    */
   card: {
-    '--lody-frame-gutter': space[2],
-    '--lody-frame-radius': radius.medium,
+    '--lody-frame-gutter': space[1],
+    '--lody-frame-radius': radius.large,
   },
 });
 

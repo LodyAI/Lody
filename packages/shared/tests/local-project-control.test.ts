@@ -390,6 +390,42 @@ describe('local project control response schema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('preserves opt-in inspection and rejects malformed directory inspection', () => {
+    const request = {
+      type: 'local-project/prepare-add',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      rootPath: '/tmp/project',
+      inspect: true,
+    };
+    expect(safeParseLocalProjectControlRequest(JSON.stringify(request))).toMatchObject({
+      success: true,
+      data: request,
+    });
+    expect(
+      safeParseLocalProjectControlRequest(JSON.stringify({ ...request, inspect: 'yes' })).success
+    ).toBe(false);
+    const result = {
+      localProjectId: 'project-1',
+      name: 'project',
+      rootPath: '/tmp/project',
+      alreadyRegistered: false,
+      inspection: { isGit: false, submodules: [] },
+    };
+    const response = { ok: true, type: 'local-project/prepare-add', result };
+    expect(LocalProjectControlResponseSchema.safeParse(response)).toMatchObject({
+      success: true,
+      data: response,
+    });
+    expect(isLocalProjectControlResponse(response)).toBe(true);
+    const malformed = {
+      ...response,
+      result: { ...result, inspection: { isGit: 'yes', submodules: [] } },
+    };
+    expect(isLocalProjectControlResponse(malformed)).toBe(false);
+    expect(LocalProjectControlResponseSchema.safeParse(malformed).success).toBe(false);
+  });
+
   it('accepts prepare-add success response', () => {
     const response = {
       ok: true,
@@ -598,6 +634,42 @@ describe('local project control response schema', () => {
 });
 
 describe('node local project control guard', () => {
+  const cjs = createRequire(import.meta.url)('../src/node/local-project-control.cjs') as {
+    isLocalProjectControlRequest: typeof isLocalProjectControlRequest;
+  };
+  const historyBase = {
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1',
+    localProjectId: 'project-1',
+  };
+  const customHistoryRequests = [
+    { type: 'local-project/sync-history' },
+    { type: 'local-project/import-history', acpSessionIds: ['acp-1'] },
+    {
+      type: 'local-project/resolve-history-conflict',
+      sessionId: 'session-1',
+      acpSessionId: 'acp-1',
+    },
+  ].map((request) => ({
+    ...historyBase,
+    ...request,
+    provider: { agentConfigId: 'config-1', cliType: 'custom', agentType: 'my-agent' },
+  }));
+
+  it.each(customHistoryRequests)(
+    'accepts custom ACP history providers for $type in Zod and both IPC guards',
+    (request) => {
+      expect(safeParseLocalProjectControlRequest(JSON.stringify(request)).success).toBe(true);
+      expect(isLocalProjectControlRequest(request)).toBe(true);
+      expect(cjs.isLocalProjectControlRequest(request)).toBe(true);
+
+      const unknown = { ...request, provider: { ...request.provider, cliType: 'unknown' } };
+      expect(safeParseLocalProjectControlRequest(JSON.stringify(unknown)).success).toBe(false);
+      expect(isLocalProjectControlRequest(unknown)).toBe(false);
+      expect(cjs.isLocalProjectControlRequest(unknown)).toBe(false);
+    }
+  );
+
   it('accepts remote directory browse request and response', () => {
     expect(
       isLocalProjectControlRequest({

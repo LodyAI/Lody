@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -118,7 +119,11 @@ export async function proposeAgentRole(args: {
     return meta;
   });
   await manager.repo.flush();
-  if (!args.localOnly && (!(await backend.waitUntilSynced()) || !(await session.waitUntilSynced())))
+  const confirm = { timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS };
+  if (
+    !args.localOnly &&
+    (!(await backend.waitUntilSynced(confirm)) || !(await session.waitUntilSynced(confirm)))
+  )
     throw new Error(
       `Proposal saved locally; sync pending. Retry with requestId ${command.requestId}.`
     );

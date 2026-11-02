@@ -21,11 +21,12 @@ history coverage and device-level responsiveness remain validation limits.
 
 ## Decision and boundaries
 
-Pin `@loro-dev/roost-node@0.1.2` as a CLI runtime dependency and exempt only that
-version and its six exact platform dependencies from the release-age policy.
-Keep `@loro-dev/roost@0.1.2` for identity,
-application JSON, and `NodeLodyHistory`. Neither Rust source nor a sibling Roost
-checkout is needed to install, build, or package Lody.
+Pin `@loro-dev/roost-node@0.2.0` as an exact CLI runtime dependency, with
+`@loro-dev/roost@0.2.0` from the shared catalog for identity, application JSON, and
+`NodeLodyHistory`. Exempt only these exact versions and the six matching platform
+dependencies from the release-age policy. Native 0.2.0 uses SQLite container v4;
+it refuses earlier containers without migration or automatic reset. Neither Rust
+source nor a sibling Roost checkout is needed to install, build, or package Lody.
 
 Use `RoostNativeClient` directly. Preserve the database path, credential-store
 seed, admitted owner, bounded queue, shared stream leases, and awaited final close.

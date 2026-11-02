@@ -28,3 +28,15 @@ procedure for [failure containment](../docs/failure-containment.md); the rules
 stay in that page and the root `AGENTS.md`. `.claude/skills/failure-containment-review`
 links to it. See the
 [decision note](../notes/proposed/process/2026-10-16-failure-containment.md).
+
+`archive-agent-notes` is authored in this repository. It is the supersession and
+archive procedure for [Agent Notes](../notes/AGENTS.md#supersession); the rules stay
+in that file. `.claude/skills/archive-agent-notes` links to it. See the
+[decision note](../notes/implemented/process/2026-10-28-agent-note-memory-hygiene.md).
+
+`lody-cli` is authored in this repository. It is the operating guide for the `lody`
+CLI: runtime prerequisites, sign-in recovery, work-context selection, selector and
+environment conventions, the schedule draft format, and confirmation-worthy commands.
+Built-in `--help` remains the flag authority.
+`.claude/skills/lody-cli` links to it. See the
+[decision note](../notes/proposed/process/2026-10-21-lody-cli-skill.md).

@@ -11,6 +11,8 @@ import type {
   MachineId,
 } from '@lody/shared';
 
+import { CLI_STORAGE_WRITE_FAILED_ISSUE_CODE } from '@lody/shared/electron-ipc';
+
 const MAX_RUNTIME_ISSUES = 50;
 
 type UpsertCliRuntimeIssueInput = {
@@ -193,6 +195,16 @@ export class CliRuntimeStateReporter {
     });
     this.trimIssues();
     this.touch();
+  }
+
+  /** Local-only runtime state; never include storage paths or document contents. */
+  reportStorageWriteFailure(): void {
+    this.upsertIssue({
+      code: CLI_STORAGE_WRITE_FAILED_ISSUE_CODE,
+      severity: 'warning',
+      recoverable: true,
+      message: 'A write to local repository storage failed.',
+    });
   }
 
   clearIssue(code: string): void {

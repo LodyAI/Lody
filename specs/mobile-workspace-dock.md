@@ -11,6 +11,10 @@ The selected icon remains the same visible 24×24 element. Labels, selection fil
 
 Both themes follow this behavior. Unmatched selection keeps navigation expanded; changing tabs never selects one implicitly. Instances remain independent, including matching legacy `layoutId` values. Resizing or omitting the new-chat action preserves available-width and safe-area layout.
 
+When a native host confirms that every action fits in a safe side rail, the rail
+replaces the bottom dock while preserving tab selection and actions. Open dialogs
+and menus suspend the rail; the bottom dock remains the fallback.
+
 ## Evidence
 
 [Component](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [Decision and validation limits](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md)

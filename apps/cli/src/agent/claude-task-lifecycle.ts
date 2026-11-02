@@ -88,6 +88,7 @@ export type ClaudeTaskLifecycleConversionResult =
 
 export type TaskLifecycleConversionOptions = {
   defaultActor: string;
+  taskMetaFallbackActor?: string;
 };
 
 export const convertTaskLifecycleNotification = (
@@ -148,7 +149,7 @@ const buildTaskLifecycleAcpNotification = (
     summary,
     usage,
     lastToolName,
-    defaultActor: options.defaultActor,
+    taskMetaFallbackActor: options.taskMetaFallbackActor,
   });
 
   const updateBase = {
@@ -300,7 +301,7 @@ const buildTaskMeta = (args: {
   summary: string | undefined;
   usage: ReturnType<typeof sanitizeUsage>;
   lastToolName: string | undefined;
-  defaultActor: string;
+  taskMetaFallbackActor: string | undefined;
 }): LodyTaskMeta => {
   const { message } = args;
   const meta: Record<string, unknown> = {
@@ -312,17 +313,14 @@ const buildTaskMeta = (args: {
         : 'subagent',
     status: args.status,
   };
-  setIfDefined(
-    meta,
-    'actor',
-    sanitizeText(
-      message.subagent_type ??
-        (message.subtype === 'task_started' ? message.workflow_name : undefined) ??
-        message.task_type ??
-        args.defaultActor,
-      MAX_META_TEXT_LENGTH
-    )
+  const actor = sanitizeText(
+    message.subagent_type ??
+      (message.subtype === 'task_started' ? message.workflow_name : undefined) ??
+      message.task_type ??
+      args.taskMetaFallbackActor,
+    MAX_META_TEXT_LENGTH
   );
+  setIfDefined(meta, 'actor', actor);
   setIfDefined(meta, 'description', args.description);
   setIfDefined(meta, 'parentToolCallId', message.tool_use_id);
   setIfDefined(meta, 'summary', args.summary);

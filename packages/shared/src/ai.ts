@@ -1,3 +1,4 @@
+import { decodeSessionFilePath } from './project-path';
 import type { AgentRoleProposalMeta } from './agent-role-proposal';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
@@ -375,7 +376,24 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 10;
+// 11: provider command previews come only from probes, never project sessions.
+export const ACP_CAPABILITY_CACHE_VERSION = 11;
+
+/**
+ * One sign-in method an ACP agent advertised in its `initialize` response.
+ *
+ * Persisted with the capability cache so the account panel can offer the
+ * agent's own sign-in methods without starting an authentication attempt
+ * first. `args` is display-only; the Machine resolves the trusted executable
+ * and arguments itself.
+ */
+export type AcpAuthMethodSummary = {
+  type: 'agent' | 'env_var' | 'terminal';
+  id?: string;
+  name?: string;
+  description?: string;
+  args?: string[];
+};
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -409,8 +427,17 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
-  /** Available slash commands advertised by the agent. */
+  /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
+  /**
+   * Sign-in methods the agent advertised in its `initialize` response.
+   *
+   * `undefined` means no probe has asked yet; an empty array means the agent was
+   * asked and advertised none. Only agent-driven (registry/custom/Devin)
+   * providers record this: built-in providers sign in with their own native
+   * login command, which the adapter's method list does not describe.
+   */
+  authMethods?: AcpAuthMethodSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
@@ -445,6 +472,10 @@ export const getReadableAcpCapabilityCacheEntry = (
 ): AcpCapabilityCacheEntry | undefined => {
   if (!entry) {
     return undefined;
+  }
+  if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
+    const { availableCommands: _projectCommands, ...compatible } = entry;
+    entry = compatible;
   }
   // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
   // non-Codex agents. Preserve every other understood field from older entries,
@@ -1259,8 +1290,8 @@ const selectByLowestRank = (
  * Computes runtime title-generation configOptionValues from current ACP capabilities.
  *
  * Builtin Codex defaults to Luna, low reasoning, and full access. Other providers
- * choose the least-privileged mode, last listed model, and smallest reasoning effort
- * from their current configOptions when the user has not configured title generation.
+ * retain their current model; only explicitly configured title models are applied.
+ * Safe mode and reasoning defaults are inferred from advertised capabilities.
  */
 export function computeTitleGenerationDefaults(
   cliType: AgentConfigCliType,
@@ -1276,10 +1307,7 @@ export function computeTitleGenerationDefaults(
       continue;
     }
 
-    if (opt.category === 'model') {
-      const lastOption = opt.options.length > 0 ? opt.options[opt.options.length - 1] : undefined;
-      defaults[opt.id] = lastOption?.value ?? opt.currentValue;
-    } else if (opt.category === 'mode') {
+    if (opt.category === 'mode') {
       defaults[opt.id] =
         selectByLowestRank(opt.options, leastPermissionModeRank) ?? opt.currentValue;
     } else if (opt.id === 'reasoning_effort' || opt.category === 'thought_level') {
@@ -1511,6 +1539,7 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
   fileName?: string;
@@ -1548,6 +1577,14 @@ export type SessionFileTransport = 'r2' | 'local';
  * absolute or parent-traversing path when it reaches a different machine.
  */
 export function isSessionFileSourcePath(value: string): boolean {
+  if (value.startsWith('\0')) {
+    const decoded = decodeSessionFilePath(value);
+    return (
+      decoded !== undefined &&
+      decoded.rootId !== 'main' &&
+      isSessionFileSourcePath(decoded.relativePath)
+    );
+  }
   if (value.length === 0 || value.includes('\0')) return false;
   const normalized = value.replace(/\\/g, '/');
   if (normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
@@ -1557,6 +1594,7 @@ export function isSessionFileSourcePath(value: string): boolean {
 }
 
 export type SessionFilePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   type: 'file';
   /** Unique identifier; also the relay-store key. Generated by the uploader. */
   fileId: string;
@@ -1945,6 +1983,8 @@ export type ACPSessionConfig = ACPTurnConfig & {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

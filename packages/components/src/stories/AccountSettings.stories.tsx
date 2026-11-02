@@ -16,11 +16,15 @@ import type { AccountSettingsPureProps } from '@/components/settings';
 import type { Invitation } from 'better-auth/plugins';
 import { userEvent, within } from 'storybook/test';
 
+const mockMemberAvatar = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" fill="#b5caf4"/><path d="M12 80a28 28 0 0 1 56 0" fill="#7268ba"/><circle cx="40" cy="34" r="20" fill="#ffe0bf"/><path d="M20 31a20 20 0 0 1 40 0q-12-3-19-13-8 10-21 13" fill="#473c55"/><circle cx="33" cy="34" r="2"/><circle cx="47" cy="34" r="2"/><path d="M34 43q6 5 12 0" fill="none" stroke="#a85863" stroke-width="2"/></svg>'
+)}`;
+
 const mockCurrentUser = {
   id: 'user-1',
   name: 'Alice Chen',
   email: 'alice@example.com',
-  image: null,
+  image: mockMemberAvatar,
 };
 
 const mockOrganization = {

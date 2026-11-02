@@ -102,7 +102,7 @@ describe('selectUniqueAgentRoleByIdOrName', () => {
 });
 
 describe('resolveAgentRoleCreate', () => {
-  it('composes the Prompt prefix and freezes the Role run config', () => {
+  it('keeps the authored prompt, binds the Prompt prefix separately and freezes the Role run config', () => {
     const role = agentRole({
       runConfig: {
         modeId: 'default',
@@ -114,7 +114,10 @@ describe('resolveAgentRoleCreate', () => {
 
     const resolved = resolveAgentRoleCreate({ role, prompt: 'Review the current diff.' });
 
-    expect(resolved.prompt).toBe('Act as a careful reviewer.\n\nReview the current diff.');
+    expect(resolved.prompt).toBe('Review the current diff.');
+    const options: CreateOptions = {};
+    applyAgentRoleCreateTarget(options, resolved);
+    expect(options.agentRolePromptPrefix).toBe('Act as a careful reviewer.');
     expect(resolved.dispatchConfig).toEqual({
       modeId: 'default',
       modelId: 'opus',
@@ -270,6 +273,8 @@ describe('MCP resolution parity', () => {
     expect(mcpOptions.agentRoleId).toBe(cliOptions.agentRoleId);
     expect(mcpOptions.agentRoleRevision).toBe(cliOptions.agentRoleRevision);
     expect(mcpOptions.agentRoleSnapshot).toEqual(cliOptions.agentRoleSnapshot);
+    expect(mcpOptions.agentRolePromptPrefix).toBe('Act as a careful reviewer.');
+    expect(mcpOptions.agentRolePromptPrefix).toBe(cliOptions.agentRolePromptPrefix);
   });
 });
 

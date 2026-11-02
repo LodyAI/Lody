@@ -346,3 +346,26 @@ export const InMobileDrawer: Story = {
     ),
   ],
 };
+
+/** Open a row to see loading and retry without materializing other runs. */
+export const DeferredRuns: Story = {
+  args: {
+    tasks: streamedRuns.map((task, index) => ({
+      ...task,
+      description: index === 0 ? 'Loading transcript' : 'Retry transcript read',
+      run: task.run ? { ...task.run, items: task.run.items.slice(-1) } : undefined,
+      history: {
+        read: () =>
+          index === 0
+            ? new Promise<NonNullable<SubagentTask['run']>>(() => {})
+            : Promise.reject(new Error('Synthetic transcript read failure')),
+      },
+    })),
+    renderHistory,
+  },
+};
+
+/** Agents and shell commands in one turn: Subagents and Tasks tabs. */
+export const SubagentsAndCommands: Story = {
+  args: { tasks: [...running, ...backgroundCommands] },
+};

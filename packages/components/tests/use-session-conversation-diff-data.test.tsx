@@ -131,6 +131,52 @@ describe('useSessionConversationDiffData', () => {
       newSnapshot: { text: 'other' },
     });
   });
+  it('refetches when the All Changes scope changes and renders the returned uncommitted file set', async () => {
+    const paths = ['committed.ts', 'worktree.ts'];
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'new' },
+    }));
+    provider.getAllChangesDiff = async (_focusPath, scope) => {
+      const entry = (path: string) => ({
+        path,
+        diff: { status: 'unavailable' as const, path, reason: 'metadata-only' as const },
+      });
+      return {
+        status: 'ready',
+        base: scope === 'uncommitted' ? 'head' : 'base',
+        truncated: false,
+        entries:
+          scope === 'uncommitted'
+            ? [entry('worktree.ts')]
+            : [entry('committed.ts'), entry('worktree.ts')],
+      };
+    };
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness({ scope }: { scope: 'branch' | 'uncommitted' }) {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'all-changes-scope-test' as SessionId,
+        filePaths: paths,
+        fileProvider: provider,
+        scope,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+
+    render(<Harness scope="branch" />);
+    await flushMicrotasks();
+    expect(state?.base).toBe('base');
+
+    rerender(<Harness scope="uncommitted" />);
+    await flushMicrotasks();
+    expect(state?.base).toBe('head');
+    expect(state?.normalizedPaths).toEqual(['worktree.ts']);
+  });
   it('accepts started reads across viewport changes and loads the newly visible file after settlement', async () => {
     type DiffResult = Awaited<ReturnType<SessionFileProvider['getDiff']>>;
     const pending = new Map<string, ReturnType<typeof createDeferred<DiffResult>>>();
@@ -264,6 +310,29 @@ describe('useSessionConversationDiffData', () => {
     await flushMicrotasks();
 
     expect(getDiff).toHaveBeenCalledWith('./README.md', undefined, undefined);
+  });
+
+  it('passes the uncommitted All Changes scope to per-file reads', async () => {
+    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
+      status: 'unavailable',
+      path: pathOrFileId,
+      reason: 'not_changed',
+    }));
+
+    render(
+      <DiffDataHarness
+        mode="base"
+        allChangesScope="uncommitted"
+        fileProvider={createDiffProvider(getDiff)}
+        onUpdate={() => undefined}
+      />
+    );
+
+    await flushMicrotasks();
+
+    expect(getDiff).toHaveBeenCalledWith('README.md', undefined, undefined, {
+      allChangesScope: 'uncommitted',
+    });
   });
 
   it('keeps loaded All Changes data when equivalent checkpoints rerender', async () => {
@@ -482,6 +551,7 @@ function DiffDataHarness({
   loadFilePaths = README_PATHS,
   priorityFilePath = 'README.md',
   fileDiffs,
+  allChangesScope,
   onUpdate,
 }: {
   readonly fileProvider: SessionFileProvider;
@@ -490,6 +560,7 @@ function DiffDataHarness({
   readonly loadFilePaths?: string[];
   readonly priorityFilePath?: string;
   readonly fileDiffs?: Parameters<typeof useSessionConversationDiffData>[0]['fileDiffs'];
+  readonly allChangesScope?: 'branch' | 'uncommitted';
   readonly onUpdate: (result: ReturnType<typeof useSessionConversationDiffData>) => void;
 }) {
   const result = useSessionConversationDiffData({
@@ -501,6 +572,7 @@ function DiffDataHarness({
     priorityFilePath,
     fileDiffs,
     fileProvider,
+    allChangesScope,
   });
 
   useEffect(() => {

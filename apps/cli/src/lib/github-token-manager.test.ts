@@ -20,6 +20,9 @@ vi.mock('@lody/cloud-api', () => ({
 import {
   GitHubTokenManager,
   GitHubTokenFetchError,
+  GITHUB_CANDIDATE_FAILURE_REUSE_MAX_MS,
+  GITHUB_TOKEN_FAILURE_BACKOFF_MAX_MS,
+  createSharedGitHubTokenManagers,
   withRequestDeadline,
 } from '../lib/github-token-manager';
 import {
@@ -418,6 +421,344 @@ describe('GitHubTokenManager', () => {
     await expect(manager.getWriteTokenForRepo('owner/repo', context)).rejects.toThrow(
       'Backend returned an invalidated personal GitHub token'
     );
+  });
+
+  describe('request sharing and failure backoff', () => {
+    const context = { requesterUserId: 'owner', machineId: 'machine' };
+    const hourFromNow = (nowMs: number) => new Date(nowMs + 3600_000).toISOString();
+    const deferred = <T>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    };
+    const createManager = () => {
+      const clock = { nowMs: Date.parse('2026-10-20T00:00:00Z') };
+      const manager = new GitHubTokenManager({
+        serverUrl: 'http://example.test',
+        cliToken: 'cli',
+        workspaceId: 'ws',
+        now: () => clock.nowMs,
+      });
+      return { clock, manager };
+    };
+
+    it('shares one cloud request among concurrent candidate lookups', async () => {
+      const { clock, manager } = createManager();
+      const answer = deferred<unknown>();
+      actionMock.mockReturnValueOnce(answer.promise);
+      const lookups = Array.from({ length: 20 }, () =>
+        manager.getCredentialCandidate('org/repo', context, 'personal')
+      );
+      answer.resolve({
+        success: true,
+        token: 'personal-1',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      const results = await Promise.all(lookups);
+      expect(new Set(results.map((result) => JSON.stringify(result))).size).toBe(1);
+      expect(results[0]).toEqual({ token: 'personal-1', tokenSource: 'personal' });
+      expect(actionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('reuses an unavailable personal answer only within one command burst', async () => {
+      const { clock, manager } = createManager();
+      actionMock.mockResolvedValue({
+        success: false,
+        errorCode: 'personal_unavailable',
+        errorMessage: 'personal_auth_missing',
+      });
+      for (let index = 0; index < 20; index++)
+        await expect(
+          manager.getCredentialCandidate('org/repo', context, 'personal')
+        ).resolves.toEqual({ available: false, reason: 'personal_auth_missing' });
+      expect(actionMock).toHaveBeenCalledTimes(1);
+
+      // A reauthorization sends the CLI no signal: the next command a few seconds
+      // later must ask again instead of falling back to another identity.
+      clock.nowMs += GITHUB_CANDIDATE_FAILURE_REUSE_MAX_MS;
+      actionMock.mockResolvedValueOnce({
+        success: true,
+        token: 'personal-reauthorized',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await expect(
+        manager.getCredentialCandidate('org/repo', context, 'personal')
+      ).resolves.toEqual({ token: 'personal-reauthorized', tokenSource: 'personal' });
+      expect(actionMock).toHaveBeenCalledTimes(2);
+
+      // Invalidation after a rejected token ends reuse of the cached answer.
+      manager.invalidate('org/repo', { requesterUserId: 'owner' });
+      await manager.getCredentialCandidate('org/repo', context, 'personal');
+      expect(actionMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('keeps backoff per repository, requester and source', async () => {
+      const { manager } = createManager();
+      actionMock.mockImplementation(async (_rpc, args) =>
+        args.repoFullName === 'org/unlinked'
+          ? { success: false, errorCode: 'repo_not_linked', errorMessage: 'not linked' }
+          : {
+              success: true,
+              token: `${args.requesterUserId}:${args.credentialSource}`,
+              tokenSource: args.credentialSource,
+            }
+      );
+      await expect(manager.getCredentialCandidate('org/unlinked', context, 'app')).resolves.toBe(
+        null
+      );
+      await expect(manager.getCredentialCandidate('org/unlinked', context, 'app')).resolves.toBe(
+        null
+      );
+      await expect(manager.getCredentialCandidate('org/linked', context, 'app')).resolves.toEqual({
+        token: 'owner:app',
+        tokenSource: 'app',
+      });
+      await expect(
+        manager.getCredentialCandidate('org/linked', { ...context, requesterUserId: 'b' }, 'app')
+      ).resolves.toEqual({ token: 'b:app', tokenSource: 'app' });
+      expect(actionMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('backs off service failures exponentially from their completion', async () => {
+      const { clock, manager } = createManager();
+      actionMock.mockRejectedValue(new Error('fetch failed'));
+      const attempt = () => manager.getCredentialCandidate('org/repo', context, 'app');
+      await expect(attempt()).rejects.toThrow('fetch failed');
+      await expect(attempt()).rejects.toThrow('fetch failed');
+      expect(actionMock).toHaveBeenCalledTimes(1);
+      clock.nowMs += 1_000;
+      await expect(attempt()).rejects.toThrow('fetch failed');
+      expect(actionMock).toHaveBeenCalledTimes(2);
+      clock.nowMs += 1_999;
+      await expect(attempt()).rejects.toThrow('fetch failed');
+      expect(actionMock).toHaveBeenCalledTimes(2);
+      clock.nowMs += 1;
+      actionMock.mockResolvedValueOnce({ success: true, token: 'app-1', tokenSource: 'app' });
+      await expect(attempt()).resolves.toEqual({ token: 'app-1', tokenSource: 'app' });
+      expect(actionMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('never reuses an expired CLI login failure', async () => {
+      const { manager } = createManager();
+      actionMock.mockResolvedValue({
+        success: false,
+        errorCode: 'unauthorized',
+        errorMessage: 'expired',
+      });
+      await expect(manager.getCredentialCandidate('org/repo', context, 'app')).rejects.toThrow(
+        'expired'
+      );
+      await expect(manager.getCredentialCandidate('org/repo', context, 'app')).rejects.toThrow(
+        'expired'
+      );
+      expect(actionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('refreshes a rejected personal candidate once and ignores a late rejection', async () => {
+      const { clock, manager } = createManager();
+      actionMock.mockResolvedValueOnce({
+        success: true,
+        token: 'personal-old',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await manager.getCredentialCandidate('org/repo', context, 'personal');
+      const refreshed = deferred<unknown>();
+      actionMock.mockReturnValueOnce(refreshed.promise);
+      const rejections = Array.from({ length: 20 }, () =>
+        manager.getCredentialCandidate('org/repo', context, 'personal', 'personal-old')
+      );
+      refreshed.resolve({
+        success: true,
+        token: 'personal-new',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      for (const result of await Promise.all(rejections))
+        expect(result).toEqual({ token: 'personal-new', tokenSource: 'personal' });
+      expect(actionMock).toHaveBeenCalledTimes(2);
+      expect(actionMock.mock.calls[1]?.[1]).toMatchObject({
+        invalidatedPersonalToken: 'personal-old',
+      });
+
+      // An old command's rejection arrives after the new candidate was published.
+      manager.invalidate('org/repo', {
+        requesterUserId: 'owner',
+        invalidatedToken: 'personal-old',
+      });
+      await expect(
+        manager.getCredentialCandidate('org/repo', context, 'personal', 'personal-old')
+      ).resolves.toEqual({ token: 'personal-new', tokenSource: 'personal' });
+      expect(actionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('asks again when a shared flight returns the token a waiter rejected', async () => {
+      const { clock, manager } = createManager();
+      const first = deferred<unknown>();
+      actionMock.mockReturnValueOnce(first.promise).mockResolvedValueOnce({
+        success: true,
+        token: 'personal-new',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      const plain = manager.getCredentialCandidate('org/repo', context, 'personal');
+      const rejecting = manager.getCredentialCandidate(
+        'org/repo',
+        context,
+        'personal',
+        'personal-old'
+      );
+      first.resolve({
+        success: true,
+        token: 'personal-old',
+        tokenSource: 'personal',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await expect(plain).resolves.toEqual({ token: 'personal-old', tokenSource: 'personal' });
+      await expect(rejecting).resolves.toEqual({ token: 'personal-new', tokenSource: 'personal' });
+      expect(actionMock.mock.calls[1]?.[1]).toMatchObject({
+        invalidatedPersonalToken: 'personal-old',
+      });
+    });
+
+    it('does not publish a candidate fetched before invalidation', async () => {
+      const { clock, manager } = createManager();
+      const stale = deferred<unknown>();
+      actionMock.mockReturnValueOnce(stale.promise).mockResolvedValueOnce({
+        success: true,
+        token: 'app-after',
+        tokenSource: 'app',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      const before = manager.getCredentialCandidate('org/repo', context, 'app');
+      manager.invalidate('org/repo');
+      stale.resolve({
+        success: true,
+        token: 'app-before',
+        tokenSource: 'app',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await expect(before).resolves.toMatchObject({ token: 'app-before' });
+      await expect(manager.getCredentialCandidate('org/repo', context, 'app')).resolves.toEqual({
+        token: 'app-after',
+        tokenSource: 'app',
+      });
+    });
+
+    it('backs off a failed managed write token instead of asking on every poll', async () => {
+      const { clock, manager } = createManager();
+      actionMock.mockResolvedValue({
+        success: false,
+        errorCode: 'repo_not_linked',
+        errorMessage: 'Repository is not linked',
+      });
+      for (let index = 0; index < 20; index++)
+        await expect(manager.getWriteTokenInfoForRepo('org/repo', context)).rejects.toMatchObject({
+          code: 'repo_not_linked',
+        });
+      expect(actionMock).toHaveBeenCalledTimes(1);
+      // Background polling keeps the longer window.
+      clock.nowMs += GITHUB_CANDIDATE_FAILURE_REUSE_MAX_MS;
+      await expect(manager.getWriteTokenInfoForRepo('org/repo', context)).rejects.toMatchObject({
+        code: 'repo_not_linked',
+      });
+      expect(actionMock).toHaveBeenCalledTimes(1);
+      clock.nowMs += GITHUB_TOKEN_FAILURE_BACKOFF_MAX_MS - GITHUB_CANDIDATE_FAILURE_REUSE_MAX_MS;
+      actionMock.mockResolvedValueOnce({
+        success: true,
+        token: 'app-linked',
+        tokenSource: 'app',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await expect(manager.getWriteTokenForRepo('org/repo', context)).resolves.toBe('app-linked');
+      expect(actionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a newer write token when an old request reports its rejection late', async () => {
+      const { clock, manager } = createManager();
+      actionMock
+        .mockResolvedValueOnce({
+          success: true,
+          token: 'personal-old',
+          tokenSource: 'personal',
+          expiresAt: hourFromNow(clock.nowMs),
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          token: 'personal-new',
+          tokenSource: 'personal',
+          expiresAt: hourFromNow(clock.nowMs),
+        });
+      await manager.getWriteTokenForRepo('org/repo', context);
+      manager.invalidate('org/repo', {
+        requesterUserId: 'owner',
+        invalidatedToken: 'personal-old',
+      });
+      await expect(manager.getWriteTokenForRepo('org/repo', context)).resolves.toBe('personal-new');
+      manager.invalidate('org/repo', {
+        requesterUserId: 'owner',
+        invalidatedToken: 'personal-old',
+      });
+      await expect(manager.getWriteTokenForRepo('org/repo', context)).resolves.toBe('personal-new');
+      expect(actionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not adopt a write token fetched before invalidation', async () => {
+      const { clock, manager } = createManager();
+      const stale = deferred<unknown>();
+      actionMock.mockReturnValueOnce(stale.promise).mockResolvedValueOnce({
+        success: true,
+        token: 'app-after',
+        tokenSource: 'app',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      const before = manager.getWriteTokenForRepo('org/repo', context);
+      manager.invalidateAll();
+      stale.resolve({
+        success: true,
+        token: 'app-before',
+        tokenSource: 'app',
+        expiresAt: hourFromNow(clock.nowMs),
+      });
+      await expect(before).resolves.toBe('app-after');
+      await expect(manager.getWriteTokenForRepo('org/repo', context)).resolves.toBe('app-after');
+      expect(actionMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('shares one workspace manager between borrowers and releases it with the last lease', async () => {
+    actionMock.mockImplementation(async (_rpc, args) => ({
+      success: true,
+      token: `${args.workspaceId}:token`,
+      tokenSource: 'app',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    }));
+    const managers = createSharedGitHubTokenManagers(
+      (workspaceId) =>
+        new GitHubTokenManager({ serverUrl: 'http://example.test', cliToken: 'cli', workspaceId })
+    );
+    const context = { requesterUserId: 'owner', machineId: 'machine' };
+    const session = managers.acquire('ws');
+    const poller = managers.acquire('ws');
+    const other = managers.acquire('ws-2');
+    await expect(session.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws:token');
+    await expect(poller.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws:token');
+    await expect(other.getWriteTokenForRepo('org/repo', context)).resolves.toBe('ws-2:token');
+    expect(actionMock).toHaveBeenCalledTimes(2);
+
+    await session.shutdown();
+    await session.shutdown();
+    await poller.getWriteTokenForRepo('org/repo', context);
+    expect(actionMock).toHaveBeenCalledTimes(2);
+
+    await poller.shutdown();
+    await managers.acquire('ws').getWriteTokenForRepo('org/repo', context);
+    expect(actionMock).toHaveBeenCalledTimes(3);
+    await managers.shutdownAll();
   });
 
   describe('cloud request deadline', () => {

@@ -8,6 +8,7 @@ import {
   type SessionMeta,
   type SessionPlanEntry,
   type SessionQueuePromotionRecord,
+  type SessionGoalMessage,
   type SessionSteerOperationRecord,
 } from '@lody/shared';
 import { resolveSessionHistoryStatus } from '@lody/shared';
@@ -29,6 +30,13 @@ import {
 } from '@lody/shared/session-data';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionAgentWrites } from '@/lib/loro/session-agent-writes';
+import {
+  readDispatchHistory,
+  readDispatchSelection,
+  type SessionDispatchEntry,
+  type SessionDispatchSelection,
+  type SessionDispatchSelector,
+} from './session-dispatch-history';
 import type {
   QueuePromotionInput,
   QueuePromotionResult,
@@ -45,8 +53,36 @@ import type {
  */
 export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
+  readonly readHistoryInspection?: SessionBackend['readHistoryInspection'];
+  readonly readHistoryReplay?: SessionBackend['readHistoryReplay'];
+  readonly readHistoryTranscript?: SessionBackend['readHistoryTranscript'];
+  readonly readHistoryEntry?: SessionBackend['readHistoryEntry'];
+  readonly readLatestGoal?: () => Promise<SessionGoalMessage | null>;
+  readonly foldHistory?: <T>(
+    create: () => T,
+    visit: (state: T, entry: SessionHistoryInput) => void
+  ) => Promise<T>;
+  readonly readHistoryQuery?: (options?: {
+    from?: number;
+    to?: number;
+    transcriptVisibility?: boolean;
+  }) => Promise<readonly import('@lody/shared/session-data').HistoryQueryRow[]>;
+  readonly readHistorySelection?: (
+    select: (
+      rows: readonly import('@lody/shared/session-data').HistoryQueryRow[]
+    ) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ) => Promise<SessionHistoryInput[]>;
+  readonly readLatestUserId?: () => Promise<string | undefined>;
   readonly agentWrites: SessionAgentWrites;
   readonly setPlan: (entries: readonly SessionPlanEntry[]) => Promise<void>;
+  readonly readDispatchHistory?: (
+    includeTurnIds: readonly string[]
+  ) => Promise<SessionDispatchEntry[]>;
+  readonly readDispatchSelection?: (
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ) => Promise<SessionDispatchSelection>;
   readonly initialize?: (options: { readonly skipAutoRead: boolean }) => Promise<void>;
   readonly flushLocalWrites?: () => Promise<void>;
   /**
@@ -89,6 +125,80 @@ export class RoostSessionBackend implements SessionBackend {
     return this.services.sessionData.history;
   }
 
+  get readHistoryInspection() {
+    return this.services.readHistoryInspection;
+  }
+
+  get readHistoryReplay() {
+    return this.services.readHistoryReplay;
+  }
+
+  get readHistoryTranscript() {
+    return this.services.readHistoryTranscript;
+  }
+
+  get readHistoryEntry() {
+    return this.services.readHistoryEntry;
+  }
+
+  async foldHistory<T>(
+    create: () => T,
+    visit: (state: T, entry: SessionHistoryInput) => void
+  ): Promise<T> {
+    if (!this.services.foldHistory) throw new Error('History traversal is unavailable');
+    return this.services.foldHistory(create, visit);
+  }
+
+  async readHistoryQuery(options?: { from?: number; to?: number; transcriptVisibility?: boolean }) {
+    if (!this.services.readHistoryQuery)
+      throw new Error('Selective history queries are unavailable');
+    return this.services.readHistoryQuery(options);
+  }
+
+  async readHistorySelection(
+    select: (
+      rows: readonly import('@lody/shared/session-data').HistoryQueryRow[]
+    ) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ) {
+    if (!this.services.readHistorySelection)
+      throw new Error('Selective history queries are unavailable');
+    return this.services.readHistorySelection(select, options);
+  }
+
+  readonly readLatestGoal = async (): Promise<SessionGoalMessage | null> => {
+    if (this.services.readLatestGoal) return this.services.readLatestGoal();
+    const history = await this.readHistorySelection((rows) => {
+      for (let index = rows.length - 1; index >= 0; index--)
+        if (
+          rows[index]?.items?.some(
+            (item) =>
+              item.type === 'goal' &&
+              typeof item.threadId === 'string' &&
+              typeof item.objective === 'string' &&
+              typeof item.status === 'string'
+          )
+        )
+          return [index];
+      return [];
+    });
+    for (let index = (history[0]?.items?.length ?? 0) - 1; index >= 0; index--) {
+      const item = history[0]?.items?.[index];
+      if (
+        item?.type === 'goal' &&
+        typeof item.threadId === 'string' &&
+        typeof item.objective === 'string' &&
+        typeof item.status === 'string'
+      )
+        return item;
+    }
+    return null;
+  };
+
+  get readLatestUserId() {
+    return this.services.readLatestUserId;
+  }
+
   get inputAcceptance() {
     return this.services.sessionData.inputAcceptance;
   }
@@ -129,6 +239,23 @@ export class RoostSessionBackend implements SessionBackend {
       ...entry,
       inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
     })) as SessionHistoryInput[];
+  }
+
+  readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]> {
+    return (
+      this.services.readDispatchHistory?.(includeTurnIds) ??
+      readDispatchHistory(this.history, includeTurnIds)
+    );
+  }
+
+  readDispatchSelection(
+    includeTurnIds: readonly string[],
+    select: SessionDispatchSelector
+  ): Promise<SessionDispatchSelection> {
+    return (
+      this.services.readDispatchSelection?.(includeTurnIds, select) ??
+      readDispatchSelection(this.history, includeTurnIds, select)
+    );
   }
 
   async captureForkSnapshot(): Promise<SessionBackendForkSnapshot> {

@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: 22
+  NODE_VERSION: '22.23.4'
   COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
 
 jobs:

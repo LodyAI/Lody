@@ -13,6 +13,11 @@ import {
   shouldWatchSession,
 } from './session-dispatch-logic';
 import { SessionExecutionService } from './session-execution-service';
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { readDispatchHistory, readDispatchSelection } from './session-dispatch-history';
+import { isActivationAwaitingHistory } from './session-dispatch-logic';
 
 describe('shouldWatchSession', () => {
   const baseMeta = {
@@ -323,5 +328,152 @@ describe('SessionExecutionService history mutation ownership', () => {
     const releaseNextQueue = service.tryAcquireSessionRewriteConflictLease(sessionId);
     expect(releaseNextQueue).toBeTypeOf('function');
     releaseNextQueue?.();
+  });
+});
+
+describe('scalar dispatch observations', () => {
+  it('captures the selected Loro body before another writer can run after the read yields', async () => {
+    const doc = new LoroDoc();
+    const list = doc.getList('history');
+    list.insert(0, {
+      id: 'coherent-input',
+      role: 'user',
+      status: 'pending',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'before' }],
+    });
+    doc.commit();
+    const data = createLoroSessionData({
+      doc,
+      sessionId: 'coherent-session' as SessionId,
+      writer: createHistoryWriter(doc),
+    });
+    const selected = readDispatchSelection(data.history, [], (entries) => entries[0]?.id);
+    list.delete(0, 1);
+    list.insert(0, {
+      id: 'coherent-input',
+      role: 'user',
+      status: 'pending',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'after' }],
+    });
+    doc.commit();
+    expect((await selected).turn).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'before' }] },
+    });
+    expect(await data.history.readTurn('coherent-input')).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'after' }] },
+    });
+    expect(() =>
+      readDispatchSelection(
+        { ...data.history, readDirectory: async (...args) => data.history.readDirectory(...args) },
+        [],
+        () => undefined
+      )
+    ).toThrow('owning history backend');
+    data.dispose();
+  });
+
+  it('matches full-history decisions for legacy, prepared, steer and duplicate inputs using real Loro directories', async () => {
+    const statuses = [
+      undefined,
+      'prepared',
+      'pending',
+      'seen',
+      'processing',
+      'pending_apply',
+      'delivery_unknown',
+      'handled',
+      'failed',
+      'canceled',
+    ] as const;
+    const base = {
+      id: 'scalar-dispatch' as SessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-22T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: SessionStatusFactory.idle(),
+    } satisfies SessionMeta;
+    const metas: SessionMeta[] = [
+      base,
+      { ...base, latestUserMsgId: 'target' },
+      { ...base, processingUserMsgId: 'target' },
+      { ...base, latestUserMsgId: 'target', lastHandledUserMsgId: 'target' },
+      { ...base, latestUserMsgId: 'target', lastMissingHistoryUserMsgId: 'target' },
+      { ...base, steerTurnStatuses: { target: 'pending' } },
+    ];
+    for (const status of statuses)
+      for (const steer of [false, true]) {
+        const doc = new LoroDoc();
+        const list = doc.getList('history');
+        const user = {
+          role: 'user' as const,
+          timestamp: 'synthetic',
+          items: [{ type: 'text', text: 'body' }],
+        };
+        list.insert(0, {
+          ...user,
+          id: 'settled-prefix',
+          status: 'handled',
+          items: [{ type: 'text', text: 'unrelated'.repeat(8192) }],
+        });
+        list.insert(1, { ...user, id: 'target', status: 'handled', read: true });
+        list.insert(2, {
+          ...user,
+          id: 'target',
+          read: false,
+          ...(status === undefined ? {} : { status }),
+          ...(steer ? { inputConfig: { _lodyDeliveryKind: 'steer' } } : {}),
+        });
+        list.insert(3, { ...user, id: 'fallback', status: 'seen' });
+        list.insert(4, {
+          id: 'completed',
+          role: 'assistant',
+          timestamp: 'synthetic',
+          userTurnId: 'target',
+          endedAt: 42,
+          items: [],
+        });
+        doc.commit();
+        const data = createLoroSessionData({
+          doc,
+          sessionId: base.id,
+          writer: createHistoryWriter(doc),
+        });
+        const full = await data.history.readAll();
+        const forbidden = () => {
+          throw new Error('Dispatch must not read bodies');
+        };
+        const reader = {
+          ...data.history,
+          readAll: forbidden,
+          readAt: forbidden,
+          readTurn: forbidden,
+          readRange: forbidden,
+        };
+        for (const meta of metas) {
+          const ids = [
+            meta.latestUserMsgId,
+            meta.processingUserMsgId,
+            ...Object.keys(meta.steerTurnStatuses ?? {}),
+          ].filter((id): id is string => typeof id === 'string');
+          const scalar = await readDispatchHistory(reader, ids);
+          expect(findNextDispatchableUserTurn(scalar, meta)?.id).toBe(
+            findNextDispatchableUserTurn(full, meta)?.id
+          );
+          for (const id of ids)
+            expect(isActivationAwaitingHistory(scalar, id)).toBe(
+              isActivationAwaitingHistory(full, id)
+            );
+          expect(scalar.every((entry) => !('items' in entry) && !('plan' in entry))).toBe(true);
+          if (ids.includes('target') || scalar.some((entry) => entry.id === 'target'))
+            expect(scalar.filter((entry) => entry.id === 'target')).toHaveLength(2);
+        }
+        data.dispose();
+      }
   });
 });

@@ -4,6 +4,29 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Explicit plaintext copies
+
+`use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
+transcript and PNG exports. Each encrypted export asks again before capture. Its
+one in-memory choice binds the account, routed workspace, runtime, genesis and
+selected source; guards recheck before output after asynchronous reads/capture.
+The final output also re-enters the captured runtime's admission gate, preserving
+C1 even when retirement precedes publication of the replacement UI state.
+Export reads verify that the selected history is the view owned by the captured
+runtime's current Session store. A loading replacement may still display an old
+view, which cannot be relabeled as a source in the replacement workspace. PNG
+snapshots carry the runtime returned by their actual reader through selection.
+Local exports reuse the retained E2EE account selector during uncertain offline
+authentication. Confirmed logout or a different live account still rejects the
+copy. This local identity never authorizes static publication or another cloud API.
+Cancellation or scope changes retire only that export, retain selection and never
+clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
+the existing Blob, Electron or native byte-save path; native staging cleanup and
+OS cancellation stay with that adapter, with no new key or file-path bridge.
+An abandoned UI waiter does not await obsolete capture/reads or prevent a new
+copy. The raw operation still observes rejection and drains its own cleanup;
+late continuations must pass the retired source guard before any further output.
+
 ## Session submission
 
 `use-session-actions.ts` binds admission, analytics, and Jotai observations to
@@ -27,14 +50,51 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## MCP default readiness
+
+`use-session-mcp-selection.ts` allows default-derived sends after the local catalog
+loads in every composition; remote catch-up does not gate sending. Unreadable
+snapshots stay errors. The shared room retries with capped backoff while borrowed,
+and the notice offers retry or an explicit one-send `[]` without changing defaults.
+Successful one-send opt-out keeps a renderer-local recovery entry scoped to runtime
+and session, so a promoted composer ignores that turn's `[]` and resumes its project
+defaults once readable. The common new-turn sender gates implicit selections while defaults are unread,
+reports loading/read failure with recovery actions, and consumes recovery after
+acceptance for both shortcuts and the composer. Every acceptance invalidates older
+recovery toast actions; each opt-out action can run only once, including before
+its send settles. Explicit ids, including `[]`,
+bypass default resolution. Explicit menu `[]` remains a normal durable selection. No extra history field, schema version or
+daemon capability is introduced. Recovery does not cross renderer reload, runtime
+replacement or devices; those readers retain the historical `[]` behavior.
+Existing conversations remain usable. See the
+[availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-mcp-defaults-send-gate.md).
+
 ## Session ACP catalogs
 
 `use-session-acp-selector-context.ts` owns the Provider subscription for persisted
 and draft composers. It resolves the exact bound id through the shared Provider
-atom and passes its current runtime overrides to both models and slash commands.
-Missing or mismatched Providers expose no catalog; extension changes invalidate
-old capabilities until a matching probe arrives. A matching extension catalog
-must not be read as though no extensions were selected.
+atom and passes its current runtime overrides to models and the initial command
+preview. Missing or mismatched Providers expose no Provider catalog; extension
+changes invalidate old capabilities until a matching probe arrives.
+
+Before an Agent starts, `use-available-commands.ts` displays the Provider probe's
+commands. Once the Session reports `acpRuntimeConfig.availableCommands`, its own
+list wins, including an empty list. Provider refreshes cannot replace that list.
+Commands remain scoped to the same ACP runtime across turns; a replacement runtime
+reports its own list. See the [command ownership decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-command-catalogs.md).
+
+## Avatar sources
+
+`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
+filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
+decode that local blob for a return visit. Only avatars used by this hook are
+decoded; startup restoration does not decode the entire persistent cache. The
+cache entry retains the off-DOM image for the same lifetime as its blob URL.
+Source changes select the current URL synchronously, including delayed profile
+arrival and image removal, while background callbacks remain tied to their source.
+First paint and cache reads never await decoding. Fully cold images and missing
+profile data can still show a fallback. Evidence and limits:
+[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
 
 ## Cloud query recovery
 
@@ -49,6 +109,14 @@ attempts; 30 seconds of continuously observed success resets the budget. Skipped
 unmounted queries stop retries, and session/query identity fences callbacks and results.
 Public queries, mutations/actions and local-only clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
+
+Authentication recovery status is presented separately from query retries:
+`AuthenticatedConvexProvider` owns its budget and actions; `AuthRecoveryEntryProvider`
+places a nonmodal icon beside the existing sidebar workspace control through
+`AuthRecoveryEntrySlot`. No status row is added; composer and footer geometry stay
+unchanged. Details open on request and leave drafts and page focus intact. See the
+[UI decision](../../../../.agents/notes/implemented/feature/2026-10-25-nonblocking-auth-recovery.md)
+for placement and verification limits.
 
 ## Session lifecycle
 
@@ -250,3 +318,25 @@ redirects, private repositories and failed probes retain the recoverable error.
 Public details do not hydrate or write authenticated caches; review caches and
 in-flight detail reads use a separate public key. Public CI polling runs every
 five minutes without the fast mergeability loop; manual refresh remains available.
+
+Every detail slice read bypasses the browser HTTP cache, because GitHub's
+`max-age=60` would otherwise satisfy it with a stale response recorded as fresh.
+These details feed only the PR tab and the CI run list. PR summaries come from session
+metadata ([read model](../../../../.agents/notes/implemented/architecture/2026-11-02-session-pr-read-model.md)).
+Merge and ready-for-review resolve `true` only when they landed; then
+`use-awaited-pr-status.ts` keeps the action pending until that metadata status agrees,
+for at most 15 seconds.
+
+## Schedule Registry recovery
+
+`useScheduleRegistrySync` owns one subscription in the workspace shell. Its local
+snapshot stays visible if opening or first sync fails; an empty cold scan is not
+shown as an authoritative empty list until the selected transport first syncs.
+Failures include a stage and sanitized error in the client log. Three automatic
+retries wait 1, 3 and 10 seconds; browser `online` and the list's Retry action can
+also restart acquisition. A remote failure closes only the room: the readable
+local document and its change subscription stay live, including after retries
+are exhausted. Local changes preserve the warning and do not mark a retry active.
+Only successful first sync clears the sync warning. An initial local scan failure
+releases the unusable observer so the next attempt can reopen it. Workspace changes
+or unmount release both subscriptions and retire pending results.

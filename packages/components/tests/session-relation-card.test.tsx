@@ -15,6 +15,7 @@ import {
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
+import { initI18n } from '../src/i18n';
 
 // This suite exercises relation rendering and navigation; collaboration controls
 // and their workspace-backed actions have their own behavioral suites.
@@ -65,7 +66,8 @@ describe('Session relation cards', () => {
   let root: Root;
   let container: HTMLDivElement;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -484,7 +486,7 @@ describe('Session relation cards', () => {
     );
   });
 
-  it('retains an empty completion summary beside creation records', async () => {
+  it('hides an empty completion summary while retaining creation records', async () => {
     const completion = completionMessage.items[0]!;
     if (completion.type !== 'operation_completion') throw new Error('fixture');
     await act(async () =>
@@ -509,7 +511,7 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(1);
-    expect(container.textContent).toContain('orchestration.operationCompleted');
+    expect(container.textContent).not.toContain('orchestration.operationCompleted');
   });
 
   it('does not duplicate target cards on completion when progress was published', async () => {
@@ -527,8 +529,153 @@ describe('Session relation cards', () => {
       )
     );
     expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
-    expect(container.textContent).not.toBe('');
+    expect(container.textContent).toBe('');
   });
+
+  it.each(['prepared', 'submitted', 'settled', 'not_submitted'] as const)(
+    'removes a contentless %s batch from the rendered stream',
+    async (deliveryStatus) => {
+      const completion = completionMessage.items[0];
+      if (completion.type !== 'operation_completion') throw new Error('fixture');
+      const message: SessionHistoryParsed = {
+        ...completionMessage,
+        items: [
+          {
+            type: 'operation_completion_batch',
+            batchId: 'batch',
+            memberCount: 1,
+            deliveryStatus,
+            members: [{ ...completion, progressMessageId: 'progress' }],
+          },
+        ],
+      };
+      await act(async () =>
+        root.render(<MessageRowView message={message} sessionId={openerSessionId} />)
+      );
+      expect(container.textContent).toBe('');
+      expect(
+        buildChatVirtualRows({
+          items: [{ type: 'message', message, sessionId: openerSessionId, turnIndex: 0 }],
+          lastAssistantMessageId: null,
+          expansionVersion: 0,
+        })
+      ).toEqual([]);
+    }
+  );
+
+  it('retains delivery uncertainty even when every preview member is hidden', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                type: 'operation_completion_batch',
+                batchId: 'uncertain-batch',
+                memberCount: 1,
+                deliveryStatus: 'unknown',
+                members: [{ ...completion, progressMessageId: 'progress' }],
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('model delivery is uncertain');
+    expect(container.textContent).not.toContain('orchestration.operationCompleted');
+  });
+
+  it('retains targetless failure details alongside published creation progress', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          sessionId={openerSessionId}
+          message={{
+            ...completionMessage,
+            items: [
+              {
+                ...completion,
+                progressMessageId: 'progress',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      {
+                        status: 'failed',
+                        label: 'Unavailable target',
+                        error: {
+                          code: 'TARGET_FAILED',
+                          message: 'Target unavailable',
+                          retryable: false,
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Target unavailable');
+    expect(container.textContent).toContain('Operation failed');
+    expect(container.textContent).not.toContain('Operation completed');
+  });
+
+  it.each([false, true])(
+    'counts successful targets even when progress hides their cards (%s)',
+    async (withProgress) => {
+      const completion = completionMessage.items[0];
+      if (completion.type !== 'operation_completion') throw new Error('fixture');
+      await act(async () =>
+        root.render(
+          <MessageRowView
+            sessionId={openerSessionId}
+            message={{
+              ...completionMessage,
+              items: [
+                {
+                  ...completion,
+                  ...(withProgress ? { progressMessageId: 'progress' } : {}),
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+                          assistantTurnId: 'assistant-turn',
+                        },
+                        {
+                          status: 'failed',
+                          label: 'Unavailable',
+                          error: {
+                            code: 'INVALID_ITEM',
+                            message: 'Synthetic failure',
+                            retryable: false,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }}
+          />
+        )
+      );
+      expect(container.textContent).toContain('1 succeeded · 1 failed · 0 cancelled');
+      expect(container.textContent).toContain('Synthetic failure');
+      expect(container.textContent).not.toContain('Operation completed');
+    }
+  );
 
   it('keeps a long reply to its opening line and shows all of it in a dialog', async () => {
     const opening =

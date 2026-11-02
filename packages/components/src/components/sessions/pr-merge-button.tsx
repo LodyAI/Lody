@@ -84,7 +84,7 @@ export function PrMergeButton({
     <div
       className={cn(
         'flex shrink-0 items-stretch overflow-hidden rounded-md',
-        compact && 'h-6 bg-status-success/[0.08]'
+        compact && 'h-5 bg-status-success/[0.08]'
       )}
       data-pr-merge-control=""
     >

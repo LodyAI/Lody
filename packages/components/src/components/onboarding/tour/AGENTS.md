@@ -7,3 +7,5 @@ tour, and about the illustrated intro, live in
 
 - `TourApp` reuses production components against fixture state, so it must remain inside `TourCloudBoundary`. The boundary owns fixture identity, workspace, authentication, and cloud operations; no tour child may observe or call the outer app's cloud adapter.
 - The tour's runtime is a stand-in on BOTH planes: `TourCloudBoundary` for cloud operations and `createTourRepo` for `runtime.repo`. The reused components read as well as write — the composer opens the workspace catalog and machine Flock documents — so every tour document must open, read empty, and report its first remote sync as done, and writes on either plane must reject rather than silently succeed. Supply the missing plane; do not fork a repo-free copy of a product component to avoid it.
+
+- Runtime subscriptions used by the reused product components must deliver a fixture snapshot without opening live transports. Prompt suggestions start at `null`.

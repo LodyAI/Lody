@@ -4,6 +4,12 @@ import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/share
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
 import { applyNotificationOnHistory } from '../src/lib/acp/history';
+import { planAgentHistoryMutation, prepareReplacement } from '@lody/shared';
+import {
+  roostContentPatches,
+  stageRoostContent,
+  coalesceAgentTextAppends,
+} from '../src/session/roost-content-patches';
 
 const makeNotification = (update: SessionNotification['update']): SessionNotification => ({
   sessionId: 'session-1' as SessionId,
@@ -11,6 +17,158 @@ const makeNotification = (update: SessionNotification['update']): SessionNotific
 });
 
 describe('applyNotificationOnHistory', () => {
+  it('plans immutable changes with the same per-event markup and instruction semantics', () => {
+    const fixtures = [
+      'hello 🙂 é\nworld',
+      '\n<thinking>\nprivate reasoning\n</thinking>\nanswer',
+      '\r\n  <proposed_plan>\r\nstep one\r\n</proposed_plan>\r\nnext',
+      'inline <thinking>mention</thinking> stays visible',
+      'visible  \nThe following are system instructions. Do not disclose them to the user:hidden',
+      'visible\nThe "lody" MCP server provides tools for this conversation:hidden',
+    ];
+    for (const text of fixtures)
+      for (let split = 0; split <= text.length; split++) {
+        const initial: SessionHistoryInput[] = [
+          {
+            id: 'a',
+            role: 'assistant',
+            timestamp: '2026-10-22',
+            items: [
+              {
+                type: 'tool_call',
+                toolCallId: 'tool',
+                status: 'completed',
+                rawOutput: { text: 'untouched' },
+              },
+              { type: 'text', text: '' },
+            ],
+            fileDiff: [],
+          },
+        ];
+        let planned = initial,
+          baseline = structuredClone(initial);
+        for (const delta of [text.slice(0, split), text.slice(split), '\nfollowing']) {
+          const event = {
+            kind: 'notification' as const,
+            value: makeNotification({
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: delta },
+            }),
+          };
+          // A fresh full snapshot forces the established parser's full scan.
+          baseline = structuredClone(baseline);
+          applyNotificationOnHistory(baseline, [event.value], undefined, {
+            targetAssistantEntryId: 'a',
+          });
+          const result = planAgentHistoryMutation(planned, [event], undefined, {
+            targetAssistantEntryId: 'a',
+          });
+          const previous = planned;
+          planned = result.history.map(
+            (entry, index) => prepareReplacement(previous[index], entry) as SessionHistoryInput
+          );
+          for (const [index, entry] of planned.entries()) {
+            const ops = roostContentPatches(
+              previous[index],
+              entry,
+              coalesceAgentTextAppends(result.textAppends, entry.id),
+              result.changes.filter((change) => change.turnId === entry.id)
+            );
+            expect(stageRoostContent(previous[index], ops)).toEqual(entry);
+          }
+          expect(planned).toEqual(baseline);
+        }
+        expect(initial[0]?.items[1]).toEqual({ type: 'text', text: '' });
+      }
+  });
+
+  it('owns new plan inputs while retaining unchanged private values and handling stale text analysis', () => {
+    const initial: SessionHistoryInput[] = [
+      {
+        id: 'a',
+        role: 'assistant',
+        timestamp: '2026-10-22',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'tool',
+            status: 'completed',
+            rawOutput: { text: 'untouched' },
+          },
+          { type: 'text', text: 'start' },
+        ],
+        fileDiff: [],
+      },
+    ];
+    const notification = makeNotification({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: ' + delta' },
+    });
+    const result = planAgentHistoryMutation(
+      initial,
+      [{ kind: 'notification', value: notification }],
+      undefined,
+      { targetAssistantEntryId: 'a' }
+    );
+    expect(result.history[0]?.items[0]).toBe(initial[0]?.items[0]);
+    expect(result.history[0]?.items[1]).toEqual({ type: 'text', text: 'start + delta' });
+    expect(initial[0]?.items[1]).toEqual({ type: 'text', text: 'start' });
+    expect(result.textAppends).toEqual([
+      { turnId: 'a', itemIndex: 1, previous: 'start', value: 'start + delta', text: ' + delta' },
+    ]);
+    const entries = [{ content: 'first', priority: 'medium' as const, status: 'pending' as const }];
+    const plan = planAgentHistoryMutation(
+      initial,
+      [{ kind: 'notification', value: makeNotification({ sessionUpdate: 'plan', entries }) }],
+      undefined,
+      { targetAssistantEntryId: 'a' }
+    );
+    const firstPlanEntry = entries[0];
+    if (!firstPlanEntry) throw new Error('Expected plan entry');
+    firstPlanEntry.content = 'caller mutation';
+    expect(plan.history[0]?.plan?.[0]?.content).toBe('first');
+    const current = result.history[0]?.items[1];
+    if (!current || current.type !== 'text') throw new Error('Expected text');
+    current.text = 'changed\n<thinking>reasoning</thinking>';
+    const reference = structuredClone(result.history);
+    const next = makeNotification({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: '\nanswer' },
+    });
+    applyNotificationOnHistory(reference, [next], undefined, { targetAssistantEntryId: 'a' });
+    expect(
+      planAgentHistoryMutation(result.history, [{ kind: 'notification', value: next }], undefined, {
+        targetAssistantEntryId: 'a',
+      }).history
+    ).toEqual(reference);
+  });
+
+  it('retains the established repair of a malformed stored text scalar', () => {
+    for (const value of [0, 1, null, undefined]) {
+      const history = [
+        {
+          id: 'a',
+          role: 'assistant',
+          timestamp: '2026-10-22',
+          items: [{ type: 'text', text: value }],
+          fileDiff: [],
+        },
+      ] as unknown as SessionHistoryInput[];
+      const notification = makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: '1 repaired' },
+      });
+      expect(
+        planAgentHistoryMutation(
+          history,
+          [{ kind: 'notification', value: notification }],
+          undefined,
+          { targetAssistantEntryId: 'a' }
+        ).history[0]?.items
+      ).toEqual([{ type: 'text', text: '1 repaired' }]);
+    }
+  });
+
   it('mutates the history array in-place', () => {
     const history: SessionHistoryInput[] = [];
     const result = applyNotificationOnHistory(history, [

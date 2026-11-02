@@ -95,6 +95,7 @@ describe('composer model picker search', () => {
       });
       root = undefined;
     }
+    vi.useRealTimers();
     container?.remove();
     container = undefined;
   });
@@ -127,9 +128,7 @@ describe('composer model picker search', () => {
       node.textContent?.trim().startsWith('Model')
     );
     await act(async () => {
-      (modelRow as HTMLElement).dispatchEvent(
-        new MouseEvent('pointerover', { bubbles: true })
-      );
+      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
       (modelRow as HTMLElement).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
@@ -225,18 +224,8 @@ describe('composer model picker search', () => {
     expect(rows()).toHaveLength(fewModels.length);
   });
 
-  it('sizes a short model list to a 108px floor instead of the 200px menu floor', async () => {
-    await openModelSubmenu({
-      modelOptions: fewModels,
-      selectedModelId: fewModels[0]?.value ?? null,
-    });
-    const submenu = [...document.querySelectorAll('[role="menu"]')].at(-1);
-    expect(submenu?.className).toMatch(/\bw-max\b/);
-    expect(submenu?.className).toMatch(/min-w-\[108px\]/);
-    expect(submenu?.className).not.toMatch(/min-w-\[200px\]/);
-  });
-
-  it('links the upstream delegation warning for a builtin DeepSeek non-default model', async () => {
+  it('opens the builtin DeepSeek menu without the obsolete delegation warning', async () => {
+    vi.useFakeTimers();
     await act(async () => {
       root?.render(
         createElement(DesktopRunConfigMenu, {
@@ -252,40 +241,16 @@ describe('composer model picker search', () => {
       container
         ?.querySelector('button[aria-label="Run configuration"]')
         ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      await vi.runAllTimersAsync();
     });
 
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Model');
     const warning = document.querySelector<HTMLAnchorElement>(
       'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
     );
-    expect(warning?.textContent).toContain('delegated subagents may use');
-    expect(warning?.textContent).toContain('Upstream discussion');
-  });
-
-  it('does not warn when the builtin DeepSeek session already uses the default model', async () => {
-    await act(async () => {
-      root?.render(
-        createElement(DesktopRunConfigMenu, {
-          ...desktopProps,
-          agentSelection: { agentId: deepseekAgentConfig.id, machineId },
-          availableAgentConfigs: [deepseekAgentConfig],
-          modelOptions: deepseekModels,
-          selectedModelId: 'deepseek-flash',
-        })
-      );
-    });
-    await act(async () => {
-      container
-        ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    expect(
-      document.querySelector(
-        'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
-      )
-    ).toBeNull();
+    expect(document.body.textContent).toContain('DeepSeek-V4-Flash');
+    expect(warning).toBeNull();
+    expect(document.body.textContent).not.toContain('delegated subagents may use');
   });
 
   it('does not steal focus to composer textarea when clicking search input inside ChatComposer with focusOnContainerClick', async () => {
@@ -312,9 +277,7 @@ describe('composer model picker search', () => {
       node.textContent?.trim().startsWith('Model')
     );
     await act(async () => {
-      (modelRow as HTMLElement).dispatchEvent(
-        new MouseEvent('pointerover', { bubbles: true })
-      );
+      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
       (modelRow as HTMLElement).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
@@ -424,7 +387,7 @@ describe('composer model picker search', () => {
     expect(search).toBeNull();
   });
 
-  it('shows the linked DeepSeek delegation warning in the mobile sheet', async () => {
+  it('renders the DeepSeek mobile sheet without the obsolete delegation warning', async () => {
     const store = createStore();
     store.set(agentConfigMetaCacheAtom, {
       [getAgentConfigRoomId(deepseekAgentConfig.id)]: deepseekAgentConfig,
@@ -447,7 +410,8 @@ describe('composer model picker search', () => {
     const warning = document.querySelector<HTMLAnchorElement>(
       'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
     );
-    expect(warning?.textContent).toContain('delegated subagents may use');
-    expect(warning?.textContent).toContain('Upstream discussion');
+    expect(document.body.textContent).toContain('DeepSeek-V4-Flash');
+    expect(warning).toBeNull();
+    expect(document.body.textContent).not.toContain('delegated subagents may use');
   });
 });

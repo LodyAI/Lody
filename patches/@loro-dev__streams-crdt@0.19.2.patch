@@ -1,0 +1,352 @@
+diff --git a/dist/ephemeral-effect-DVM7kO9I.d.ts b/dist/ephemeral-effect-DVM7kO9I.d.ts
+index db300ce07001c51440db9663e6f2a74515eb6079..b9a2e779e74445275a3d36016808fe36aa6a2881 100644
+--- a/dist/ephemeral-effect-DVM7kO9I.d.ts
++++ b/dist/ephemeral-effect-DVM7kO9I.d.ts
+@@ -502,6 +502,8 @@ interface SnapshotDiagnosticEvent {
+   readonly error?: StreamErrorContext | TransportErrorContext;
+ }
+ interface SnapshotUploadOptions {
++  /** Protected-only recovery notification; errors are ignored. Hosts can relay a fixed hint for read-only devices and display pending state. */
++  readonly onSnapshotRecovery?: (streamUrl: string, pending: boolean) => void;
+   /** Observation only; callback failures never affect synchronization. */
+   readonly onDiagnostic?: (event: SnapshotDiagnosticEvent) => void;
+   /** Master switch. Defaults to `true` when `snapshotUpload` is provided. */
+diff --git a/dist/stream-id-CkYX5Gw_.js b/dist/stream-id-CkYX5Gw_.js
+index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9c1e21b12 100644
+--- a/dist/stream-id-CkYX5Gw_.js
++++ b/dist/stream-id-CkYX5Gw_.js
+@@ -1,6 +1,105 @@
+ import { $ as parseRetryAfterMs, A as normalizeSnapshotUploadConfig, C as isReadNoProgress, D as mergeAbortSignals, E as jsonObjectEquals, F as toTransportError, H as normalizePayloadProtection, J as encodeItems, K as BINARY_CONTENT_TYPE, M as parseSseControlData$1, O as normalizeAuthProvider, P as sleep, Q as StreamRequestRouter, S as isPayloadTooLargeError, T as isStreamNotFoundError, X as MIN_SUCCESSFUL_SSE_DURATION_MS, Y as DEFAULT_RECONNECT_CONFIG, Z as computeRetryDelay, _ as classifyFetchError, at as recordErrorContext, b as decodeSseItemPayloads, d as makeEphemeralStream, et as Deque, f as HttpError, g as TimeoutError, h as ProtocolError, it as originalThrown, j as parseSnapshotByteOffset, k as normalizeSnapshotCodec, l as ephemeralAuthLegacy, m as LocalAppendFailedError, n as CrdtApplyIncompleteError, nt as atSyncErrorBoundary, p as InitialSyncTimeoutError, q as decodeItems, r as TransportCursorManager, rt as errorContext, s as EphemeralFailure, tt as atErrorBoundary, v as createProducerId, w as isSseUnsupportedErrorText$1, x as isAuthOrProtocolError, y as decodeMultipartPartItems } from "./upload-capability-DwA4z9F1.js";
+ import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
+ import { StreamsClient, createDiagnosticId, safeRequestId, thrownToStreamError } from "@loro-dev/streams-client";
++// Failed protected snapshot decoding is identified before any CRDT import or cursor save.
++const rejectedProtectedSnapshots = new WeakSet();
++// Hints only: this short-lived stream carries no document bytes or authority.
++const snapshotRepairPendingErrors = new WeakSet();
++class SnapshotRepairChannel {
++  constructor(owner, options) {
++    this.owner = owner;
++    this.controller = new AbortController();
++    this.work = new Set();
++    this.waiters = new Set();
++    this.pending = false;
++    this.closed = false;
++    this.lastRequested = -Infinity;
++    this.lastPublished = -Infinity;
++    this.client = new StreamsClient({
++      url: owner.streamUrl + ":snapshot-repair",
++      auth: options.authProvider,
++      fetch: (url, init) => options.fetchImpl(url, { ...init, signal: mergeAbortSignals(init?.signal, this.controller.signal) }),
++      retry: { maxAttempts: 0 },
++      timeout: { connectTimeoutMs: 5000, authTimeoutMs: 5000, uploadTimeoutMs: 5000 }
++    });
++  }
++  retain(task) {
++    this.work.add(task);
++    void task.then(() => this.work.delete(task), () => this.work.delete(task));
++    return task;
++  }
++  start() {
++    if (this.closed || this.timer != null || this.ticking) return;
++    this.timer = setTimeout(() => {
++      this.timer = undefined;
++      this.ticking = true;
++      void this.retain(this.tick()).catch(() => {}).finally(() => { this.ticking = false; this.start(); });
++    }, 5000);
++  }
++  request() {
++    this.start();
++    if (this.closed || this.requestFlight || Date.now() - this.lastRequested < 30000) return;
++    const task = (async () => {
++      const created = await this.client.create({ ttlSeconds: 120, contentType: "application/octet-stream" });
++      if (!created.ok || this.closed) return;
++      const sent = await this.client.append({ part: { contentType: "application/octet-stream", body: new Uint8Array([1]) } });
++      if (sent.ok) this.lastRequested = Date.now();
++    })();
++    this.requestFlight = task;
++    void this.retain(task).catch(() => {}).finally(() => { if (this.requestFlight === task) this.requestFlight = undefined; });
++  }
++  async tick() {
++    if (this.closed) return;
++    const state = this.owner.joinState;
++    if (this.pending) {
++      this.request();
++      if (state?.initialSyncFailed && !state.closed) {
++        this.owner.rejoin();
++        try {
++          await state.started;
++          this.pending = false;
++          for (const waiter of this.waiters) waiter.resolve();
++          this.waiters.clear();
++        } catch { /* Keep the original local state and retry this room. */ }
++      }
++    }
++    if (!state || state.closed || this.pending || Date.now() - this.lastPublished < 30000) return;
++    const head = await this.client.head();
++    if (!head.ok) { if (head.result.code === "not_found") this.handled = undefined; return; }
++    const offset = head.result.nextOffset;
++    if (offset === "-1" || /^0+$/.test(offset)) return;
++    const marker = `${head.result.expiresAt ?? ""}/${offset}`;
++    if (marker === this.handled || this.closed) return;
++    if (await this.owner.snapshotManager.repair(state)) { this.handled = marker; this.lastPublished = Date.now(); }
++  }
++  wait() {
++    if (this.closed) return Promise.reject(new Error("subscription closed"));
++    if (!this.pending) return Promise.resolve();
++    return new Promise((resolve, reject) => this.waiters.add({ resolve, reject }));
++  }
++  async reopen() {
++    if (!this.closed) return;
++    await this.closing;
++    this.controller = new AbortController();
++    this.closed = false;
++    this.pending = false;
++    this.timer = undefined;
++    this.handled = undefined;
++    this.lastRequested = -Infinity;
++    this.lastPublished = -Infinity;
++  }
++  close() {
++    if (this.closed) return this.closing;
++    this.closed = true;
++    clearTimeout(this.timer);
++    this.controller.abort();
++    for (const waiter of this.waiters) waiter.reject(new Error("subscription closed"));
++    this.waiters.clear();
++    this.closing = Promise.allSettled([...this.work]);
++    return this.closing;
++  }
++}
++
+ //#region src/ephemeral-runtime.ts
+ var LegacyRoom = class extends Context.Service()("@loro-dev/streams-crdt/LegacyRoom") {};
+ /** Complete failures at the Promise boundary. This object is not safe diagnostic data. */
+@@ -839,8 +938,14 @@ var TransportSnapshotManager = class {
+ 			}
+ 		});
+ 	}
+-	async maybeUpload(state) {
+-		const config = this.getRunnableConfig(state);
++	async repair(state) {
++		if (this.uploadInFlight || state.status !== "joined" || state.awaitingInitialTail || state.initialSyncFailed) return false;
++		this.uploadInFlight = true;
++		try { return (await this.maybeUpload(state, true)) === true; }
++		finally { this.uploadInFlight = false; }
++	}
++	async maybeUpload(state, repair = false) {
++		const config = this.getRunnableConfig(state, repair);
+ 		if (config == null) return;
+ 		const snapshotId = createDiagnosticId();
+ 		const workflowStartedAt = performance.now();
+@@ -906,17 +1011,17 @@ var TransportSnapshotManager = class {
+ 				});
+ 				return;
+ 			}
+-			if (this.getRunnableConfig(state) == null) return;
++			if (this.getRunnableConfig(state, repair) == null) return;
+ 			const snapshotBytes = parseSnapshotByteOffset(await observe("head", () => this.readSnapshotOffsetValue(requestDiagnostics("head"))));
+ 			if (snapshotBytes == null) return;
+ 			await this.adapter.flushLocalExports?.();
+ 			const capture = await this.enqueueExclusive(() => {
+-				if (this.getRunnableConfig(state) == null || !this.isCursorComplete(state.cursor) || this.hasPendingLocal(state)) return void 0;
++				if (this.getRunnableConfig(state, repair) == null || !this.isCursorComplete(state.cursor) || this.hasPendingLocal(state)) return void 0;
+ 				const currentVersion = this.adapter.getCurrentVersion?.();
+ 				if (currentVersion != null && this.adapter.mergeVersions != null && !jsonObjectEquals(this.adapter.mergeVersions(state.cursor.serverLowerBoundVersion, currentVersion), state.cursor.serverLowerBoundVersion)) return void 0;
+ 				const offset = state.cursor.nextOffset;
+ 				const tailBytes = parseSnapshotByteOffset(offset);
+-				if (tailBytes == null || tailBytes <= snapshotBytes || tailBytes - snapshotBytes < config.minBytesSinceRemoteSnapshot) return void 0;
++				if (tailBytes == null || (!repair && (tailBytes <= snapshotBytes || tailBytes - snapshotBytes < config.minBytesSinceRemoteSnapshot))) return void 0;
+ 				snapshotOffset = offset;
+ 				const startedAt = performance.now();
+ 				emit({
+@@ -967,7 +1072,7 @@ var TransportSnapshotManager = class {
+ 				snapshotByteLength = bytes.byteLength;
+ 				return bytes;
+ 			});
+-			if (this.getRunnableConfig(state) == null) {
++			if (this.getRunnableConfig(state, repair) == null) {
+ 				emit({
+ 					stage: "put",
+ 					outcome: "skipped",
+@@ -976,6 +1081,7 @@ var TransportSnapshotManager = class {
+ 				return;
+ 			}
+ 			await observe("put", () => this.putSnapshotAt(capture.offset, encoded, requestDiagnostics("put")));
++			return true;
+ 		} catch (error) {
+ 			this.logError("snapshot upload failed", void 0, {
+ 				context: toTransportError(error, "snapshot").context,
+@@ -984,10 +1090,10 @@ var TransportSnapshotManager = class {
+ 			});
+ 		}
+ 	}
+-	getRunnableConfig(state) {
++	getRunnableConfig(state, repair = false) {
+ 		const config = this.config;
+ 		if (config == null || state.closed || !this.isCurrentState(state)) return;
+-		if (state.snapshot.observedForeignWriter || state.status === "reconnecting" || state.status === "disconnected" || state.status === "error") return;
++		if ((!repair && state.snapshot.observedForeignWriter) || state.status === "reconnecting" || state.status === "disconnected" || state.status === "error") return;
+ 		return config;
+ 	}
+ };
+@@ -1142,6 +1248,8 @@ var StreamsCrdt = class StreamsCrdt {
+ 		const payloadProtection = normalizePayloadProtection(options.e2ee, "e2ee");
+ 		if (payloadProtection?.writePolicy === "plaintext" && options.snapshotUpload != null && options.snapshotUpload.enabled !== false) throw new Error("snapshotUpload is not supported when e2ee.writePolicy is plaintext");
+ 		const snapshotUploadConfig = normalizeSnapshotUploadConfig(options.snapshotUpload);
++		this.protectedBootstrap = payloadProtection != null;
++		this.onSnapshotRecovery = payloadProtection == null ? undefined : options.snapshotUpload?.onSnapshotRecovery;
+ 		this.decodeSnapshot = this.composeSnapshotDecoder(payloadProtection, snapshotCodec?.decompress);
+ 		this.encodeSnapshot = this.composeSnapshotEncoder(payloadProtection, snapshotCodec?.compress);
+ 		this.decodeUpdateItems = payloadProtection == null ? void 0 : (items) => payloadProtection.decodeUpdateItems(items);
+@@ -1172,17 +1280,28 @@ var StreamsCrdt = class StreamsCrdt {
+ 			hasPendingLocal: (state) => state.pendingLocal.length > 0 || this.frozenLocalAppend != null,
+ 			isCursorComplete: (cursor) => this.cursorManager.isCursorComplete(cursor)
+ 		});
++		this.snapshotRepair = payloadProtection != null && snapshotUploadConfig != null ? new SnapshotRepairChannel(this, { authProvider, fetchImpl }) : undefined;
+ 		this.writeOnlyCursor = this.createInitialCursor();
+ 		this.unsubscribeWriteOnlyLocal = this.adapter.subscribeLocalUpdates((batch) => {
+ 			if (this.writeOnlyDisabledReason != null) return;
+ 			this.pendingWriteOnly.pushBack(batch);
+ 		});
+ 	}
++	notifySnapshotRecovery(pending) {
++		try { this.onSnapshotRecovery?.(this.streamUrl, pending); } catch { /* Notification never changes sync. */ }
++	}
+ 	composeSnapshotDecoder(payloadProtection, decompressSnapshot) {
+ 		if (payloadProtection == null && decompressSnapshot == null) return;
+ 		return async (snapshot, continuationOffset) => {
+-			const clearSnapshot = payloadProtection == null ? snapshot : await payloadProtection.decodeSnapshot(snapshot, continuationOffset);
+-			return decompressSnapshot == null ? clearSnapshot : await decompressSnapshot(clearSnapshot);
++			try {
++				const clearSnapshot = payloadProtection == null ? snapshot : await payloadProtection.decodeSnapshot(snapshot, continuationOffset);
++				return decompressSnapshot == null ? clearSnapshot : await decompressSnapshot(clearSnapshot);
++			} catch (cause) {
++				if (payloadProtection == null) throw cause;
++				const error = new Error("Encrypted snapshot could not be opened", { cause });
++				rejectedProtectedSnapshots.add(error);
++				throw error;
++			}
+ 		};
+ 	}
+ 	composeSnapshotEncoder(payloadProtection, compressSnapshot) {
+@@ -1199,6 +1318,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 		this.disableWriteOnlyMode("transport closed");
+ 		const state = this.joinState;
+ 		if (state != null) await this.disposeJoinState(state);
++		await this.snapshotRepair?.close();
+ 	}
+ 	/**
+ 	* Resets the retry counter and immediately attempts to reconnect.
+@@ -1228,7 +1348,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 			state.started.catch((error) => {
+ 				if (state.closed) return;
+ 				const transportError = toTransportError(error, "live");
+-				if (transportError.retryable) {
++				if (transportError.retryable || snapshotRepairPendingErrors.has(error)) {
+ 					state.initialSyncFailed = true;
+ 					state.lastError = transportError;
+ 				} else this.disposeJoinState(state);
+@@ -1488,6 +1608,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 				};
+ 			}
+ 		}
++		if (this.snapshotRepair?.closed) {
++			await this.snapshotRepair.reopen();
++			return await this.join(params);
++		}
+ 		const state = createJoinState(createInitialRemoteCursor({
+ 			streamUrl: this.streamUrl,
+ 			nextOffset: "-1",
+@@ -1500,6 +1624,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 		if (statusListener != null) state.statusListeners.add(statusListener);
+ 		state.started = this.startJoin(state);
+ 		this.joinState = state;
++		this.snapshotRepair?.start();
+ 		try {
+ 			await state.started;
+ 			return {
+@@ -1508,6 +1633,12 @@ var StreamsCrdt = class StreamsCrdt {
+ 			};
+ 		} catch (error) {
+ 			const transportError = toTransportError(error, "join");
++			if (snapshotRepairPendingErrors.has(error) && !state.closed) {
++				state.initialSyncFailed = true;
++				state.lastError = { ...transportError, retryable: true };
++				this.setReadSubStatus(state, "reconnecting");
++				return { ok: true, value: this.createSubscription(state, params) };
++			}
+ 			if (transportError.retryable && !state.closed) {
+ 				state.initialSyncFailed = true;
+ 				state.lastError = transportError;
+@@ -1570,6 +1701,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 				};
+ 			},
+ 			waitUntilSynced: async () => {
++				if (this.snapshotRepair?.pending) await this.snapshotRepair.wait();
+ 				if (state.initialSyncFailed) {
+ 					const msg = state.lastError?.code ? `initial sync failed: ${state.lastError.code}` : "initial sync failed";
+ 					throw new Error(msg);
+@@ -1604,12 +1736,14 @@ var StreamsCrdt = class StreamsCrdt {
+ 		};
+ 	}
+ 	async disposeJoinState(state) {
++		const repairClosed = this.snapshotRepair?.close();
+ 		await disposeJoinState(state, {
+ 			snapshotManager: this.snapshotManager,
+ 			onDisposed: () => {
+ 				if (this.joinState === state) this.joinState = void 0;
+ 			}
+ 		});
++		await repairClosed;
+ 	}
+ 	async runInitialSyncWithDeadline(operation, task, parentSignal) {
+ 		const startedAtMs = Date.now();
+@@ -1947,7 +2081,39 @@ var StreamsCrdt = class StreamsCrdt {
+ 	async bootstrapState(cursor, options = {}) {
+ 		const cursorManager = options.cursorManager ?? this.cursorManager;
+ 		const result = await atErrorBoundary({ stage: "bootstrap" }, () => this.client.bootstrap(options.signal, options.timeoutMode));
+-		let saved = await cursorManager.applyBootstrapPayload(cursor, result.snapshot, result.updates, result.nextOffset, result.upToDate, result.snapshotOffset);
++		let saved;
++		try {
++			const origin = (offset) => offset === "-1" || typeof offset === "string" && /^0+$/.test(offset);
++			if (this.protectedBootstrap && result.snapshot.byteLength === 0 && (!origin(result.snapshotOffset) || result.updates.length === 0 && !origin(result.nextOffset))) {
++				const missing = new Error("Encrypted bootstrap is missing its snapshot");
++				rejectedProtectedSnapshots.add(missing);
++				throw missing;
++			}
++			saved = await cursorManager.applyBootstrapPayload(cursor, result.snapshot, result.updates, result.nextOffset, result.upToDate, result.snapshotOffset);
++		} catch (error) {
++			if (!rejectedProtectedSnapshots.has(error)) throw error;
++			this.logDebug("ignoring rejected encrypted snapshot; replaying history");
++			this.notifySnapshotRecovery(true);
++			this.snapshotRepair?.request();
++			// Never reuse the bootstrap suffix: rejected snapshot state was not imported.
++			// Read from origin once, with the same protected update decoder and durability barrier.
++			const replayed = await this.catchupOrGone(this.createInitialCursor(), {
++				goneStrategy: "return-gone",
++				cursorManager,
++				signal: options.signal,
++				timeoutMode: options.timeoutMode
++			});
++			if ("kind" in replayed) {
++				const pending = recordErrorContext(new ProtocolError("Requesting another device to upload a fresh encrypted snapshot; retrying automatically", 410), { source: "payload_protection", stage: "bootstrap", originalCode: "gone", status: 410 });
++				if (this.snapshotRepair == null) throw pending;
++				this.snapshotRepair.pending = true;
++				if (this.joinState != null) { snapshotRepairPendingErrors.add(pending); throw pending; }
++				await sleep(5000, mergeAbortSignals(options.signal, this.snapshotRepair.controller.signal));
++				return await this.bootstrapState(cursor, options);
++			}
++			this.notifySnapshotRecovery(false);
++			return replayed;
++		}
+ 		let bootstrapCursor = result.streamCursor;
+ 		if (!result.upToDate) {
+ 			const caughtUp = await this.catchupOrGone(saved, {
+@@ -1960,6 +2126,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 			saved = caughtUp.cursor;
+ 			bootstrapCursor = caughtUp.streamCursor;
+ 		}
++		this.notifySnapshotRecovery(false);
+ 		return {
+ 			cursor: saved,
+ 			streamCursor: bootstrapCursor

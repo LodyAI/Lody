@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import { MailCheck } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
-import { Card } from '@lody/ui/card';
-import lodyLogo from '@/assets/lody-icon.png';
+import { SecondaryPage } from '@/components/pages/secondary-page';
 
 export interface EmailVerifiedPageProps {
   /** The verified email address, when better-auth forwarded it in the callback. */
@@ -17,28 +17,22 @@ export function EmailVerifiedPage({ email, secondsRemaining, onContinue }: Email
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card.Root className="w-full max-w-md">
-        <div className="flex justify-center">
-          <img src={lodyLogo} alt="Lody" className="h-10 w-10 object-contain" draggable={false} />
-        </div>
-        <Card.Header className="text-center">
-          <Card.Title as="h1">{t('emailVerified.title', 'Email verified')}</Card.Title>
-          {email ? <p className="break-all text-sm font-medium text-foreground">{email}</p> : null}
-          <Card.Description>
-            {t('emailVerified.signInPrompt', 'You can now sign in.')}
-          </Card.Description>
-        </Card.Header>
-        <p className="text-center text-sm text-muted-foreground">
-          {t('emailVerified.redirectNotice', {
-            seconds: secondsRemaining,
-            defaultValue: 'Redirecting to sign in in {{seconds}}s…',
-          })}
-        </p>
-        <Button type="button" className="w-full" onClick={onContinue}>
+    <SecondaryPage
+      state="done"
+      from={<MailCheck size={22} strokeWidth={1.6} aria-hidden="true" />}
+      markLabel={t('emailVerified.markLabel', 'Email and Lody')}
+      title={t('emailVerified.title', 'Email verified')}
+      description={t('emailVerified.signInPrompt', 'You can now sign in.')}
+      well={email ? <span>{email}</span> : undefined}
+      actions={
+        <Button type="button" size="large" onClick={onContinue}>
           {t('emailVerified.continueNow', 'Sign in now')}
         </Button>
-      </Card.Root>
-    </div>
+      }
+      note={t('emailVerified.redirectNotice', {
+        seconds: secondsRemaining,
+        defaultValue: 'Redirecting to sign in in {{seconds}}s…',
+      })}
+    />
   );
 }

@@ -662,6 +662,7 @@ Before you use them:
 | `lody agent-config list`                 | List configs in a workspace                  | `lody agent-config list --help`                 |
 | `lody agent-config show`                 | Show one config                              | `lody agent-config show --help`                 |
 | `lody agent-config create`               | Create a new config                          | `lody agent-config create --help`               |
+| `lody agent-config import-magpie` | Import local Magpie providers | `lody agent-config import-magpie --help` |
 | `lody agent-config update`               | Update an existing config                    | `lody agent-config update --help`               |
 | `lody agent-config delete`               | Delete a config                              | `lody agent-config delete --help`               |
 | `lody agent-config refresh-capabilities` | Refresh supported modes, models, and options | `lody agent-config refresh-capabilities --help` |
@@ -711,6 +712,16 @@ Exact flags:
 ```bash
 lody agent-config create --help
 ```
+
+### agent-config import-magpie
+
+Import Magpie providers on the server running the command, for all supported agents or a selected subset:
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+See [Connect Magpie](/docs/magpie) for setup, options, and result states.
 
 ### agent-config update
 

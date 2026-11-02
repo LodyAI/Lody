@@ -12,6 +12,7 @@ import { platformLayer, type PlatformFacadeOptions } from '@/platform/process-op
 import { GitExecutableNotFoundError } from './git-process-error';
 
 export const WORKTREE_GIT_TIMEOUT_MS = 10 * 60 * 1000;
+export const BEST_EFFORT_FETCH_TIMEOUT_MS = 30_000;
 export const CREDENTIAL_HELPER_PROBE_TIMEOUT_MS = 5_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
@@ -35,6 +36,7 @@ export interface WorktreeGitCommand {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly timeout?: number;
 }
 export interface CredentialHelperProbe {
   readonly helperPath: string;
@@ -87,7 +89,7 @@ export const WorktreeGitLive = Layer.effect(
             args: command.args,
             cwd: command.cwd,
             env,
-            timeout: WORKTREE_GIT_TIMEOUT_MS,
+            timeout: command.timeout ?? WORKTREE_GIT_TIMEOUT_MS,
             maxOutputBytes: GIT_MAX_OUTPUT_BYTES,
           }).pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -121,7 +123,7 @@ export const WorktreeGitLive = Layer.effect(
                 return yield* Effect.fail(
                   error instanceof CommandTimedOut
                     ? new WorktreeGitExecutionFailed({
-                        message: `git ${command.args.join(' ')} timed out after ${WORKTREE_GIT_TIMEOUT_MS}ms`,
+                        message: `git ${command.args.join(' ')} timed out after ${command.timeout ?? WORKTREE_GIT_TIMEOUT_MS}ms`,
                         cause: error,
                       })
                     : executionFailed(error)

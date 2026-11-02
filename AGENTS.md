@@ -6,27 +6,33 @@ Map: [README.md](README.md#repository).
 ## Context and documentation
 
 - Read the applicable ancestor/scoped `AGENTS.md` files and task-relevant Specs,
-  active notes, `.agents/docs/`, and module READMEs. Follow the required topic
-  links below when their trigger applies, including changes outside the owner's
-  directory. Archives are history, not current authority.
+  `.agents/docs/`, and module READMEs, then the notes they link for the rationale.
+  Search notes directly before reversing a recorded decision. Follow the required
+  topic links below when their trigger applies, including changes outside the
+  owner's directory. Archives are history, not current authority.
+- A note you rely on that is stale, unlinked, or in the wrong lifecycle is fixed in
+  the same PR ([maintenance on read](.agents/notes/AGENTS.md#maintenance-on-read)).
 - Specs express intent, docs explain implementation, notes record decisions.
   Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
   never change a Spec to justify a bug.
 - Before creating or editing a Spec, read [Spec rules](specs/AGENTS.md), including
   status and approval requirements. Reserve Specs for consequential decisions
   needing human review; prefer an existing Spec. Ordinary fixes need no new Spec.
-- Non-trivial work MUST add/update its [Agent Note](.agents/notes/AGENTS.md#when-to-write)
-  in the same PR; substantial research/design needs a note without a PR too.
-  Only mechanical/local edits without changed decisions are exempt. Link distinct
-  decisions, keep proposals `proposed`, and report deferred notes for read-only work.
+- Add/update an [Agent Note](.agents/notes/AGENTS.md#when-to-write) in the same PR
+  only for durable rationale: alternatives, unenforceable constraints, measurements,
+  formats or ownership. A fix that is merely done belongs in its PR and test.
+  Every new note runs the [supersession check](.agents/notes/AGENTS.md#supersession);
+  keep implemented notes' cited facts current. Report deferred notes for read-only work.
 - Update affected docs/READMEs. Run `pnpm run docs status` at start and
   `pnpm run docs check` at finish; review SHA-protected changes before confirming.
   Checks and translations establish neither correctness nor approval; translation
   may follow later. See [document maintenance](.agents/README.md).
 - Keep PR docs compact: consolidate decisions, evidence and limits; avoid fix/run logs.
   Follow [submission consolidation](.agents/AGENTS.md#documentation-at-submission).
-- Keep binding rules in the nearest `AGENTS.md` (<8 KiB; new scopes need a
-  `CLAUDE.md` symlink). Keep explanations and rationale in their owning docs/notes.
+- Keep binding rules in the nearest `AGENTS.md` as complete sentences (new scopes
+  need a `CLAUDE.md` symlink); over a [word ceiling](.agents/README.md#word-ceilings),
+  relocate a topic or raise the ceiling with a reason, never compress into fragments.
+  Keep explanations and rationale in their owning docs/notes.
 
 ## Effect reference
 
@@ -69,7 +75,7 @@ changes dependencies, native boundaries, consumers or ownership.
   artifact and versioned ACP contract. Shared ACP extension contracts belong in the
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
-- Magpie: require local desktop confirmation, fixed loopback mappings and public token.
+- Magpie: desktop confirmation or explicit local CLI import; loopback mappings and public token.
   Keep gateway metadata outside env and catalogs under Lody data, never user profiles.
   [Contract](specs/magpie-provider-import.md).
 - Pi provider migration requires owner confirmation and the target's `builtinPi`
@@ -84,8 +90,8 @@ changes dependencies, native boundaries, consumers or ownership.
   `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
   contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
   Read it before any PR/Issue work as well.
-- Node.js 22.14-22.x or 23.6+ (Node-API 10+); use the pnpm in `package.json`. See the
-  [runtime-floor decision](.agents/notes/implemented/bug-fix/2026-09-09-node-api-runtime-floor.md).
+- Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), with Node-API 10+; use the pnpm in `package.json`. See the
+  [runtime security decision](.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md).
   `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
   `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
 - Before commit: `pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`;

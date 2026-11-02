@@ -7,6 +7,8 @@ import {
   type WorkspaceId,
   type SessionId,
   type SessionActiveInvocationContextResult,
+  type SessionSteerResponse,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { AuthContext } from './command-runtime';
 import type { LoroDocumentManager } from './loro/doc';
@@ -17,6 +19,16 @@ import type { SessionLiveStatusBatchItem } from '@/commands/session';
 export interface SessionCommandHost {
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readLiveStatus(sessionId: SessionId): Promise<SessionLiveStatusBatchItem>;
+  /** The running turn an Agent chat may steer; undefined unless it runs on this daemon. */
+  readActiveTurnId(sessionId: SessionId): string | undefined;
+  steerSession(input: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    userTurnId: string;
+    userId: string;
+    timestamp: string;
+    inputConfig: SessionTurnInputConfig;
+  }): Promise<SessionSteerResponse>;
   cancelSession(
     sessionId: SessionId,
     turnId?: string
@@ -26,7 +38,7 @@ export interface SessionCommandHost {
     input?: {
       inputId: string;
       userId: string;
-      config: import('@lody/shared').SessionTurnInputConfig;
+      config: SessionTurnInputConfig;
       inputOrigin: 'human' | 'agent';
     }
   ): Promise<void>;
@@ -54,6 +66,17 @@ export const runWithSessionCommandEnvironment = <T>(
 ): T => environments.run(environment, run);
 
 /**
+ * The daemon's current verdict on its own workspace, read from the access state
+ * it already maintains (remote subscription, else the cached bootstrap entry).
+ * `unknown` means the daemon has no verdict, so commands fall back to discovery.
+ */
+export type DaemonWorkspaceAccess =
+  | { status: 'authorized'; workspace: WorkspaceSummary }
+  | { status: 'revoked' }
+  | { status: 'unauthorized' }
+  | { status: 'unknown' };
+
+/**
  * The daemon's own workspace replica, lent to a command the daemon executes.
  * It changes only which replica a command uses; platform behavior is unchanged.
  * The daemon owns its lifecycle, so a borrowing command never cleans it up.
@@ -64,6 +87,17 @@ export interface DaemonWorkspace {
   machineId: MachineId;
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
+  readAccess?(): DaemonWorkspaceAccess;
+  /**
+   * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
+   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
+   * may target only this machine. Rejects when the origin cannot be verified, is
+   * itself derived, has exhausted its derivations or targets another machine.
+   */
+  classifyEncryptedDerivation?(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'>;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

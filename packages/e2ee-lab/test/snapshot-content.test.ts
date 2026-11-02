@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { setEd25519WasmEnabled } from '@lody/e2ee-core/internal';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Bytes } from '@lody/e2ee-core';
 import {
@@ -117,8 +118,9 @@ describe('current content-v0 protected snapshots with the released SDK', () => {
               const tailAfterSuffix = yield* Effect.promise(() => raw.head());
               if (!tailAfterSuffix.ok) throw new Error('missing actual suffix head');
               // Move an authentic old snapshot to a later existing position, or alter
-              // its signed raw offset bytes. Neither failure may persist native state
-              // or advance the exact durable SDK cursor.
+              // its signed raw offset bytes. Native retention has trimmed the
+              // prefix, so fallback must report unavailable recovery material and
+              // preserve native state and the exact durable SDK cursor.
               for (const attack of ['move-context', 'tamper-content-offset'] as const) {
                 let writes = 0,
                   modified = false;
@@ -142,7 +144,15 @@ describe('current content-v0 protected snapshots with the released SDK', () => {
                 const refused = yield* Effect.result(attacked.pull());
                 expect(Result.isFailure(refused) && refused.failure).toMatchObject({
                   _tag: 'LabContentError',
-                  code: 'decrypt_failed',
+                  code: 'protocol_error',
+                  cause: {
+                    status: 410,
+                    context: {
+                      source: 'payload_protection',
+                      stage: 'bootstrap',
+                      originalCode: 'gone',
+                    },
+                  },
                 });
                 expect(modified).toBe(true);
                 expect(writes).toBe(0);
@@ -264,240 +274,246 @@ describe('current content-v0 protected snapshots with the released SDK', () => {
   );
 });
 
-it.each(['publish-epoch', 'revoke-author'] as const)(
-  'rechecks snapshot admission after %s during actual native signature verification',
-  async (transition) => {
-    const f = await fixture(),
-      owner = f.owner,
-      directory = f.dir;
-    let forwarded = false;
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const old = ok(Bytes.epochKey(new Uint8Array(32).fill(61))),
-              next = ok(Bytes.epochKey(new Uint8Array(32).fill(62)));
-            const genesis = yield* signGenesisRecord({
-              userId: ok(Bytes.userId(new Uint8Array(32).fill(63))),
-              membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(64))),
-              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(65))),
-              initialKey: old,
-              signer: owner,
-            });
-            let view = ok(
-              verifyLedger({
-                anchor: genesis.genesis,
-                records: [genesis.record],
-                checkpoint: { head: hashRecordBytes(genesis.record), length: 1 },
-              })
-            );
-            const companion = yield* generateDevice();
-            const consent = yield* prepareDeviceAdmission({
-              genesis: genesis.genesis,
-              membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(64))),
-              encryptionPublicKey: companion.enc,
-              kind: 'personal',
-              signer: companion,
-            });
-            const admission = yield* signLedgerRecord(
-              ok(prepareLedgerCommand(view, owner.publicKey, consent)),
-              owner
-            );
-            view = ok(
-              extendLedger(view, [admission], {
-                head: hashRecordBytes(admission),
-                length: view.length + 1,
-              })
-            );
-            const org = Buffer.from(genesis.genesis.toBytes()).toString('hex');
-            expect(
-              (yield* Effect.promise(() =>
-                fetch(`${f.server.baseUrl}/ds/${org}`, { method: 'PUT' })
-              )).ok
-            ).toBe(true);
-            const raw = new StreamsClient({
-              url: `${f.server.baseUrl}/ds/${org}/loro`,
-              retry: { maxAttempts: 1 },
-            });
-            expect(
-              (yield* Effect.promise(() => raw.create({ contentType: 'application/octet-stream' })))
-                .ok
-            ).toBe(true);
-            const head = yield* Effect.promise(() => raw.head());
-            if (!head.ok) throw new Error('missing real native head');
-            const binding = yield* makeStreamsUpdateBinding({
-              genesis: genesis.genesis,
-              resource: 'document',
-              model: 'loro',
-              writeEpoch: 'current',
-              signer: owner,
-              ledger: () => Effect.succeed(view),
-              readEpochKey: () =>
-                Effect.sync(() => ok(Bytes.epochKey(new Uint8Array(32).fill(61)))),
-            });
-            const context = {
-              protocol: 'loro-streams-crdt-payload-protection',
-              version: 2,
-              kind: 'snapshot',
-              continuationOffset: head.result.nextOffset,
-            } as const;
-            let prefix!: Uint8Array;
-            const sealed = yield* binding.seal({
-              context,
-              plaintext: new Uint8Array(9000).fill(10),
-              additionalData: (header) => {
-                prefix = new Uint8Array(10 + header.length);
-                prefix.set([76, 83, 67, 69, 2, 2, 0, 0, 0, 0]);
-                new DataView(prefix.buffer).setUint16(6, header.length, false);
-                prefix.set(header, 10);
-                return new Uint8Array(
-                  Buffer.concat([
-                    new TextEncoder().encode('loro-streams-crdt-payload-protection/v2\0'),
-                    prefix,
-                  ])
-                );
-              },
-            });
-            const snapshotStore = yield* makeSqliteSnapshotPublication({
-              path: join(directory, 'admission.sqlite'),
-              mode: 'create',
-              genesis: genesis.genesis,
-              resource: 'document',
-              model: 'loro',
-            });
-            const gateway = yield* makeLabContentGateway({
-              genesis: genesis.genesis,
-              resource: 'document',
-              model: 'loro',
-              baseUrl: f.server.baseUrl,
-              ledger: () => Effect.succeed(view),
-              snapshotStore,
-              snapshotBoundary: yield* makeLabRiverrunSnapshotBoundary({
-                baseUrl: f.server.baseUrl,
-                genesis: genesis.genesis,
-                model: 'loro',
-              }),
-              now: () => 0,
-              fetch: async (url, init) => {
-                if (init?.method === 'PUT') forwarded = true;
-                return fetch(url, init);
-              },
-            });
-            const original = new Uint8Array(Buffer.concat([prefix, sealed.sealed]));
-            const entered = yield* Deferred.make<void>(),
-              release = yield* Deferred.make<void>();
-            const native = crypto.subtle.verify.bind(crypto.subtle);
-            let verifications = 0;
-            const spy = vi.spyOn(crypto.subtle, 'verify').mockImplementation(async (...args) => {
-              const valid = await native(...args);
-              // Hold admission's real native verification after it captured the
-              // writer view; historical authentication was the first large call.
-              if (args[3].byteLength > 8192 && ++verifications === 2) {
-                Deferred.doneUnsafe(entered, Effect.void);
-                await Effect.runPromise(Deferred.await(release));
-              }
-              return valid;
-            });
-            yield* Effect.addFinalizer(() => Effect.sync(() => spy.mockRestore()));
-            const pending = yield* Effect.forkChild(
-              Effect.result(
-                gateway.snapshot({
-                  credential: {
-                    account: 'synthetic-owner',
-                    token: '',
-                    issuedAt: 0,
-                    expiresAt: 1,
-                    device: owner.publicKey,
-                    genesis: genesis.genesis,
-                  },
-                  requestGenesis: genesis.genesis,
-                  continuationOffset: context.continuationOffset,
-                  body: original,
+describe('on the Web Crypto fallback (no WebAssembly verifier)', () => {
+  // These tests pause native Web Crypto verification; the WebAssembly verifier is synchronous.
+  beforeAll(() => setEd25519WasmEnabled(false));
+  afterAll(() => setEd25519WasmEnabled(true));
+  it.each(['publish-epoch', 'revoke-author'] as const)(
+    'rechecks snapshot admission after %s during actual native signature verification',
+    async (transition) => {
+      const f = await fixture(),
+        owner = f.owner,
+        directory = f.dir;
+      let forwarded = false;
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const old = ok(Bytes.epochKey(new Uint8Array(32).fill(61))),
+                next = ok(Bytes.epochKey(new Uint8Array(32).fill(62)));
+              const genesis = yield* signGenesisRecord({
+                userId: ok(Bytes.userId(new Uint8Array(32).fill(63))),
+                membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(64))),
+                encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(65))),
+                initialKey: old,
+                signer: owner,
+              });
+              let view = ok(
+                verifyLedger({
+                  anchor: genesis.genesis,
+                  records: [genesis.record],
+                  checkpoint: { head: hashRecordBytes(genesis.record), length: 1 },
                 })
-              )
-            );
-            yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
-            yield* Deferred.await(entered);
-            const record = yield* Effect.gen(function* () {
-              if (transition === 'revoke-author')
-                return yield* signLedgerRecord(
-                  ok(
-                    prepareLedgerCommand(view, companion.publicKey, {
-                      _tag: 'RevokeDevice',
-                      target: owner.publicKey,
-                    })
-                  ),
-                  companion
-                );
-              const body = ok(
-                encodeCbor([
-                  view.head.toBytes(),
-                  owner.publicKey.toBytes(),
-                  [
-                    7,
-                    1,
-                    ok(commitEpochKey(genesis.genesis, 1, next)).toBytes(),
+              );
+              const companion = yield* generateDevice();
+              const consent = yield* prepareDeviceAdmission({
+                genesis: genesis.genesis,
+                membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(64))),
+                encryptionPublicKey: companion.enc,
+                kind: 'personal',
+                signer: companion,
+              });
+              const admission = yield* signLedgerRecord(
+                ok(prepareLedgerCommand(view, owner.publicKey, consent)),
+                owner
+              );
+              view = ok(
+                extendLedger(view, [admission], {
+                  head: hashRecordBytes(admission),
+                  length: view.length + 1,
+                })
+              );
+              const org = Buffer.from(genesis.genesis.toBytes()).toString('hex');
+              expect(
+                (yield* Effect.promise(() =>
+                  fetch(`${f.server.baseUrl}/ds/${org}`, { method: 'PUT' })
+                )).ok
+              ).toBe(true);
+              const raw = new StreamsClient({
+                url: `${f.server.baseUrl}/ds/${org}/loro`,
+                retry: { maxAttempts: 1 },
+              });
+              expect(
+                (yield* Effect.promise(() =>
+                  raw.create({ contentType: 'application/octet-stream' })
+                )).ok
+              ).toBe(true);
+              const head = yield* Effect.promise(() => raw.head());
+              if (!head.ok) throw new Error('missing real native head');
+              const binding = yield* makeStreamsUpdateBinding({
+                genesis: genesis.genesis,
+                resource: 'document',
+                model: 'loro',
+                writeEpoch: 'current',
+                signer: owner,
+                ledger: () => Effect.succeed(view),
+                readEpochKey: () =>
+                  Effect.sync(() => ok(Bytes.epochKey(new Uint8Array(32).fill(61)))),
+              });
+              const context = {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'snapshot',
+                continuationOffset: head.result.nextOffset,
+              } as const;
+              let prefix!: Uint8Array;
+              const sealed = yield* binding.seal({
+                context,
+                plaintext: new Uint8Array(9000).fill(10),
+                additionalData: (header) => {
+                  prefix = new Uint8Array(10 + header.length);
+                  prefix.set([76, 83, 67, 69, 2, 2, 0, 0, 0, 0]);
+                  new DataView(prefix.buffer).setUint16(6, header.length, false);
+                  prefix.set(header, 10);
+                  return new Uint8Array(
+                    Buffer.concat([
+                      new TextEncoder().encode('loro-streams-crdt-payload-protection/v2\0'),
+                      prefix,
+                    ])
+                  );
+                },
+              });
+              const snapshotStore = yield* makeSqliteSnapshotPublication({
+                path: join(directory, 'admission.sqlite'),
+                mode: 'create',
+                genesis: genesis.genesis,
+                resource: 'document',
+                model: 'loro',
+              });
+              const gateway = yield* makeLabContentGateway({
+                genesis: genesis.genesis,
+                resource: 'document',
+                model: 'loro',
+                baseUrl: f.server.baseUrl,
+                ledger: () => Effect.succeed(view),
+                snapshotStore,
+                snapshotBoundary: yield* makeLabRiverrunSnapshotBoundary({
+                  baseUrl: f.server.baseUrl,
+                  genesis: genesis.genesis,
+                  model: 'loro',
+                }),
+                now: () => 0,
+                fetch: async (url, init) => {
+                  if (init?.method === 'PUT') forwarded = true;
+                  return fetch(url, init);
+                },
+              });
+              const original = new Uint8Array(Buffer.concat([prefix, sealed.sealed]));
+              const entered = yield* Deferred.make<void>(),
+                release = yield* Deferred.make<void>();
+              const native = crypto.subtle.verify.bind(crypto.subtle);
+              let verifications = 0;
+              const spy = vi.spyOn(crypto.subtle, 'verify').mockImplementation(async (...args) => {
+                const valid = await native(...args);
+                // Hold admission's real native verification after it captured the
+                // writer view; historical authentication was the first large call.
+                if (args[3].byteLength > 8192 && ++verifications === 2) {
+                  Deferred.doneUnsafe(entered, Effect.void);
+                  await Effect.runPromise(Deferred.await(release));
+                }
+                return valid;
+              });
+              yield* Effect.addFinalizer(() => Effect.sync(() => spy.mockRestore()));
+              const pending = yield* Effect.forkChild(
+                Effect.result(
+                  gateway.snapshot({
+                    credential: {
+                      account: 'synthetic-owner',
+                      token: '',
+                      issuedAt: 0,
+                      expiresAt: 1,
+                      device: owner.publicKey,
+                      genesis: genesis.genesis,
+                    },
+                    requestGenesis: genesis.genesis,
+                    continuationOffset: context.continuationOffset,
+                    body: original,
+                  })
+                )
+              );
+              yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+              yield* Deferred.await(entered);
+              const record = yield* Effect.gen(function* () {
+                if (transition === 'revoke-author')
+                  return yield* signLedgerRecord(
                     ok(
-                      sealHistoryPacket({
-                        genesis: genesis.genesis,
-                        epoch: 1,
-                        currentKey: next,
-                        previousKey: old,
+                      prepareLedgerCommand(view, companion.publicKey, {
+                        _tag: 'RevokeDevice',
+                        target: owner.publicKey,
                       })
                     ),
-                  ],
-                ])
+                    companion
+                  );
+                const body = ok(
+                  encodeCbor([
+                    view.head.toBytes(),
+                    owner.publicKey.toBytes(),
+                    [
+                      7,
+                      1,
+                      ok(commitEpochKey(genesis.genesis, 1, next)).toBytes(),
+                      ok(
+                        sealHistoryPacket({
+                          genesis: genesis.genesis,
+                          epoch: 1,
+                          currentKey: next,
+                          previousKey: old,
+                        })
+                      ),
+                    ],
+                  ])
+                );
+                return yield* signLedgerRecord(ok(prepareLedgerRecord(view, body)), owner);
+              });
+              view = ok(
+                extendLedger(view, [record], {
+                  head: hashRecordBytes(record),
+                  length: view.length + 1,
+                })
               );
-              return yield* signLedgerRecord(ok(prepareLedgerRecord(view, body)), owner);
-            });
-            view = ok(
-              extendLedger(view, [record], {
-                head: hashRecordBytes(record),
-                length: view.length + 1,
-              })
-            );
-            yield* Deferred.succeed(release, undefined);
-            const result = yield* Fiber.join(pending);
-            const nativeSnapshot = yield* Effect.promise(() => raw.readLatestSnapshot());
-            expect(nativeSnapshot.ok).toBe(true);
-            if (transition === 'publish-epoch') {
-              expect(Result.isSuccess(result)).toBe(true);
-              expect(ok(result).status).toBe(204);
-              expect(forwarded).toBe(true);
-              if (!nativeSnapshot.ok || !nativeSnapshot.result)
-                throw new Error('missing accepted snapshot');
-              expect(nativeSnapshot.result.snapshotOffset).toBe(context.continuationOffset);
-              expect(new Uint8Array(nativeSnapshot.result.payload.body)).toEqual(original);
-              expect(yield* snapshotStore.lookup(context.continuationOffset)).toMatchObject({
-                phase: 'Accepted',
-                offset: context.continuationOffset,
-                body: original,
-              });
-              expect((yield* snapshotStore.current())?.offset).toBe(context.continuationOffset);
-            } else {
-              expect(Result.isFailure(result) && result.failure).toMatchObject({
-                _tag: 'ContentError',
-                code: 'unauthorized',
-              });
-              expect(forwarded).toBe(false);
-              expect(nativeSnapshot.ok && nativeSnapshot.result).toBeNull();
-              // HEAD/reservation already settled, so preserve the pending exact
-              // original without publishing or advancing the accepted pointer.
-              expect(yield* snapshotStore.lookup(context.continuationOffset)).toMatchObject({
-                phase: 'Pending',
-                offset: context.continuationOffset,
-                body: original,
-              });
-              expect(yield* snapshotStore.current()).toBeNull();
-            }
-          })
-        )
-      );
-    } finally {
-      await f.close();
+              yield* Deferred.succeed(release, undefined);
+              const result = yield* Fiber.join(pending);
+              const nativeSnapshot = yield* Effect.promise(() => raw.readLatestSnapshot());
+              expect(nativeSnapshot.ok).toBe(true);
+              if (transition === 'publish-epoch') {
+                expect(Result.isSuccess(result)).toBe(true);
+                expect(ok(result).status).toBe(204);
+                expect(forwarded).toBe(true);
+                if (!nativeSnapshot.ok || !nativeSnapshot.result)
+                  throw new Error('missing accepted snapshot');
+                expect(nativeSnapshot.result.snapshotOffset).toBe(context.continuationOffset);
+                expect(new Uint8Array(nativeSnapshot.result.payload.body)).toEqual(original);
+                expect(yield* snapshotStore.lookup(context.continuationOffset)).toMatchObject({
+                  phase: 'Accepted',
+                  offset: context.continuationOffset,
+                  body: original,
+                });
+                expect((yield* snapshotStore.current())?.offset).toBe(context.continuationOffset);
+              } else {
+                expect(Result.isFailure(result) && result.failure).toMatchObject({
+                  _tag: 'ContentError',
+                  code: 'unauthorized',
+                });
+                expect(forwarded).toBe(false);
+                expect(nativeSnapshot.ok && nativeSnapshot.result).toBeNull();
+                // HEAD/reservation already settled, so preserve the pending exact
+                // original without publishing or advancing the accepted pointer.
+                expect(yield* snapshotStore.lookup(context.continuationOffset)).toMatchObject({
+                  phase: 'Pending',
+                  offset: context.continuationOffset,
+                  body: original,
+                });
+                expect(yield* snapshotStore.current()).toBeNull();
+              }
+            })
+          )
+        );
+      } finally {
+        await f.close();
+      }
     }
-  }
-);
+  );
+});
 
 it('reopens an uncertain snapshot and confirms only its original bytes; older receipts never republish', async () => {
   const f = await fixture();

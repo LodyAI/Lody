@@ -26,6 +26,7 @@ import { ChangePasswordButton } from './change-password-button';
 import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-list';
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { UserAvatar } from '@/components/user-avatar';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { settingsSurface } from './surface';
 
@@ -822,6 +823,7 @@ export function AccountSettingsPure({
             return (
               <CompactRow
                 key={member.id}
+                leading={<UserAvatar user={member.user} size="large" />}
                 label={label}
                 helper={member.user?.name ? member.user?.email : undefined}
               >

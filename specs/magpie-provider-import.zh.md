@@ -42,6 +42,15 @@ API 路径固定。`magpie-lody` 是公开的用量归属标识，不是上游�
 `builtinPi`。部分成功的写入在失败后保留，重试跳过已绑定同一网关和运行时的
 Provider，不覆盖已有配置。
 
+## 无桌面 CLI 导入
+
+显式执行 `lody agent-config import-magpie` 即授权在运行命令的服务器上导入相同的
+固定 Provider 映射，无需桌面确认。命令不选择远程机器，也不接受环境变量中的远程
+机器默认值。`--gateway` 接受回环地址，`--link` 复用现有有界公开数据格式；可选的
+目标子集只能缩小链接提供的集合。写入前检查所有选中运行时所需的能力。已有
+Provider 和准备任务复用原 ID；重新执行命令可以显式重试失败任务。本地持久化与
+发布结果分别报告，进入准备队列不代表模型请求成功。桌面链接仍需原有确认流程。
+
 ## 运行时职责
 
 渲染器只生成已知环境变量映射，经现有 Machine Flock writer 持久化。托管运行时
@@ -56,8 +65,10 @@ Provider，不覆盖已有配置。
 目录变化不会热更新已运行的 Agent。
 
 - Claude 接收 Anthropic 端点、标识 token 和 `CLAUDE_MODEL_CONFIG` 模型目录。
-- Codex 在 Lody 自有、按网关隔离的 Codex home 中使用 Responses Provider 和生成的
-  原生模型目录，不复用 ChatGPT 账号绑定。
+- Codex 在 Lody 自有、按网关隔离的 Codex home 中使用 Responses Provider，其
+  `model_catalog_url` 指向 Magpie 提供的 Codex 形状目录
+  （`<gateway>/v1/codex/models`），能力投影由 Magpie 完成，不在本地重复生成，
+  也不复用 ChatGPT 账号绑定。
 - Pi 在 Lody 自有隔离配置中使用生成的 `models.json` 和 OpenAI Chat Completions，
   不导入原生全局配置中的扩展和设置。
 - Kimi Code 在隔离 `KIMI_CODE_HOME/config.toml` 中生成 Provider 和模型目录。

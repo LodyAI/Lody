@@ -84,6 +84,46 @@ function makeTransportRepo(
 }
 
 describe('Code Collab Flock publication', () => {
+  it('does not apply a stale file index when cancellation wins a pending pre-sync', async () => {
+    const events: string[] = [];
+    const local = makeFlock({ 'old.ts': true }, events);
+    const controller = new AbortController();
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let ready: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const work = publishCodeCollabFileIndexFlock({
+      repo: {
+        openFlockDoc: async () => ({
+          flock: local.flock,
+          syncOnce: async () => {
+            ready();
+            await pending;
+          },
+        }),
+        flush: async () => {
+          throw new Error('Cancelled pre-sync must not flush');
+        },
+      },
+      signal: controller.signal,
+      flockDocId: 'workspace:fi:owner',
+      fileIndex: { 'stale.ts': true },
+      updatedAtMs: 1,
+      reconcileRemote: true,
+    });
+    const cancelled = expect(work).rejects.toThrow('cancelled');
+    await started;
+    controller.abort(new Error('cancelled'));
+    await cancelled;
+    release();
+    await pending;
+    expect(local.snapshot()).toEqual({ 'old.ts': true });
+  });
+
   it('pre-syncs reconnect repair and skips write, flush, and post-sync when unchanged', async () => {
     const events: string[] = [];
     const { repo, remoteSnapshot } = makeTransportRepo(events);

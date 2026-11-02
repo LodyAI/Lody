@@ -22,6 +22,10 @@ Mobile controls remain in the same 32px row. With only machine information the b
 is a transparent row; existing items and actions retain the raised bar surface. The
 [draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.
 The parent passes already-resolved metadata and presence without new subscriptions.
+Scheduled-message drafts must not add an info-bar item. Their state is the
+composer's secondary action beside Send; the bar only carries machine, status,
+goal, schedule, and context. This is distinct from the pending Agent task countdown
+and the schedule that created the conversation.
 With the compact mobile control, a private-access label collapses to its lock icon
 at container widths up to 420px, leaving room for repository actions. Its full
 access description remains in the accessible name/title, and tap still opens
@@ -83,7 +87,10 @@ labelClassName`) so the stage diffstat never clips. Wired from
   content, right after the PR number, so it is only visible when the PR is
   expanded; one click toggles its check-run popover (`PrCiRun[]` is
   presentational; production maps the active PR's live GitHub check-run fetch
-  into it via `mapGitHubCheckRunToPrCiRun`). The verdict reads only the newest
+  into it via `mapGitHubCheckRunToPrCiRun`; live runs only list checks, while the
+  PR status mark, CI verdict and action gating read session metadata through the
+  same [read model](../notes/implemented/architecture/2026-11-02-session-pr-read-model.md)
+  as the sidebar). When live runs are listed, their summary reads only the newest
   attempt of each check (`selectLatestCheckRuns` keys by app + name, highest id
   wins), so a re-run that went green clears an earlier failure; cancelled/stale
   runs render as `cancelled` and never make CI "failed" nor enter the Fix CI
@@ -218,6 +225,30 @@ the requester. **Restore collaboration** explicitly removes the barrier. Offline
 machines act after metadata sync; this is not an instantaneous cross-machine stop.
 The scope follows creation/containment edges, not every unrelated session that
 has exchanged a message. See the [decision](../notes/implemented/feature/2026-10-11-stop-conversation-tree.md).
+
+## Repositories panel and the active repository
+
+`session-project-members-chip.tsx` renders a multi-repository conversation's
+Repositories chip through the bar's `projectMembers` slot. Like Relations it is a
+plain cluster action, never staged. Its popover lists every frozen Member in
+placement order (each root followed by its submodules, siblings in snapshot
+order), indented by depth, with the repository identity, directory, branch or
+registered absolute directory for an in-place local Member, and current PR when one exists.
+The directory comes from the matching machine/project catalog; absent metadata keeps
+the in-place label. The full path and non-isolation notice remain in its hover title
+and accessible selection label. A repository without a PR
+leaves the slot empty, and unpublished work gets no separate dot. CI is the PR
+glyph's tone (green passing, red failing, amber running) while its shape keeps
+the PR status. Clicking a row selects that repository and closes the panel.
+
+Selection is view state in `atoms/session-project-member-selection.ts`, keyed by
+the workspace-owner Session so a child tab and its root agree. The context stage,
+the PR tab, live PR details/actions, and the diff stat describe the selected
+Member. With no selection the legacy first-Member projection is used, preserving
+existing conversations. A Member with no GitHub remote explicitly clears the
+repository/PR/actions instead of borrowing another Member's PR. Create PR and
+Commit & Push remain conversation-scoped because their prompt publishes every
+changed Member.
 
 ## Type
 

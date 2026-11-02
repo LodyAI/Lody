@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { MachineId, SupportedLanguage } from '@lody/shared';
+import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
@@ -226,6 +226,21 @@ export const sessionSidebarCodeChangesOnlyAtom = atomWithStorage<boolean>(
   false
 );
 
+// All Changes workspace diff: branch cumulative (merge-base -> disk) vs uncommitted
+// (HEAD -> disk). Persisted globally; default preserves the existing branch view.
+const allChangesDiffScopeStorageAtom = atomWithStorage<string>(
+  'lody-all-changes-diff-scope',
+  'branch'
+);
+
+export const allChangesDiffScopeAtom = atom(
+  (get): CodeCollabAllChangesScope =>
+    get(allChangesDiffScopeStorageAtom) === 'uncommitted' ? 'uncommitted' : 'branch',
+  (_get, set, nextValue: CodeCollabAllChangesScope) => {
+    set(allChangesDiffScopeStorageAtom, nextValue);
+  }
+);
+
 export const QUEUED_MESSAGE_BEHAVIOR_VALUES = ['queue', 'guide'] as const;
 export type QueuedMessageBehavior = (typeof QUEUED_MESSAGE_BEHAVIOR_VALUES)[number];
 
@@ -240,18 +255,6 @@ export const queuedMessageBehaviorAtom = atom(
   (_get, set, nextValue: QueuedMessageBehavior) => {
     set(queuedMessageBehaviorStorageAtom, nextValue);
   }
-);
-
-// Auto-archive a session when its linked PR is merged. Per-user, browser-local.
-export const autoArchiveOnPrMergedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-merged',
-  false
-);
-
-// Auto-archive a session when its linked PR is closed (without merge). Per-user, browser-local.
-export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-closed',
-  false
 );
 
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
@@ -279,6 +282,31 @@ export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
 /** The single gate for showing the unfinished mobile Inbox entry. */
 export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
+);
+
+/** Enables creation only. Existing encrypted workspaces retain their immutable mode. */
+export const e2eeWorkspaceCreationEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-workspace-creation-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
+);
+
+/** Shows account-wide personal device pairing where the host implements it. The
+ * existing per-workspace pairing stays available either way. */
+export const e2eeAccountPairingEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-account-pairing-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeAccountPairingFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeAccountPairingEnabledAtom)
 );
 
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(

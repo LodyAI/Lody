@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { makeSqliteLedgerFeed } from './feed-fixture';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { setEd25519WasmEnabled } from '../../src/internal/foundation/ed25519-wasm';
 import { verifyLedger, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../keys/fixture';
 import { prepareLedgerPage, frameLedgerRecord } from '@lody/e2ee-core/protocol';
@@ -162,6 +163,9 @@ describe('verified ledger increments without known-record skipping', () => {
 });
 
 describe('durable full-history feed boundary', () => {
+  // These cover the Web Crypto fallback used when WebAssembly is unavailable.
+  beforeAll(() => setEd25519WasmEnabled(false));
+  afterAll(() => setEd25519WasmEnabled(true));
   it('rejects an external point change during native verification without publishing and retries on the same handle', async () => {
     const f = envelopeFixture(0, 219),
       dir = mkdtempSync(path.join(tmpdir(), 'ledger-native-conflict-')),

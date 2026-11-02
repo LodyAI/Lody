@@ -1,10 +1,16 @@
+import { TestCloudPlatformProvider } from './test-platform';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
-import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import {
+  createHistoryWriter,
+  resolveSessionAcpRuntimeConfig,
+  resolveSessionConversationConfig,
+} from '@lody/shared';
 import {
   useConversationVersion,
   useConversationIndexRows,
@@ -14,6 +20,7 @@ import {
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
 import {
   createConversationSession,
+  createConversationViewFromReader,
   createConversationDerivation,
   collectConversationConfigSources,
   type ConversationView,
@@ -29,6 +36,12 @@ import {
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import { useSessionTurnFacts } from '../src/components/sessions/session-turn-facts';
 import { useSessionMcpSelection } from '../src/hooks/use-session-mcp-selection';
+import { FloatingPermissionRequest } from '../src/components/sessions/floating-permission-request';
+import { initI18n } from '../src/i18n';
+import {
+  buildAcpSessionConfigCandidates,
+  EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+} from '../src/lib/acp-session-config-selection';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -67,6 +80,128 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it.each([false, true])(
+    'shows a synced Core question while older history is blocked (existing tool: %s)',
+    async (existingTool) => {
+      await initI18n('en');
+      const history = buildFixtureHistory(2);
+      const active = history.at(-1)!;
+      active.finished = false;
+      delete active.endedAt;
+      const source = buildSessionDoc(history);
+      const peer = reimport(source);
+      const idle = createManualIdle();
+      const session = createConversationSession(source, {
+        sessionId: FIXTURE_SESSION_ID,
+        scheduleIdle: idle.scheduleIdle,
+      });
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: peer });
+      let releaseOlder!: () => void;
+      const olderGate = new Promise<void>((resolve) => {
+        releaseOlder = resolve;
+      });
+      const view = createConversationViewFromReader(
+        {
+          ...data.history,
+          readTurnForDisplay: async (id) => {
+            if (id !== active.id) await olderGate;
+            return data.history.readTurnForDisplay(id);
+          },
+        },
+        {
+          sessionId: FIXTURE_SESSION_ID,
+          tailKeep: 1,
+          hydrateChunkSize: 1,
+          scheduleIdle: idle.scheduleIdle,
+          yieldToEventLoop: () => Promise.resolve(),
+        }
+      );
+      await flushReaderChanges();
+      views.push(view);
+      function QuestionSurface() {
+        const tail = useConversationTail(view, { extendToLastUserTurn: true });
+        const current = view.turn(view.turnCount - 1);
+        const text = current?.items.filter((item) => item.type === 'text').at(-1);
+        return (
+          <>
+            <output>{text?.type === 'text' ? text.text : ''}</output>
+            <FloatingPermissionRequest
+              sessionId={FIXTURE_SESSION_ID}
+              sessionStatus={{ type: 'requestPermission' }}
+              sessionHistory={
+                tail.availableTurns as Parameters<
+                  typeof FloatingPermissionRequest
+                >[0]['sessionHistory']
+              }
+            />
+          </>
+        );
+      }
+      try {
+        await act(async () => root.render(<QuestionSurface />));
+        await flush();
+        expect(container.textContent).not.toContain('Which storage should we use?');
+        createHistoryWriter(source).updateEntry(active.id, (entry) => {
+          entry.items.push({ type: 'text', text: 'Concurrent output is still arriving' });
+          return entry;
+        });
+        source.commit();
+        const result = await session.sessionData.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'question-request',
+          request: {
+            sessionId: 'acp-test',
+            toolCall: { toolCallId: existingTool ? 'tc-1' : 'synthetic-question', kind: 'think' },
+            options: [{ optionId: 'answer', name: 'Submit answers', kind: 'allow_once' }],
+            _meta: {
+              lody: {
+                elicitation: {
+                  version: 1,
+                  questions: [
+                    {
+                      id: 'question_0',
+                      header: 'Storage',
+                      question: 'Which storage should we use?',
+                      options: [{ label: 'SQLite' }, { label: 'Files' }],
+                      multiSelect: false,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+        expect(result.matched).toBe(true);
+        await act(async () => {
+          peer.import(source.export({ mode: 'update', from: peer.version() }));
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(container.querySelector('output')?.textContent).toBe(
+          'Concurrent output is still arriving'
+        );
+        expect(view.turn(0)).toBeUndefined();
+        expect(view.turn(view.turnCount - 1)?.finished).toBe(false);
+        expect(container.textContent).toContain('Which storage should we use?');
+        expect(container.textContent).toContain('SQLite');
+        expect(container.textContent).toContain('Files');
+        // Resolving unrelated old bodies neither unlocks nor duplicates the form.
+        await act(async () => {
+          releaseOlder();
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(view.turn(0)).toBeDefined();
+        expect(container.textContent?.split('Which storage should we use?')).toHaveLength(2);
+      } finally {
+        releaseOlder();
+        view.dispose();
+        data.dispose();
+        session.dispose();
+      }
+    }
+  );
+
   it('updates streamed text and summaries without rebuilding unchanged business facts or losing the draft', async () => {
     const { doc, view } = await openView(2);
     let facts!: ReturnType<typeof useSessionTurnFacts>;
@@ -488,8 +623,15 @@ describe('conversation view React readers', () => {
   });
 });
 
-vi.mock('../src/hooks/use-workspace-mcp-catalog', () => ({
-  useWorkspaceMcpCatalog: () => ({ servers: CATALOG, synced: true }),
+vi.mock('../src/hooks/use-workspace-catalog', () => ({
+  useWorkspaceCatalog: () => ({
+    servers: CATALOG,
+    roles: [],
+    projectMcpDefaults: {},
+    loaded: true,
+    failed: false,
+    synced: true,
+  }),
 }));
 const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }];
 // Deterministic (manual idle, an explicit `yieldToEventLoop` gate, fake timers)
@@ -501,7 +643,7 @@ const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }]
 // for a hang, since nothing here waits on wall-clock time.
 const MCP_SELECTION_HYDRATION_TIMEOUT_MS = 30_000;
 it.each([false, true])(
-  'preserves explicit empty MCP selection after mounting composer hooks: windowed=%s',
+  'preserves MCP selection and reported Plan exit while composer history hydrates: windowed=%s',
   async (windowed) => {
     const host = container;
     const history = buildFixtureHistory(25);
@@ -512,7 +654,7 @@ it.each([false, true])(
       ...history[48]!.inputConfig,
       agentRoleId: null,
       mcpServerIds: [],
-      configOptionValues: { effort: 'high' },
+      configOptionValues: { effort: 'high', plan_mode: true },
     };
     const doc = buildSessionDoc(history);
     const idle = createManualIdle();
@@ -524,18 +666,56 @@ it.each([false, true])(
       scheduleIdle: idle.scheduleIdle,
       yieldToEventLoop: () => gate,
     });
+    const view = windowed
+      ? createConversationViewFromReader(
+          {
+            ...session.sessionData.history,
+            readTurnForDisplay: async (id) => {
+              if (id === history[48]!.id) await gate;
+              return session.sessionData.history.readTurnForDisplay(id);
+            },
+          },
+          {
+            sessionId: FIXTURE_SESSION_ID,
+            scheduleIdle: idle.scheduleIdle,
+            yieldToEventLoop: () => gate,
+          }
+        )
+      : session.history;
+    await flushReaderChanges();
+    const runtimeSnapshot = {
+      acpSessionId: 'synthetic-agent-session',
+      basedOnUserTurnId: history[48]!.id,
+      revision: 1,
+      configOptionValues: { effort: 'high', plan_mode: false },
+    };
     let sent: readonly string[] | undefined;
+    let sentPlan: unknown;
     let selected: readonly string[] = [];
+    let selectedPlan: unknown;
+    let legacyPlan: unknown;
+    let tailHasUserTurn = false;
     function Stream() {
-      useConversationStreamItems(session.history, FIXTURE_SESSION_ID);
+      useConversationStreamItems(view, FIXTURE_SESSION_ID);
       return null;
     }
     function Composer() {
-      const tail = useConversationTail(session.history, { extendToLastUserTurn: true });
-      const config = resolveSessionConversationConfig(
-        collectConversationConfigSources(session.history, tail.from)
-      );
-      useSessionTurnFacts(session.history);
+      const tail = useConversationTail(view, { extendToLastUserTurn: true });
+      const sources = collectConversationConfigSources(view, tail.from);
+      const config = resolveSessionConversationConfig(sources);
+      const runtimeConfig = resolveSessionAcpRuntimeConfig(sources, [], runtimeSnapshot);
+      selectedPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: runtimeConfig,
+      }).configOptionValues.plan_mode;
+      legacyPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: resolveSessionAcpRuntimeConfig(sources, [], undefined),
+      }).configOptionValues.plan_mode;
+      tailHasUserTurn = tail.turns.some((turn) => turn.id === runtimeSnapshot.basedOnUserTurnId);
+      useSessionTurnFacts(view);
       selected = useSessionMcpSelection(config.mcpServerIds, { existingSession: true }).selectedIds;
       return (
         <>
@@ -543,6 +723,7 @@ it.each([false, true])(
           <button
             onClick={() => {
               sent = [...selected];
+              sentPlan = selectedPlan;
             }}
           >
             send
@@ -551,10 +732,19 @@ it.each([false, true])(
       );
     }
     try {
-      await act(async () => root.render(<Composer />));
+      await act(async () =>
+        root.render(
+          <TestCloudPlatformProvider>
+            <Composer />
+          </TestCloudPlatformProvider>
+        )
+      );
       await act(async () => vi.runAllTimersAsync());
       act(() => host.querySelector('button')!.click());
       const before = sent;
+      expect(sentPlan, 'send before body hydration keeps the reported Plan exit').toBe(false);
+      expect(legacyPlan, 'an older daemon without a snapshot keeps its turn config').toBe(true);
+      if (windowed) expect(tailHasUserTurn, 'exercise the unloaded body path').toBe(false);
       resume();
       await act(async () => {
         await gate;
@@ -562,10 +752,12 @@ it.each([false, true])(
         await vi.runAllTimersAsync();
       });
       expect(selected, 'after hydration').toEqual([]);
+      expect(selectedPlan, 'hydration must not change the reported Plan exit').toBe(false);
       expect(before, 'send while range loading').toEqual([]);
     } finally {
       resume();
       await act(async () => root.render(null));
+      if (view !== session.history) view.dispose();
       session.history.dispose();
       session.mirror.dispose();
       doc.free();

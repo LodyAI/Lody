@@ -82,6 +82,7 @@ describe('billing overview cache', () => {
     const rawOverview = { ...legacyOverview } as Record<string, unknown>;
     for (const field of [
       'giftStackingSupported',
+      'referralRewardsSupported',
       'giftStartsAt',
       'giftEndsAt',
       'nextBillingAt',
@@ -102,6 +103,7 @@ describe('billing overview cache', () => {
 
     expect(readBillingOverviewCache('workspace-1', 'session-1')).toMatchObject({
       giftStackingSupported: false,
+      referralRewardsSupported: false,
       giftStartsAt: null,
       giftEndsAt: null,
       nextBillingAt: null,
@@ -127,6 +129,16 @@ describe('billing overview reconciliation', () => {
     const changedFetch = overview({ seatCount: 4 });
 
     expect(reconcileBillingOverview(current, changedFetch)).toBe(changedFetch);
+  });
+
+  it('refreshes server referral availability even when all other billing fields match', () => {
+    const current = overview({ referralRewardsSupported: false });
+    const enabled = overview({ referralRewardsSupported: true });
+    expect(reconcileBillingOverview(current, enabled)).toBe(enabled);
+    writeBillingOverviewCache('workspace-1', 'session-1', enabled);
+    expect(readBillingOverviewCache('workspace-1', 'session-1')?.referralRewardsSupported).toBe(
+      true
+    );
   });
 
   it('keeps first-visit billing actions disabled until permissions are confirmed', () => {

@@ -13,8 +13,10 @@ attempts with increasing delays; each attempt has a 15-second deadline covering
 session refresh and Convex authentication confirmation. Offline or hidden clients
 pause scheduling without resetting the budget.
 
-After exhaustion, protected requests stay gated and a persistent error dialog
-replaces indefinite recovery feedback. “Retry connection” starts a new budget;
+Recovery status stays visible without a modal, backdrop or automatic focus change.
+After exhaustion, protected requests stay gated and the status explains that
+automatic retries have paused. Users open the recovery details themselves;
+closing them keeps the recovery entry available. “Retry connection” starts a new budget;
 “Sign in again” uses normal sign-out and login navigation without clearing local
 workspace data. Exhaustion alone is not evidence of an invalid session. Existing
 confirmed-session-rejection handling still signs the user out.

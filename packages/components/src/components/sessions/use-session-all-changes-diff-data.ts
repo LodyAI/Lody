@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SessionId } from '@lody/shared';
+import type { CodeCollabAllChangesScope, SessionId } from '@lody/shared';
 import { sessionFileProviderDiffResultToFileDiffData } from '@/lib/session-file-provider-diff';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
 import type { FileDiffData } from './session-conversation-diff-types';
@@ -41,6 +41,7 @@ export function useSessionAllChangesDiffData({
   fileProvider,
   fileProviderPending = false,
   enabled = true,
+  scope = 'branch',
 }: {
   sessionId: SessionId;
   filePaths: string[];
@@ -49,6 +50,7 @@ export function useSessionAllChangesDiffData({
   fileProvider?: SessionFileProvider | null;
   fileProviderPending?: boolean;
   enabled?: boolean;
+  scope?: CodeCollabAllChangesScope;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -56,23 +58,45 @@ export function useSessionAllChangesDiffData({
   hasAllResolved: boolean;
   isDiffUnavailable: boolean;
   isPanelLoading: boolean;
+  batchReady: boolean;
+  base: string | null;
+  unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
+  unavailableMessage: string | null;
 } {
-  const normalizedPaths = useMemo(
+  const normalizedInputPaths = useMemo(
     () => Array.from(new Set(filePaths.filter(Boolean))).toSorted((a, b) => a.localeCompare(b)),
     [filePaths]
   );
-  const normalizedPathsKey = useMemo(() => JSON.stringify(normalizedPaths), [normalizedPaths]);
+  const normalizedPathsKey = useMemo(
+    () => JSON.stringify(normalizedInputPaths),
+    [normalizedInputPaths]
+  );
 
   const [batch, setBatch] = useState<{
     provider: SessionFileProvider;
     pathsKey: string;
+    scope: CodeCollabAllChangesScope;
     inline: Record<string, FileDiffData>;
     deferred: string[];
+    entryPaths: string[];
+    base: string | null;
+    unavailableScopeReason: 'not_a_git_worktree' | 'no_commits' | null;
+    unavailableMessage: string | null;
   } | null>(null);
   const currentBatch =
-    batch !== null && batch.provider === fileProvider && batch.pathsKey === normalizedPathsKey
+    batch !== null &&
+    batch.provider === fileProvider &&
+    batch.pathsKey === normalizedPathsKey &&
+    batch.scope === scope
       ? batch
       : null;
+  const normalizedPaths = useMemo(
+    () =>
+      scope === 'uncommitted' && currentBatch !== null
+        ? currentBatch.entryPaths
+        : normalizedInputPaths,
+    [currentBatch, normalizedInputPaths, scope]
+  );
   const deferredData = useSessionConversationDiffData({
     sessionId,
     mode: 'base',
@@ -82,6 +106,7 @@ export function useSessionAllChangesDiffData({
     fileProvider,
     fileProviderPending,
     requestScope: currentBatch ?? undefined,
+    allChangesScope: scope,
     enabled: enabled && currentBatch !== null && currentBatch.deferred.length > 0,
   });
   const resolvedByPath = useMemo(
@@ -116,14 +141,33 @@ export function useSessionAllChangesDiffData({
     let cancelled = false;
     const getAllChangesDiff = fileProvider.getAllChangesDiff.bind(fileProvider);
 
-    const publish = (inline: Record<string, FileDiffData>, deferred: string[] = []): void => {
+    const publish = (
+      inline: Record<string, FileDiffData>,
+      deferred: string[] = [],
+      extra: {
+        base?: string | null;
+        unavailableScopeReason?: 'not_a_git_worktree' | 'no_commits' | null;
+        unavailableMessage?: string | null;
+      } = {}
+    ): void => {
       if (!cancelled)
-        setBatch({ provider: fileProvider, pathsKey: normalizedPathsKey, inline, deferred });
+        setBatch({
+          provider: fileProvider,
+          pathsKey: normalizedPathsKey,
+          scope,
+          inline,
+          deferred,
+          entryPaths: [...Object.keys(inline), ...deferred],
+          base: extra.base ?? null,
+          unavailableScopeReason: extra.unavailableScopeReason ?? null,
+          unavailableMessage: extra.unavailableMessage ?? null,
+        });
     };
 
     const run = async (): Promise<void> => {
       const focus = focusPathRef.current ?? undefined;
-      let result = await getAllChangesDiff(focus);
+      const requestScope = scope === 'branch' ? undefined : scope;
+      let result = await getAllChangesDiff(focus, requestScope);
       if (
         !cancelled &&
         result.status === 'unavailable' &&
@@ -131,14 +175,21 @@ export function useSessionAllChangesDiffData({
       ) {
         await delay(RETRY_DELAY_MS);
         if (cancelled) return;
-        result = await getAllChangesDiff(focus);
+        result = await getAllChangesDiff(focus, requestScope);
       }
       if (cancelled) return;
 
       if (result.status === 'unavailable') {
+        if (scope === 'uncommitted') {
+          publish({}, [], {
+            unavailableScopeReason: result.scopeReason ?? null,
+            unavailableMessage: result.message ?? null,
+          });
+          return;
+        }
         // Mark every expected path unavailable so the panel stops spinning.
         const next: Record<string, FileDiffData> = {};
-        for (const path of normalizedPaths) {
+        for (const path of normalizedInputPaths) {
           next[path] = sessionFileProviderDiffResultToFileDiffData({
             status: 'unavailable',
             path,
@@ -146,11 +197,11 @@ export function useSessionAllChangesDiffData({
             ...(result.message === undefined ? {} : { message: result.message }),
           });
         }
-        publish(next);
+        publish(next, [], { unavailableMessage: result.message ?? null });
         return;
       }
 
-      const entryPaths = new Set(result.entries.map((entry) => entry.path));
+      const entryPathSet = new Set(result.entries.map((entry) => entry.path));
       const deferredPaths: string[] = [];
       const next: Record<string, FileDiffData> = {};
       for (const entry of result.entries) {
@@ -160,40 +211,55 @@ export function useSessionAllChangesDiffData({
         }
         next[entry.path] = sessionFileProviderDiffResultToFileDiffData(entry.diff);
       }
-      // Reconcile: any expected path the batch did not mention is treated as unavailable so
-      // `hasAllResolved` can complete (the list can briefly disagree with git).
-      for (const path of normalizedPaths) {
-        if (next[path] !== undefined || entryPaths.has(path)) {
-          continue;
+      // Branch mode reconciles expected paths the batch did not mention so `hasAllResolved`
+      // can complete (the list can briefly disagree with git). Uncommitted mode renders the
+      // batch's own file set, so committed-only paths must not be added.
+      if (scope === 'branch') {
+        for (const path of normalizedInputPaths) {
+          if (next[path] !== undefined || entryPathSet.has(path)) {
+            continue;
+          }
+          next[path] = sessionFileProviderDiffResultToFileDiffData({
+            status: 'unavailable',
+            path,
+            reason: 'metadata-only',
+          });
         }
-        next[path] = sessionFileProviderDiffResultToFileDiffData({
-          status: 'unavailable',
-          path,
-          reason: 'metadata-only',
-        });
       }
       if (cancelled) return;
-      publish(next, deferredPaths);
+      publish(next, deferredPaths, { base: result.base });
     };
 
     void run().catch((error: unknown) => {
       const message = getSessionDiffErrorMessage(error);
       publish(
-        Object.fromEntries(normalizedPaths.map((path) => [path, { status: 'error', message }]))
+        scope === 'branch'
+          ? Object.fromEntries(
+              normalizedInputPaths.map((path) => [path, { status: 'error', message }])
+            )
+          : {},
+        [],
+        { unavailableMessage: message }
       );
     });
     return () => {
       cancelled = true;
     };
-    // Refetch when the provider is rebuilt (file-index/list changed → D4) or the path set changes.
+    // Refetch when the provider is rebuilt (file-index/list changed → D4), the path set or
+    // the comparison scope changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, fileProvider, normalizedPathsKey]);
+  }, [enabled, fileProvider, normalizedPathsKey, scope]);
 
   const hasAllResolved = useMemo(
     () => normalizedPaths.every((path) => Boolean(resolvedByPath[path])),
     [normalizedPaths, resolvedByPath]
   );
   const isPanelLoading = normalizedPaths.length > 0 && !isDiffUnavailable && !hasAllResolved;
+  const unavailableMessage = currentBatch?.unavailableMessage ?? null;
+  const batchReady =
+    currentBatch !== null &&
+    unavailableMessage === null &&
+    (currentBatch.unavailableScopeReason ?? null) === null;
 
   return {
     cacheKey: null,
@@ -202,5 +268,9 @@ export function useSessionAllChangesDiffData({
     hasAllResolved,
     isDiffUnavailable,
     isPanelLoading,
+    batchReady,
+    base: currentBatch?.base ?? null,
+    unavailableScopeReason: currentBatch?.unavailableScopeReason ?? null,
+    unavailableMessage,
   };
 }

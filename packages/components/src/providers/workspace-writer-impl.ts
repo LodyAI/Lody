@@ -7,6 +7,7 @@ import {
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
+import type { LoroDoc } from 'loro-crdt';
 import type {
   PreviewVisualCommentDocStore,
   SessionDocDraft,
@@ -50,9 +51,14 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
   // Renderer-side, every message-queue mutation also bumps `messageQueueUpdatedAt`
   // so the CLI dispatch watcher re-evaluates.
-  const bumpMessageQueueWatermark = async (sessionId: string): Promise<void> => {
+  const bumpMessageQueueWatermark = async (
+    sessionId: string,
+    frontiers: ReturnType<LoroDoc['frontiers']>
+  ): Promise<void> => {
+    const updatedAt = getServerNow();
     await deps.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
-      messageQueueUpdatedAt: getServerNow(),
+      messageQueueUpdatedAt: updatedAt,
+      messageQueueUpdateVersion: { updatedAt, frontiers },
     });
   };
 
@@ -159,7 +165,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async enqueueSessionMessage(sessionId, item) {
-      await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const userTurnId = item.userTurnId;
@@ -176,22 +182,26 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
             } as MessageQueueItem,
           ];
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async removeSessionMessage(sessionId, itemId) {
-      await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async updateSessionMessage(sessionId, itemId, patch) {
-      await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
@@ -200,12 +210,14 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
               : item
           );
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
-      await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
@@ -224,8 +236,10 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           }
           draft.mq = ordered;
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async mutatePreviewVisualComments(sessionId, mutation) {

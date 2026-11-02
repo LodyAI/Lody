@@ -3,6 +3,7 @@ import type { SessionId, WorkspaceId } from '../src/ids';
 import {
   formatNotification,
   notificationMessages,
+  notificationReplyPreview,
   resolveNotificationPresentation,
   notificationPresentationSchema,
   projectTurnAttention,
@@ -73,6 +74,76 @@ describe('notification source policy', () => {
 });
 
 describe('notification presentation', () => {
+  it('extracts only the last nonempty assistant text and bounds Unicode previews', () => {
+    expect(
+      notificationReplyPreview({
+        role: 'assistant',
+        items: [
+          { type: 'text', text: 'Earlier progress' },
+          { type: 'thought', text: 'Private reasoning' },
+          { type: 'text', text: ' Done\nwith\u202e checks. ' },
+          { type: 'tool_call', text: 'Tool output' },
+          { type: 'text', text: '  ' },
+        ],
+      })
+    ).toBe('Done with checks.');
+    expect(
+      notificationReplyPreview({ role: 'user', items: [{ type: 'text', text: 'Prompt' }] })
+    ).toBeUndefined();
+    expect(
+      notificationReplyPreview({
+        role: 'assistant',
+        items: [{ type: 'thought', text: 'Reasoning only' }],
+      })
+    ).toBeUndefined();
+    const preview = notificationReplyPreview({
+      role: 'assistant',
+      items: [{ type: 'text', text: '🚀'.repeat(250) }],
+    });
+    expect(preview).toBe('🚀'.repeat(199) + '…');
+    expect(
+      notificationPresentationSchema.parse({ kind: 'conversation', replyPreview: preview })
+        .replyPreview
+    ).toBe(preview);
+    expect(
+      notificationPresentationSchema.safeParse({
+        kind: 'conversation',
+        replyPreview: 'a'.repeat(401),
+      }).success
+    ).toBe(false);
+  });
+
+  it('appends reply excerpts after context in both languages and omits them from requests', () => {
+    const presentation = {
+      kind: 'conversation' as const,
+      conversationTitle: 'Fix sign-in',
+      projectName: 'lody',
+      pullRequestNumber: 15,
+      replyPreview: 'Fixed and verified.',
+    };
+    for (const language of ['en', 'zh'] as const) {
+      const translate = (key: keyof typeof notificationMessages.en) =>
+        notificationMessages[language][key];
+      for (const event of ['succeeded', 'failed', 'unknown'] as const) {
+        const formatted = formatNotification(event, presentation, translate);
+        expect(formatted.title).toBe('Fix sign-in');
+        expect(formatted.body).toBe(
+          `${event === 'succeeded' ? '' : translate(`notifications.copy.conversation.${event}`) + ' '}lody PR #15\nFixed and verified.`
+        );
+      }
+      expect(formatNotification('permission', presentation, translate).body).not.toContain(
+        'Fixed and verified.'
+      );
+      expect(
+        formatNotification('succeeded', { kind: 'conversation', replyPreview: 'Done.' }, translate)
+          .body
+      ).toBe('Done.');
+      expect(
+        formatNotification('succeeded', { kind: 'conversation', replyPreview: '  ' }, translate)
+          .body
+      ).toBe(translate('notifications.copy.openConversation'));
+    }
+  });
   const meta = {
     title: 'Fix sign-in',
     project: { kind: 'github' as const, repoFullName: 'team/lody', branch: 'main' },

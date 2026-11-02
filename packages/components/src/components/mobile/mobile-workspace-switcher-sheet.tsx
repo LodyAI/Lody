@@ -1,15 +1,19 @@
 import { Fragment, type ReactNode } from 'react';
 import { Check, Plus, Users } from 'lucide-react';
+import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { cn } from '@/lib/utils';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 export type MobileWorkspaceSwitcherWorkspace = {
   id: string;
   name: string;
   avatarUrl?: string | null;
   isActive?: boolean;
+  /** Display-only listing metadata; never an admission decision. */
+  encrypted?: boolean;
 };
 
 export type MobileWorkspaceSwitcherSheetLabels = {
@@ -51,6 +55,7 @@ export function MobileWorkspaceSwitcherSheet({
   onInviteMembers,
   labels = {},
 }: MobileWorkspaceSwitcherSheetProps) {
+  const maxHeight = useFoldAwareSheetHeight(80);
   const title = labels.title ?? '工作空间';
   const description = labels.description;
   const workspacesHeading = labels.workspacesHeading ?? 'Workspaces';
@@ -60,10 +65,8 @@ export function MobileWorkspaceSwitcherSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'mobile-workspace-switcher-sheet',
-          'h-auto! max-h-[80dvh]! rounded-t-2xl border-border/60'
-        )}
+        style={{ maxHeight }}
+        className={cn('mobile-workspace-switcher-sheet', 'h-auto! rounded-t-2xl border-border/60')}
       >
         <div className="flex max-h-full min-h-0 flex-col">
           <DrawerTitle className="sr-only">{title}</DrawerTitle>
@@ -96,6 +99,7 @@ export function MobileWorkspaceSwitcherSheet({
                     }
                   >
                     <span className="truncate text-[0.95rem] font-medium">{workspace.name}</span>
+                    {workspace.encrypted ? <EncryptedWorkspaceMark /> : null}
                   </SheetRow>
                 </li>
               ))}
@@ -152,11 +156,7 @@ export function MobileWorkspaceSwitcherSheet({
   );
 }
 
-function WorkspaceLeadingAvatar({
-  workspace,
-}: {
-  workspace: MobileWorkspaceSwitcherWorkspace;
-}) {
+function WorkspaceLeadingAvatar({ workspace }: { workspace: MobileWorkspaceSwitcherWorkspace }) {
   /* No selection ring on the avatar — letter tiles use hashed hues
      (green/blue/…) and a primary ring clashes hard. Active state is
      shown by the trailing check + row background instead. */

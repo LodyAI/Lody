@@ -55,6 +55,9 @@ the provider and complete Cause. Call `retryCleanup` to join retained work befor
 retrying handoff/close. Concurrent close shares one Deferred receipt; failed close
 keeps that failure until explicit successful recovery. Parent Scope close reports
 the same failure and does not silently release the retained child Scope.
+The Promise facade's repeated `invalidate()` after close begins is a no-op,
+including after a failed close. It cannot resurrect admission or erase a failure;
+callers still await `retryCleanup` and the close receipt before replacing the owner.
 
 The optional cache stays encrypted and partitioned by endpoint/workspace, with
 credential and rejected-token publication fences. Its storage/crypto failures remain
@@ -73,7 +76,8 @@ Both diagnostic outputs omit credentials, JWTs, URLs, messages, stacks and recov
 owners. Preserve the original Cause separately for recovery; log the safe summary.
 
 Renderer workspace runtime, CLI durable transports and Machine RPC still use
-`createLoroStreamsTokenProviderLegacy` / `createTokenProviderLegacy`. Renderer
+`createLoroStreamsTokenProviderLegacy` / `createTokenProviderLegacy` (the CLI ones borrow
+a shared workspace kernel, below). Renderer
 teardown awaits this provider's close, retaining it on failure; the CLI official
 cloud composition retains Legacy providers until cloud-port disposal. Native
 `CloudStreamsTokenPort.createTokenProvider` places ownership in its caller's Scope.
@@ -94,5 +98,17 @@ CLI workspace presence creates one native provider in its workspace Scope. Durab
 Streams and machine monitor use `createLoroStreamsTokenProviderLegacy({ provider,
 executor })` with that provider and the existing application runtime; this mode
 creates no runtime or cache. Its close ends the provider after all cloud sinks
-are detached, and never disposes the borrowed executor. Renderer/Machine RPC
-callers may still use the owned options until their application ownership migrates.
+are detached, and never disposes the borrowed executor.
+
+In the official CLI cloud port every such provider, and the Machine RPC Legacy
+provider, is a view of one kernel per workspace (`apps/cli/src/lib/loro/streams-token-shares.ts`),
+so a cold start or reconnect makes one token request. A view's close fences and
+interrupts only its own reads; the last view closes the kernel, whose failed close
+still reports the kernel as recovery owner. Release failures and terminal auth of
+the shared kernel are visible to every view; a view that joins a terminally rejected
+kernel first invalidates it once, so a reattach after access is restored is admitted
+as a fresh kernel would be. Every view read first drives the kernel's shared bounded
+`retryCleanup` when a release failed (one immediate rerun only after an ended
+failure was reported and no raw work remains), and a view's `retryCleanup` finishes
+its failed last close without releasing its lease twice. Renderer callers still use the owned
+options until their application ownership migrates.

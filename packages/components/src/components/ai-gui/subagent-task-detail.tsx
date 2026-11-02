@@ -1,4 +1,12 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
@@ -110,6 +118,68 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 function TaskActivity({
   task,
   renderHistory,
+  onHistoryReady,
+}: {
+  task: SubagentTask;
+  renderHistory?: (task: SubagentTask) => ReactNode;
+  onHistoryReady?: () => void;
+}) {
+  const { t } = useTranslation();
+  const source = task.history;
+  const owner = JSON.stringify([task.run?.sessionId, task.taskId]);
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{
+    source: NonNullable<SubagentTask['history']>;
+    owner: string;
+    run?: SubagentTask['run'];
+  } | null>(null);
+  useEffect(() => {
+    if (!source) return undefined;
+    let cancelled = false;
+    void source.read().then(
+      (run) => {
+        if (!cancelled) setLoaded({ source, owner, run });
+      },
+      () => {
+        if (!cancelled) setLoaded({ source, owner });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [source, owner, attempt]);
+  useLayoutEffect(() => {
+    if (loaded?.source === source && loaded?.owner === owner && loaded?.run) onHistoryReady?.();
+  }, [loaded, source, owner, onHistoryReady]);
+  if (!source) return <MaterializedTaskActivity task={task} renderHistory={renderHistory} />;
+  if (loaded?.owner === owner && loaded.run) {
+    return (
+      <MaterializedTaskActivity task={{ ...task, run: loaded.run }} renderHistory={renderHistory} />
+    );
+  }
+  return (
+    <Section label={t('sessions.subagentTasks.activity', 'Activity')}>
+      {loaded?.source === source ? (
+        <Button
+          variant="ghost"
+          size="small"
+          onClick={() => {
+            setLoaded(null);
+            setAttempt((value) => value + 1);
+          }}
+        >
+          {t('common.retry', 'Retry')}
+        </Button>
+      ) : (
+        <Spinner size="small" />
+      )}
+    </Section>
+  );
+}
+
+function MaterializedTaskActivity({
+  task,
+  renderHistory,
 }: {
   task: SubagentTask;
   renderHistory?: (task: SubagentTask) => ReactNode;
@@ -199,16 +269,17 @@ function CancelTaskAction({
  */
 function useFollowEnd(ref: RefObject<HTMLDivElement | null>, follow: boolean, content: unknown) {
   const pinned = useRef(follow);
-  useLayoutEffect(() => {
+  const followEnd = useCallback(() => {
     const node = ref.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
-  }, [ref, content]);
+  }, [ref]);
+  useLayoutEffect(followEnd, [followEnd, content]);
   const onScroll = () => {
     const node = ref.current;
     if (!node) return;
     pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight <= FOLLOW_SLACK_PX;
   };
-  return onScroll;
+  return { onScroll, followEnd };
 }
 
 /** The task at full depth: what it is, the whole brief, its run, its result, its cost. */
@@ -244,7 +315,7 @@ export function SubagentTaskDetail({
     running &&
     task.taskKind === 'subagent' &&
     (task.run ? runCancellation && task.run.snapshot.support.cancel : true);
-  const onScroll = useFollowEnd(scrollerRef, running, task);
+  const { onScroll, followEnd } = useFollowEnd(scrollerRef, running, task);
 
   return (
     <>
@@ -283,7 +354,7 @@ export function SubagentTaskDetail({
           </Section>
         ) : null}
 
-        <TaskActivity task={task} renderHistory={renderHistory} />
+        <TaskActivity task={task} renderHistory={renderHistory} onHistoryReady={followEnd} />
 
         {/* A legacy task has no steps; the one line the row shows is all it has. */}
         {!task.run && latest ? (

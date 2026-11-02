@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoroRepo } from 'loro-repo';
 import type { MachineId, WorkspaceId } from '@lody/shared';
+import { machineFlockKeys, writeMachineFlockRowToFlock } from '@lody/shared';
+import { Flock } from '@loro-dev/flock-wasm';
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 
 const noopLogger = {
@@ -48,6 +50,78 @@ const makeCoordinator = (syncOnce: () => Promise<unknown>) => {
 };
 
 describe('MachineFlockSyncCoordinator sync confirmation', () => {
+  it('observes loaded project registrations without acquiring, syncing or rewriting a catalog', async () => {
+    const machineId = 'machine-1' as MachineId;
+    const projectId = 'synthetic-project' as import('@lody/shared').LocalProjectId;
+    const flock = new Flock();
+    let allowIo = false;
+    const handle = {
+      flock,
+      joinRoom: async () => {
+        if (!allowIo) throw new Error('query tried to join');
+        return {
+          unsubscribe() {},
+          firstSyncedWithRemote: Promise.resolve(),
+          status: 'detached',
+          onStatusChange: () => () => {},
+          subscription: () => ({
+            status: 'detached',
+            firstSyncedWithRemote: Promise.resolve(),
+            onStatusChange: () => () => {},
+          }),
+        };
+      },
+    };
+    const coordinator = new MachineFlockSyncCoordinator({
+      repo: {
+        openFlockDoc: async () => {
+          if (!allowIo) throw new Error('query tried to open storage');
+          return handle;
+        },
+      } as unknown as LoroRepo,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      logger: noopLogger as never,
+    });
+    expect(coordinator.peekLocalProjectRootPath(machineId, projectId)).toBeNull();
+    writeMachineFlockRowToFlock(
+      flock,
+      {
+        key: machineFlockKeys.localProject(projectId),
+        value: {
+          id: projectId,
+          name: 'Synthetic',
+          rootPath: '/synthetic/first',
+          createdAtMs: 1,
+        },
+      },
+      1
+    );
+    try {
+      allowIo = true;
+      await coordinator.ensureJoined(machineId);
+      allowIo = false;
+      expect(coordinator.peekLocalProjectRootPath(machineId, projectId)).toBe('/synthetic/first');
+      writeMachineFlockRowToFlock(
+        flock,
+        {
+          key: machineFlockKeys.localProject(projectId),
+          value: {
+            id: projectId,
+            name: 'Synthetic',
+            rootPath: '/synthetic/current',
+            createdAtMs: 1,
+          },
+        },
+        2
+      );
+      const before = await flock.exportFile();
+      expect(coordinator.peekLocalProjectRootPath(machineId, projectId)).toBe('/synthetic/current');
+      expect(await flock.exportFile()).toEqual(before);
+    } finally {
+      await coordinator.cleanUp();
+    }
+    expect(coordinator.peekLocalProjectRootPath(machineId, projectId)).toBeNull();
+  });
   it('confirms only a non-empty ok report', async () => {
     const coordinator = makeCoordinator(async () => ({
       ok: true,

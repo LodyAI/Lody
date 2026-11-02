@@ -21,7 +21,17 @@ backend. A complete runnable reference of the mailbox rules is
 
 **Authentication.** Every mailbox and staging request is made by an
 authenticated device. The server derives the *principal* (the device's signing
-key) from the session, never from the request body.
+key) from the session or from a device access credential bound when the device
+was admitted, never from the request body.
+
+**Where signatures are verified.** Signature checks have two tiers. The required
+tier is what every host must enforce; the optional tier adds server-side
+signature verification with the `@lody/e2ee-core/host` helpers. Lody Cloud
+implements only the required tier: it verifies signatures when accepting ledger
+records, and for mailbox and staging requests it applies the structural checks
+below. Recipients always verify signatures and key commitments themselves, so
+skipping the optional tier lets a device misbehave only in its own slots and its
+own envelopes, within the per-sender limits.
 
 ## 1. Ledger log
 
@@ -50,9 +60,10 @@ server.
 **`put(id, frame)`** — store an envelope authored by the principal.
 
 1. `envelopeRouting(frame)` must give `sender = principal` and this workspace.
-2. `authenticateEpochEnvelope(view, context, frame)` must pass at the current
-   view: the sender is an eligible current device (Recovery devices may not
-   send) and the recipient is a current device.
+2. At the current view, the sender is an eligible current device (Recovery
+   devices may not send), the recipient is a current device and the epoch is
+   current. Optional tier: `authenticateEpochEnvelope(view, context, frame)`
+   also verifies the envelope signature.
 3. `id` is the 16-byte delivery id (hex). An existing `(epoch, sender, id)`
    with a different digest is refused (`replay`). The same bytes again are a
    no-op.
@@ -72,9 +83,9 @@ if more rows exist. The whole page must come from one consistent read.
 exists for the current revision, `EnvelopeStored` if a live envelope exists,
 otherwise `NeedsEnvelope`; plus the repair revision.
 
-**`report(report, publication?)`** — `authenticateInstallationReport` against
-the current view, with the principal as recipient. For a local publication,
-`checkLocalPublication` must accept the supplied record. The report's revision
+**`report(report, publication?)`** — the decoded report names the principal as
+recipient at the current view. Optional tier: `authenticateInstallationReport`,
+and `checkLocalPublication` for a local publication. The report's revision
 must equal the slot's current revision, and an envelope source must still be
 stored and not rejected. Record the revision as reported.
 
@@ -93,15 +104,18 @@ Immutable storage for a rotation's complete envelope group, keyed by
 `(genesis, epoch, commitment, recordHash)`. Use the DTOs `EpochStagedGroupDto` /
 `EpochStagedGroupKeyDto` and their `decode…`/`encode…` helpers.
 
-- **Stage**: verify the device-possession proof, a signature by the principal
-  over `epochStagingRequestSigningBytes({ operation: 'stage', workspaceId, group })`,
-  where `workspaceId` is your own workspace identifier. Then
-  `checkEpochStageRequest({ genesis, principal, group })` must pass. Store the
-  group if absent. A retry must match every byte, otherwise refuse.
+- **Stage**: the principal must be the record's signing device named by the
+  group. Optional tier: verify the principal's signature over
+  `epochStagingRequestSigningBytes({ operation: 'stage', workspaceId, group })`,
+  where `workspaceId` is your own workspace identifier, and run
+  `checkEpochStageRequest({ genesis, principal, group })`. Store the group if
+  absent. A retry must match every byte, otherwise refuse. Clients verify a
+  staged group with `authenticateEpochStagedGroup` before using it.
 - **Read**: return the stored group or nothing. Anyone in the workspace may
   read; groups are ciphertext.
-- **Delete**: only the record's signing device, with a signed `delete` request
-  naming an `occupied` epoch and commitment that differs from the group's.
+- **Delete**: only the record's signing device (the principal), naming an
+  `occupied` epoch and commitment that differs from the group's. Optional tier:
+  require the request signature as well.
   Check ownership and delete atomically. The client has already verified that
   the occupied commitment is genuine.
 
@@ -157,3 +171,46 @@ adapters (`E2eeWorkflows` plus your ports) and drive receive, distribute,
 repair and publish. The core test suites in `test/keys/` show the
 fault cases worth reproducing: lost acknowledgements, retries after restart,
 rejected frames and revocation during a request.
+
+## Machine sharing policy storage (unconnected contract)
+
+Every Scope includes workspace/genesis, machine, owner membership instance and
+`generation` (hex32 initial machine-admission signing key of the uninterrupted
+replacement chain). A verified initial admission plus exact atomic replacements
+qualifies generation through `verifyMachineSharingGeneration`. Pass its opaque
+`machineGeneration` to all core policy operations. The original ledger records and
+snapshot/retained formats do not change. Unknown checkpoint prefixes need genuine
+ledger-history qualification, never a server-chosen root or counter.
+
+Control operations require device credentials/current ledger eligibility. New
+commits require the machine owner's active personal device and
+`admitMachineSharingFrame`. Recheck current generation and eligibility inside the
+same internal mutation as full scope/status/revision/digest CAS, request-intent
+deduplication and original/head insertion. Action-level verification alone cannot
+fence a removal between verification and commit. Every new generation starts at
+revision 1/null parent. Within it, increment by one and reference the complete
+original ciphertext's SHA-256 digest; the frame limit remains 262287 bytes.
+
+Removal permanently closes the old generation and captures its cleanup cutoff.
+Readmission, even for the same member and machineId, has a new initial key and
+resource: require fresh owner intent, private defaults and a new revision-one
+chain, without old policy bytes or pins. Old pending requests must conflict with
+the current ledger generation; no old head can be reactivated. Atomic same-member
+replacement preserves generation/policy. Cleanup and request receipts are scoped
+to the old generation, so delayed deletion cannot touch the new one. Exact old
+committed retries may return their retained receipt or removed after purge, never
+reinsert ciphertext. Keep lightweight original-intent digests to reject altered
+requestId reuse. Purged version reads may return null; old readHead retains its
+removed high water as storage evidence only, never a client verification pin.
+
+`latestForMember` remains an independent account-authenticated query for current
+workspace members, returning ciphertext/untrusted metadata only. It accepts no
+device credential and cannot renew execution freshness; machines use their own
+credential-authenticated latest-head action.
+
+Local cache age is strictly less than 15 minutes from before latest-read I/O,
+intersected with ledger/request deadlines. A server withholding newer versions
+can hide unknown withdrawal indefinitely despite those reads. Signatures and
+local chains provide no globally-latest proof; trusting complete latest delivery
+remains pending owner confirmation. No network or execution integration is enabled
+by this contract. See the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).

@@ -32,7 +32,7 @@ const dark = BOOT_SHELL_COLORS.dark;
 export const BOOT_SHELL_CSS = `
 ${WORKSPACE_FRAME_CSS}
 .lody-boot-shell {
-  --lody-frame-left: var(--lody-frame-gutter, 8px);
+  --lody-frame-left: var(--lody-frame-gutter, 4px);
   --lody-frame-canvas: hsl(${light.canvas});
   --lody-frame-border: hsl(${light.frameBorder} / .6);
   position: fixed; inset: 0; z-index: 30; box-sizing: border-box;

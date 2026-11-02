@@ -1,3 +1,4 @@
+import { waitForCodeCollabTask } from './code-collab-task';
 import {
   readCodeCollabFileIndexSignalFromFlock,
   writeCodeCollabFileIndexSignalToFlock,
@@ -23,6 +24,11 @@ type CodeCollabFlockHandle = {
 export type CodeCollabFlockRepo = {
   readonly openFlockDoc: (flockDocId: string) => Promise<CodeCollabFlockHandle>;
   readonly flush: () => Promise<void>;
+  readonly sync?: (options: {
+    readonly scope: 'doc';
+    readonly flockDocIds: string[];
+    readonly signal: AbortSignal;
+  }) => Promise<unknown>;
 };
 
 export class CodeCollabFileIndexChangedPublishError extends Error {
@@ -35,23 +41,27 @@ export class CodeCollabFileIndexChangedPublishError extends Error {
 }
 
 export async function publishCodeCollabFileIndexFlock(args: {
+  readonly signal?: AbortSignal;
   readonly repo: CodeCollabFlockRepo;
   readonly flockDocId: string;
   readonly fileIndex: CodeCollabV2FileIndexState;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
 }): Promise<{ readonly changed: boolean }> {
-  const handle = await args.repo.openFlockDoc(args.flockDocId);
+  args.signal?.throwIfAborted();
+  const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
   if (args.reconcileRemote) {
-    await handle.syncOnce();
+    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   }
+  args.signal?.throwIfAborted();
   const changed = writeCodeCollabFileIndexToFlock(handle.flock, args.fileIndex, args.updatedAtMs);
   if (!changed) {
     return { changed: false };
   }
   try {
-    await args.repo.flush();
-    await handle.syncOnce();
+    await waitForCodeCollabTask(args.repo.flush(), args.signal);
+    args.signal?.throwIfAborted();
+    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   } catch (error) {
     throw new CodeCollabFileIndexChangedPublishError(error);
   }
@@ -59,18 +69,40 @@ export async function publishCodeCollabFileIndexFlock(args: {
 }
 
 export async function publishCodeCollabFileIndexSignalFlock(args: {
+  readonly signal?: AbortSignal;
   readonly repo: CodeCollabFlockRepo;
   readonly flockDocId: string;
   readonly updatedAtMs: number;
 }): Promise<{ readonly changed: boolean; readonly revision: number }> {
-  const handle = await args.repo.openFlockDoc(args.flockDocId);
-  await handle.syncOnce();
+  args.signal?.throwIfAborted();
+  const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
+  await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+  args.signal?.throwIfAborted();
   const previous = readCodeCollabFileIndexSignalFromFlock(handle.flock);
   const revision = (previous?.r ?? 0) + 1;
   const changed = writeCodeCollabFileIndexSignalToFlock(handle.flock, revision, args.updatedAtMs);
   if (changed) {
-    await args.repo.flush();
-    await handle.syncOnce();
+    await waitForCodeCollabTask(args.repo.flush(), args.signal);
+    args.signal?.throwIfAborted();
+    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   }
   return { changed, revision };
+}
+
+async function syncFlock(
+  repo: CodeCollabFlockRepo,
+  handle: CodeCollabFlockHandle,
+  flockDocId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted();
+  // The shared Repo/Streams owner serializes its raw I/O even after a caller aborts.
+  // Never destroy/reopen that owner merely to cancel one optional refresh.
+  await waitForCodeCollabTask(
+    signal && repo.sync
+      ? repo.sync({ scope: 'doc', flockDocIds: [flockDocId], signal })
+      : handle.syncOnce(),
+    signal
+  );
+  signal?.throwIfAborted();
 }

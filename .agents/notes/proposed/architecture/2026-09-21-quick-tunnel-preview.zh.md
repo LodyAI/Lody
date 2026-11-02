@@ -193,7 +193,7 @@ Mobile 前端与 Electron production-mode bundle
 
 | 消融项 | 证据与结论 |
 | --- | --- |
-| 删除两套手写 header 聚合函数 | 保留删除：Fetch `Headers` 已合并重复名称；代理仍剥离应用 Cookie，且只输出一枚 capability Cookie。重复 header/Cookie 边界断言通过；这不是任意原始 header 列表的通用转换器。 |
+| 删除两套手写 header 聚合函数 | 保留删除：Fetch `Headers` 已合并重复名称；原改动剥离应用 Cookie，且只输出一枚 capability Cookie。后来的[应用 Cookie 决策](../../implemented/bug-fix/2026-10-28-preview-app-cookies.zh.md)分别保留改写后的 Set-Cookie；这不是任意原始 header 列表的通用转换器。 |
 | 删除纯内存槽位的异步包装、未使用时间参数和返回 key | 保留删除：预留与释放仍同步修改状态。新增跨工作区测试证明机器级上限，以及撤销、下载失败后的槽位复用。 |
 | 删除手工初始化及空操作 Promise resolver 字段 | 拒绝删除并恢复：88 项单测通过，但 CLI 构建/类型检查报 TS2550，因为当前配置的类型库不包含 `Promise.withResolvers`。不为这次清理扩大到全局编译配置变更。 |
 | 删除进行中的健康检查合并 | 拒绝删除并恢复：并发健康测试发起了重复探测，端点变成 inactive，而不是保持 active。 |

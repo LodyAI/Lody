@@ -1,3 +1,4 @@
+import { withScheduledMessageInput } from './schedule-run-preparation';
 import { projectTurnAttention } from '@lody/shared/notifications';
 import { turnNotificationAudience } from '../notifications/turn-notification-audience';
 import { describe, expect, it } from 'vitest';
@@ -49,6 +50,7 @@ const manager = {
   repo: {
     getDocMeta: async () => undefined,
     getWorkspaceMeta: async () => undefined,
+    openFlockDoc: async () => ({ flock: { scan: () => [] } }),
   },
   syncMetaOrThrow: async () => {},
 } as unknown as LoroDocumentManager;
@@ -83,6 +85,36 @@ describe('Session preparation for a scheduled run', () => {
       expect(prepared.meta).not.toHaveProperty(field);
     expect(prepared.meta.machineId).toBe('machine');
     expect(prepared.meta.agentConfigId).toBe('agent');
+    expect(prepared.userTurn.inputConfig?.mcpServerIds).toEqual([]);
+  });
+
+  it('hands complete message blocks to both history and frozen execution input', async () => {
+    const base = await prepare();
+    const blocks = [
+      {
+        type: 'file' as const,
+        fileId: 'frozen-file',
+        fileName: 'notes.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 5,
+        sha256: 'a'.repeat(64),
+        textPreview: true,
+        transport: 'local' as const,
+        machineId: 'machine',
+        uploadedAt: 1,
+      },
+      { type: 'text' as const, text: 'Say good morning.' },
+    ];
+    const prepared = withScheduledMessageInput(base, { inputBlocks: blocks });
+    expect(prepared.userTurn.items).toContainEqual(
+      expect.objectContaining({ type: 'file', fileId: 'frozen-file', transport: 'local' })
+    );
+    expect(prepared.userTurn.items).toContainEqual({ type: 'text', text: 'Say good morning.' });
+    expect(prepared.userTurn.inputConfig?.inputBlocks).toEqual(blocks);
+    expect(prepared.userTurn.inputConfig?.mcpServerIds).toEqual([]);
+    expect(prepared.userTurn.status).toBe('prepared');
+    expect(prepared.userTurn.id).toBe('turn-1');
+    expect(base.userTurn.items).not.toContainEqual(expect.objectContaining({ type: 'file' }));
   });
 
   it('carries the identifiers the engine froze, so a retry reuses one Session', async () => {
@@ -156,7 +188,7 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
     cliType: 'custom',
     agentType: 'acp',
     modes: [],
-    models: [],
+    models: [{ modelId: 'opus', name: 'Opus' }],
     fetchedAt: 0,
     configOptions: [
       { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
@@ -182,10 +214,14 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
       }),
     },
   } as unknown as LoroDocumentManager;
-  const prepareOptions = async (planMode: string | boolean) => {
+  const prepareOptions = async (
+    planMode: string | boolean,
+    fastValues: Record<string, string | boolean> = {}
+  ) => {
     const stored = ScheduleAgentSchema.parse({
       agentConfigId: 'agent',
-      configOptionValues: { plan_mode: planMode, select_flag: 'false' },
+      modelId: Object.keys(fastValues).length > 0 ? 'opus' : undefined,
+      configOptionValues: { plan_mode: planMode, select_flag: 'false', ...fastValues },
     });
     const agent = await resolveScheduleAgentRunConfig(
       localManager,
@@ -223,5 +259,18 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
   );
   it('leaves malformed legacy booleans for the ordinary validator to reject', async () => {
     await expect(prepareOptions('off')).rejects.toThrow('expects a boolean');
+  });
+  it.each([
+    { fast: 'false', 'fast-mode': 'true', expected: { fast: false, 'fast-mode': true } },
+    { fast: 'true', 'fast-mode': 'false', expected: { fast: true, 'fast-mode': false } },
+  ])('prepares legacy Fast values when the probe omits both Fast controls', async (values) => {
+    const { expected, ...fastValues } = values;
+    const prepared = await prepareOptions(false, fastValues);
+
+    expect(prepared.userTurn.inputConfig?.configOptionValues).toEqual({
+      plan_mode: false,
+      select_flag: 'false',
+      ...expected,
+    });
   });
 });

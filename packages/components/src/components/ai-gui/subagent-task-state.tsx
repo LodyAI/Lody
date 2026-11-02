@@ -1,3 +1,4 @@
+import type { SubagentRunHistorySource } from '@/lib/conversation-view/types';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { MessageContent } from '@lody/shared';
@@ -10,11 +11,35 @@ import { formatToolCommand } from './tool-call-command';
 export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }> & {
   /** Derived from the spawning tool in this turn; never persisted as task metadata. */
   command?: string;
+  /** Present only on a display projection. Its run.items is a latest-step preview. */
+  history?: SubagentRunHistorySource;
 };
 type SubagentRunItem = NonNullable<SubagentTask['run']>['items'][number];
 
 const isBashTask = (task: SubagentTask): boolean =>
   task.actor === 'local_bash' || task.taskType === 'local_bash';
+
+/**
+ * Provider task types that run a command or watch something rather than an
+ * agent. `taskKind` cannot tell these apart: Claude publishes `background` for
+ * any backgrounded run, an agent's included, and `subagent` for the rest.
+ */
+const NON_AGENT_TASK_TYPES = new Set(['local_bash', 'mcp_task', 'monitor_mcp']);
+
+/** Which tab of the panel a task belongs on. */
+export type TaskGroup = 'subagents' | 'tasks';
+
+/**
+ * An agent run is a subagent; a shell command, MCP task, monitor or scheduled
+ * wakeup is a task. An unrecognised type stays with the subagents, where the
+ * panel listed every task before it was split.
+ */
+export const groupOf = (task: SubagentTask): TaskGroup => {
+  if (task.taskKind === 'scheduled') return 'tasks';
+  if (task.subagentType || task.run) return 'subagents';
+  const type = task.taskType ?? task.actor;
+  return type && NON_AGENT_TASK_TYPES.has(type) ? 'tasks' : 'subagents';
+};
 
 /**
  * A task's state. A task carrying a normalized run reads its snapshot, which
@@ -54,7 +79,7 @@ export const collectSubagentTasks = (items: readonly MessageContent[]): Subagent
   }
   return [...byId.values()].map((task) => {
     const command = isBashTask(task) && task.toolUseId ? commands.get(task.toolUseId) : undefined;
-    return command ? { ...task, command } : task;
+    return command ? { ...task, command, history: task.history } : task;
   });
 };
 

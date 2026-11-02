@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import i18next from 'i18next';
 import {
   getSessionFileDownloadApiPath,
@@ -25,6 +26,12 @@ export async function captureSessionShare(options: {
   previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
   signal: AbortSignal;
 }) {
+  await options.runtime.waitForContentAdmission?.(options.signal);
+  options.signal.throwIfAborted();
+  requireWorkspaceFeature(
+    { mode: options.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+    'sharing'
+  );
   const stores: Array<{ store: SessionDocStore; releaseSync: () => void }> = [];
   try {
     const orderedStores = await mapShareConcurrent(

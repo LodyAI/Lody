@@ -66,7 +66,9 @@ export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem)
       if (result.code === 'ENOENT') return 'not_installed';
       try {
         const status = z.object({ status: z.string() }).parse(JSON.parse(result.stdout));
-        return status.status === 'ok' && result.code === undefined ? 'ready' : 'not_running';
+        return (status.status === 'ok' || status.status === 'healthy') && result.code === undefined
+          ? 'ready'
+          : 'not_running';
       } catch {
         return result.code !== undefined ? 'not_running' : 'error';
       }

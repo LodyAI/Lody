@@ -59,6 +59,14 @@ a deleted row. Deleting an association leaves the external identity and existing
 Role/turn references intact. See the
 [association decision](../notes/implemented/feature/2026-10-05-memory-association-catalog.md).
 
+Project MCP defaults share this workspace document as one optional ids-array row
+per project. Missing rows inherit catalog defaults; present rows replace them,
+including an empty selection. Authoring resolves these defaults before accepting
+a new conversation, while continuation inherits the target conversation selection.
+The existing per-turn and Operation target configurations carry the resolved ids;
+startup and recovery do not reapply project policy. The
+[project default Spec](../../specs/project-default-mcp.md) describes UI behavior
+and acceptance scope.
 Memory batch import reuses these per-row writes sequentially. The editor removes
 successful rows from its checkbox selection, stops on the first failed write, and
 keeps remaining selections for retry; it does not roll back earlier durable rows.

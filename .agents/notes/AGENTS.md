@@ -1,81 +1,113 @@
 # Agent Notes
 
-Notes are important decision records for human and agent contributors. Shared
-maintenance and publication rules come from the [parent instructions](../AGENTS.md).
+Notes are the repository's decision memory for human and agent contributors: the
+why, the rejected alternatives, and the evidence that code and docs cannot carry.
+Shared maintenance and publication rules come from the [parent instructions](../AGENTS.md).
+The rationale for these rules is recorded in
+[note memory hygiene](implemented/process/2026-10-28-agent-note-memory-hygiene.md).
 
 ## When to write
 
-Every non-trivial change MUST add or update an Agent Note in the same PR.
-Non-trivial work changes behavior, architecture, cross-file or package contracts,
-storage/wire/configuration formats, process/tooling, testing strategy, or another
-decision a maintainer may reasonably revisit. A short diff is not an exemption.
-Only mechanical or local edits that change none of these decisions or their
-rationale need only a PR summary.
+Add or update a note in the same PR only for durable decision rationale that code,
+tests, Specs, and existing docs do not explain. A note qualifies when it records at
+least one of: a genuine alternative and why it lost; a constraint that tests and
+types cannot enforce; a measurement with its conditions; a storage, wire, protocol
+or configuration format change; an ownership or responsibility boundary. Research
+or design that produces a substantial proposal or a consequential finding needs a
+note even without a PR; record it as `proposed` and never invent approval or
+verification. If the task forbids file writes, report the intended note instead.
 
-Research and design that produce a substantial proposal, a consequential finding,
-or a correction to an earlier conclusion also require a note, even without code
-changes or a PR. Record proposals as `proposed`; do not invent approval or completed
-verification. If the task explicitly forbids file writes, report the intended note
-and defer the write rather than overriding that restriction.
+A bug fix earns a note only when it exposes such a constraint or alternative; a
+fix that is merely done belongs in its PR description and regression test.
+Mechanical or local edits, including local UI presentation and interaction
+changes, are exempt. A short diff is not an exemption and a long one is not a
+reason.
 
-Search for the existing owning note first; updating it satisfies this requirement.
-Use a new linked note for a different decision rather than duplicating the owner
-or rewriting a historical decision into its opposite. Updating an affected Spec
-is separate, even when no note is needed.
-
-Record the problem, responsibilities, evidence-backed discoveries, genuine
-alternatives, trade-offs, outcome, verification limits, and PR link when available.
+Record the problem, the decision, evidence-backed discoveries, genuine alternatives,
+trade-offs, consequences, verification limits, and the PR link when it exists.
 Do not invent alternatives or PRs.
 
-Under the root compact-documentation rule, consolidate redundant PR-local notes,
-retaining decisions, reproducible evidence and unresolved limits; repair inbound
-links. The root rule also covers guides and READMEs outside this directory.
-
-A note is not overflow space for an oversized `AGENTS.md`. Nothing makes an agent
-read a dated note before changing a file, so a constraint that still binds stays
-in the nearest `AGENTS.md` even when its rationale moves here; leave the one-line
-rule in place and link the note. See
+A note is not overflow space for an oversized `AGENTS.md`. A constraint that still
+binds stays in the nearest `AGENTS.md` with its rationale linked here; see
 [where content goes](../README.md#where-content-goes).
+
+## Supersession
+
+Every new note triggers a supersession check. Before drafting, search active notes
+(`proposed/` and `implemented/`) for the same decision, mechanism or rejected
+alternative, then classify each match in the same PR:
+
+- **Owning note exists:** update it instead of creating a duplicate.
+- **Fully superseded implemented note:** archive it and list it in the new note's
+  `Supersedes:` metadata line; the check rejects a `Supersedes` target that is
+  still active. Carry every unique rationale, alternative, measurement and
+  reintroduction condition into the new owner first.
+- **Partially superseded:** keep both active and cross-link them; update the facts
+  that remain current in the older note.
+- **Obsolete proposal:** reject it with the reason; never archive a proposal.
+
+Use the [archive-agent-notes skill](../skills/archive-agent-notes/SKILL.md) for
+classification and the archive procedure. Judge by future decision value, not by
+word count, age or a quota.
+
+## Linking
+
+Notes are found through the documents agents already read before changing code.
+Every active note is linked from its current-state owner: the README section,
+`.agents/docs/` page, `AGENTS.md` rule or Spec covering the code or process it
+explains. The owner states in a sentence what is true now; the note explains why.
+Several notes about one module or provider become one owner section with a line
+per behavior, so a reader sees the current set without reconstructing it from
+dated records. The check rejects a new note that no such document links; a link
+from another note does not count. `pnpm run docs status` lists existing active
+notes without an owner link (`unlinkedNotes`).
+
+## Maintenance on read
+
+Memory is maintained where it is used. When a task relies on a note and finds it
+wrong, fix it in the same PR, limited to notes the task actually relied on:
+
+- A cited path, symbol or default moved: update the fact (implemented notes only).
+- No owner link: add the one-line entry and link to the owner, or archive or delete
+  the note through the [archive skill](../skills/archive-agent-notes/SKILL.md) if
+  it no longer guides work.
+- Wrong lifecycle: the PR that implements a proposal moves it to `implemented/` and
+  rewrites its plan in the present tense; a proposal shown obsolete is rejected.
+- A later note corrects it: apply the supersession rules below.
 
 ## Opening abstract
 
 After the title, metadata, and language link, start the body with `## Abstract`
-(`## 摘要` in Chinese). Write one short, self-contained paragraph, usually three
-to five sentences, like a paper abstract in plain language: the concrete problem
-and its impact, the chosen or proposed approach, and the outcome or conclusion.
-Include the most important trade-off or unresolved limit when it changes how the
-reader should interpret the result. A proposal states what is proposed and what
-remains unverified; never present expected benefits as measured results.
+(`## 摘要` in Chinese): one short, self-contained paragraph, usually three to five
+sentences, giving the concrete problem and its impact, the chosen or proposed
+approach, and the outcome or conclusion, plus the most important trade-off or
+unresolved limit when it changes how the reader should interpret the result. A
+proposal states what is proposed and what remains unverified; never present
+expected benefits as measured results.
 
-Readers should understand the decision without opening links or reading the rest.
-Avoid file inventories, unexplained acronyms, chronology, and generic claims such
-as "improves maintainability." Keep implementation evidence and detailed alternatives
-in the body. Both language versions carry the same abstract meaning.
+The abstract is what a future agent reads first and often only. Avoid file
+inventories, chronology, and generic claims such as "improves maintainability".
 
 ## Lifecycle and type
 
 Paths are `{lifecycle}/{type}/yyyy-mm-dd-topic.md` with an adjacent `.zh.md`
-counterpart; either language may be authored first. Create folders when a note
-needs them, not a full matrix of empty directories.
-
-The two axes are independent: lifecycle answers "what state is the decision in?";
-type answers "what is the decision about?" Every lifecycle uses the same type set.
-For example, a process proposal starts at `proposed/process/`; once adopted and
-implemented, move its language pair to `implemented/process/`. Its type stays the same.
-A runtime architecture proposal belongs in `proposed/architecture/` instead.
-
-Lifecycle and the `Status:` line agree:
+counterpart. Lifecycle is the decision's state and type is its subject; a
+lifecycle move updates paths, status, translations, and inbound links together.
 
 - `proposed/` + `Status: proposed`: pending decisions or work still under review.
-- `implemented/` + `Status: implemented`: an adopted decision put into practice;
-  name the evidence and remaining limits. This does not approve a linked Spec.
-- `rejected/` + `Status: rejected`: explain why it was declined. Retain it while
-  that reason can prevent a plausible mistake.
-- `archived/` + `Status: implemented` and `Archived: YYYY-MM-DD`: historical
-  implemented decisions no longer useful as active guidance. They are not current
-  authority. Archive only implemented notes; obsolete proposals need a verdict.
-
-Types:
+  Its body may speak in the future tense: plans, acceptance criteria, open questions.
+- `implemented/` + `Status: implemented`: an adopted decision in practice, written
+  in the present tense and **kept current with what shipped**. When a later change
+  moves a file, renames a symbol, or changes a default this note cites, update the
+  fact in the same change; do not append change history. The decision and its
+  rationale are not rewritten: a reversal is a new linked note. Proposal-era
+  headings (`## Plan`, `## Migration plan`, `## Acceptance criteria`, `## Proposal`)
+  are rejected here; fold them into `## Decision` and `## Consequences`. This
+  status does not approve a linked Spec.
+- `rejected/` + `Status: rejected`: explain why it was declined. Keep it only while
+  that reason prevents a plausible mistake; otherwise delete the language pair.
+- `archived/` + `Status: implemented` and `Archived: YYYY-MM-DD`: frozen snapshots
+  of implemented decisions that no longer guide work; never current authority.
 
 | Folder           | Decision concerns                                         |
 | ---------------- | --------------------------------------------------------- |
@@ -86,33 +118,27 @@ Types:
 | `process`        | Contributor workflows, tooling, and repository policy     |
 | `testing`        | Verification strategy or test infrastructure              |
 
-Pick the type of the decision, not every affected surface. Small fixes remain
-exempt even though a bug-fix folder exists. A lifecycle move updates paths,
-status, existing translations, and inbound links together.
+Pick the type of the decision, not every affected surface. `pnpm run docs status`
+lists active notes whose cited repository paths no longer exist
+(`staleReferences`); handle them under [maintenance on read](#maintenance-on-read).
+
+## Verification
+
+Evidence is kept; run logs are not. Measurements, reproduction commands, benchmark
+tables and their conditions belong in the body or `assets/` because a future
+reviewer needs them. A `Verification` section links the test, story or fixture
+that pins each behavior and names what remains unverified. Pass counts, lint or
+documentation-check results and environment notes carry no future value; the
+status command warns about them in changed notes.
 
 ## History and language
 
-Translation follows the [shared language policy](../README.md#asynchronous-bilingual-documentation),
-with one addition for agents. When the author is an Agent, land both `.md` and
-`.zh.md` in the same change: cross-link the two languages, keep their `Status:`
-equal, carry the same Abstract/摘要 meaning, and mark both `Translation: current`.
-`Translation: pending` remains available only to a human who cannot write the
-other language; an agent that can write both never merges a note as pending.
+Translation follows the [shared language policy](../README.md#asynchronous-bilingual-documentation).
+An Agent author lands both `.md` and `.zh.md` in the same change, cross-linked,
+with equal `Status:`, the same abstract meaning, and `Translation: current`;
+`Translation: pending` is only for a human who cannot write the other language.
 
-Implemented notes preserve the decision in its historical context. Keep current
-implementation behavior in owning docs; only consequential human-reviewed intent
-belongs in [Specs](../../specs/AGENTS.md). A Note does not require a companion Spec.
-Important later changes use a new linked note. Identify
-factual corrections as corrections. Adding a note includes a scoped search for
-related decisions: link partial replacements and archive obsolete implemented
-records only when their rationale is no longer useful. Do not rewrite an old
-choice into its opposite or silently remove rationale still constraining work.
-
-Archived bodies are historical snapshots; use active documentation for current
-facts and new linked records for corrections. Pending translations may be added
-without rewriting the original history. Repository-wide link checks include archives;
-repair broken link targets without changing the historical rationale. There is no
-automated archive seal yet.
-Do not add a global index or log that every contribution must modify. Search
-proposed and implemented notes for current work; search archives explicitly for
-historical questions, not as current authority.
+A note does not require a companion [Spec](../../specs/AGENTS.md). Identify factual
+corrections as corrections. Repair a broken link target in an archived note
+without changing its rationale. Do not add a global index or log that every
+contribution must modify.

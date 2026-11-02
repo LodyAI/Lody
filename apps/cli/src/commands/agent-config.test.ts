@@ -2,6 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Flock } from '@loro-dev/flock-wasm';
+import {
+  getMachineFlockAgentConfigs,
+  getMachineFlockProviderSetups,
+  readMachineFlockRowsFromFlock,
+  writeMachineFlockRowToFlock,
+  machineFlockKeys,
+} from '@lody/shared';
+import { importMagpieProviders, resolveMagpieImport } from './magpie-import';
 import { toAgentConfigOutput } from './agent-config-output';
 import type { AgentConfigMeta, MachineMeta } from '@lody/shared';
 import {
@@ -17,6 +26,14 @@ import {
 const state = vi.hoisted(() => ({
   config: undefined as AgentConfigMeta | undefined,
   saved: undefined as AgentConfigMeta | undefined,
+  flock: undefined as Flock | undefined,
+  flushed: undefined as ReturnType<typeof readMachineFlockRowsFromFlock> | undefined,
+  syncResults: [true, true],
+  online: true,
+}));
+
+vi.mock('@/utils/file-lock', () => ({
+  fileLocksLegacy: { withLock: async (_key: string, action: () => Promise<unknown>) => action() },
 }));
 
 vi.mock('@/lib/command-runtime', async (importOriginal) => {
@@ -30,8 +47,29 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
       _workspace: unknown,
       _name: string,
       action: (manager: object) => Promise<void>
-    ) => action({ repo: {} }),
-    listAliveDocMetas: async () => [{ meta: { id: 'machine-id', name: 'Machine' } }],
+    ) =>
+      action({
+        repo: {
+          openFlockDoc: async () => ({ flock: state.flock }),
+          flush: async () => {
+            state.flushed = state.flock
+              ? structuredClone(readMachineFlockRowsFromFlock(state.flock))
+              : undefined;
+          },
+        },
+        getOnlineMachineIds: async () => new Set(state.online ? ['machine-id'] : []),
+        markMachineFlockDocDirty: () => {},
+        syncMachineFlockDoc: async () => state.syncResults.shift() ?? true,
+      }),
+    listAliveDocMetas: async () => [
+      {
+        meta: {
+          id: 'machine-id',
+          name: 'Machine',
+          protocolCapabilities: { magpieImport: 1, providerSetup: 1, builtinPi: 1 },
+        },
+      },
+    ],
     runOneShotCommand: async (_name: string, _options: unknown, action: () => Promise<void>) =>
       action(),
     ensureWorkspaceMetaSynced: async () => {},
@@ -162,6 +200,161 @@ FOO=from-file
   });
 });
 
+describe('Magpie provider imports', () => {
+  const machine = createMachine({
+    protocolCapabilities: { magpieImport: 1, providerSetup: 1, builtinPi: 1 },
+  });
+  function harness() {
+    const flock = new Flock();
+    let id = 0;
+    const run = (targets?: string, targetMachine = machine) =>
+      importMagpieProviders({
+        flock,
+        machine: targetMachine,
+        request: resolveMagpieImport({ targets }),
+        existing: [],
+        newId: () => `magpie-${++id}` as AgentConfigMeta['id'],
+        now: 1000,
+      });
+    const read = () => {
+      const rows = readMachineFlockRowsFromFlock(flock);
+      return {
+        configs: Object.values(getMachineFlockAgentConfigs(rows)),
+        setups: Object.values(getMachineFlockProviderSetups(rows)),
+      };
+    };
+    return { flock, run, read };
+  }
+
+  it('persists all seven native mappings and preserves identities across retries', () => {
+    const { run, read } = harness();
+    const result = run();
+    expect(result.map((p) => p.target)).toEqual([
+      'claude',
+      'codex',
+      'pi',
+      'dsh',
+      'kimi',
+      'grok',
+      'bub',
+    ]);
+    expect(read().configs.map((c) => c.agentType)).toEqual(['deepseek']);
+    expect(read().setups).toHaveLength(6);
+    const configs = [...read().configs, ...read().setups.map((s) => s.config)];
+    expect(
+      configs.every(
+        (c) =>
+          c.magpieGatewayUrl === 'http://127.0.0.1:3425' &&
+          c.cliType === 'builtin' &&
+          c.machineId === machine.id
+      )
+    ).toBe(true);
+    expect(configs.find((c) => c.agentType === 'pi')?.env).toEqual({});
+    expect(configs.find((c) => c.agentType === 'deepseek')?.env).toEqual({
+      DEEPSEEK_BASE_URL: 'http://127.0.0.1:3425/v1',
+      DEEPSEEK_API_KEY: 'magpie-lody',
+    });
+    const before = read();
+    expect(run().map((p) => p.agentConfigId)).toEqual(result.map((p) => p.agentConfigId));
+    expect(read()).toEqual(before);
+  });
+
+  it('retries failed setup without replacing its configuration or other providers', () => {
+    const { flock, run, read } = harness();
+    run('pi');
+    const original = read().setups[0]!;
+    const failed = {
+      ...original,
+      config: { ...original.config, name: 'My Pi' },
+      status: 'failed' as const,
+      failureCode: 'verification-failed' as const,
+    };
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.providerSetup(failed.id),
+      value: failed,
+    });
+    run('pi,codex');
+    expect(read().setups.find((s) => s.id === original.id)).toEqual({
+      ...original,
+      config: failed.config,
+      status: 'queued',
+      attempt: 2,
+    });
+    expect(read().setups).toHaveLength(2);
+  });
+
+  it('rejects unsupported Pi before writing any selected provider', () => {
+    const { run, read } = harness();
+    expect(() =>
+      run(
+        'claude,pi',
+        createMachine({ protocolCapabilities: { magpieImport: 1, providerSetup: 1 } })
+      )
+    ).toThrow('builtin Pi');
+    expect(read()).toEqual({ configs: [], setups: [] });
+    expect(() => run('codex', createMachine())).toThrow('daemon');
+    expect(read()).toEqual({ configs: [], setups: [] });
+  });
+
+  it('completes a partial import without overwriting a published provider', () => {
+    const { flock, run, read } = harness();
+    run('pi');
+    const config = {
+      ...read().setups[0]!.config,
+      name: 'Preserve my Pi',
+      env: { CUSTOM: 'synthetic' },
+    };
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.agentConfig(config.id),
+      value: config,
+    });
+    expect(run('pi,codex')[0]?.status).toBe('existing');
+    expect(read().configs).toEqual([config]);
+    expect(read().setups).toHaveLength(2);
+  });
+
+  it('creates a fresh setup rather than reviving a cancelled one', () => {
+    const { flock, run, read } = harness();
+    run('pi');
+    const cancelled = read().setups[0]!;
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.providerSetupCancellation(cancelled.id),
+      value: { v: 1, id: cancelled.id, machineId: machine.id, cancelledAt: 1001 },
+    });
+    const result = run('pi');
+    expect(result[0]?.agentConfigId).not.toBe(cancelled.id);
+    expect(read().setups.find((s) => s.id === cancelled.id)).toEqual(cancelled);
+    expect(read().setups).toHaveLength(2);
+  });
+
+  it('validates gateway, link selection and duplicate targets before import', () => {
+    expect(() => resolveMagpieImport({ gateway: 'https://example.com' })).toThrow();
+    expect(() => resolveMagpieImport({ link: '' })).toThrow();
+    expect(() => resolveMagpieImport({ targets: 'pi,pi' })).toThrow('Invalid --targets');
+    expect(() => resolveMagpieImport({ targets: '' })).toThrow('Invalid --targets');
+    const data = Buffer.from(
+      JSON.stringify({
+        kind: 'custom',
+        id: 'magpie',
+        name: 'Magpie',
+        auth: { method: 'apiKey', apiKey: 'magpie-lody' },
+        endpoints: [
+          {
+            protocol: 'openai-chat',
+            baseUrl: 'http://127.0.0.1:3425/v1',
+            targets: ['pi'],
+            modelsUrl: 'http://127.0.0.1:3425/v1/models',
+          },
+        ],
+      })
+    ).toString('base64url');
+    const link = `lody://provider/import?v=1&data=${data}`;
+    expect(resolveMagpieImport({ link }).targets).toEqual(['pi']);
+    expect(() => resolveMagpieImport({ link, targets: 'codex' })).toThrow('Invalid --targets');
+    expect(() => resolveMagpieImport({ link, gateway: 'http://127.0.0.1:3425' })).toThrow('either');
+  });
+});
+
 const syntheticEnv = {
   OPENAI_API_KEY: 'synthetic-key-never-valid',
   ORDINARY_NAME: 'synthetic-arbitrary-value',
@@ -199,6 +392,37 @@ describe('agent-config output boundary', () => {
       expect(output).not.toContain(JSON.stringify(value).slice(1, -1));
     }
   }
+
+  it('imports through the CLI on the invoking machine and reports durable rows when upload fails', async () => {
+    state.flock = new Flock();
+    state.flushed = undefined;
+    state.syncResults = [true, false];
+    state.online = true;
+    vi.stubEnv('LODY_MACHINE_ID', 'unrelated-remote-machine');
+    try {
+      const output = JSON.parse(await run(['import-magpie', '--targets', 'pi,dsh', '--json']));
+      expect(output).toMatchObject({ ok: true, machineId: 'machine-id', synced: false });
+      expect(output.providers.map((p: { target: string }) => p.target)).toEqual(['pi', 'dsh']);
+      expect(Object.values(getMachineFlockProviderSetups(state.flushed!))[0]?.config).toMatchObject(
+        { agentType: 'pi', magpieGatewayUrl: 'http://127.0.0.1:3425', machineId: 'machine-id' }
+      );
+      expect(Object.values(getMachineFlockAgentConfigs(state.flushed!))[0]?.agentType).toBe(
+        'deepseek'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(['offline', 'sync'])('does not write when preflight fails: %s', async (failure) => {
+    state.flock = new Flock();
+    state.flushed = undefined;
+    state.online = failure !== 'offline';
+    state.syncResults = [false];
+    await expect(run(['import-magpie', '--targets', 'pi', '--json'])).rejects.toThrow();
+    expect(readMachineFlockRowsFromFlock(state.flock)).toEqual({});
+    expect(state.flushed).toBeUndefined();
+  });
 
   it.each([false, true])(
     'show hides every env value (json=%s) without changing stored values',

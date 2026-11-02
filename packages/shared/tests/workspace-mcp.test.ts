@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { McpServerId } from '../src/ids';
 import {
   formatMcpResolutionProblem,
+  getEffectiveDefaultMcpIds,
+  getProjectMcpKey,
   interpolateEnvVars,
   isMcpConnectionSpec,
   normalizeMcpServerIdSelection,
@@ -236,5 +238,39 @@ describe('workspace MCP guards and normalization', () => {
     expect(normalizeMcpServerIdSelection([])).toEqual([]);
     expect(normalizeMcpServerIdSelection(undefined)).toBeUndefined();
     expect(normalizeMcpServerIdSelection([' one ', '', 'one', 42, 'two'])).toEqual(['one', 'two']);
+  });
+});
+
+describe('project default selection', () => {
+  it('inherits only absent preferences and filters deleted ids without re-enabling defaults', () => {
+    const catalog = [stdioServer('a', { enabledByDefault: true }), stdioServer('b')];
+    expect(getEffectiveDefaultMcpIds(catalog)).toEqual(['a']);
+    expect(getEffectiveDefaultMcpIds(catalog, { ids: [] })).toEqual([]);
+    expect(
+      getEffectiveDefaultMcpIds(catalog, { ids: [serverId('b'), serverId('gone'), serverId('b')] })
+    ).toEqual(['b']);
+    expect(
+      getEffectiveDefaultMcpIds([...catalog, stdioServer('new', { enabledByDefault: true })], {
+        ids: [serverId('b')],
+      })
+    ).toEqual(['b']);
+  });
+
+  it('shares project defaults across branches but isolates project kinds and machines', () => {
+    const local = {
+      kind: 'local' as const,
+      localProjectId: 'project' as import('../src/project').LocalProjectId,
+      githubRepoFullName: 'Example/Repo',
+    };
+    expect(getProjectMcpKey(local, 'a')).toBe(
+      getProjectMcpKey({ ...local, branch: 'feature', useWorktree: true }, 'a')
+    );
+    expect(getProjectMcpKey(local, 'a')).not.toBe(getProjectMcpKey(local, 'b'));
+    expect(getProjectMcpKey(local)).toBeUndefined();
+    const github = { kind: 'github' as const, repoFullName: 'Example/Repo', branch: 'main' };
+    expect(getProjectMcpKey(github)).toBe(
+      getProjectMcpKey({ ...github, repoFullName: 'example/repo', branch: 'feature' })
+    );
+    expect(getProjectMcpKey(github)).not.toBe(getProjectMcpKey(local, 'a'));
   });
 });

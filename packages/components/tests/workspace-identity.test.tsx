@@ -169,8 +169,7 @@ describe('workspace identity capability boundary', () => {
     const sidebar = (key: string) => <LoroSidebar {...sidebarProps} scrollStateKey={key} />;
     render(<Provider store={store}>{sidebar('workspace-a')}</Provider>);
 
-    const viewport = () =>
-      container?.querySelector<HTMLDivElement>('[data-radix-scroll-area-viewport]');
+    const viewport = () => container?.querySelector<HTMLDivElement>('[data-scroll-area-viewport]');
     expect(viewport()).not.toBeNull();
     viewport()!.scrollTop = 180;
     flushSync(() => root?.render(<Provider store={store}>{null}</Provider>));
@@ -200,6 +199,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('syncing');
     expect(status?.textContent).toBe('Syncing target workspace…');
+    expect(status?.querySelector('[data-working-grid]')).not.toBeNull();
   });
 
   it('keeps connection failures ahead of workspace synchronization', () => {
@@ -215,6 +215,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('offline');
     expect(status?.textContent).toBe('No connection');
+    expect(status?.querySelector('[data-working-grid]')).toBeNull();
   });
 
   it('supports a content-scoped loading placeholder without taking over the viewport', () => {

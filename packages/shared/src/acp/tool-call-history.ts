@@ -86,14 +86,6 @@ const isToolImagePayload = (value: unknown): boolean => {
   );
 };
 
-/**
- * Applies the tool image rule to a raw tool result array, such as Claude's
- * `[{ type: 'image', source }, { type: 'text', text }]`, before it is stored as
- * readable child output.
- */
-export const stripRawOutputImagesForHistory = (output: readonly unknown[]): unknown[] =>
-  output.filter((item) => !isToolImagePayload(item));
-
 /** Tool images are execution output, not durable conversation attachments. */
 export const stripToolCallPayloadsForHistory = (content: ToolCallContent): ToolCallContent =>
   content

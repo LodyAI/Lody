@@ -1,6 +1,7 @@
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
+import { useLegacyWorkspaceAction } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCloudAction } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from '@/lib/toast';
 import {
@@ -14,11 +15,12 @@ export function usePersonalGitHubAuthorization(
   workspaceId: string | null,
   workspaceSlug: string | null | undefined
 ) {
-  const begin = useCloudAction(cloudOperations.github.beginPersonalAuthorization);
-  const complete = useCloudAction(cloudOperations.github.completePersonalAuthorization);
+  const begin = useLegacyWorkspaceAction(cloudOperations.github.beginPersonalAuthorization);
+  const complete = useLegacyWorkspaceAction(cloudOperations.github.completePersonalAuthorization);
   const { t } = useTranslation();
+  const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || legacyStatus !== 'allowed') return;
     try {
       const callback = takePersonalGitHubCallback();
       if (!callback) return;
@@ -32,7 +34,7 @@ export function usePersonalGitHubAuthorization(
         t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
       );
     }
-  }, [workspaceId, complete, t]);
+  }, [workspaceId, complete, legacyStatus, t]);
   return useCallback(async () => {
     if (!workspaceId || !workspaceSlug) return;
     const { verifier, challenge } = await createPersonalGitHubProof();

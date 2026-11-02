@@ -3,6 +3,7 @@
 Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink; edit this file only.
 Intent: [chat image export](../../../../../specs/chat-share-image.md). Rationale:
 [the redesign note](../../../../../.agents/notes/implemented/feature/2026-09-14-chat-share-card-fixed-template.md).
+WebKit export sharpness: [rendering decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-29-webkit-share-image-sharpness.md).
 
 - `chat-share-card.tsx` is ONE fixed template, not an appearance editor: one gutter
   per band, left-aligned turns, unconditional code wrap, no height cap, no QR.

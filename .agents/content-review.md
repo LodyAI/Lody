@@ -157,7 +157,8 @@ hubs and archived notes. Dependency/build output is normally ignored by Git; sub
 contents belong to their own repository. Symlink aliases are skipped in favor of their
 canonical files. Heading fragments are not validated. Archived metadata and prose
 are historical, but broken outbound links are reported and may be repaired without
-changing the historical decision. Every canonical `AGENTS.md` must be under 8192 bytes.
+changing the historical decision. Every canonical `AGENTS.md` must stay within its
+word ceiling in `scripts/docs/agents-budgets.json`.
 
 One malformed topic produces `{ topic, status: "error", message }` alongside the
 healthy topics and document queues. Source parsing errors appear in the shared error

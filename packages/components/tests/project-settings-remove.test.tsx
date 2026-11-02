@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -96,19 +96,31 @@ describe('ProjectSettingsView local-project remove', () => {
     expect(container.textContent).not.toContain('Delete project');
   });
 
-  it('exposes delete and calls onRequestRemoveLocalProject', async () => {
-    const onRequestRemoveLocalProject = vi.fn();
+  it('deletes the selected project directly from settings', async () => {
+    function Settings() {
+      const [rows, setRows] = useState(sections);
+      return (
+        <ProjectSettingsView
+          sections={rows}
+          githubSections={[]}
+          isLoading={false}
+          githubProjectsLoading={false}
+          canRemoveLocalProject={() => true}
+          onRequestRemoveLocalProject={(target) =>
+            setRows((current) =>
+              current.map((section) => ({
+                ...section,
+                rows: section.rows.filter((row) => row.key !== target.key),
+              }))
+            )
+          }
+        />
+      );
+    }
     await act(async () => {
       root.render(
         <SettingsStoryProviders>
-          <ProjectSettingsView
-            sections={sections}
-            githubSections={[]}
-            isLoading={false}
-            githubProjectsLoading={false}
-            canRemoveLocalProject={() => true}
-            onRequestRemoveLocalProject={onRequestRemoveLocalProject}
-          />
+          <Settings />
         </SettingsStoryProviders>
       );
     });
@@ -123,8 +135,12 @@ describe('ProjectSettingsView local-project remove', () => {
     );
     expect(deleteButtons.length).toBeGreaterThan(0);
     await act(async () => deleteButtons[0]?.click());
-    expect(onRequestRemoveLocalProject).toHaveBeenCalledTimes(1);
-    expect(onRequestRemoveLocalProject.mock.calls[0]?.[0]?.project.name).toBe('Lody');
+    expect(container.textContent).toContain('No folders added on this machine yet.');
+    expect(
+      Array.from(document.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === 'Delete project'
+      )
+    ).toBe(false);
   });
 
   // One add for the page, named like every catalog's: the folder dialog asks

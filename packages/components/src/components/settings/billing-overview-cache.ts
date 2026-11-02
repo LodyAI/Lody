@@ -5,6 +5,7 @@ import type { BillingOverviewData } from './billing-setting-pure';
 const billingOverviewSchema: z.ZodType<BillingOverviewData> = z.object({
   billingAccountId: z.string().nullable(),
   giftStackingSupported: z.boolean().catch(false),
+  referralRewardsSupported: z.boolean().catch(false),
   effectivePlanTier: z.enum(['free', 'plus', 'enterprise']),
   entitlementSource: z.enum(['free', 'stripe', 'stripe_gift', 'enterprise']),
   offerKey: z.string().nullable(),
@@ -50,6 +51,7 @@ const billingOverviewCache = createLocalStorageCache(
  * values as soon as it resolves.
  */
 export const OPTIMISTIC_BILLING_OVERVIEW: BillingOverviewData = {
+  referralRewardsSupported: false,
   billingAccountId: null,
   giftStackingSupported: false,
   effectivePlanTier: 'free',
@@ -112,6 +114,7 @@ export function areBillingOverviewsEqual(
   return (
     left.billingAccountId === right.billingAccountId &&
     left.giftStackingSupported === right.giftStackingSupported &&
+    Boolean(left.referralRewardsSupported) === Boolean(right.referralRewardsSupported) &&
     JSON.stringify(left.seatBilling) === JSON.stringify(right.seatBilling) &&
     left.effectivePlanTier === right.effectivePlanTier &&
     left.entitlementSource === right.entitlementSource &&

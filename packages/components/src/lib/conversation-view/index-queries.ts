@@ -98,18 +98,22 @@ export function resolveTailStart(
   return start;
 }
 
-/** The hydrated turns in `[from, to)`, contiguous from `from` until the first gap. */
+/** Hydrated turns in `[from, to)`. By default, stop at the first unloaded body. */
 export function collectHydratedRange(
   view: Pick<ConversationView, 'turn' | 'index'>,
   from: number,
-  to: number
+  to: number,
+  options: { skipGaps?: boolean } = {}
 ): SessionHistory[] {
   const turns: SessionHistory[] = [];
   for (let i = from; i < to; i += 1) {
     const row = view.index(i);
     if (row && isUnloadedTurnId(row.id)) continue;
     const turn = view.turn(i);
-    if (!turn) break;
+    if (!turn) {
+      if (options.skipGaps) continue;
+      break;
+    }
     turns.push(turn);
   }
   return turns;

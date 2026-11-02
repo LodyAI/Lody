@@ -22,25 +22,30 @@
  * that is what the addon loader actually gates on, and it stays correct under Electron
  * (Electron 39 reports napi 10 on Node 22.22).
  */
-export const REQUIRED_NODE_API_VERSION = 10;
+import {
+  REQUIRED_NODE_API_VERSION,
+  isNodeApiVersionSupported,
+  isNodeSecurityVersionSupported,
+} from './node-runtime-version';
+export {
+  REQUIRED_NODE_API_VERSION,
+  isNodeApiVersionSupported,
+  isNodeSecurityVersionSupported,
+} from './node-runtime-version';
 
 /** Architectures better-sqlite3 ships a prebuilt binding for (its lib/binding.js). */
 export const SUPPORTED_ARCHS = ['x64', 'arm64'] as const;
-
-/** Exported for tests: `undefined`/unparsable napi fails closed. */
-export function isNodeApiVersionSupported(napi: string | undefined): boolean {
-  const parsed = Number.parseInt(napi ?? '', 10);
-  return Number.isFinite(parsed) && parsed >= REQUIRED_NODE_API_VERSION;
-}
 
 export function isArchSupported(arch: string): boolean {
   return (SUPPORTED_ARCHS as readonly string[]).includes(arch);
 }
 
-/** The reason this runtime cannot load the binding, or `undefined` if it can. */
+/** Reject unsupported runtimes before CLI application initialization. */
 export function describeUnsupportedRuntime(runtime: {
   napi: string | undefined;
   arch: string;
+  nodeVersion?: string;
+  electronVersion?: string;
 }): string | undefined {
   if (!isArchSupported(runtime.arch)) {
     return (
@@ -51,10 +56,19 @@ export function describeUnsupportedRuntime(runtime: {
   }
   if (!isNodeApiVersionSupported(runtime.napi)) {
     return (
-      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION}, which means Node.js v22.14.0 through v22.x, ` +
-      `v23.6.0+, or a later major release (you are on ${process.version}, ` +
+      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION} (you are on ${process.version}, ` +
       `Node-API ${runtime.napi ?? 'unknown'}).\n` +
       `Its SQLite binding would crash the process instead of failing cleanly here.\n` +
+      `Upgrade Node, then re-run: npx lody@latest`
+    );
+  }
+  if (
+    !runtime.electronVersion &&
+    !isNodeSecurityVersionSupported(runtime.nodeVersion ?? process.versions.node)
+  ) {
+    return (
+      `Lody requires Node.js v22.23.4+ (22.x), v24.22.1+ (24.x), or v26.12.1+ (26.x) ` +
+      `for the October 2026 security fixes (current: ${runtime.nodeVersion ?? process.versions.node}).\n` +
       `Upgrade Node, then re-run: npx lody@latest`
     );
   }
@@ -65,6 +79,8 @@ export function assertSqliteRuntimeSupported(): void {
   const problem = describeUnsupportedRuntime({
     napi: process.versions.napi,
     arch: process.arch,
+    nodeVersion: process.versions.node,
+    electronVersion: process.versions.electron,
   });
   if (problem === undefined) {
     return;

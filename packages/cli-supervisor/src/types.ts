@@ -99,6 +99,8 @@ export type SupervisorOptions = {
   fatalFailureThreshold?: number;
   fatalOomWindowMs?: number;
   fatalOomThreshold?: number;
+  /** Pause after repeated V8 OOMs before one automatic recovery start (default 10 minutes). */
+  fatalOomCooldownMs?: number;
   healthyRunMs?: number;
 };
 
@@ -107,11 +109,15 @@ export type SupervisorStopOptions = {
 };
 
 export type SupervisorOwnership = {
-  acquire: (
-    signal: AbortSignal
-  ) => Promise<
+  acquire: (signal: AbortSignal) => Promise<
     | { status: 'acquired' }
     | { status: 'occupied'; description?: string; owner?: SupervisorHostIdentity }
+    /**
+     * A host owns the runtime and refuses this process outright (for example a
+     * Windows pipe created under an elevated or service token). It cannot be
+     * attached or outwaited, so the supervisor goes fatal instead of retrying.
+     */
+    | { status: 'inaccessible'; description: string }
   >;
   inspect?: () => Promise<SupervisorHostIdentity | null>;
   release: () => void | Promise<void>;

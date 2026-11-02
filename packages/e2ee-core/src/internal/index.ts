@@ -18,6 +18,8 @@ export {
   MAX_RECORD_BYTES,
 } from './foundation/cbor';
 export { disposeEpochKey, copyEpochKeyBytes } from './foundation/epoch-key';
+/** Tests only: turn the strict Ed25519 WebAssembly verifier off to exercise the Web Crypto fallback. */
+export { setEd25519WasmEnabled } from './foundation/ed25519-wasm';
 export {
   openSqliteStore,
   openSqliteConnection,

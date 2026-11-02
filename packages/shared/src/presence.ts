@@ -153,6 +153,84 @@ export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
   PresenceSessionViewingStateSchema,
 ]);
 
+// Minimal metadata must not accept arbitrary strings disguised as branded IDs.
+// Route-supplied session IDs require UUIDs; timestamp-shaped text proves no provenance.
+// Only internally generated instance IDs retain the legacy browser fallback.
+const MinimalUuidIdSchema = z.string().length(36).uuid();
+const MinimalBrowserInstanceIdSchema = z
+  .string()
+  .max(30)
+  .regex(/^\d{13}-[0-9a-z]{1,16}$(?![\s\S])/);
+const MinimalSessionIdSchema = MinimalUuidIdSchema.transform((value) => value as SessionId);
+const MinimalInstanceIdSchema = z
+  .union([MinimalUuidIdSchema, MinimalBrowserInstanceIdSchema])
+  .transform((value) => value as LodyPresenceInstanceId);
+// New installations use UUIDs; retained legacy machine identities may be SHA-256 hex.
+const MinimalMachineIdSchema = z
+  .union([
+    MinimalUuidIdSchema,
+    z
+      .string()
+      .length(64)
+      .regex(/^[0-9a-f]{64}$/),
+  ])
+  .transform((value) => value as MachineId);
+// Auth IDs use 32 alphanumerics (or UUID); local identities use local:<32 hex>.
+const MinimalUserIdSchema = z.union([
+  z
+    .string()
+    .length(32)
+    .regex(/^[0-9A-Za-z]{32}$/),
+  MinimalUuidIdSchema,
+  z
+    .string()
+    .length(38)
+    .regex(/^local:[0-9a-f]{32}$/),
+]);
+
+/** Independent allowlist: adding an ordinary detail never widens encrypted-workspace metadata. */
+const MinimalActiveSessionStatusSchema = z.preprocess(
+  omitNullValues,
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('running'),
+      activity: z.enum(['image_generation']).optional(),
+      phase: z.literal('finalizing').optional(),
+    }),
+    z.object({ type: z.literal('requestPermission') }),
+    z.object({
+      type: z.literal('initializing'),
+      stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
+    }),
+  ])
+);
+
+/** Only IDs, fixed discriminators/enums and timestamps; z.object strips extra fields. */
+export const MinimalLodyPresenceStateSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('machine'),
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session'),
+    sessionId: MinimalSessionIdSchema,
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    status: MinimalActiveSessionStatusSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session-viewing'),
+    userId: MinimalUserIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    sessionId: MinimalSessionIdSchema,
+    since: z.number().finite(),
+    updatedAt: z.number().finite(),
+  }),
+]);
+
 export const getLodyMachinePresenceKey = (
   machineId: MachineId,
   instanceId: LodyPresenceInstanceId
@@ -174,10 +252,14 @@ export const toLodyPresenceStreamUrl = (durableStreamUrl: string): string => {
   return url.toString();
 };
 
-export const parseLodyPresenceStates = (states: Record<string, unknown>): LodyPresenceStateMap => {
+export const parseLodyPresenceStates = (
+  states: Record<string, unknown>,
+  options: { minimal?: boolean } = {}
+): LodyPresenceStateMap => {
+  const schema = options.minimal ? MinimalLodyPresenceStateSchema : LodyPresenceStateSchema;
   const parsed: LodyPresenceStateMap = {};
   for (const [key, value] of Object.entries(states)) {
-    const result = LodyPresenceStateSchema.safeParse(value);
+    const result = schema.safeParse(value);
     if (!result.success) continue;
     parsed[key] = result.data;
   }

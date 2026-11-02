@@ -76,7 +76,7 @@ export function MobileWorkspaceLayout({
                    context to `mobileWorkspaceBaseContextAtom`, which the stack
                    reads to keep the right page beneath an open session.
                  - It also carries the always-on globals (route tracker,
-                   auto-archive PR watcher, …) that must keep
+                   command handlers, …) that must keep
                    running on these — the most common — mobile pages.
                The stack is layered on top; since the route components render
                nothing on mobile there is no duplicate content. */}

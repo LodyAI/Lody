@@ -21,6 +21,12 @@ current history so a preflight snapshot cannot overwrite an intervening update.
 The real-Mirror regression is in
 [operation-progress-feedback.test.ts](../../tests/operation-progress-feedback.test.ts).
 
+## Database startup degradation
+
+Synchronous Inbox startup failure leaves ordinary human dispatch available without Inbox. Dependent MCP tools return retryable `INBOX_UNAVAILABLE` before accessing even cached storage; the local runtime warning clears after recovery or stop.
+Temporary failures retry from 30 seconds, doubling to a 10-minute cap; incompatible schema/protocol does not auto-retry. `stop` and `recoverStop` cancel retry.
+Partial startup detaches Inbox and drains its resources through the stop owner before replacement, without canceling or waiting for ordinary turns. Unknown input is never replayed; the [Inbox decision record](../../../../.agents/notes/implemented/architecture/2026-10-12-operation-inbox.md#database-startup-degradation) explains the remaining adapter scope.
+
 ## Effect and transaction ownership
 
 The native coordinator lives in `coordinator-workflow.ts`; `coordinator-model.ts`
@@ -46,7 +52,7 @@ the original cause and a busy/storage/invariant classification. Reopen and multi
 behavior still require disk tests. Session configuration is frozen in intents/batches;
 the unused session-row configuration read/write is removed without a schema migration.
 
-`inbox/execution-owner.ts` hides input/batch identity, resource registration, raw
+`inbox/execution-owner.ts` hides input/batch identity, cleanup terminate handles, raw
 requests, submission, settlement and release recovery. Session callers use this
 handle rather than SQL. Its `submit` starts transport and records the submitted
 receipt; callers cannot manually interleave begin/prepare/submit/settle through the
@@ -59,35 +65,31 @@ retry first recovers retained resources, then starts a replacement.
 ## Completion consumption
 
 `inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
-watermarks and persists input/batch/resource receipts. `inbox/service.ts` owns coalesced
+watermarks and persists input/batch/release receipts. `inbox/service.ts` owns coalesced
 signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
-single host runtime and the unfinished Session adapter. `inbox/recovery.ts` supplies the pure disappearance rule; the process probe is a platform capability. It proves
-resource disappearance conservatively; unsupported or missing identities remain blocked.
-Session admission locks retain both waiters and holders, then evict only at zero references.
-Projected receipt cache entries follow retained SQLite receipt identities/statuses. Release
-retries own a private mutable receipt, leaving the caller event unchanged.
+single host runtime and the unfinished Session adapter. Interrupted executions retire without replay. Startup retires old active inputs and clears legacy
+blocks; `blocked` and `inbox_resources` are otherwise neither read nor written. Restart retirement
+currently emits a warning rather than a history notice because activation owns SQLite only.
 
-Missing or incomplete resource journals remain fail-closed across restart, including
-when no record exists between `begin` and first acquisition. Inspect them with the
-local, offline operator command (stop the daemon and desktop first):
+Unconfirmed release returns the slot and detaches the old
+Agent before waking a successor. Cleanup gets one background attempt with a five-second
+budget; cleanup failure is logged and cannot gate input or shutdown. Cleanup completion
+always retries the old execution's release write. Admission retries retirement once for a
+slot absent from the service's live execution ID set; a persistent write failure emits a disk-space chat notice instead
+of leaving the session dependent on restart. IDs stay live until successful release or
+detached retirement, independently of the replaceable turn runtime index. Preparation failure
+always drops its matching runtime/current-turn registration and any owned live execution ID,
+even if the compensating release rolls back; later admission can retry that stale database slot.
+Cleanup addresses only the
+retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
+intent, but later wakeable receipts can proceed. Process identities are not journaled;
+restart orphan-process cleanup is deferred. The offline recovery command and startup PID
+proof are removed. See the [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
 
-```sh
-lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId>
-# Only AFTER independently checking that all old processes/requests are released:
-lody session recover-inbox <sessionId> --machine <machineId> --workspace <workspaceId> \
-  --execution <executionId> --confirm-resources-released
-```
+Session admission locks retain waiters and holders until zero references. Projected
+receipt caches follow SQLite identities/statuses; release retries own a private receipt.
 
-The scoped platform adapter acquires the exclusive Host lease before opening SQLite,
-checks known PIDs/process groups without sending signals, and rejects live roots,
-probe uncertainty or another platform. The operator must attest unrecorded resources
-as well; a dead daemon PID alone is insufficient. The native workflow rechecks the
-exact blocked identity. Pause, old-input retirement, release and audit commit in one
-transaction. Recovery stays paused, creates no intent and never replays unknown
-submissions; restart Lody and send fresh input from an Inbox-aware client/CLI.
-This is local-account maintenance, not a new MCP tool or remote recovery RPC.
-
-`session-execution-service.ts` calls the actual prompt primitive while holding admission.
+`session-execution-service.ts` calls`session-execution-service.ts` calls the actual prompt primitive while holding admission.
 A batch is one system history item plus one model input, even when details require pages.
 Inline context intentionally previews at most 50 members and 64 KiB; batch_get reads all fixed members.
 `batch-page.ts` returns complete large members in bounded JSON fragments. The execution
@@ -137,7 +139,7 @@ A persistent sequence counter survives deletion so post-claim results cannot ent
 Settlement records consumption time; consumed payloads expire after seven days, while
 unfinished creation progress keeps its Operation until projection is settled. Retired
 Operation IDs still prevent replay. Pending result data is passive, not busy work;
-automation admission observes active Operations, executions, blocked resources and runnable intents.
+automation admission observes active Operations, executions and runnable intents.
 
 Schema v2 deletes only `deliveries` and `delivery_execution_state`. Released Operation
 rows, author/input snapshots, materialization/progress state and retired IDs survive

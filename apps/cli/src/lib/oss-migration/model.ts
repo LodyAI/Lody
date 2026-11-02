@@ -75,6 +75,7 @@ export function migratedMetadata(
     'steerOperationLedger',
     'queuePromotionLedger',
     'messageQueueUpdatedAt',
+    'messageQueueUpdateVersion',
     'messageQueueCheckedAt',
     'awaitingUserSince',
     'previewConnection',

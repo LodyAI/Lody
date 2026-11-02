@@ -30,6 +30,10 @@ import {
   lightSheenTheme,
 } from '@lody/ui/tokens/colors.stylex';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import {
+  scrollbarPaletteTheme,
+  scrollbarNativeTheme,
+} from '@lody/ui/scroll-area/scroll-area.tokens.stylex';
 
 export type Theme = 'dark' | 'light' | 'system';
 
@@ -41,8 +45,20 @@ export type Theme = 'dark' | 'light' | 'system';
 const uiPaletteClassNames = (mode: 'light' | 'dark'): string[] =>
   (
     (mode === 'dark'
-      ? stylex.props(productDarkPalette, darkShadowTheme, darkSheenTheme)
-      : stylex.props(productLightPalette, lightShadowTheme, lightSheenTheme)
+      ? stylex.props(
+          productDarkPalette,
+          darkShadowTheme,
+          darkSheenTheme,
+          scrollbarPaletteTheme,
+          scrollbarNativeTheme
+        )
+      : stylex.props(
+          productLightPalette,
+          lightShadowTheme,
+          lightSheenTheme,
+          scrollbarPaletteTheme,
+          scrollbarNativeTheme
+        )
     ).className ?? ''
   )
     .split(' ')

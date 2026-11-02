@@ -2,10 +2,25 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { MessageContent } from '@lody/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildAskUserQuestionElicitationResponse,
+  parseAskUserQuestionElicitationRequest,
+  type MessageContent,
+  type SessionDoc,
+  type SessionId,
+} from '@lody/shared';
 
-import { PermissionPrompt } from '../src/components/sessions/floating-permission-request';
+import {
+  PermissionPrompt,
+  FloatingPermissionRequest,
+  hasPendingAskUserQuestion,
+} from '../src/components/sessions/floating-permission-request';
+
+const responseBoundary = vi.hoisted(() => ({ respond: vi.fn() }));
+vi.mock('../src/hooks/use-permission-response', () => ({
+  usePermissionResponse: () => ({ isReady: true, respondToPermission: responseBoundary.respond }),
+}));
 import { resolvePermissionSubject } from '../src/lib/permission-request-presentation';
 import { initI18n } from '../src/i18n';
 
@@ -91,6 +106,94 @@ describe('PermissionPrompt', () => {
     Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.replace(/esc$/, '') === name
     )!;
+
+  it.each(['answer', 'cancel'] as const)(
+    'renders a DSH Core form and returns its %s through the existing response boundary',
+    async (action) => {
+      // DSH emits standard elicitation with Core-only metadata, no Claude/Codex alias.
+      const elicitation = parseAskUserQuestionElicitationRequest({
+        mode: 'form',
+        sessionId: 'acp-test',
+        message: 'Which storage should we use?',
+        _meta: { lody: { elicitation: { version: 1, autoResolveAfterSeconds: null } } },
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            question_0: {
+              type: 'string',
+              title: 'Storage',
+              description: 'Which storage should we use?',
+              oneOf: [
+                { const: 'SQLite', title: 'SQLite' },
+                { const: 'Files', title: 'Files' },
+              ],
+            },
+            custom_0: {
+              type: 'string',
+              title: 'Other',
+              _meta: { lody: { elicitation: { version: 1, customAnswerFor: 'question_0' } } },
+            },
+          },
+        },
+      })!;
+      const { toolCall, permission } = makeRequest(
+        [
+          { optionId: 'answer', name: 'Submit answers', kind: 'allow_once' },
+          { optionId: 'cancel', name: 'Cancel', kind: 'reject_once' },
+        ],
+        {
+          meta: { lody: { elicitation: { version: 1, questions: elicitation.meta.questions } } },
+          toolCall: { kind: 'think', title: 'Which storage should we use?', content: [] },
+        }
+      );
+      const history = [
+        { id: 'turn-1', role: 'assistant', items: [toolCall] },
+      ] as unknown as SessionDoc['history'];
+      let response: ReturnType<typeof buildAskUserQuestionElicitationResponse> | undefined;
+      responseBoundary.respond.mockImplementation(async (_sessionId, _requestId, outcome) => {
+        permission.outcome = outcome;
+        response = buildAskUserQuestionElicitationResponse(elicitation, { outcome });
+      });
+      const show = () =>
+        root.render(
+          <FloatingPermissionRequest
+            sessionId={'session-test' as SessionId}
+            sessionStatus={{ type: 'requestPermission' }}
+            sessionHistory={[...history] as SessionDoc['history']}
+          />
+        );
+      await act(async () => show());
+      expect(hasPendingAskUserQuestion({ type: 'requestPermission' }, history)).toBe(true);
+      expect(hasPendingAskUserQuestion(undefined, history)).toBe(false);
+      expect(container.textContent).toContain('Which storage should we use?');
+      expect(container.textContent).toContain('SQLite');
+      expect(container.textContent).toContain('Files');
+      expect(container.textContent).not.toContain('Submit answers');
+      expect(response).toBeUndefined();
+      const click = async (text: string) => {
+        const button = [...container.querySelectorAll<HTMLElement>('button, [role="button"]')].find(
+          (element) =>
+            element.textContent?.includes(text) || element.getAttribute('aria-label') === text
+        );
+        expect(button).toBeDefined();
+        await act(async () => button!.click());
+      };
+      if (action === 'answer') {
+        await click('SQLite');
+        await click('Submit');
+      } else {
+        await click('Cancel');
+      }
+      expect(response).toEqual(
+        action === 'answer'
+          ? { action: 'accept', content: { question_0: 'SQLite' } }
+          : { action: 'cancel' }
+      );
+      await act(async () => show());
+      expect(hasPendingAskUserQuestion({ type: 'requestPermission' }, history)).toBe(false);
+      expect(container.textContent).not.toContain('Which storage should we use?');
+    }
+  );
 
   it('asks in the provider’s words and shows exactly what would run', async () => {
     await render(

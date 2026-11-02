@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+import React, { act, useState } from 'react';
 import {
   buildMentionFileIndex,
   getSuggestions,
@@ -61,6 +61,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+import { UserMessageEditor } from '../src/components/ai-gui/user-message-editor';
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
 import { initI18n } from '../src/i18n';
 import { commands } from '../src/lib/commands';
@@ -281,6 +282,62 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       }
     }
   );
+
+  it('expands and reanchors an edited session mention before saving and ignores IME submit', async () => {
+    sessionItems.push({
+      sessionId: 'other-session',
+      title: 'Other session',
+      slug: 'other-session',
+      projectKey: 'chat',
+    });
+    let saved: Parameters<React.ComponentProps<typeof UserMessageEditor>['onSave']>[0] | undefined;
+    function Editor() {
+      const [value, setValue] = useState('  @other-session  ');
+      return (
+        <UserMessageEditor
+          value={value}
+          onChange={setValue}
+          onCancel={() => undefined}
+          onSave={(submission) => {
+            saved = submission;
+          }}
+          isSaving={false}
+          conversationFontSize={13}
+        />
+      );
+    }
+    await act(async () => root.render(<Editor />));
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved).toBeUndefined();
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved?.text).toContain('lody://session/other-session');
+    expect(saved?.text).toBe(saved?.text.trim());
+    expect(saved?.spans).toEqual([
+      expect.objectContaining({ start: 0, kind: 'session', target: 'other-session' }),
+    ]);
+    expect(saved!.text.slice(saved!.spans![0]!.start, saved!.spans![0]!.end)).toContain(
+      'lody://session/other-session'
+    );
+  });
 
   it('renders a plain textarea when no mention type is reachable', async () => {
     await render({ value: '' });

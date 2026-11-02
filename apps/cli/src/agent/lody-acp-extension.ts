@@ -12,6 +12,8 @@ import {
   LODY_EXTENSION_METHODS,
   LODY_SUBAGENT_EVENT_METHOD,
   isLodySubagentEvent,
+  isLodyPromptSuggestion,
+  type LodyPromptSuggestion,
   type LodySubagentEvent,
   MAX_USAGE_SCOPE_ID_LENGTH,
   normalizeLodyExtensionMethod,
@@ -83,6 +85,7 @@ const LodyCapabilitiesSchema = z
     sessionHistory: VersionOneSchema.optional(),
     worktreeProject: VersionOneSchema.optional(),
     sessionActivity: VersionOneSchema.optional().catch(undefined),
+    promptSuggestions: VersionOneSchema.optional().catch(undefined),
   })
   .partial();
 
@@ -174,6 +177,7 @@ export type LodyExtensionEvent =
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | { readonly type: 'sessionActivity'; readonly update: LodySessionActivityUpdate }
+  | { readonly type: 'promptSuggestion'; readonly update: LodyPromptSuggestion }
   | {
       readonly type: 'legacyProposedPlan';
       readonly plan: z.infer<typeof LegacyProposedPlanSchema>;
@@ -270,6 +274,11 @@ export function parseLodyExtensionMessage(args: {
   }
   if (method === LODY_EXTENSION_METHODS.rateLimitsUpdate) {
     return { type: 'rateLimits', snapshot: parseRateLimitsSnapshot(args.params) };
+  }
+  if (method === LODY_EXTENSION_METHODS.sessionPromptSuggestion) {
+    return isLodyPromptSuggestion(args.params)
+      ? { type: 'promptSuggestion', update: args.params }
+      : null;
   }
   if (method === LODY_EXTENSION_METHODS.sessionActivityUpdate) {
     return { type: 'sessionActivity', update: SessionActivityUpdateSchema.parse(args.params) };

@@ -10,7 +10,11 @@ import {
   useResolvedAcpSessionConfigSelection,
 } from '../src/hooks/use-acp-session-config-selection';
 import { useChatLandingDefaults } from '../src/hooks/use-chat-landing-defaults';
-import { writeChatLandingDefaults } from '../src/lib/chat-landing-defaults';
+import {
+  writeChatLandingDefaults,
+  readChatLandingDefaults,
+  recordChatLandingProjectUse,
+} from '../src/lib/chat-landing-defaults';
 import { agentDefaultsCache, persistAgentSessionDefaults } from '../src/lib/local-storage-cache';
 
 (
@@ -179,5 +183,59 @@ describe('contextType restore vs auto-switch (write ping-pong regression)', () =
     expect(renderCount).toBeLessThanOrEqual(6);
     act(() => root.unmount());
     container.remove();
+  });
+});
+
+describe('accepted project survives browsing/default persistence', () => {
+  it('does not overwrite the last sent target when the mounted landing changes context', () => {
+    localStorage.clear();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const noop = () => {};
+    function Probe({ context }: { context: 'chat' | 'github' }) {
+      useChatLandingDefaults({
+        workspaceId: 'last-target-test',
+        shouldRestoreContextType: false,
+        contextType: context,
+        setContextType: noop,
+        executorConfigs: [],
+        machines: new Map(),
+        selectableMachines: new Map(),
+        visibleMachinesLoading: false,
+        docMetaCacheReady: true,
+        repositories: [],
+        selectedAgent: null,
+        setSelectedAgent: noop,
+        selectedMachineId: null,
+        selectedRepo: undefined,
+        setSelectedRepo: noop,
+        selectedBranch: null,
+        setSelectedBranch: noop,
+        selectedLocalProject: null,
+        setSelectedLocalProject: noop,
+        selectedLocalBranch: null,
+        setSelectedLocalBranch: noop,
+      });
+      return null;
+    }
+    const local = { kind: 'local', machineId: 'machine-a', localProjectId: 'project-a' } as const;
+    recordChatLandingProjectUse('last-target-test', local);
+    try {
+      act(() => root.render(<Probe context="chat" />));
+      expect(readChatLandingDefaults('last-target-test')).toMatchObject({
+        contextType: 'chat',
+        lastUsedProject: local,
+      });
+      act(() => root.render(<Probe context="github" />));
+      expect(readChatLandingDefaults('last-target-test')).toMatchObject({
+        contextType: 'github',
+        lastUsedProject: local,
+      });
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      localStorage.clear();
+    }
   });
 });

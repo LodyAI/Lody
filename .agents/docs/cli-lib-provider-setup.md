@@ -45,6 +45,9 @@ trigger the same queue. Never make local mode wait on `firstSyncedWithRemote`.
 The durable command subscription that delivers these rows is described in
 [`apps/cli/src/lib/loro/AGENTS.md`](../../apps/cli/src/lib/loro/AGENTS.md).
 
+Unreadable profile records are skipped with one warning per file and scanned again next time.
+A failed full scan warns and leaves the setup queue running; targeted account validation remains strict.
+
 ## Secrets
 
 Never add authorization URLs, codes, tokens, or raw provider output to a setup row, and

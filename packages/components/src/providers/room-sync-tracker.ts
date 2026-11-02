@@ -135,6 +135,10 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
       detachStatusListener?.();
       activeSubscription = sub;
       detachStatusListener = sub.onStatusChange(setStatus);
+      // A binding emits its status when it attaches, which is before a join
+      // resolves and hands it here. Adopt it, or a previous failed join's
+      // status outlives the subscription that replaced it.
+      setStatus(sub.status);
     },
     markFirstSynced: () => {
       stopped = false;

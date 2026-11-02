@@ -13,6 +13,12 @@ import { applyNotificationOnHistory } from '../src/acp/history-apply';
 import { parseSessionNotification } from '../src/acp/schema';
 import type { LodySubagentEvent, LodySubagentSnapshot } from 'acp-extension-core';
 import type { MessageContent } from '../src/ai';
+import { formatMessageQuote, readMessageQuote } from '../src/message-quote';
+import { sanitizeMessageTextSpans } from '../src/message-text-spans';
+import {
+  historyItemsToInputBlocks,
+  resolveSessionExecutionInputBlocks,
+} from '../src/session-input';
 
 const id = 'synthetic-session' as SessionId;
 const entry = (turnId = 'turn'): SessionHistory => ({
@@ -26,6 +32,196 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('retains quoted snapshots through the writer, a restart and execution projection', () => {
+    const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
+    const quote = formatMessageQuote(snapshot);
+    const text = `${quote}\n\nExplain this passage.`;
+    const span = {
+      start: 0,
+      end: quote.length,
+      kind: 'message_quote' as const,
+      quoteVersion: 1 as const,
+      label: '[Quote]',
+      target: 'quote-1',
+    };
+    const doc = new Loro();
+    const mirror = open(doc);
+    mirror.historyWriter.append({ ...entry(), items: [{ type: 'text', text, spans: [span] }] });
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const revived = open(restarted);
+    try {
+      const item = revived.historyWriter.readStored()[0]!.items![0]!;
+      expect(item).toMatchObject({ type: 'text', text, spans: [span] });
+      if (item.type !== 'text') throw new Error('Expected authored text');
+      expect(
+        readMessageQuote(item.text.slice(span.start, span.end), item.spans![0]!.quoteVersion)
+      ).toBe(snapshot);
+      const blocks = historyItemsToInputBlocks([item]);
+      expect(resolveSessionExecutionInputBlocks({ prompt: text, inputBlocks: blocks })).toEqual([
+        { type: 'text', text },
+      ]);
+      expect(sanitizeMessageTextSpans(text, [{ ...span, end: text.length }])).toBeUndefined();
+      expect(text).toContain('Explain this passage.');
+    } finally {
+      revived.dispose();
+    }
+  });
+
+  it('retains unchanged containers inside a compensated range and receives their delayed peer edits', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    for (const name of ['prefix', 'one', 'gap', 'two', 'suffix']) writer.append(entry(name));
+    const gap = doc.getList('history').get(2) as LoroMap;
+    const text = ((gap.get('items') as LoroList).get(0) as LoroMap).get('text') as LoroText;
+    const rollback = writer.updateSelectedWithRollback(
+      () => [1, 3],
+      (rows) =>
+        rows.map((row) =>
+          row.id === 'one' || row.id === 'two' ? { ...row, status: 'handled' } : row
+        )
+    );
+    const peer = new Loro();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    (peer.getContainerById(text.id) as LoroText).update('delayed peer edit');
+    peer.commit();
+    rollback();
+    expect((doc.getList('history').get(2) as LoroMap).id).toBe(gap.id);
+    expect(writer.readStored()).toEqual(['prefix', 'one', 'gap', 'two', 'suffix'].map(entry));
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    expect(writer.readStored()[2]?.items).toEqual([{ type: 'text', text: 'delayed peer edit' }]);
+  });
+
+  it.each(['local', 'synchronized'] as const)(
+    'compensates a selected range while preserving a %s append with a restored ID',
+    (source) => {
+      const doc = new Loro(),
+        writer = createHistoryWriter(doc);
+      writer.append(entry('prefix'));
+      const old = { ...entry('tail'), items: [{ type: 'text' as const, text: 'original' }] };
+      writer.append(old);
+      const prefix = doc.getList('history').get(0) as LoroMap;
+      const rollback = writer.updateSelectedWithRollback(
+        () => [1],
+        (rows) => [rows[0]!, entry('replacement')]
+      );
+      const late = {
+        ...entry('tail'),
+        items: [{ type: 'text' as const, text: 'late body'.repeat(10000) }],
+        inputConfig: { modelId: 'late-model', mcpServerIds: [] },
+      };
+      if (source === 'local') writer.append(late);
+      else {
+        const peer = new Loro();
+        peer.import(doc.export({ mode: 'snapshot' }));
+        createHistoryWriter(peer).append(late);
+        doc.import(peer.export({ mode: 'update', from: doc.version() }));
+      }
+      const appended = doc.getList('history').get(2) as LoroMap;
+      appended.set('futureField', { preserved: true });
+      doc.commit();
+      const json = LoroMap.prototype.toJSON;
+      const unread = new Set([prefix.id, appended.id]);
+      const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        if (unread.has(this.id)) throw new Error('Unowned body read');
+        return json.call(this);
+      });
+      try {
+        rollback();
+      } finally {
+        guard.mockRestore();
+      }
+      expect(writer.readStored()).toEqual([
+        entry('prefix'),
+        old,
+        { ...late, futureField: { preserved: true } },
+      ]);
+      expect((doc.getList('history').get(0) as LoroMap).id).toBe(prefix.id);
+      expect((doc.getList('history').get(2) as LoroMap).id).toBe(appended.id);
+      const restored = writer.readStored();
+      expect(rollback).toThrow();
+      expect(writer.readStored()).toEqual(restored);
+    }
+  );
+
+  it('updates and compensates a selected range while preserving an unread prefix and later appends', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append({
+      ...entry('prefix'),
+      items: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }],
+    });
+    writer.append(entry('tail'));
+    const before = writer.readStored();
+    const original = LoroMap.prototype.toJSON;
+    const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+      if (this.get('id') === 'prefix') throw new Error('Unrelated prefix body read');
+      return original.call(this);
+    });
+    try {
+      const rollback = writer.updateSelectedWithRollback(
+        (rows) => rows.flatMap((row, index) => (row.id === 'tail' ? [index] : [])),
+        (rows) =>
+          rows.map((row) =>
+            row.id === 'tail' ? { ...entry('replacement'), status: 'pending', read: false } : row
+          )
+      );
+      writer.setField('replacement', 'status', 'seen');
+      writer.setField('replacement', 'read', true);
+      writer.append(entry('later'));
+      rollback();
+    } finally {
+      guard.mockRestore();
+    }
+    expect(writer.readStored()).toEqual([...before, entry('later')]);
+  });
+
+  it('selected compensation retains the complete pre-write ID and membership conditions', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append(entry('reused'));
+    writer.append(entry('tail'));
+    const rollback = writer.updateSelectedWithRollback(
+      (rows) => rows.flatMap((row, index) => (row.id === 'tail' ? [index] : [])),
+      (rows) =>
+        rows.map((row) =>
+          row.id === 'tail' ? { ...entry('reused'), status: 'pending', read: false } : row
+        )
+    );
+    writer.setField('reused', 'status', 'seen');
+    writer.setField('reused', 'read', true);
+    const after = writer.readStored();
+    expect(rollback).toThrow();
+    expect(writer.readStored()).toEqual(after);
+    const another = writer.updateSelectedWithRollback(
+      (rows) => rows.flatMap((row, index) => (index === rows.length - 1 ? [index] : [])),
+      (rows) => [...rows.slice(0, -1), entry('new-tail')]
+    );
+    (doc.getList('history').get(0) as LoroMap).set('id', 'renamed-prefix');
+    doc.commit();
+    const renamed = writer.readStored();
+    expect(another).toThrow();
+    expect(writer.readStored()).toEqual(renamed);
+  });
+
+  it('refuses a mutation outside the selected bodies before changing storage', () => {
+    const doc = new Loro(),
+      writer = createHistoryWriter(doc);
+    writer.append(entry('kept'));
+    const before = writer.readStored();
+    expect(() =>
+      writer.updateSelected(
+        () => [],
+        (rows) => {
+          rows[0]!.timestamp = '2026-10-31T00:00:00Z';
+          return rows;
+        }
+      )
+    ).toThrow();
+    expect(writer.readStored()).toEqual(before);
+  });
   it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
     'drops unused tool bytes for kind %s while preserving audio and download references',
     (kind) => {
@@ -145,7 +341,7 @@ describe('single history writer', () => {
     }
   );
 
-  it('drops child tool images while retaining read results, diffs and sparse updates', () => {
+  it('drops child tool images while retaining other-kind content and sparse updates', () => {
     const doc = new Loro();
     const writer = open(doc).historyWriter;
     writer.append({ ...entry('first'), role: 'assistant', items: [] });
@@ -211,8 +407,8 @@ describe('single history writer', () => {
       update: {
         sessionUpdate: 'tool_call',
         toolCallId: 'child-tool',
-        title: 'Child read',
-        kind: 'read',
+        title: 'Child tool',
+        kind: 'other',
         content: [
           ...retained.map((block) =>
             block.type === 'content' && block.content.type === 'resource'
@@ -239,7 +435,7 @@ describe('single history writer', () => {
       { type: 'subagent_task' }
     >;
     expect(task.run?.items).toMatchObject([
-      { toolCallId: 'child-tool', kind: 'read', status: 'completed', content: retained },
+      { toolCallId: 'child-tool', kind: 'other', status: 'completed', content: retained },
     ]);
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
     expect(task.run?.items[0]).not.toHaveProperty('rawInput');
@@ -288,20 +484,14 @@ describe('single history writer', () => {
     expect(imageReads).toMatchObject([
       {
         toolCallId: 'child-image-read',
-        content: [
-          {
-            type: 'content',
-            content: {
-              type: 'text',
-              text: JSON.stringify([{ type: 'text', text: 'Readable note' }]),
-            },
-          },
-        ],
       },
       { toolCallId: 'child-image-only' },
     ]);
     const imageOnly = imageReads?.[1] as Extract<MessageContent, { type: 'tool_call' }>;
     expect(imageOnly.content ?? []).toEqual([]);
+    expect(
+      (imageReads?.[0] as Extract<MessageContent, { type: 'tool_call' }> | undefined)?.content ?? []
+    ).toEqual([]);
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
     const plan = 'Useful approval plan. '.repeat(6000);
     emit({
@@ -321,10 +511,161 @@ describe('single history writer', () => {
     >;
     expect(planned.run?.items.at(-1)).toMatchObject({
       rawInput: { plan },
-      rawOutput: { summary: 'Readable JSON. '.repeat(6000) },
     });
+    expect(planned.run?.items.at(-1)).not.toHaveProperty('rawOutput');
     expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD_PLAN_INPUT');
   });
+
+  it.each(['read', 'edit', 'execute', 'switch_mode'] as const)(
+    'persists root and child %s tools through the same projection and sparse merge',
+    (kind) => {
+      const doc = new Loro();
+      const writer = open(doc).historyWriter;
+      writer.append({ ...entry('first'), role: 'assistant', items: [] });
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [
+              parseSessionNotification({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'subagent_event',
+                  event: {
+                    version: 1,
+                    sessionId: 'root',
+                    runId: 'run',
+                    type: 'snapshot',
+                    snapshot: {
+                      state: 'running',
+                      support: {
+                        stream: ['tool'],
+                        progress: false,
+                        cancel: false,
+                        outputRead: 'none',
+                      },
+                    },
+                  },
+                },
+              }),
+            ],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+      const emit = (update: Record<string, unknown>) => {
+        writer.updateEntry(
+          'first',
+          (turn) =>
+            applyNotificationOnHistory(
+              [turn],
+              [
+                parseSessionNotification({ sessionId: 'root', update }),
+                parseSessionNotification({
+                  sessionId: 'root',
+                  update: {
+                    sessionUpdate: 'subagent_event',
+                    event: { version: 1, type: 'output', sessionId: 'root', runId: 'run', update },
+                  },
+                }),
+              ],
+              undefined,
+              { targetAssistantEntryId: 'first' }
+            )[0]!
+        );
+        const items = writer.read('first')!.items;
+        const root = items.find((item) => item.type === 'tool_call');
+        const task = items.find((item) => item.type === 'subagent_task') as Extract<
+          MessageContent,
+          { type: 'subagent_task' }
+        >;
+        expect(task.run?.items).toEqual([root]);
+        return root as Extract<MessageContent, { type: 'tool_call' }>;
+      };
+      const body = 'DROP_FILE_BODY'.repeat(10000);
+      const output = '终端 output '.repeat(1000);
+      const first = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        kind,
+        title: 'Useful title',
+        status: 'in_progress',
+        content:
+          kind === 'execute'
+            ? [{ type: 'content', content: { type: 'text', text: output } }]
+            : kind === 'switch_mode'
+              ? []
+              : [
+                  { type: 'diff', path: '/synthetic.txt', oldText: body, newText: body },
+                  { type: 'content', content: { type: 'text', text: body } },
+                ],
+        rawInput:
+          kind === 'switch_mode'
+            ? { plan: '# Useful plan', unused: body }
+            : kind === 'execute'
+              ? { command: 'echo hello', unused: body }
+              : { unused: body },
+        rawOutput: kind === 'read' || kind === 'edit' ? body : { aggregated_output: output },
+        _meta: { unused: body },
+      });
+      expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+      if (kind === 'read' || kind === 'edit') {
+        expect(first.locations).toEqual([{ path: '/synthetic.txt' }]);
+        expect(first.content ?? []).toEqual([]);
+      }
+      if (kind === 'execute') {
+        const outputBlock = first.content?.find((block) => block.type === 'terminal_output');
+        expect(outputBlock?.type === 'terminal_output' && outputBlock.truncated).toBe(true);
+      }
+      if (kind === 'switch_mode') expect(first.rawInput).toEqual({ plan: '# Useful plan' });
+      if (kind === 'read' || kind === 'edit') {
+        for (const rawOutput of [{ body }, [{ type: 'text', text: body }]]) {
+          emit({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'tool',
+            rawOutput,
+            content: [{ type: 'diff', path: '/synthetic.txt', oldText: body, newText: body }],
+          });
+          expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_FILE_BODY');
+        }
+      }
+      const completed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'completed',
+      });
+      expect(completed.title).toBe('Useful title');
+      expect(completed.content ?? []).toEqual(first.content ?? []);
+      const replayed = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        status: 'pending',
+      });
+      expect(replayed.status).toBe('completed');
+      const duplicate = emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Useful title',
+        status: 'pending',
+      });
+      expect(duplicate.content ?? []).toEqual(first.content ?? []);
+      expect(duplicate.locations).toEqual(first.locations);
+      const replaced = emit({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool',
+        locations: [],
+        content: [],
+      });
+      expect(replaced.locations).toEqual([]);
+      expect(replaced.content?.filter((block) => block.type !== 'terminal_command') ?? []).toEqual(
+        []
+      );
+      const restored = new Loro();
+      restored.import(doc.export({ mode: 'snapshot' }));
+      expect(open(restored).historyWriter.read('first')).toEqual(writer.read('first'));
+    }
+  );
 
   it('freezes the same default emoji displayed by the Role catalog', () => {
     const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
@@ -450,7 +791,7 @@ describe('single history writer', () => {
       {
         type: 'tool_call',
         nativeTurnId: 'turn-b',
-        content: [{ type: 'content', content: { type: 'text', text: 'file contents' } }],
+        content: [{ type: 'terminal_output', output: 'file contents' }],
       },
     ]);
     expect(task.run?.items.at(-1)).not.toHaveProperty('_meta.lody.subagentRaw');
@@ -1623,6 +1964,64 @@ describe('single history writer', () => {
     mirror.historyWriter.setField('b', 'finished', true);
     expect(doc.getContainerById(body.id)?.toJSON()).toBe('hello');
     expect(doc.toJSON().history.map((r: { id: string }) => r.id)).toEqual(['prefix', 'b']);
+    mirror.dispose();
+  });
+
+  it('rewrites a large text to unrelated content as one splice and converges with a peer', () => {
+    const doc = new Loro();
+    doc.setPeerId('1');
+    const mirror = open(doc);
+    const body = (tag: string) =>
+      Array.from({ length: 300 }, (_, i) => `${tag} paragraph ${i}\n`).join('');
+    const turn = (text: string): SessionHistory => ({
+      id: 'turn',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      items: [{ type: 'text', text }],
+      fileDiff: [],
+    });
+    mirror.historyWriter.append(turn(`head\n${body('A')}tail`));
+    const peer = new Loro();
+    peer.setPeerId('2');
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const before = doc.version();
+    mirror.historyWriter.update(() => [turn(`head\n${body('B')}tail`)]);
+    expect(doc.toJSON().history[0].items[0].text).toBe(`head\n${body('B')}tail`);
+    const ops = doc
+      .exportJsonUpdates(before, doc.version())
+      .changes.flatMap((change) => change.ops)
+      .map((op) => op.content as { type: string; pos: number });
+    // Unbounded Myers (`LoroText.update`) blocks for minutes on ~100k-char
+    // rewrites and emits an op per differing run; the splice keeps the common
+    // prefix/suffix and replaces only the middle.
+    expect(ops).toEqual([
+      expect.objectContaining({ type: 'delete', pos: 5 }),
+      expect.objectContaining({ type: 'insert', pos: 5 }),
+    ]);
+    peer.import(doc.export({ mode: 'update', from: peer.version() }));
+    expect(peer.toJSON()).toEqual(doc.toJSON());
+    mirror.dispose();
+  });
+
+  it('keeps surrogate pairs intact when the edit boundary falls inside one', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const turn = (text: string): SessionHistory => ({
+      id: 'turn',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      items: [{ type: 'text', text }],
+      fileDiff: [],
+    });
+    // 😀 (D83D DE00) and 😁 (D83D DE01) share their high surrogate, so the
+    // common prefix ends inside a pair; 😂 (D83D DE02) before 😁 makes the
+    // common suffix start inside one. Loro rejects either split.
+    const steps = ['a😀b', 'a😁b', 'x😁', 'x😂😁', '😂', ''];
+    mirror.historyWriter.append(turn(steps[0]!));
+    for (const text of steps.slice(1)) {
+      mirror.historyWriter.update(() => [turn(text)]);
+      expect(doc.toJSON().history[0].items[0].text).toBe(text);
+    }
     mirror.dispose();
   });
 

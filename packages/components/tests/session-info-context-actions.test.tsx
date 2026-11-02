@@ -104,6 +104,82 @@ describe('ContextChip actions', () => {
     expect(onOpenPr).toHaveBeenCalledTimes(1);
   });
 
+  it('labels the PR with the number in its URL', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+            number: 12,
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+        })
+      );
+    });
+
+    expect(container.textContent).toContain('#2894');
+    expect(container.textContent).not.toContain('#12');
+  });
+
+  it('summarizes CI from session metadata even when live runs disagree', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+          prCiState: 's',
+          prCiRuns: [{ name: 'test', status: 'failure' }],
+        })
+      );
+    });
+
+    expect(
+      container.querySelector('[data-pr-ci-verdict]')?.getAttribute('data-pr-ci-verdict')
+    ).toBe('success');
+    expect(
+      container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
+    ).toBe('CI checks · CI passed');
+  });
+
+  it('gives no CI verdict when session metadata has no CI code yet', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+          prCiRuns: [{ name: 'test', status: 'failure' }],
+        })
+      );
+    });
+
+    expect(container.querySelector('[data-pr-ci-verdict]')).toBeNull();
+    expect(
+      container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
+    ).toBe('CI checks');
+  });
+
   it('renders the highest-priority action directly and folds the rest into a menu', async () => {
     const onCreatePr = vi.fn();
     const onCommitAndPush = vi.fn();

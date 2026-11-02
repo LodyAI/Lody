@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ACPSessionId, AcpSessionNotification } from '@lody/shared';
+import {
+  computeTitleGenerationDefaults,
+  type ACPSessionId,
+  type AcpSessionNotification,
+} from '@lody/shared';
 
 import {
   applyTitleConfigOptions,
@@ -102,13 +106,17 @@ describe('applyTitleConfigOptions', () => {
   });
 
   it('applies a synthetic legacy model selection before title prompting', async () => {
-    const setSessionConfigOption = vi.fn(async () => undefined);
-    const unstableSetSessionModel = vi.fn(async () => {});
+    const active = { model: 'grok-4.5' };
 
     await applyTitleConfigOptions({
       client: {
-        setSessionConfigOption,
-        unstable_setSessionModel: unstableSetSessionModel,
+        setSessionConfigOption: async (_session, key, value) => {
+          if (key === 'model') active.model = String(value);
+          return undefined;
+        },
+        unstable_setSessionModel: async (_session, model) => {
+          active.model = model;
+        },
       },
       acpSessionId: 'title-session' as ACPSessionId,
       sessionResponse: {
@@ -125,7 +133,56 @@ describe('applyTitleConfigOptions', () => {
       logger: { debug: vi.fn() } as never,
     });
 
-    expect(unstableSetSessionModel).toHaveBeenCalledWith('title-session', 'grok-code-fast-1');
-    expect(setSessionConfigOption).not.toHaveBeenCalled();
+    expect(active.model).toBe('grok-code-fast-1');
+  });
+
+  it('keeps the provider current model when the title model is not explicitly configured', async () => {
+    const titleValues = computeTitleGenerationDefaults('registry', 'amp', [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'medium',
+        options: [
+          { value: 'medium', name: 'Medium' },
+          { value: 'ultra', name: 'Ultra' },
+        ],
+      },
+    ]);
+    const active = { model: 'medium' };
+
+    await applyTitleConfigOptions({
+      client: {
+        setSessionConfigOption: async (_session, key, value) => {
+          if (key === 'model') active.model = String(value);
+          return undefined;
+        },
+        unstable_setSessionModel: async (_session, model) => {
+          active.model = model;
+        },
+      },
+      acpSessionId: 'title-session' as ACPSessionId,
+      sessionResponse: {
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'medium',
+            options: [
+              { value: 'medium', name: 'Medium' },
+              { value: 'ultra', name: 'Ultra' },
+            ],
+          },
+        ],
+      },
+      configOptionValues: titleValues,
+      logger: { debug: vi.fn() } as never,
+    });
+
+    expect(titleValues).not.toHaveProperty('model');
+    expect(active.model).toBe('medium');
   });
 });

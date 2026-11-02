@@ -19,6 +19,7 @@ type SessionVisibilityOptions = {
   machineVisibilityLoading?: boolean;
   localProjectVisibilityLoading?: boolean;
   currentUserId?: string | null;
+  workspaceHistoryReadable?: boolean;
 };
 
 export function isLocalProjectSession(
@@ -26,6 +27,40 @@ export function isLocalProjectSession(
 ): session is LocalProjectSessionMachineRecord {
   const project = session.project;
   return project?.kind === 'local' && typeof project.localProjectId === 'string';
+}
+
+/** UI availability only; the receiver still authorizes every execution. No author fallback. */
+export function isSessionMachineAvailable(
+  session: SessionMachineRecord | null | undefined,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>
+): boolean {
+  if (!session?.machineId || !visibleMachineIds.has(session.machineId as MachineId)) return false;
+  return (
+    !isLocalProjectSession(session) ||
+    visibleLocalProjectKeys.has(
+      getLocalProjectVisibilityKey(session.machineId, session.project.localProjectId)
+    )
+  );
+}
+
+/** Metadata presentation must not turn unreadable/unusable machines into catalog readers. */
+export function availableLocalHistoryMachineIds(
+  sessions: readonly (SessionMachineRecord & { id: string })[],
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>
+): MachineId[] {
+  return [
+    ...new Set(
+      sessions
+        .filter(
+          (session) =>
+            isLocalProjectSession(session) &&
+            isSessionMachineAvailable(session, visibleMachineIds, visibleLocalProjectKeys)
+        )
+        .map((session) => session.machineId as MachineId)
+    ),
+  ];
 }
 
 export function isSessionVisibleToUser(
@@ -57,6 +92,7 @@ export function resolveSessionVisibilityState(
   visibleLocalProjectKeys: ReadonlySet<string>,
   options: SessionVisibilityOptions = {}
 ): SessionVisibilityState {
+  if (options.workspaceHistoryReadable && typeof session.machineId === 'string') return 'visible';
   if (
     isSessionVisibleToUser(
       session,
@@ -86,10 +122,16 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   visibleMachineIds: ReadonlySet<MachineId>,
   visibleLocalProjectKeys: ReadonlySet<string>,
   machineVisibilityLoading = false,
-  currentUserId?: string | null
+  currentUserId?: string | null,
+  workspaceHistoryReadable = false
 ): T[] {
   if (sessions.length === 0) return [];
-  if (visibleMachineIds.size === 0 && visibleLocalProjectKeys.size === 0 && !currentUserId) {
+  if (
+    !workspaceHistoryReadable &&
+    visibleMachineIds.size === 0 &&
+    visibleLocalProjectKeys.size === 0 &&
+    !currentUserId
+  ) {
     return [];
   }
   return sessions.filter(
@@ -97,6 +139,7 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
       resolveSessionVisibilityState(session, visibleMachineIds, visibleLocalProjectKeys, {
         machineVisibilityLoading,
         currentUserId,
+        workspaceHistoryReadable,
       }) === 'visible'
   );
 }

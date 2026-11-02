@@ -1,6 +1,7 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
+import { useWorkspaceFeature } from './use-workspace-feature';
 import { useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
@@ -41,6 +42,7 @@ function useSessionSharingActiveOrganization(teamSharingAvailable: boolean) {
 }
 
 export function useSessionSharing(options: UseSessionSharingOptions = {}) {
+  const sharingAllowed = useWorkspaceFeature('sharing');
   const teamSharingAvailable = useAppCapability('teamSharing');
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const scope = useResolvedWorkspaceScope(options);
@@ -53,6 +55,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
     enabled,
   });
   const projectIndex = useVisibleLocalProjects({
+    includeMemberOnly: true,
     includeMachineFlock: options.includeLocalProjectDetails ?? false,
     syncMachineFlock: false,
     workspaceId,
@@ -60,15 +63,16 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
   });
   const { machines, accessByMachineId, isLoading: machineVisibilityLoading } = machineIndex;
   const { projects, accessByProjectKey, isLoading: localProjectVisibilityLoading } = projectIndex;
-  const setMachineSharedWithTeam = useCloudMutation(
+  const setMachineSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.machines.setMachineSharedWithTeam
   );
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const isLoading = machineVisibilityLoading || localProjectVisibilityLoading;
   const showSessionSharing =
     enabled &&
+    sharingAllowed &&
     teamSharingAvailable &&
     shouldShowSessionSharing({
       workspaceId,
@@ -102,6 +106,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
 
   const shareWithTeam = useCallback(
     async (state: SessionSharingState): Promise<void> => {
+      if (!sharingAllowed) throw new Error('e2ee_sharing_unavailable');
       if (!workspaceId) {
         throw new Error('Workspace is not ready');
       }
@@ -134,7 +139,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         sharedWithTeam: true,
       });
     },
-    [setLocalProjectSharedWithTeam, setMachineSharedWithTeam, workspaceId]
+    [sharingAllowed, setLocalProjectSharedWithTeam, setMachineSharedWithTeam, workspaceId]
   );
 
   return {

@@ -1,6 +1,7 @@
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
+  MinimalLodyPresenceStateSchema,
   LODY_PRESENCE_TTL_MS,
   getLodySessionViewingPresenceKey,
   getServerNow,
@@ -17,9 +18,22 @@ import {
   EphemeralRoomTransport,
   type EphemeralRoomAuthCallback,
   type EphemeralRoomBaseOptions,
+  type EphemeralRoomStartArgs,
   type EphemeralRoomStoreLike,
   type EphemeralRoomTransportLike,
 } from './ephemeral-room-transport';
+import type { RoomSyncState } from '@/lib/room-sync-state';
+
+/**
+ * How long a synced presence room's DISPLAY state survives an in-place
+ * reconnect. The Streams SDK reports `reconnecting` whenever its SSE read loop
+ * recycles (a routine server-side stream recycle qualifies), even though the
+ * retained store still holds the last applied snapshot. The raw state must keep
+ * driving recovery immediately; the UI must not blink every machine's "Offline"
+ * pill for the milliseconds a reconnect takes. A store-replacing restart and
+ * every terminal state bypass this window because the snapshot is gone/unknown.
+ */
+export const PRESENCE_SYNC_DISPLAY_GRACE_MS = 5_000;
 
 export type PresenceStoreLike = EphemeralRoomStoreLike & {
   set(key: string, value: Value): void;
@@ -42,6 +56,7 @@ export type WorkspacePresenceDebugGlobal = {
 
 export type WorkspacePresenceTransportOptions = EphemeralRoomBaseOptions & {
   onSnapshot?: (states: LodyPresenceStateMap) => void;
+  minimal?: boolean;
   createStore?: () => PresenceStoreLike;
   createTransport?: (args: {
     streamUrl: string;
@@ -66,6 +81,78 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   private readonly viewingInstanceId = createViewingInstanceId();
   private viewing: { sessionId: SessionId; userId: string; since: number } | null = null;
   private viewingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** UI-facing liveness state: the raw state, held through a brief in-place reconnect. */
+  private displaySyncState: RoomSyncState = 'idle';
+  private displayGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly displaySyncStateListeners = new Set<(state: RoomSyncState) => void>();
+  /**
+   * `start()` replaces the store, so its snapshot is empty until the new join
+   * bootstraps. Never let the display grace cover that: unlike an SSE recycle,
+   * it has no retained snapshot to speak for.
+   */
+  private replacingStore = false;
+
+  /**
+   * Presence health as the UI should read it. This equals the raw transport
+   * state except during a brief in-place reconnect, when the last synced state
+   * still describes the retained snapshot. Recovery and reconnect decisions
+   * must use {@link getSyncState} / {@link subscribeSyncState} instead.
+   */
+  getDisplaySyncState(): RoomSyncState {
+    return this.displaySyncState;
+  }
+
+  subscribeDisplaySyncState(listener: (state: RoomSyncState) => void): () => void {
+    this.displaySyncStateListeners.add(listener);
+    listener(this.displaySyncState);
+    return () => {
+      this.displaySyncStateListeners.delete(listener);
+    };
+  }
+
+  override start(args: EphemeralRoomStartArgs): void {
+    this.replacingStore = true;
+    try {
+      super.start(args);
+    } finally {
+      this.replacingStore = false;
+    }
+  }
+
+  protected override setSyncState(next: RoomSyncState): void {
+    super.setSyncState(next);
+    this.advanceDisplaySyncState(next);
+  }
+
+  private advanceDisplaySyncState(next: RoomSyncState): void {
+    this.clearDisplayGrace();
+    const briefRecovery = next === 'connecting' || next === 'reconnecting';
+    if (this.displaySyncState === 'synced' && briefRecovery && !this.replacingStore) {
+      this.displayGraceTimer = setTimeout(() => {
+        this.displayGraceTimer = null;
+        // The raw state may have moved on without a status event; publish what
+        // it is now, and let a concurrent `synced` win (the snapshot is back).
+        const current = this.getSyncState();
+        if (current !== 'synced') this.publishDisplaySyncState(current);
+      }, PRESENCE_SYNC_DISPLAY_GRACE_MS);
+      return;
+    }
+    this.publishDisplaySyncState(next);
+  }
+
+  private publishDisplaySyncState(next: RoomSyncState): void {
+    if (this.displaySyncState === next) return;
+    this.displaySyncState = next;
+    for (const listener of Array.from(this.displaySyncStateListeners)) {
+      listener(next);
+    }
+  }
+
+  private clearDisplayGrace(): void {
+    if (this.displayGraceTimer === null) return;
+    clearTimeout(this.displayGraceTimer);
+    this.displayGraceTimer = null;
+  }
 
   shouldRestartOnExternalWake(nowMs: number = Date.now()): boolean {
     const syncState = this.getSyncState();
@@ -88,6 +175,21 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       this.viewing = null;
       this.stopViewingHeartbeat();
       this.store?.delete(key);
+      return;
+    }
+    if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'session-viewing',
+        sessionId: args.sessionId,
+        userId: args.userId,
+        instanceId: this.viewingInstanceId,
+        since: 0,
+        updatedAt: 0,
+      }).success
+    ) {
+      // An unchecked route must not publish text or keep heartbeating the previous session.
+      this.publishSessionViewing(null);
       return;
     }
     if (
@@ -129,7 +231,9 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected onStoreChange(store: PresenceStoreLike): void {
     this.lastSnapshotAtMs = Date.now();
-    this.options.onSnapshot?.(parseLodyPresenceStates(store.getAllStates()));
+    this.options.onSnapshot?.(
+      parseLodyPresenceStates(store.getAllStates(), { minimal: this.options.minimal })
+    );
   }
 
   protected override onRoomStarted(store: PresenceStoreLike): void {
@@ -183,9 +287,13 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       since: this.viewing.since,
       updatedAt: getServerNow(),
     };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (minimal && !minimal.success) return;
     this.store.set(
       getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId),
-      state as unknown as Value
+      (minimal?.data ?? state) as unknown as Value
     );
   }
 
@@ -213,13 +321,17 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
         return owner.store?.getAllStates() ?? {};
       },
       getParsedStates() {
-        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {});
+        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {}, {
+          minimal: owner.options.minimal,
+        });
       },
       subscribe(listener) {
         const store = owner.store;
         if (!store) return () => {};
         return store.subscribe(() => {
-          listener(parseLodyPresenceStates(store.getAllStates()));
+          listener(
+            parseLodyPresenceStates(store.getAllStates(), { minimal: owner.options.minimal })
+          );
         });
       },
     };

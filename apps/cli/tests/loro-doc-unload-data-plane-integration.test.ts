@@ -489,6 +489,61 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
     }
   });
 
+  it.each([false, true])(
+    'reopens a partially destroyed doc, persistent failure=%s',
+    async (persistent) => {
+      const harness = await createHarness();
+      const manager = harness.manager;
+      const previous = await manager.getOrCreateSessionDoc(harness.sessionId);
+      const unload = manager.repo.unloadDoc.bind(manager.repo);
+      let failing = true;
+      const injected = vi.spyOn(manager.repo, 'unloadDoc').mockImplementation(async (id) => {
+        if (failing) throw new Error('synthetic unload failure');
+        await unload(id);
+      });
+      try {
+        await expect(manager.cleanSessionDoc(harness.sessionId)).rejects.toThrow(
+          'synthetic unload failure'
+        );
+        expect(previous.isDestroyed).toBe(true);
+        expect(previous.getSessionBackend()).toBeUndefined();
+        failing = persistent;
+        const [replacement, concurrent] = await Promise.all([
+          manager.getOrCreateSessionDoc(harness.sessionId),
+          manager.getOrCreateSessionDoc(harness.sessionId),
+        ]);
+        expect(replacement).not.toBe(previous);
+        expect(concurrent).toBe(replacement);
+        expect(replacement.isDestroyed).toBe(false);
+        const changed = createDeferred();
+        const unsubscribe = replacement.subscribeControl(() => changed.resolve());
+        await replacement.pushMessageQueue({
+          userTurnId: 'recovered-turn',
+          task: 'hello',
+          project: undefined,
+          userId: 'test-user',
+          timestamp: new Date(0).toISOString(),
+          acpSessionConfig: {
+            prompt: 'hello',
+            inputBlocks: [{ type: 'text', text: 'hello' }],
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
+        });
+        await changed.promise;
+        expect((await replacement.getMessageQueue())[0]?.userTurnId).toBe('recovered-turn');
+        unsubscribe();
+        expect(
+          (await manager.getSessionHistorySnapshot(harness.sessionId)).map((entry) => entry.id)
+        ).toContain(harness.cliEntryId);
+      } finally {
+        failing = false;
+        injected.mockRestore();
+        await harness.dispose();
+      }
+    }
+  );
+
   it('lets a renderer update authored after session GC reach the CLI', async () => {
     const harness = await createHarness();
     try {

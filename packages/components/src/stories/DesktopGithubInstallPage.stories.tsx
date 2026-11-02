@@ -6,7 +6,7 @@ const meta = {
   title: 'Pages/DesktopGithubInstallPage',
   component: DesktopGithubInstallPage,
   parameters: {
-    layout: 'centered',
+    layout: 'fullscreen',
   },
   tags: ['autodocs'],
 } satisfies Meta<typeof DesktopGithubInstallPage>;
@@ -14,6 +14,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** The deep link has fired; the fallback line appears after three seconds. */
 export const Ready: Story = {
   args: {
     deepLink: 'lody://github-install?installation_id=123',

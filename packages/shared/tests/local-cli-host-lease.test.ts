@@ -1,4 +1,7 @@
+import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -132,4 +135,33 @@ describe('local CLI host lease', () => {
     await Promise.resolve();
     expect(onRequest).toHaveBeenCalledOnce();
   });
+
+  // Windows reports a pipe whose DACL refuses the caller (an elevated or
+  // service-session Host) as EPERM; an unreadable Unix socket is the same
+  // kernel refusal as EACCES. Root bypasses socket permissions.
+  it.runIf(process.platform !== 'win32' && process.getuid?.() !== 0)(
+    'reports a Host whose endpoint refuses this process as access denied',
+    async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-host-denied-'));
+      const socketPath = path.join(dir, 'host.sock');
+      const foreign = net.createServer((socket) => socket.end('{}\n'));
+      await new Promise<void>((resolve) => foreign.listen(socketPath, resolve));
+      fs.chmodSync(socketPath, 0o000);
+      try {
+        const endpoint: LocalCliHostEndpoint = { kind: 'pipe', path: socketPath };
+        await expect(
+          acquireLocalCliHostLease({ endpoint, instanceId: 'desktop', mode: 'electron' })
+        ).resolves.toEqual({ status: 'occupied', record: null, accessDenied: true });
+
+        const commonJs =
+          require('../src/node/local-cli-host-lease.cjs') as typeof import('../src/node/local-cli-host-lease');
+        await expect(
+          commonJs.acquireLocalCliHostLease({ endpoint, instanceId: 'desktop', mode: 'electron' })
+        ).resolves.toEqual({ status: 'occupied', record: null, accessDenied: true });
+      } finally {
+        await new Promise<void>((resolve) => foreign.close(() => resolve()));
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  );
 });

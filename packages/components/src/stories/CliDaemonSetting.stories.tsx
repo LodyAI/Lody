@@ -83,3 +83,16 @@ export const Degraded: Story = {
     cliState: { ...runningCliState, phase: 'degraded' },
   },
 };
+
+export const HostAccessDenied: Story = {
+  args: {
+    cliState: {
+      phase: 'fatal',
+      desiredState: 'running',
+      localAgentEnabled: true,
+      updatedAtMs: 0,
+      preventSleepEnabled: true,
+      hostAccessDenied: true,
+    },
+  },
+};

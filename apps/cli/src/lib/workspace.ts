@@ -1,4 +1,5 @@
 import { ConvexHttpClient } from 'convex/browser';
+import { CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { z } from 'zod';
 import { api } from '@lody/cloud-api';
 import { BILLING_PLAN_TIERS } from '@lody/shared';
@@ -9,6 +10,11 @@ export const WorkspaceSummarySchema = z.object({
   name: z.string(),
   slug: z.string().nullable(),
   role: z.string(),
+  contentMode: z.string().optional(),
+  genesisHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 
 export const WorkspaceGitHubRepositorySchema = z.object({
@@ -58,6 +64,21 @@ const WorkspaceBillingEntitlementResultSchema = z.discriminatedUnion('valid', [
   z.object({ valid: z.literal(false) }),
   WorkspaceBillingEntitlementSchema.extend({ valid: z.literal(true) }),
 ]);
+
+const MachineWorkspaceEntitlementResultSchema = z.discriminatedUnion('valid', [
+  z.object({ valid: z.literal(false), reason: z.string() }),
+  WorkspaceBillingEntitlementSchema.extend({ valid: z.literal(true) }),
+]);
+
+/** A paired machine's plan from its device credential; a refusal is never a plan. */
+export function parseMachineWorkspaceEntitlement(raw: unknown): WorkspaceBillingEntitlement {
+  const parsed = MachineWorkspaceEntitlementResultSchema.parse(raw);
+  if (!parsed.valid) {
+    if (parsed.reason === 'e2ee_device_revoked') throw new CloudE2eeDeviceRevoked();
+    throw new Error('e2ee_machine_service_revoked_pair_again');
+  }
+  return WorkspaceBillingEntitlementSchema.parse(parsed);
+}
 
 const RegisterMachineAccessResultSchema = z.object({
   success: z.literal(true),
@@ -114,7 +135,10 @@ function createAuthConvexClient(): ConvexHttpClient {
 
 export async function listWorkspacesForToken(token: string): Promise<WorkspaceSummary[]> {
   const client = createAuthConvexClient();
-  const raw = await client.query(api.deviceAuth.listMyWorkspacesForCliToken, { token });
+  const raw = await client.query(api.deviceAuth.listMyWorkspacesForCliToken, {
+    token,
+    includeEncrypted: true,
+  });
   const parsed = WorkspaceListResultSchema.parse(raw);
   if (!parsed.valid) {
     throw new Error('CLI token is invalid or expired. Run `lody login` again.');

@@ -156,6 +156,7 @@ it('uses an active Recovery device to durably enroll its own new personal device
             membershipId,
             encryptionPublicKey: machine.enc,
             kind: 'machine',
+            machineId: 'synthetic-machine',
             signer: machine,
           });
           const deniedKind = yield* Effect.result(session.submit(badKind));

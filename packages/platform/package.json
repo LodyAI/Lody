@@ -14,6 +14,7 @@
       "types": "./src/react.ts",
       "import": "./src/react.ts"
     },
+    "./telemetry": "./src/telemetry.ts",
     "./host-keys": {
       "types": "./src/host-keys.ts",
       "import": "./src/host-keys.ts"
@@ -27,7 +28,8 @@
   },
   "dependencies": {
     "@lody/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "@lody/cloud-api": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

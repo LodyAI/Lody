@@ -19,6 +19,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
 - Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
   Its four switches bind translated labels and rendered helpers.
+- `SettingsLineTabs` keeps a held tab's full ID on its overflow menu item as
+  `data-settings-tab-overflow-id`; visible tabs retain `data-tab`. Labels may repeat.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -33,12 +35,13 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   owners) as a `CompactSection` of ruled project rows. Clicking a project opens
   a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
-  `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
-  do not add a second confirm. Pending removal stays listed until the owning
-  machine finishes. Do not RPC-probe worktree/skills on offline remotes, and
+  `useRemoveLocalProject` directly, without a confirmation overlay.
+  Follow the parent removal contract.
+  Do not RPC-probe worktree/skills on offline remotes, and
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
+- Project create/edit: `project-create-wizard.tsx`, scope first; read-only: `ProjectGroupView`.
 - Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
   content width. Never size columns from viewport breakpoints: the panel
   clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
@@ -86,6 +89,13 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   The graphic follows the range
   (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
   every kind fits the one `GRAPHIC_H` box so card height never depends on range. Leave the space beside the headline empty.
+
+- Provider automation binds `agent-provider-add` to the actual resolved machine
+  and `agent-config-dialog` to its captured machine through `data-machine-id`.
+  Preserve these identities when selection falls back or a dialog remains open.
+  Add actions and the dialog itself must honor the provider list's workspace RPC
+  restriction before mounting probes or persisting a draft. Signed file RPC
+  availability does not grant provider management; same-machine IPC remains available.
 
 ## Agent Roles
 

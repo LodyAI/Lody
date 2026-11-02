@@ -1,3 +1,4 @@
+import { SessionFileRootIdSchema } from './project-path';
 import { z } from 'zod';
 
 /**
@@ -101,6 +102,7 @@ export type FilePreviewV3Content = z.infer<typeof FilePreviewV3ContentSchema>;
 
 export const FilePreviewV3RequestSchema = z
   .object({
+    rootId: SessionFileRootIdSchema.optional(),
     v: z.literal(FILE_PREVIEW_PROTOCOL_VERSION),
     sessionId: z.string().trim().min(1),
     /**
@@ -114,6 +116,8 @@ export const FilePreviewV3RequestSchema = z
      * `unchanged` and carries no bytes.
      */
     knownDigest: FilePreviewV3DigestSchema.optional(),
+    /** Negotiated markdownFileLinks v1: resolve candidates without reading content. */
+    resolveMarkdownLink: z.literal(true).optional(),
     /** Client-side ceiling; the machine still clamps it to its own limits. */
     maxBytes: z.number().int().positive().optional(),
   })
@@ -157,6 +161,7 @@ export const FilePreviewV3UnchangedSchema = z
 export type FilePreviewV3Unchanged = z.infer<typeof FilePreviewV3UnchangedSchema>;
 
 export const FilePreviewV3ErrorCodeSchema = z.enum([
+  'unsupported_protocol',
   'invalid_path',
   /** Resolved outside every allowed root — the security boundary, not an IO failure. */
   'path_not_allowed',
@@ -187,10 +192,32 @@ export const FilePreviewV3ErrorSchema = z
   .strict();
 export type FilePreviewV3Error = z.infer<typeof FilePreviewV3ErrorSchema>;
 
+export const FileLinkCandidateSchema = z
+  .object({
+    path: z.string().min(1),
+    absolutePath: z.string().min(1),
+    worktreeRoot: z.string().nullable(),
+    branch: z.string().nullable(),
+    head: z.string().nullable(),
+    mtimeMs: z.number(),
+  })
+  .strict();
+export type FileLinkCandidate = z.infer<typeof FileLinkCandidateSchema>;
+
+export const FileLinkResolutionSchema = z
+  .object({
+    status: z.literal('resolved-link'),
+    v: z.literal(FILE_PREVIEW_PROTOCOL_VERSION),
+    candidates: z.array(FileLinkCandidateSchema).min(1).max(128),
+  })
+  .strict();
+export type FileLinkResolution = z.infer<typeof FileLinkResolutionSchema>;
+
 export const FilePreviewV3ResponseSchema = z.discriminatedUnion('status', [
   FilePreviewV3OkSchema,
   FilePreviewV3UnchangedSchema,
   FilePreviewV3ErrorSchema,
+  FileLinkResolutionSchema,
 ]);
 export type FilePreviewV3Response = z.infer<typeof FilePreviewV3ResponseSchema>;
 

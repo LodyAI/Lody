@@ -115,6 +115,7 @@ export type LocalLoroDataPlaneServerOptions = {
   resolveMetaFlock?: () => Promise<LocalLoroFlockLike>;
   presenceSource?: LocalLoroPresenceSource | null;
   machineMonitorSource?: LocalLoroMachineMonitorSource | null;
+  promptSuggestionSource?: Pick<LocalLoroMachineMonitorSource, 'encodeAll' | 'subscribe'> | null;
   // Sender-side frame discipline (R4): a sync payload above this is never
   // written as one frame. Flock payloads are chunked entry-wise; doc payloads
   // are sliced into `doc-update-chunk` frames the peer reassembles before one
@@ -192,7 +193,8 @@ type WriterTask =
   | { kind: 'join-reply'; roomKey: string; peerId: string; requestId: string }
   | { kind: 'sync'; roomKey: string; peerId: string }
   | { kind: 'presence' }
-  | { kind: 'machine-monitor' };
+  | { kind: 'machine-monitor' }
+  | { kind: 'prompt-suggestions' };
 
 /**
  * Transport-agnostic server half of the local Loro data plane. It holds one
@@ -225,6 +227,11 @@ export class LocalLoroDataPlaneServerLegacy {
   private readonly writerOwner = makeLocalLoroWriterOwner();
   private readonly disconnectedIds = new Set<string>();
   private presenceUnsubscribe: (() => void) | null = null;
+  private readonly promptSuggestionReceivers = new Map<
+    string,
+    LocalLoroDataPlaneServerConnection
+  >();
+  private promptSuggestionUnsubscribe: (() => void) | null = null;
   private machineMonitorUnsubscribe: (() => void) | null = null;
   private docRoomJoinHandler: LocalLoroDocRoomJoinHandler | null = null;
   private docRoomLeaveHandler: LocalLoroDocRoomJoinHandler | null = null;
@@ -245,6 +252,13 @@ export class LocalLoroDataPlaneServerLegacy {
       this.presenceUnsubscribe = options.presenceSource.subscribeLocalOrigin(() =>
         this.broadcastPresence()
       );
+    }
+    if (options.promptSuggestionSource) {
+      this.promptSuggestionUnsubscribe = options.promptSuggestionSource.subscribe(() => {
+        for (const connection of this.promptSuggestionReceivers.values()) {
+          this.offer(connection, { kind: 'prompt-suggestions' });
+        }
+      });
     }
     if (options.machineMonitorSource) {
       this.machineMonitorUnsubscribe = options.machineMonitorSource.subscribe(() =>
@@ -378,6 +392,13 @@ export class LocalLoroDataPlaneServerLegacy {
       // gets the current presence snapshot (presence is workspace-level, not
       // per-room).
       this.registerPresenceReceiver(connection);
+      if (
+        this.options.promptSuggestionSource &&
+        !this.promptSuggestionReceivers.has(connection.id)
+      ) {
+        this.promptSuggestionReceivers.set(connection.id, connection);
+        this.offer(connection, { kind: 'prompt-suggestions' });
+      }
       switch (message.type) {
         case 'join':
           await this.handleJoin(connection, message);
@@ -466,6 +487,11 @@ export class LocalLoroDataPlaneServerLegacy {
           this.machineMonitorUnsubscribe?.();
           this.machineMonitorUnsubscribe = null;
         });
+        release(() => {
+          this.promptSuggestionUnsubscribe?.();
+          this.promptSuggestionUnsubscribe = null;
+        });
+        this.promptSuggestionReceivers.clear();
         this.presenceReceivers.clear();
         this.machineMonitorReceivers.clear();
         for (const [key, entry] of this.rooms)
@@ -495,6 +521,7 @@ export class LocalLoroDataPlaneServerLegacy {
   /** Synchronous revocation precedes the awaited physical-writer release. */
   handleDisconnectLegacy(connectionId: string): Promise<void> {
     this.disconnectedIds.add(connectionId);
+    this.promptSuggestionReceivers.delete(connectionId);
     this.presenceReceivers.delete(connectionId);
     this.machineMonitorReceivers.delete(connectionId);
     let failure: Cause.Cause<unknown> = Cause.empty;
@@ -819,7 +846,9 @@ export class LocalLoroDataPlaneServerLegacy {
       key:
         task.kind === 'sync'
           ? `sync:${task.roomKey}\n${task.peerId}`
-          : task.kind === 'presence' || task.kind === 'machine-monitor'
+          : task.kind === 'presence' ||
+              task.kind === 'machine-monitor' ||
+              task.kind === 'prompt-suggestions'
             ? task.kind
             : undefined,
       roomKey: task.kind === 'sync' || task.kind === 'join-reply' ? task.roomKey : undefined,
@@ -897,14 +926,18 @@ export class LocalLoroDataPlaneServerLegacy {
             },
           ];
         }
+        case 'prompt-suggestions':
         case 'machine-monitor': {
-          const source = self.options.machineMonitorSource;
+          const source =
+            task.kind === 'prompt-suggestions'
+              ? self.options.promptSuggestionSource
+              : self.options.machineMonitorSource;
           if (!source) return [];
           const encoded = source.encodeAll();
           if (encoded.length === 0) return [];
           return [
             {
-              type: 'machine-monitor',
+              type: task.kind,
               protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
               workspaceId: self.options.workspaceId,
               dataBase64: bytesToBase64(encoded),

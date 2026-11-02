@@ -1,3 +1,6 @@
+import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
@@ -34,7 +37,49 @@ export interface MachineRuntimeOptions {
 }
 
 export class MachineRuntime {
+  /** Trusted encrypted ingress only; actual side effects still enter the shared execution gate. */
+  async offerEncryptedRpcTurn(input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) {
+    if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
+    return this.requireHandler().offerEncryptedRpcTurn(input);
+  }
+  /** Verified encrypted feature ingress reuses same-member machine authority. */
+  async handleEncryptedFeatureRpc(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context?: EncryptedFeatureContext
+  ) {
+    const config = this.options.handlerConfig;
+    if (
+      !config.encryptedWorkspace ||
+      request.workspaceId !== config.workspaceId ||
+      request.machineId !== config.machineId
+    )
+      throw new Error('e2ee_feature_scope');
+    if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
+      throw new Error('e2ee_feature_requester');
+    if (isE2eeReadQuery(request.method, request.params)) {
+      if (!context) throw new Error('e2ee_rpc_unavailable');
+      return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
+    return this.dispatchLocalMachineRpc(request);
+  }
   private handler: MessageHandler | null = null;
+  private clientLossHandler: MessageHandler | null = null;
+  inspectClientLoss() {
+    const handler = this.handler ?? this.clientLossHandler;
+    if (!handler) return null;
+    const observed = handler.inspectClientLoss();
+    const processor = this.messageProcessor.inspectClientLoss();
+    return {
+      intakeClosed: processor.stopped && observed.watcherStopped,
+      pending: {
+        processorActive: processor.active,
+        processorQueued: processor.queued,
+        watcherChecks: observed.watcherChecks,
+        executionTurns: observed.executionTurns,
+        executionBookkeeping: observed.executionBookkeeping,
+      },
+    };
+  }
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;
   private gcManager: SessionGCManager | null = null;
@@ -231,6 +276,11 @@ export class MachineRuntime {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    this.messageProcessor.stop();
+    await this.handler?.prepareForShutdown();
+  }
+
   async cleanup(): Promise<void> {
     this.options.workspaceDocument.clearMachineMonitorProvider();
     this.resourceMonitor = null;
@@ -242,9 +292,11 @@ export class MachineRuntime {
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
     this.handler?.cancelPendingHistoryWatches();
+    await this.prepareForShutdown();
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {
+      if (daemonLossProbeEnabled) this.clientLossHandler = this.handler;
       await this.handler.cleanup();
       this.handler = null;
     } else {
@@ -259,6 +311,12 @@ export class MachineRuntime {
     message: LocalSessionControlRequestValidated,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
+    if (
+      this.options.handlerConfig.encryptedWorkspace &&
+      (message.type.startsWith('session/preview-') ||
+        message.type === 'session/code-collab-host-start')
+    )
+      throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     const dispatchStartedAt = Date.now();
     this.options.logger.debug(
@@ -336,6 +394,11 @@ export class MachineRuntime {
   async dispatchLocalMachineRpc(
     message: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResponse> {
+    if (
+      this.options.handlerConfig.encryptedWorkspace &&
+      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
+    )
+      throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message);
   }

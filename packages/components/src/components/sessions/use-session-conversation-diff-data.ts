@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FileDiff, SessionId } from '@lody/shared';
+import type { CodeCollabAllChangesScope, FileDiff, SessionId } from '@lody/shared';
 import { isFilteredDiffFile } from '@lody/shared';
 import {
   describeSessionDiffSnapshot,
@@ -189,6 +189,7 @@ export const useSessionConversationDiffData = ({
   fileDiffsPending = false,
   enabled = true,
   requestScope,
+  allChangesScope,
 }: {
   sessionId: SessionId;
   turnId?: string;
@@ -206,6 +207,8 @@ export const useSessionConversationDiffData = ({
   enabled?: boolean;
   /** Identifies an authoritative live batch, even when its path set is unchanged. */
   requestScope?: object;
+  /** All Changes comparison scope; only used when `mode` is `base`. */
+  allChangesScope?: CodeCollabAllChangesScope;
 }): {
   cacheKey: string | null;
   normalizedPaths: string[];
@@ -290,9 +293,19 @@ export const useSessionConversationDiffData = ({
       mode,
       normalizedPathsKey,
       requestScope,
+      allChangesScope,
       turnId,
     }),
-    [cacheKey, fileDiffCacheKey, fileProvider, mode, normalizedPathsKey, requestScope, turnId]
+    [
+      cacheKey,
+      fileDiffCacheKey,
+      fileProvider,
+      mode,
+      normalizedPathsKey,
+      requestScope,
+      allChangesScope,
+      turnId,
+    ]
   );
   const loadContextRef = useRef(loadContext);
   loadContextRef.current = loadContext;
@@ -493,12 +506,18 @@ export const useSessionConversationDiffData = ({
             ? undefined
             : (fileDiffLookup.byPath.get(filePath) ??
               fileDiffLookup.byNormalizedPath.get(normalizePathForMatch(filePath)));
+        // Keep the three-argument shape when no scope is selected so older providers and
+        // existing call expectations stay byte-compatible.
+        const diffRequestArgs: Parameters<SessionFileProvider['getDiff']> = [
+          filePath,
+          mode === 'base' ? undefined : turnId,
+          matchedFileDiff,
+        ];
+        if (mode === 'base' && allChangesScope !== undefined) {
+          diffRequestArgs.push({ allChangesScope });
+        }
         const data = sessionFileProviderDiffResultToFileDiffData(
-          await fileProvider.getDiff(
-            filePath,
-            mode === 'base' ? undefined : turnId,
-            matchedFileDiff
-          )
+          await fileProvider.getDiff(...diffRequestArgs)
         );
         if (!isCurrentLoad()) {
           if (data.status === 'ready-text-source') data.source.dispose?.();
@@ -693,6 +712,7 @@ export const useSessionConversationDiffData = ({
       }
     };
   }, [
+    allChangesScope,
     cacheKey,
     fileDiffLookup,
     fileDiffsPending,

@@ -123,7 +123,10 @@ export function WebArchiveScreen({
   const isElectronFullscreen = useElectronFullscreen();
   const windowDragClass = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
+    insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
+  });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.
   // Mirrors the same derivation in session-detail.tsx.

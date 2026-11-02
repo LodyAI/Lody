@@ -7,7 +7,7 @@ export const inboxRepositoryLayer = (sql: InboxSqlite, ownedConnection = false) 
   const io = <A>(f: () => A) =>
     Effect.try({ try: f, catch: (cause) => new OrchestrationStorageFailure(cause) });
   const repository: Repository = {
-    abandon: (w, s, id) => io(() => sql.abandonInput(w, s, id)),
+    abandon: (w, s, id, unlessActive) => io(() => sql.abandonInput(w, s, id, unlessActive)),
     deactivate: (w, o) => io(() => sql.deactivate(w, o)),
     cancelExecution: (scope, id, reason) => io(() => sql.cancelExecution(scope, id, reason)),
     adopt: (p, n, id) => io(() => sql.adoptExecution(p, n, id)),

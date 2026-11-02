@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import viteConfig from '../vite.config';
+import createViteConfig from '../vite.config';
+
+const viteConfig = createViteConfig({ command: 'build', mode: 'test' });
 
 describe('CLI vite config', () => {
   it('bundles runtime dependencies needed by the Electron CLI copy', () => {
@@ -29,5 +31,26 @@ describe('CLI vite config', () => {
       'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('true'),
       'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('true'),
     });
+  });
+  it('requires an explicit E2E build flag and refuses release compositions', async () => {
+    for (const [enabled, environment, channel, expected] of [
+      ['', '', '', false],
+      ['1', '', '', true],
+      ['1', 'production', '', false],
+      ['1', '', 'nightly', false],
+    ] as const) {
+      vi.resetModules();
+      vi.stubEnv('LODY_E2E_DAEMON_LOSS_BUILD', enabled);
+      vi.stubEnv('LODY_ENV', environment);
+      vi.stubEnv('LODY_RELEASE_CHANNEL', channel);
+      try {
+        const { default: create } = await import('../vite.config');
+        expect(create({ command: 'build', mode: 'test' }).define?.__LODY_E2E_DAEMON_LOSS__).toBe(
+          JSON.stringify(expected)
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
   });
 });

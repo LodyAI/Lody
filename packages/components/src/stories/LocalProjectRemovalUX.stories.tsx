@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Archive, Bot, FolderPlus, Search, SlidersHorizontal } from 'lucide-react';
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { SessionStatusFactory } from '@lody/shared';
@@ -10,14 +10,9 @@ import {
   type ArchivedSessionGroup,
 } from '@/components/archive/archive-view';
 import { WebArchiveScreen } from '@/components/archive/web-archive-screen';
-import {
-  LocalProjectItem,
-  RemoveLocalProjectDialog,
-  type LocalProjectRemovalState,
-} from '@/components/loro-app-sidebar';
+import { LocalProjectItem, type LocalProjectRemovalState } from '@/components/loro-app-sidebar';
 import { LoroSidebar, type LoroSidebarNavKey } from '@/components/loro-sidebar';
 import { MobileHomeScreen } from '@/components/mobile/mobile-home-screen';
-import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
@@ -223,50 +218,6 @@ function DesktopApp({ state }: { state?: LocalProjectRemovalState }) {
   );
 }
 
-function DesktopConfirmation() {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="relative h-screen">
-      <DesktopApp />
-      <RemoveLocalProjectDialog
-        open={open}
-        target={{
-          machineId,
-          localProjectId: projectId,
-          name: project.name,
-          pathLabel: project.rootPath,
-          conversationCount: 12,
-          runningSessionCount: 2,
-        }}
-        isRemote
-        machineName="MacBook Pro"
-        deviceOnline
-        canCleanupWorktrees
-        isRemoving={false}
-        onOpenChange={setOpen}
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
-        onConfirm={() => {}}
-      />
-    </div>
-  );
-}
-
 function MobileProjectHome({ waiting = false }: { waiting?: boolean }) {
   return (
     <MobileHomeScreen
@@ -308,44 +259,6 @@ function MobileProjectHome({ waiting = false }: { waiting?: boolean }) {
       onAddLocalProject={() => {}}
       onAddGitHubRepository={() => {}}
     />
-  );
-}
-
-function MobileConfirmation() {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="h-dvh overflow-hidden bg-background">
-      <MobileProjectHome />
-      <MobileRemoveLocalProjectSheet
-        open={open}
-        onOpenChange={setOpen}
-        projectName={project.name}
-        pathLabel={project.rootPath}
-        deviceName="MacBook Pro"
-        deviceOnline
-        conversationCount={12}
-        runningSessionCount={2}
-        canCleanupWorktrees
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
-        onConfirm={async () => true}
-      />
-    </div>
   );
 }
 
@@ -476,17 +389,13 @@ type RemovalUxPreviewProps = {
   surface:
     | 'project-removing'
     | 'project-waiting'
-    | 'desktop-confirmation'
     | 'mobile-project-waiting'
-    | 'mobile-confirmation'
     | 'cleanup-result'
     | 'archive';
 };
 
 function RemovalUxPreview({ surface }: RemovalUxPreviewProps) {
-  if (surface === 'desktop-confirmation') return <DesktopConfirmation />;
   if (surface === 'mobile-project-waiting') return <MobileProjectHome waiting />;
-  if (surface === 'mobile-confirmation') return <MobileConfirmation />;
   if (surface === 'cleanup-result') return <CleanupResult />;
   if (surface === 'archive') return <RemovedProjectArchive />;
   return <DesktopApp state={surface === 'project-waiting' ? 'waiting_for_device' : 'removing'} />;
@@ -504,10 +413,8 @@ type Story = StoryObj<typeof meta>;
 
 export const ProjectRemoving: Story = { args: { surface: 'project-removing' } };
 export const ProjectWaitingForDevice: Story = { args: { surface: 'project-waiting' } };
-export const DesktopRemoveConfirmation: Story = { args: { surface: 'desktop-confirmation' } };
 export const MobileProjectWaitingForDevice: Story = {
   args: { surface: 'mobile-project-waiting' },
 };
-export const MobileRemoveConfirmation: Story = { args: { surface: 'mobile-confirmation' } };
 export const CleanupResultVisible: Story = { args: { surface: 'cleanup-result' } };
 export const RemovedProjectInArchive: Story = { args: { surface: 'archive' } };

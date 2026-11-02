@@ -14,6 +14,8 @@ import {
   getSessionRoomId,
   getWorkspaceFlockDocId,
   writeWorkspaceAgentRoleToFlock,
+  writeWorkspaceMcpServerToFlock,
+  type McpServerId,
   deleteWorkspaceAgentRoleFromFlock,
   type AgentRoleId,
   type MachineId,
@@ -115,6 +117,15 @@ describe('local platform zero-cloud integration', () => {
       const sessionId = await manager.createSession(machineId, 'custom', 'claude');
       await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), { agentConfigId: configId });
       const catalog = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      writeWorkspaceMcpServerToFlock(catalog.flock, {
+        id: 'synthetic-mcp' as McpServerId,
+        name: 'Synthetic MCP',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'synthetic-not-executed' },
+        enabledByDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      });
       writeWorkspaceAgentRoleToFlock(catalog.flock, {
         v: AGENT_ROLE_VERSION,
         id: 'reviewer' as AgentRoleId,
@@ -158,6 +169,10 @@ describe('local platform zero-cloud integration', () => {
             fresh: true,
             state: 'idle',
           }),
+          readActiveTurnId: () => undefined,
+          steerSession: async () => {
+            throw new Error('Unexpected steer');
+          },
           cancelSession: async () => ({ success: true }),
           dispatchSession: async (id) => {
             dispatched.push(id);
@@ -275,11 +290,23 @@ describe('local platform zero-cloud integration', () => {
         },
       });
       expect(history[0]?.inputConfig?.modelId).not.toBe('source-model');
-      expect(history[0]?.items).toEqual([
-        { type: 'text', text: 'Review carefully.\n\nCheck the change.' },
-      ]);
+      expect(history[0]?.inputConfig?.mcpServerIds).toEqual(['synthetic-mcp']);
+      expect(history[0]?.items).toEqual([{ type: 'text', text: 'Check the change.' }]);
+      expect(history[0]?.inputConfig?.prompt).toBe('Review carefully.\n\nCheck the change.');
       expect(target?.meta.latestUserMsgId).toBe(history[0]?.id);
       await call('lody_session_create', input);
+      expect(dispatched).toEqual([targetId]);
+      // An Agent that lost the first response retries the same work under a new id.
+      const freshIdRetry = await call('lody_session_create', {
+        ...input,
+        operationId: 'role-create-fresh-id',
+      });
+      expect(freshIdRetry.isError, JSON.stringify(freshIdRetry)).not.toBe(true);
+      expect(JSON.parse(String(freshIdRetry.content[0]?.text))).toMatchObject({
+        id: 'role-create',
+        state: 'active',
+        notice: expect.stringContaining('no new Session was created'),
+      });
       expect(dispatched).toEqual([targetId]);
       const store = new LodyOperationStore(getLodyOperationStorePath(machineId), undefined, {
         maintenance: false,
@@ -291,9 +318,41 @@ describe('local platform zero-cloud integration', () => {
           target: { sessionId: targetId },
         });
         expect(operation.canonicalCommand).toMatchObject({ agentRoleRevision: 1 });
+        expect(operation.frozenContinuationConfig.targetDispatchConfigs?.[0]?.mcpServerIds).toEqual(
+          ['synthetic-mcp']
+        );
       } finally {
         store.close();
       }
+      const optOutCreate = await call('lody_session_create', {
+        ...input,
+        operationId: 'role-create-opt-out',
+        mcpServerIds: [],
+      });
+      expect(optOutCreate.isError, JSON.stringify(optOutCreate)).not.toBe(true);
+      const optOutTargetId = dispatched.at(-1);
+      if (!optOutTargetId || optOutTargetId === targetId)
+        throw new Error('Missing opt-out Session');
+      const optOutDoc = await manager.getOrCreateSessionDoc(optOutTargetId);
+      expect((await optOutDoc.sessionData.history.readAll())[0]?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
+      writeWorkspaceMcpServerToFlock(catalog.flock, {
+        id: 'synthetic-mcp' as McpServerId,
+        name: 'Synthetic MCP',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'synthetic-not-executed' },
+        enabledByDefault: false,
+        createdAt: 1,
+        updatedAt: 2,
+      });
+      const repeated = await call('lody_session_create', input);
+      expect(repeated.isError, JSON.stringify(repeated)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll())[0]?.inputConfig?.mcpServerIds).toEqual([
+        'synthetic-mcp',
+      ]);
+      expect(dispatched).toEqual([targetId, optOutTargetId]);
+
       const targetMeta = target?.meta as import('@lody/shared').SessionMeta;
       const targetInput = history[0];
       if (!targetInput) throw new Error('Missing target input');
@@ -379,6 +438,45 @@ describe('local platform zero-cloud integration', () => {
           role: { id: 'reviewer', name: 'Reviewer' },
         },
       });
+
+      await sourceDoc.sessionData.commands.appendTurn({
+        id: 'source-turn',
+        role: 'user',
+        userId,
+        author: { v: 1, kind: 'human', userId },
+        timestamp: targetInput.timestamp,
+        items: [{ type: 'text', text: 'Continue the delegated review.' }],
+        fileDiff: [],
+        status: 'processing',
+        inputConfig: environment.host.readInvocation(sessionId).inputConfig,
+      });
+      const continued = await call('lody_session_chat', {
+        operationId: 'continue-with-selected-mcp',
+        sessionId: targetId,
+        prompt: 'Continue review.',
+      });
+      expect(continued.isError, JSON.stringify(continued)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual([
+        'synthetic-mcp',
+      ]);
+      const optedOut = await call('lody_session_chat', {
+        operationId: 'continue-without-mcp',
+        sessionId: targetId,
+        prompt: 'Continue without tools.',
+        mcpServerIds: [],
+      });
+      expect(optedOut.isError, JSON.stringify(optedOut)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
+      const batch = await call('lody_session_chat_many', {
+        operationId: 'batch-preserves-opt-out',
+        items: [{ sessionId: targetId, prompt: 'Still without tools.' }],
+      });
+      expect(batch.isError, JSON.stringify(batch)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
 
       const denied = await environment.checkMachineAccess({
         workspaceId,

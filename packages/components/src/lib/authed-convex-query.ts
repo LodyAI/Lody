@@ -1,3 +1,5 @@
+import { isConvexError } from '@lody/shared';
+
 export type AuthenticatedConvexState = {
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -13,6 +15,15 @@ export function getConvexAuthRecoveryDelayMs(attempt: number): number {
   return CONVEX_AUTH_RECOVERY_DELAYS_MS[
     Math.min(Math.max(0, attempt), CONVEX_AUTH_RECOVERY_DELAYS_MS.length - 1)
   ];
+}
+
+/** Structured application/permission errors need their own handling. An opaque
+ * query server failure may be transient, but the client cannot infer its cause. */
+export function isTransientConvexQueryError(error: Error): boolean {
+  return (
+    !isConvexError(error) &&
+    /^\[CONVEX Q\([^\n]+\)\](?: \[Request ID: [^\]]+\])? Server Error(?:\n|$)/.test(error.message)
+  );
 }
 
 export function shouldRecoverConvexAuthMismatch({

@@ -11,6 +11,23 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- `SessionHistoryReader` uses the real read-only view inside `WorkspaceCard` with
+  the shell's `WindowDragStrip`. Mac window and 390px compact-window states cover
+  English and Chinese, including the real header menu and Copy submenu. The narrow
+  story resizes the actual manager iframe while retaining the desktop layout family.
+  `tests/e2e/session-history-header.spec.ts` checks pointer clicks, hit testing and
+  computed no-drag regions without forced clicks or injected CSS; native Electron
+  window dragging still needs shell acceptance.
+- `SessionConversationPage` → `DesktopReadingReview` combines synthetic thinking,
+  tool calls and results, inline diffs, edited-file summaries, comment references,
+  visual annotation references, and Markdown in the real conversation renderers.
+  It uses a builtin DeepSeek session because that provider exposes thought prose.
+  Light, wide, working, permission and question variants share this history; mobile
+  variants cover the same reading, working, permission and question states. A file
+  click opens the real desktop diff panel or mobile diff drawer using a fake file
+  provider. `DesktopReadingReviewAnnotations` opens the real managed-preview surface
+  with an inert page and in-memory annotation: its comment can be collapsed or
+  resolved, but the fixture does not exercise a live inspector or transport.
 - `ConversationDiffPanel` uses a synthetic 200-file provider with the real diff panel.
   `OpenFromChanges` starts without a mounted diff; its Changes button mounts the panel
   inside the real `DesktopSessionDetailLayout`, including its sidebar transition.

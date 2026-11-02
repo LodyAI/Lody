@@ -47,6 +47,7 @@ export interface PresenceStream {
 }
 export interface PresenceRemoteOptions {
   readonly streamsBaseUrl: string;
+  readonly bucketId?: string;
   readonly shardHostSuffix?: string;
   /** Borrowed from the workspace token owner. Remote detach never closes it. */
   readonly auth: (context?: {
@@ -135,7 +136,7 @@ const REJOIN_BACKOFF = [2_000, 5_000, 10_000, 30_000, 60_000];
 /** Workspace child owner. No execution runtime, Promise coordinator, or transport queue. */
 export const makeWorkspacePresence = Effect.fnUntraced(function* (
   workspaceId: WorkspaceId,
-  options: { releaseTimeoutMs?: number; bootstrapTimeoutMs?: number } = {}
+  options: { releaseTimeoutMs?: number; bootstrapTimeoutMs?: number; minimal?: boolean } = {}
 ): Effect.fn.Return<WorkspacePresence, never, PresenceTransport | PresenceHost | Scope.Scope> {
   const transport = yield* PresenceTransport;
   const host = yield* PresenceHost;
@@ -152,7 +153,7 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
     return yield* Effect.die(new RangeError('Invalid presence release budget'));
   const scope = yield* Scope.make();
   const gate = yield* Semaphore.make(1);
-  const replica = new PresenceReplica(host.instanceId());
+  const replica = new PresenceReplica(host.instanceId(), { minimal: options.minimal });
   let generation: Generation | undefined;
   let sequence = 0;
   let stopped = false;
@@ -615,7 +616,8 @@ export class WorkspacePresenceOwners extends Context.Service<
   WorkspacePresenceOwners,
   {
     readonly create: (
-      workspaceId: WorkspaceId
+      workspaceId: WorkspaceId,
+      options?: { minimal?: boolean }
     ) => Effect.Effect<WorkspacePresence, PresenceReleaseFailed>;
   }
 >()('lody/loro/WorkspacePresenceOwners') {}
@@ -630,7 +632,7 @@ export const WorkspacePresenceOwnersLive = Layer.effect(
     const retired = new Set<WorkspacePresence>();
     const gate = yield* Semaphore.make(1);
     return WorkspacePresenceOwners.of({
-      create: (workspaceId) =>
+      create: (workspaceId, options) =>
         gate.withPermit(
           Effect.gen(function* () {
             const previous = owners.get(workspaceId);
@@ -654,7 +656,7 @@ export const WorkspacePresenceOwnersLive = Layer.effect(
               else yield* Effect.forkIn(Effect.ignoreCause(owner.retryCleanup), root);
             }
             const owner = yield* Scope.provide(
-              makeWorkspacePresence(workspaceId).pipe(Effect.provideContext(services)),
+              makeWorkspacePresence(workspaceId, options).pipe(Effect.provideContext(services)),
               root
             );
             owners.set(workspaceId, owner);

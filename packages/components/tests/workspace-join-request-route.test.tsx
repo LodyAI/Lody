@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../src/i18n';
 
 const mocks = vi.hoisted(() => ({
+  token: 'open-token',
   navigate: vi.fn(),
   query: vi.fn(),
   submit: vi.fn(),
@@ -19,12 +20,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({
     ...options,
-    useParams: () => ({ token: 'open-token' }),
+    useParams: () => ({ token: mocks.token }),
   }),
   useNavigate: () => mocks.navigate,
 }));
 
 vi.mock('@lody/platform/react', () => ({
+  usePlatform: () => ({ e2eeWorkspaces: undefined }),
   useCloudMutation: () => mocks.submit,
   useCloudQuery: (...args: unknown[]) => mocks.query(...args),
   usePlatformCapability: () => true,
@@ -52,7 +54,72 @@ describe('WorkspaceJoinRequestRoute', () => {
   afterEach(() => {
     vi.clearAllMocks();
     mocks.session = null;
+    mocks.token = 'open-token';
+    window.location.hash = '';
   });
+
+  it.each(['ordinary', 'encrypted'])(
+    'opens the second encrypted invitation after an %s invitation without a page reload',
+    async (first) => {
+      await initI18n('en');
+      const offer = {
+        version: 1,
+        workspaceId: 'team-a',
+        genesisHash: '11'.repeat(32),
+        genesisRecordHex: 'abcd',
+        endorser: '22'.repeat(32),
+        token: '33'.repeat(32),
+        mode: 'link',
+        expiresAt: 9000000000000,
+      };
+      const next = { ...offer, workspaceId: 'team-b', token: '44'.repeat(32) };
+      const props = (value: typeof offer) => ({
+        status: 'available',
+        offer: value,
+        workspaceName: value.workspaceId,
+        workspaceSlug: value.workspaceId,
+        recipientEmailMasked: null,
+        matchesRecipient: null,
+      });
+      mocks.query.mockImplementation((_operation, args) =>
+        args.token === offer.token
+          ? props(offer)
+          : args.token === next.token
+            ? props(next)
+            : {
+                status: 'available',
+                workspaceName: 'ordinary',
+                workspaceSlug: 'ordinary',
+                expiresAt: 9000000000000,
+                viewer: null,
+              }
+      );
+      mocks.token = first === 'ordinary' ? 'open-token' : offer.token;
+      window.location.hash =
+        first === 'ordinary' ? '' : 'e2ee=' + encodeURIComponent(JSON.stringify(offer));
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => root.render(<WorkspaceJoinRequestRoute />));
+        mocks.token = next.token;
+        window.location.hash = 'e2ee=' + encodeURIComponent(JSON.stringify(next));
+        await act(async () => root.render(<WorkspaceJoinRequestRoute />));
+        expect(container.textContent).toContain('team-b');
+        expect(container.textContent).not.toContain('team-a');
+        const signIn = [...container.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Sign in or register'
+        )!;
+        await act(async () => signIn.click());
+        expect(mocks.navigate.mock.calls.at(-1)?.[0].search.redirect).toBe(
+          `/join/${next.token}#e2ee=${encodeURIComponent(JSON.stringify(next))}`
+        );
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+      }
+    }
+  );
 
   it('loads the public preview before authentication and preserves the join URL on sign-in', async () => {
     await initI18n('en');

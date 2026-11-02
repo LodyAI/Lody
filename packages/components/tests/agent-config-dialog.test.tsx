@@ -35,6 +35,8 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
@@ -146,6 +148,16 @@ const getOptionByText = (text: string): HTMLButtonElement => {
   return option;
 };
 
+const getTitleModelOptionByText = (text: string): HTMLElement => {
+  const option = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]')).find(
+    (element) => element.textContent?.includes(text)
+  );
+  if (!option) {
+    throw new Error(`Expected title model option containing text "${text}"`);
+  }
+  return option;
+};
+
 const setNativeTextAreaValue = (element: HTMLTextAreaElement, value: string): void => {
   const valueSetter = Object.getOwnPropertyDescriptor(
     window.HTMLTextAreaElement.prototype,
@@ -172,6 +184,14 @@ describe('AgentConfigDialog', () => {
   beforeEach(async () => {
     store = createStore();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
     await initI18n('en');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -201,6 +221,7 @@ describe('AgentConfigDialog', () => {
     container?.remove();
     container = undefined;
     document.body.innerHTML = '';
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -241,6 +262,127 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  it.each([false, true])(
+    'explains unsupported encrypted remote provider forms before any write or probe (signed RPC: %s)',
+    async (protectedRpcAvailable) => {
+      store.set(workspaceContentModeAtom, {
+        accountId: 'fixture-owner',
+        workspaceSlug: 'encrypted-fixture',
+        workspaceId: 'encrypted-fixture',
+        descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+      } as never);
+      store.set(runtimeAtom, {
+        contentMode: 'e2ee',
+        protectedRpcAvailable,
+        accountId: 'fixture-owner',
+        workspaceId: 'encrypted-fixture',
+        workspaceSlug: 'encrypted-fixture',
+      } as unknown as WorkspaceRuntime);
+      store.set(localProbeResultAtom, { ok: true, machineId: 'fixture-local' });
+      const effects: string[] = [];
+      await renderDialog(
+        {
+          kind: 'create',
+          initialForm: {
+            name: 'Synthetic agent',
+            cliType: 'custom',
+            agentType: 'custom',
+            customCommandLine: 'fixture-agent --acp',
+          },
+        },
+        createMachine('Remote fixture'),
+        async () => {
+          effects.push('write');
+        },
+        async () => {
+          effects.push('binary probe');
+          return { status: 'installed' as const };
+        },
+        async () => {
+          effects.push('capability probe');
+          throw new Error('unexpected probe');
+        }
+      );
+      expect(document.body.textContent).toContain(
+        'Encrypted workspaces do not yet support remote machine operations.'
+      );
+      expect(document.querySelector('#custom-acp-command')).toBeNull();
+      expect(
+        Array.from(document.querySelectorAll('button')).some(
+          (button) => button.textContent?.trim() === 'Create'
+        )
+      ).toBe(false);
+      expect(effects).toEqual([]);
+    }
+  );
+
+  it('keeps the encrypted same-machine provider form usable through its existing local callbacks', async () => {
+    store.set(workspaceContentModeAtom, {
+      accountId: 'fixture-owner',
+      workspaceSlug: 'encrypted-fixture',
+      workspaceId: 'encrypted-fixture',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    store.set(localProbeResultAtom, { ok: true, machineId });
+    const saved: AgentConfigSubmitPayload[] = [];
+    const transitions: boolean[] = [];
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig() },
+      createTitleConfigMachine(),
+      async (payload) => {
+        saved.push(payload);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (open: boolean) => {
+        transitions.push(open);
+      }
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.map((payload) => payload.id)).toEqual([kimiConfigId]);
+    expect(transitions).toEqual([false]);
+    expect(document.body.textContent).not.toContain('Encrypted workspaces do not yet support');
+  });
+
+  it('keeps a rejected save open and displays its failure', async () => {
+    const transitions: boolean[] = [];
+    const saved: AgentConfigSubmitPayload[] = [];
+    let failWrite = true;
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig() },
+      createTitleConfigMachine(),
+      async (payload) => {
+        if (failWrite) throw new Error('Synthetic durable write failed');
+        saved.push(payload);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (open: boolean) => {
+        transitions.push(open);
+      }
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(document.body.textContent).toContain('Failed to update configuration');
+    expect(document.querySelector('[data-testid="agent-config-dialog"]')).not.toBeNull();
+    expect(transitions).toEqual([]);
+    expect(saved).toEqual([]);
+    failWrite = false;
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.map((payload) => payload.id)).toEqual([kimiConfigId]);
+    expect(transitions).toEqual([false]);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
 
   it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
@@ -1089,6 +1231,10 @@ describe('AgentConfigDialog', () => {
     const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
+    const displayedConfigId = document
+      .querySelector('[data-testid="agent-config-dialog"]')
+      ?.getAttribute('data-agent-config-id');
+    expect(displayedConfigId).toMatch(/^[0-9a-f-]{36}$/u);
 
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
     expect(onCheckBinaryStatus).not.toHaveBeenCalled();
@@ -1122,6 +1268,7 @@ describe('AgentConfigDialog', () => {
     await vi.waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
+          id: displayedConfigId,
           cliType: 'builtin',
           agentType: 'deepseek',
           env: {
@@ -1915,6 +2062,17 @@ describe('AgentConfigDialog', () => {
       });
     });
     expect(document.body.textContent).toContain('Kimi K2');
+    const modelTrigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Kimi K2'
+    );
+    expect(modelTrigger).toBeDefined();
+    await act(async () => {
+      modelTrigger?.click();
+    });
+    expect(getTitleModelOptionByText('Kimi K2 Turbo')).toBeDefined();
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
     expect(document.body.textContent).not.toContain('Probing capabilities…');
     await act(async () => {
       Array.from(document.body.querySelectorAll('button'))
@@ -1923,9 +2081,63 @@ describe('AgentConfigDialog', () => {
     });
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
-        titleGeneration: expect.objectContaining({
-          configOptionValues: expect.objectContaining({ model: expect.any(String) }),
-        }),
+        titleGeneration: { configOptionValues: { reasoning_effort: 'low' } },
+      })
+    );
+  });
+
+  it('saves the selected title model after testing capabilities', async () => {
+    const mode: AgentConfigDialogMode = { kind: 'edit', config: createBuiltinConfig() };
+    const onSubmit = vi.fn(async () => {});
+    let finishProbe!: (response: Awaited<ReturnType<RefreshCapabilities>>) => void;
+    const onRefreshCapabilities: RefreshCapabilities = () =>
+      new Promise((resolve) => {
+        finishProbe = resolve;
+      });
+    const renderMachine = (machine: MachineViewMeta) =>
+      renderDialog(mode, machine, onSubmit, undefined, onRefreshCapabilities);
+
+    await renderMachine(createMachine('Workstation'));
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    await renderMachine(createTitleConfigMachine());
+    await act(async () => {
+      finishProbe({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId,
+        configId: kimiConfigId,
+        cliType: 'builtin',
+        agentType: 'kimi',
+        success: true,
+      });
+    });
+
+    const modelTrigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Kimi K2'
+    );
+    expect(modelTrigger).toBeDefined();
+    await act(async () => {
+      modelTrigger?.click();
+    });
+    await act(async () => {
+      getTitleModelOptionByText('Kimi K2 Turbo').dispatchEvent(
+        new MouseEvent('click', { bubbles: true })
+      );
+    });
+
+    await act(async () => {
+      Array.from(document.body.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'Save')!
+        .click();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: {
+          configOptionValues: { model: 'kimi-k2-turbo', reasoning_effort: 'low' },
+        },
       })
     );
   });

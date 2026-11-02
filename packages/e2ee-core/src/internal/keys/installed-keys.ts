@@ -193,6 +193,8 @@ export class InstalledEpochKeys extends Context.Service<
   {
     /** Protect and durably reload a key matching the ledger commitment; borrows `key`, which remains caller-owned. */
     saveAndReload(epoch: number, key: Bytes.EpochKey): Effect.Effect<void, InstalledKeyError>;
+    /** Verify an installed key and dispose its temporary material without exporting it. */
+    check(epoch: number): Effect.Effect<void, InstalledKeyError>;
     /** Open an installed key after current membership checks; the caller owns and must dispose the returned key. */
     read(epoch: number): Effect.Effect<Bytes.EpochKey, InstalledKeyError>;
   }
@@ -246,6 +248,9 @@ export class InstalledEpochKeys extends Context.Service<
       });
 
       return InstalledEpochKeys.of({
+        check: Effect.fn('@lody/e2ee-core/InstalledEpochKeys.check')(function* (epoch: number) {
+          return yield* gate.run(Effect.flatMap(load(epoch), (blob) => openOwned(epoch, blob)));
+        }),
         saveAndReload: Effect.fn('@lody/e2ee-core/InstalledEpochKeys.saveAndReload')(function* (
           epoch: number,
           key: Bytes.EpochKey

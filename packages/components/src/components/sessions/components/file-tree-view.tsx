@@ -43,7 +43,8 @@ import { currentWorkspaceIdAtom, getMachineMetaByIdAtomFamily, userAtom } from '
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { runtimeAtom } from '@/atoms/runtime';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Button, ScrollArea } from '@/ui';
+import { Button } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   createFileIconComponent,
   createFolderIconComponent,
@@ -251,7 +252,7 @@ function VirtualFileTree({
   });
 
   // The virtualizer reads `getScrollElement()` from a layout effect, and the
-  // Radix ScrollArea viewport it points at is an ANCESTOR host node: React
+  // Base UI ScrollArea viewport it points at is an ANCESTOR host node: React
   // attaches that ref only after this child's layout effects have already run,
   // so the first pass always sees `null` and produces an empty range. The
   // viewport can also legitimately measure 0 while the panel is still being

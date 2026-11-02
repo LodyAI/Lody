@@ -8,56 +8,81 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  multiRepoProject: 'multiRepoProject',
+  projectFolderSelection: 'projectFolderSelection',
+  projectFileRoots: 'projectFileRoots',
+  projectRepositoryMembers: 'projectRepositoryMembers',
   operationInbox: 'operationInbox',
   magpieImport: 'magpieImport',
   dshProviderIsolation: 'dshProviderIsolation',
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
+  mcpLocalAuthentication: 'mcpLocalAuthentication',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
+  acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
+  sessionAutomations: 'sessionAutomations',
+  remoteAutomationControl: 'remoteAutomationControl',
   preparedSessionInput: 'preparedSessionInput',
+  messageQuotes: 'messageQuotes',
   sessionInputAttachments: 'sessionInputAttachments',
   localFileResources: 'localFileResources',
+  fileDownload: 'fileDownload',
+  markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  androidEmulator: 'androidEmulator',
+  androidEmulatorQuality: 'androidEmulatorQuality',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
+  codeCollabAllChangesScope: 'codeCollabAllChangesScope',
   sessionHistory: 'sessionHistory',
   sessionHistoryIncremental: 'sessionHistoryIncremental',
   sessionHistoryWatch: 'sessionHistoryWatch',
+  sessionHistoryInspection: 'sessionHistoryInspection',
+  sessionHistoryPatches: 'sessionHistoryPatches',
   sessionInputAcceptance: 'sessionInputAcceptance',
   sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
   bugReportClientLog: 'bugReportClientLog',
 } as const;
 
+export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
+export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+/** `start` accepts the `methodId` the reader picked from the agent's advertised methods. */
+export const ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
-export const SCHEDULES_PROTOCOL_VERSION = 2;
+const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
+// v3 supports frozen full-message one-time schedules.
+const SCHEDULED_MESSAGES_PROTOCOL_VERSION = 3;
+export const SCHEDULES_PROTOCOL_VERSION = SCHEDULED_MESSAGES_PROTOCOL_VERSION;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
+export const MESSAGE_QUOTES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
@@ -66,9 +91,13 @@ export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
-export const SESSION_HISTORY_PROTOCOL_VERSION = 2;
+export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
+/** Native publication and watch are the history authority; no Loro cursor log. */
+export const SESSION_HISTORY_PROTOCOL_VERSION = 3;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
+export const SESSION_HISTORY_PATCHES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
@@ -121,7 +150,15 @@ export function machineSupportsSubagentCancellation(
  * required version must never travel apart, because a mismatch fails silently
  * in the "supported" direction and there is no version fallback to catch it.
  */
+export const MULTI_REPO_PROJECT_PROTOCOL_VERSION = 1;
+export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
+export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
+
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject]: MULTI_REPO_PROJECT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots]: PROJECT_FILE_ROOTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
   providerRateLimitsRefresh: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
@@ -130,6 +167,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication]: MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:
     LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.subagentEvents]: SUBAGENT_EVENTS_PROTOCOL_VERSION,
@@ -137,26 +175,40 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection]:
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.fileDownload]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope]:
+    CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches]: SESSION_HISTORY_PATCHES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch]: SESSION_HISTORY_WATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]:
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
@@ -195,6 +247,16 @@ export function machineSupportsSessionHistoryWatch(
       MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch,
       SESSION_HISTORY_WATCH_PROTOCOL_VERSION
     ) && machineSupportsSessionHistoryIncremental(machine)
+  );
+}
+
+export function machineSupportsSessionHistoryInspection(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection,
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION
   );
 }
 
@@ -267,6 +329,22 @@ export function machineSupportsAcpAuthenticationInteractionsProtocol(
   );
 }
 
+/**
+ * Whether `machine/acp-authenticate` accepts a `methodId` the reader picked
+ * before starting. Its request schema is strict, so an older daemon rejects the
+ * whole start when the field is present; callers omit it there and let the
+ * daemon show its own picker after the sign-in has started.
+ */
+export function machineSupportsAcpAuthenticationMethodSelectionProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection,
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION
+  );
+}
+
 /** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
 export function machineSupportsLocalProjectRemovalProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
@@ -332,7 +410,7 @@ export function machineSupportsSchedulesProtocol(
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.schedules,
-    SCHEDULES_PROTOCOL_VERSION
+    SCHEDULES_PROMPT_PROTOCOL_VERSION
   );
 }
 
@@ -344,6 +422,16 @@ export function machineSupportsPreparedSessionInputProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
     PREPARED_SESSION_INPUT_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsMessageQuotes(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.messageQuotes,
+    MESSAGE_QUOTES_PROTOCOL_VERSION
   );
 }
 
@@ -423,6 +511,41 @@ export function machineSupportsIosSimulatorExterior(
   );
 }
 
+export function machineSupportsMultiRepoProject(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject,
+    MULTI_REPO_PROJECT_PROTOCOL_VERSION
+  );
+}
+
+/** Non-Git Project group members and root-aware file RPCs require this capability. */
+export function machineSupportsProjectFileRoots(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots,
+    PROJECT_FILE_ROOTS_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Project group repository Members (`preferLocal`): the daemon uses its own
+ * copy of the repository when it has one. Older daemons would clone instead.
+ */
+export function machineSupportsProjectRepositoryMembers(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers,
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION
+  );
+}
+
 export function machineSupportsSessionHistoryIncremental(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
@@ -430,5 +553,49 @@ export function machineSupportsSessionHistoryIncremental(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental,
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistoryPatches(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return (
+    machineSupportsSessionHistoryIncremental(machine) &&
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches,
+      SESSION_HISTORY_PATCHES_PROTOCOL_VERSION
+    )
+  );
+}
+
+/** Frozen input blocks must never be downgraded to a plain-text prompt. */
+export function machineSupportsScheduledMessagesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULED_MESSAGES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsAndroidEmulatorProtocol(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulator,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorQuality(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
   );
 }

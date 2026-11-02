@@ -1,32 +1,9 @@
 import { Brand, Result } from 'effect';
 import { Point } from '@noble/ed25519';
 import { ValidationError } from './errors';
+import { wasmSigningKeyValid } from './ed25519-wasm';
 import { keyId } from './identifiers';
-
-/** Unexported constructor: successful parsers are the only public constructors. */
-class OwnedBytes<K extends string> implements Brand.Brand<K> {
-  declare readonly ['~effect/Brand']: { readonly [P in K]: K };
-  readonly #bytes: Uint8Array<ArrayBuffer>;
-
-  constructor(
-    readonly kind: K,
-    bytes: Uint8Array
-  ) {
-    this.#bytes = new Uint8Array(bytes);
-    Object.freeze(this);
-  }
-
-  /** Return a fresh owned copy; modifying it cannot change this value. */
-  toBytes(): Uint8Array<ArrayBuffer> {
-    return new Uint8Array(this.#bytes);
-  }
-
-  /** Compare kind and bytes for equality; this is not an authorization check. */
-  equals(other: OwnedBytes<K>): boolean {
-    if (this.kind !== other.kind || this.#bytes.length !== other.#bytes.length) return false;
-    return this.#bytes.every((value, i) => value === other.#bytes[i]);
-  }
-}
+import { OwnedBytes } from './owned-bytes';
 
 /** A device's Ed25519 public key (32 bytes); also its device id in hex. */
 export type SigningPublicKey = OwnedBytes<'SigningPublicKey'>;
@@ -54,7 +31,9 @@ export type EpochNumber = number & Brand.Brand<'EpochNumber'>;
 const epochBrand = Brand.nominal<EpochNumber>();
 // Only exact bytes that passed the fixed point checks enter this bounded cache.
 // A cache hit proves key shape, never signer authority or signature validity.
-const SIGNING_KEY_CACHE_LIMIT = 256;
+// Least recently used eviction: a ledger's frequent signers (its Owner) stay cached
+// while thousands of members' keys pass through once.
+const SIGNING_KEY_CACHE_LIMIT = 4096;
 const validatedSigningKeys = new Set<string>();
 
 function exact<K extends string>(
@@ -74,14 +53,22 @@ export function signingPublicKey(input: unknown): Result.Result<SigningPublicKey
     const key = yield* exact('SigningPublicKey', 32, input);
     const bytes = key.toBytes();
     const id = keyId(bytes);
-    if (validatedSigningKeys.has(id)) return key;
-    const valid = Result.try({
-      try: () => {
-        const point = Point.fromBytes(bytes, false);
-        return !point.isSmallOrder() && point.isTorsionFree();
-      },
-      catch: () => new ValidationError({ code: 'invalid-key' }),
-    });
+    if (validatedSigningKeys.has(id)) {
+      validatedSigningKeys.delete(id);
+      validatedSigningKeys.add(id);
+      return key;
+    }
+    const fast = wasmSigningKeyValid(bytes);
+    const valid =
+      fast === undefined
+        ? Result.try({
+            try: () => {
+              const point = Point.fromBytes(bytes, false);
+              return !point.isSmallOrder() && point.isTorsionFree();
+            },
+            catch: () => new ValidationError({ code: 'invalid-key' }),
+          })
+        : Result.succeed(fast);
     if (!(yield* valid)) return yield* Result.fail(new ValidationError({ code: 'invalid-key' }));
     if (validatedSigningKeys.size === SIGNING_KEY_CACHE_LIMIT)
       validatedSigningKeys.delete(validatedSigningKeys.values().next().value!);

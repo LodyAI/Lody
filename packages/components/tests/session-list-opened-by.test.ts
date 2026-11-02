@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
+import { buildOpenedBySessionTree } from '../src/lib/session-opened-by-tree';
 import {
   buildGroups,
   getVisibleSessionGroupRows,
@@ -14,6 +15,12 @@ import {
   sessionGroupOverflowsPreview,
   type SessionListRow,
 } from '../src/components/session-list';
+import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
+import {
+  buildSessionListRows,
+  placeWorkspaceSessionsWithOpeners,
+  type WorkspaceSidebarGroups,
+} from '../src/components/sessions/session-list-rows';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
 import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
@@ -478,5 +485,109 @@ describe('SessionList opened-by rendering', () => {
     const row = container?.querySelector('[data-sidebar-session-id="opened-2"]');
     expect(row?.getAttribute('aria-current')).toBe('page');
     expect(row?.querySelector('[data-session-working-indicator]')).not.toBeNull();
+  });
+});
+
+describe('Workspace placement under openers across groups', () => {
+  const PROJECT_KEY = 'machine-local:project-1';
+  const meta = (overrides: Partial<SessionMeta> & { id: string }): SessionMeta =>
+    ({
+      machineId: 'machine-local' as MachineId,
+      createdAt: '2026-05-09T10:00:00.000Z',
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      ...overrides,
+      id: overrides.id as SessionId,
+    }) as SessionMeta;
+  const localProject = {
+    kind: 'local',
+    localProjectId: 'project-1' as LocalProjectId,
+  } as const;
+  const toTaskRows = (sessions: SessionMeta[]) =>
+    buildSessionListRows(sessions, { scope: 'my', currentUserId: 'user-1', defaultTitle: 'Untitled' });
+  const place = (
+    natural: WorkspaceSidebarGroups,
+    sessions: SessionMeta[],
+    rendered: (key: string) => boolean = (key) => key === PROJECT_KEY
+  ) =>
+    placeWorkspaceSessionsWithOpeners(natural, {
+      sessions,
+      isRenderedLocalProject: rendered,
+      resolveOpenerRowId: (id) => id ?? null,
+      toTaskRows,
+      latestMessageAt: (session) => session.lastMessageAt ?? 0,
+    });
+
+  it('nests a remote plain chat opened from a Local Project under its opener there', () => {
+    const opener = meta({ id: 'opener', project: localProject, lastMessageAt: 1_000 });
+    const remoteChat = meta({
+      id: 'remote-chat',
+      machineId: 'machine-remote' as MachineId,
+      openedBySessionId: 'opener' as SessionId,
+      lastMessageAt: 2_000,
+    });
+    const placed = place(
+      {
+        chatSessions: toTaskRows([remoteChat]),
+        repoSessions: [],
+        projectGroupSessions: [],
+        localProjectSessionsByKey: new Map([[PROJECT_KEY, [opener]]]),
+      },
+      [opener, remoteChat]
+    );
+
+    expect(placed.chatSessions).toEqual([]);
+    expect(placed.localProjectSessionsByKey.get(PROJECT_KEY)?.map((s) => s.id)).toEqual([
+      'remote-chat',
+      'opener',
+    ]);
+    const tree = buildOpenedBySessionTree(placed.localProjectSessionsByKey.get(PROJECT_KEY) ?? [], {
+      getId: (session) => session.id,
+      getOpenedBySessionId: (session) => session.openedBySessionId ?? null,
+    });
+    expect(tree.map((node) => `${node.id}@${node.depth}`)).toEqual([
+      'opener@0',
+      'remote-chat@1',
+    ]);
+  });
+
+  it('renders a Local Project Session opened from a GitHub Session as a row of that repo group', () => {
+    const opener = makeRow({ sessionId: 'repo-opener' });
+    const localChild = meta({
+      id: 'local-child',
+      project: localProject,
+      openedBySessionId: 'repo-opener' as SessionId,
+    });
+    const placed = place(
+      {
+        chatSessions: [],
+        repoSessions: [opener],
+        projectGroupSessions: [],
+        localProjectSessionsByKey: new Map([[PROJECT_KEY, [localChild]]]),
+      },
+      [localChild]
+    );
+
+    expect(placed.localProjectSessionsByKey.get(PROJECT_KEY)).toEqual([]);
+    const [group] = buildGroups(placed.repoSessions, [], false);
+    expect(group?.repoFullName).toBe(REPO);
+    expect(
+      getVisibleSessionGroupTree(group!, true).map((node) => `${node.id}@${node.depth}`)
+    ).toEqual(['repo-opener@0', 'local-child@1']);
+  });
+
+  it('leaves a row in its own group when the opener is not rendered there', () => {
+    const opener = meta({ id: 'opener', project: localProject });
+    const chat = toTaskRows([meta({ id: 'chat', openedBySessionId: 'opener' as SessionId })]);
+    const natural: WorkspaceSidebarGroups = {
+      chatSessions: chat,
+      repoSessions: [],
+      projectGroupSessions: [],
+      localProjectSessionsByKey: new Map([[PROJECT_KEY, [opener]]]),
+    };
+    // A hidden project (or a pinned opener, absent from every Workspace group)
+    // cannot host the row, so it stays where it was.
+    expect(place(natural, [opener], () => false)).toBe(natural);
   });
 });

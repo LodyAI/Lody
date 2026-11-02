@@ -1,3 +1,8 @@
+import {
+  WorkspaceStreamsConfigurationError,
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsMode,
+} from '@lody/shared/workspace-streams-content';
 import { StreamsCrdt, type CrdtAdapter, type JsonObject as Version } from '@loro-dev/streams-crdt';
 import { StreamsClient, type Result, type StreamError } from '@loro-dev/streams-client';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
@@ -91,8 +96,12 @@ export type MigrationTarget = {
 /** Reads use isolated replicas. All shared-index writes use server-enforced CAS. */
 export async function openMigrationTarget(
   provider: LoroStreamsTokenProviderLegacy,
-  workspaceId: WorkspaceId
+  workspaceId: WorkspaceId,
+  content: WorkspaceStreamsMode
 ): Promise<MigrationTarget> {
+  if (content?.mode === 'protected')
+    throw new WorkspaceStreamsConfigurationError('加密工作区不支持导入');
+  requirePlaintextWorkspaceStreamsContent(content);
   const baseUrl = await prepareCliStreamsGatewayBaseUrl(provider);
   const lifetime = new AbortController();
   const streams = new Set<StreamsCrdt<Version>>();

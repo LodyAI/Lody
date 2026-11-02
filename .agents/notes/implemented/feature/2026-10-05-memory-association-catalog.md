@@ -80,6 +80,18 @@ Assigned rows now expose their accessible Role emojis and names through desktop
 tooltips or mobile tap popovers. This reuses the same exact-machine binding lookup
 as the unassigned shortcut, without revealing private inaccessible Roles.
 
+## Assigned-role alignment (2026-10-24)
+
+Long descriptions made the assigned-role cluster shrink below its content width, so
+its avatar wrapped under the label, and the whole cluster was centred against a
+taller row. The label therefore moved between rows that should read as one column.
+The trailing cluster now keeps its content width and anchors to the title line
+instead of the row centre; the provider logo stays vertically centred. Descriptions
+clamp to two lines with an ellipsis, so a long profile no longer defines the row's
+height. The `AssignedRoles` Storybook story pairs a long and a short description;
+this is visual evidence for the layout, not a behavioural test. Many role avatars
+can still wrap inside the cluster's 45% width limit.
+
 ## Redundancy ablation (2026-10-06)
 
 The cleanup keeps the existing provider and persistence contracts. Remove the

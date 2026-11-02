@@ -51,8 +51,9 @@ supply a command or environment dictionary through the memory RPC.
 
 The initial adapter is Nowledge Mem. It executes `nmem status -j`; a missing
 executable shows in-page copy with `https://mem.nowledge.co/en` on that machine's
-Memory page (and in the Role memory picker), and a status other than `ok` asks
-the user to start Mem and refresh. Opening Memory still probes the selected
+Memory page (and in the Role memory picker). A successful exit with top-level
+status `ok` or `healthy` means ready; other status values ask the user to start
+Mem and refresh. Opening Memory still probes the selected
 machine automatically. Missing or inactive nmem must not open a dialog. When
 ready, `nmem agents list -j` supplies `agentProfiles`. Creation uses
 `nmem agents enroll <id> -j` with a required name and optional description, role and default

@@ -224,6 +224,7 @@ export type FrozenOperationContinuationConfig = {
    * correspond to batch items rejected before a target was accepted.
    */
   targetDispatchConfigs?: Array<{
+    mcpServerIds?: string[];
     /** Internal derived-default provenance; never accepted from public MCP input. */
     builtinDefaultModeId?: string;
     /** Legacy inherited-mode provenance, retained for stored config compatibility. */

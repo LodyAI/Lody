@@ -1,3 +1,4 @@
+import { inheritHistoryStreamText } from './history-stream-text';
 import { historyValuesEqual } from './history-values-equal';
 export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
@@ -28,6 +29,7 @@ import {
   planOperationProgress,
 } from './session-data/operation-progress';
 import type { HistoryAction } from './session-data/history-actions';
+import { historyQueryRow, type HistoryQueryRow } from './session-data/history-selection';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -163,7 +165,9 @@ function preserveUnknown(
 const cleanNew = (schema: z.ZodType, input: unknown, old?: unknown): unknown => {
   const parsed = parseHistoryWrite(schema, input);
   // There is no stored extension to merge for a newly authored value.
-  return old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  const result = old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  inheritHistoryStreamText(input, result);
+  return result;
 };
 
 // One independently editable group, derived from the message definition rather
@@ -348,6 +352,21 @@ export function prepareReplacement(previous: unknown, incoming: unknown): Record
 }
 
 export interface HistoryWriter {
+  forEachStored(visit: (entry: SessionHistoryInput) => void): void;
+  readQuery(options?: { transcriptVisibility?: boolean }): HistoryQueryRow[];
+  readSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ): SessionHistoryInput[];
+  /** Plan selected bodies; changes to metadata-only rows are rejected. */
+  updateSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): void;
+  updateSelectedWithRollback(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): () => void;
   /** Detached stored JSON for inspection/hashing; not copy/rollback provenance. */
   readStored(): SessionHistoryInput[];
   capture(): StoredHistorySnapshot;
@@ -462,7 +481,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old,
       value
     ) =>
-      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value)
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
+    offset = 0
   ) => {
     const used = new Set<number>();
     const byId = new Map<unknown, number[]>();
@@ -486,7 +506,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       last = index;
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(index);
+      const map = list.get(offset + index);
       if (!isContainer(map) && record(map))
         return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
@@ -494,18 +514,18 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { index, map, value: prepareValue(previous[index], entry) };
     });
     return () => {
-      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(i, 1);
+      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(offset + i, 1);
       plan.forEach((op, i) => {
         if (op.index < 0)
           populateContainer(
-            list.insertContainer(i, new LoroMap()),
+            list.insertContainer(offset + i, new LoroMap()),
             sessionHistorySchema,
             op.value,
             undefined
           );
         else if ('inline' in op && op.inline) {
-          list.delete(i, 1);
-          list.insert(i, op.value as Parameters<LoroList['insert']>[1]);
+          list.delete(offset + i, 1);
+          list.insert(offset + i, op.value as Parameters<LoroList['insert']>[1]);
         } else if (op.value !== undefined && isContainer(op.map))
           diffHistoryContainer(
             op.map,
@@ -521,7 +541,149 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
   const prepare = (previous: readonly SessionHistory[], next: readonly SessionHistory[]) =>
     planWrite(previous, next);
 
+  const readQuery = (options?: { transcriptVisibility?: boolean }): HistoryQueryRow[] =>
+    Array.from({ length: list.length }, (_, index) =>
+      historyQueryRow(
+        list.get(index),
+        {
+          field: storedField,
+          scalar: (value) => {
+            const scalar = storedScalar(value);
+            if (isContainer(scalar)) return scalar.kind() === 'List' ? [] : {};
+            return scalar && typeof scalar === 'object'
+              ? Array.isArray(scalar)
+                ? []
+                : {}
+              : scalar;
+          },
+          keys: (value) =>
+            isContainer(value) && value.kind() === 'Map'
+              ? [...(value as LoroMap).keys()]
+              : record(value)
+                ? Object.keys(value)
+                : [],
+          length: (value) =>
+            Array.isArray(value)
+              ? value.length
+              : isContainer(value) && value.kind() === 'List'
+                ? (value as LoroList).length
+                : 0,
+          at: (value, itemIndex) =>
+            Array.isArray(value) ? value[itemIndex] : (value as LoroList).get(itemIndex),
+        },
+        options?.transcriptVisibility
+      )
+    );
+  const storedAt = (index: number): SessionHistoryInput => {
+    const value = list.get(index);
+    return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+  };
+  const storedRange = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => storedAt(from + index));
+  const membership = () =>
+    Array.from({ length: list.length }, (_, index) => {
+      const row = list.get(index);
+      return {
+        id: storedScalar(storedField(row, 'id')),
+        record: isContainer(row) ? row.kind() === 'Map' : record(row),
+      };
+    });
+  const selectedPlan = (
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ) => {
+    const query = readQuery();
+    const positions = new Set(select(query));
+    for (const index of positions)
+      if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
+        throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+    const untouched = new Set<unknown>();
+    const before = query.map((row, index) => {
+      if (positions.has(index)) return storedAt(index);
+      untouched.add(row);
+      return row as unknown as SessionHistoryInput;
+    });
+    const next = immer.produce(before, (draft) => {
+      const result = updater(draft);
+      if (result && result !== draft) draft.splice(0, draft.length, ...result);
+    });
+    const commit = planWrite(before, next, (old, value) => {
+      if (untouched.has(old))
+        throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
+      return old === undefined
+        ? cleanNew(HistoryEntryWriteSchema, value)
+        : prepareReplacement(old, value);
+    });
+    return { before, next, commit };
+  };
+
   const writer: HistoryWriter = {
+    forEachStored(visit) {
+      for (let index = 0; index < list.length; index++) {
+        const value = storedAt(index);
+        if (record(value)) visit(value);
+      }
+    },
+    readQuery,
+    readSelected(select, options) {
+      const rows = readQuery(options);
+      return select(rows).map((index) => {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= list.length)
+          throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+        return storedAt(index);
+      });
+    },
+    updateSelected(select, updater) {
+      selectedPlan(select, updater).commit();
+    },
+    updateSelectedWithRollback(select, updater) {
+      const beforeMembers = membership();
+      const { before, next, commit } = selectedPlan(select, updater);
+      let start = 0,
+        suffix = 0;
+      while (
+        start < before.length &&
+        start < next.length &&
+        historyValuesEqual(before[start], next[start])
+      )
+        start++;
+      while (
+        suffix < before.length - start &&
+        suffix < next.length - start &&
+        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+      )
+        suffix++;
+      const removed = storedRange(start, before.length - suffix);
+      commit();
+      const afterMembers = membership();
+      const end = afterMembers.length - suffix;
+      const after = storedRange(start, end);
+      let consumed = false;
+      return () => {
+        const currentMembers = membership();
+        const sameRows =
+          currentMembers.length >= afterMembers.length &&
+          afterMembers.every(
+            (row, index) =>
+              row.record && currentMembers[index]?.record && row.id === currentMembers[index]!.id
+          );
+        if (consumed || !sameRows)
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        const currentRange = storedRange(start, end);
+        if (
+          !matchesRollbackReceipt(
+            beforeMembers.filter((row) => row.record),
+            after,
+            currentRange
+          )
+        )
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        // Align only complete values in the owned range. Later appends cannot
+        // consume restored IDs; unchanged containers inside the range survive.
+        planWrite(currentRange, removed, (_old, value) => value, start)();
+        consumed = true;
+      };
+    },
     readStored() {
       return list.toJSON() as SessionHistoryInput[];
     },

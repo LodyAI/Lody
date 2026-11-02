@@ -224,6 +224,12 @@ conflicting edit. A cached goal guard is valid only for its exact history versio
 missing, invalid or concurrently changed cache evidence requires an authoritative
 check. Cache absence never establishes that no active goal exists.
 
+Ordinary Roost queries use logical fields and selected bodies. Structural edits
+use an SDK membership manifest referencing existing physical segments; reinserted
+business IDs receive fresh physical primaries. Final activation commits the root
+reference, branch revision and operation receipts atomically. This membership
+format requires matching SDK and Native capabilities.
+
 Opening a Roost conversation reads the latest active-branch window. Scrolling
 up loads older logical turns through a reverse cursor. Whole-history search,
 outline navigation, counts and facts must cover earlier pages without requiring
@@ -251,8 +257,12 @@ to the same observation. Consecutive changes update the affected cached rows
 atomically. Independently negotiated incremental recovery uses an owner-issued,
 durable checkpoint to cover missed changes: notification coalescing alone must
 not require rereading unchanged historical bodies. Cache bodies, membership and
-checkpoint advance together. Missing or foreign recovery evidence stages a
-replacement through bounded pages while retaining the previous coherent snapshot. Reconnection refreshes through the
+checkpoint advance together. Losing patch eligibility alone retains verified
+change coverage for complete-body repair. Missing or foreign recovery evidence
+atomically replaces the latest window, retaining the previous readable snapshot
+until that window commits. Invalidated older pages load on demand and are unavailable
+offline until fetched again; ordinary incremental repair preserves the cached prefix.
+Recovery must not automatically sweep the entire history. Reconnection refreshes through the
 existing owner transport. The cache never accepts or replays user commands, and
 cannot supply history this device has never synchronized.
 

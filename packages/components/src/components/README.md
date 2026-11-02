@@ -90,7 +90,9 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   retains the last committed presentation. With no owners and navigation settled,
   the provider releases the frame and clears that memory so later session navigation
   cannot revive it. Static BootShell and `WorkspaceCard`
-  share frame geometry. `DocumentStyle` replaces the inline first-paint sheet
+  share frame geometry. Desktop web headers share the macOS row geometry across the
+  card rim; see [header alignment](../../../../.agents/notes/implemented/bug-fix/2026-10-29-web-header-alignment.md).
+  `DocumentStyle` replaces the inline first-paint sheet
   after commit and keeps live CSS mutable during updates; React's immutable
   `style href` resources cannot own it. The card's content `LoadingPlaceholder` retains the
   same mark while workspace data resolves. See [startup intent](../../../../specs/app-startup-landing.md),
@@ -98,7 +100,9 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   and its [layout-handoff follow-up](../../../../.agents/notes/implemented/feature/2026-10-19-boot-shell-layout-handoff.md).
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
-  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
+  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu.
+  Desktop Help opens to the right of its button with bottom edges aligned; mobile Help opens upward.
+  Archive is a direct
   button and becomes the return action while open. Desktop controls are 28px and use
   the navigation rows' ink and fills (`sidebarSurface.iconButton`, shared with the
   header's icon buttons); mobile actions retain their touch targets. See the
@@ -185,8 +189,7 @@ are recorded in the
 
 The [conversation drop overlay](shared/conversation-drop-overlay.tsx) paints a
 non-interactive mask over the active drop zone; the parent owns hit testing and
-drag state. The [DeepSeek delegation warning](shared/deepseek-delegation-warning.tsx)
-supplies the same linked warning contents to desktop and mobile run configuration.
+drag state.
 The [MCP transport icon](shared/mcp-transport.tsx) supplies the transport glyph to
 settings controls. Their visual rules are component-local StyleX, with the
 overlay's light/dark alpha tied to the app's explicit theme. See the

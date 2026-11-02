@@ -6,6 +6,7 @@ import type { MachineId } from '@lody/shared';
 import { bugReportDialogOpenAtom, currentWorkspaceIdAtom, userAtom } from '@/atoms';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { withoutEncryptedSharedMachines } from '@/lib/visible-machine-index';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
@@ -38,7 +39,12 @@ export function BugReportDialogContainer() {
   // Same machine source as the chat landing picker / sidebar: includes
   // machines shared with the team, not just the ones whose meta rooms this
   // client happens to have cached.
-  const { machines: visibleMachines } = useVisibleMachineMetas();
+  const visibleMachineIndex = useVisibleMachineMetas();
+  // Log collection uses ordinary machine RPC, which encrypted shared machines never offer.
+  const visibleMachines = useMemo(
+    () => withoutEncryptedSharedMachines(visibleMachineIndex.machines, visibleMachineIndex),
+    [visibleMachineIndex]
+  );
   const onlineMachineIds = useOnlineMachineIds();
   const user = useAtomValue(userAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);

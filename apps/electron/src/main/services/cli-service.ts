@@ -1,3 +1,7 @@
+import {
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest
+} from '@lody/shared/e2ee-local-pairing'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -5,6 +9,7 @@ import { totalmem } from 'node:os'
 import { basename, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
+import type { AutomationControlRequest } from '@lody/shared/automations'
 import {
   signalChildTreeNowLegacy,
   startProcessLegacy,
@@ -12,6 +17,10 @@ import {
   type ProcessHandleLegacy,
   type TerminationPolicy
 } from '@lody/shared/node/process'
+import type {
+  LocalE2eePrepareRequest,
+  LocalE2eeActivateRequest
+} from '@lody/shared/e2ee-local-pairing'
 import { isLocalSessionControlRequest } from '@lody/shared/node/local-session-control'
 import { isLocalProjectControlRequest } from '@lody/shared/node/local-project-control'
 import {
@@ -47,6 +56,7 @@ import type {
   LocalSessionControlResponse
 } from '@lody/shared/message'
 import type {
+  CliRuntimeState,
   ElectronCliState,
   RestartCliResult,
   SendLocalMachineRpcResult,
@@ -69,7 +79,10 @@ import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
 import { getDesktopLog } from '../desktop-log'
 import { createCliProbeTrace } from '../desktop-log-core'
-import type { DesktopExecutionHost } from './desktop-execution-host'
+import {
+  DESKTOP_HOST_ACCESS_DENIED_MESSAGE,
+  type DesktopExecutionHost
+} from './desktop-execution-host'
 import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
 import type { CliOutputEvent, CliRunResult } from '../types'
@@ -77,9 +90,8 @@ import { resolveLocalSessionControlTimeoutMs } from './local-session-control-bud
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
-// force-killing it. Kept short so Command+Q feels responsive; with the CLI's own
-// fast socket teardown a clean exit normally lands well under this.
-const CLI_QUIT_GRACE_MS = 3000
+// force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
+const CLI_QUIT_GRACE_MS = 10_000
 // How long a SIGKILLed embedded CLI may take to be reaped before quit reports it.
 const CLI_FORCE_KILL_WAIT_MS = 5000
 // The embedded CLI shares Electron's process group: it is not spawned detached,
@@ -245,6 +257,8 @@ type MachineIdLookupOptions = {
 type CliServiceOptions = {
   resolveBootstrapSession?: () => Promise<BootstrapSession | null>
   executionHost?: DesktopExecutionHost
+  /** Every runtime-state snapshot the Supervisor observes. */
+  onRuntimeState?: (runtime: CliRuntimeState) => void
 }
 
 function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['type']): number {
@@ -498,8 +512,11 @@ export class CliService {
   private supervisor: CliSupervisor | null = null
   private readonly supervisorInstanceId: string
   private readonly executionHost: DesktopExecutionHost | undefined
+  private readonly onRuntimeState: ((runtime: CliRuntimeState) => void) | undefined
   private readonly supervisorToken = `${randomUUID()}${randomUUID()}`
   private hostLease: LocalCliHostLease | null = null
+  /** The last Host acquisition was refused by an endpoint this process may not open. */
+  private hostAccessDenied = false
   private lastTracedSupervisorState = ''
   private readonly cliProbeTrace = createCliProbeTrace({
     getLog: getDesktopLog,
@@ -509,6 +526,7 @@ export class CliService {
   constructor(options: CliServiceOptions = {}) {
     this.resolveBootstrapSession = options.resolveBootstrapSession
     this.executionHost = options.executionHost
+    this.onRuntimeState = options.onRuntimeState
     this.supervisorInstanceId = options.executionHost?.instanceId ?? randomUUID()
     const settings = readElectronSettings()
     if (typeof settings.preventSleepEnabled === 'boolean') {
@@ -559,6 +577,13 @@ export class CliService {
             signal,
             endpoint: LOCAL_CLI_HOST_ENDPOINT
           })
+          this.hostAccessDenied = result.status === 'occupied' && result.accessDenied === true
+          if (this.hostAccessDenied) {
+            return {
+              status: 'inaccessible' as const,
+              description: DESKTOP_HOST_ACCESS_DENIED_MESSAGE
+            }
+          }
           if (result.status === 'occupied') {
             return {
               status: 'occupied' as const,
@@ -584,6 +609,7 @@ export class CliService {
         if (runtime?.machineId) {
           this.cachedMachineId = runtime.machineId
         }
+        if (runtime) this.onRuntimeState?.(runtime)
         this.publishCliState()
         this.updatePowerSaveBlocker()
       }
@@ -787,6 +813,56 @@ export class CliService {
     }
   }
 
+  async resetLocalE2eeIdentity(message: LocalE2eeResetRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(this.localControlClient.e2eeReset(message, { timeoutMs: 30_000 }))
+  }
+
+  async prepareLocalE2eeDevice(message: LocalE2eePrepareRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eePrepare(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                LocalE2eeRecoveryFailureSchema.safeParse({ ok: false, error: error.message })
+                  .success
+                  ? error.message
+                  : error._tag === 'IpcTimeoutError'
+                    ? 'e2ee_local_agent_pending'
+                    : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
+  }
+
+  async sendLocalAutomationControl(message: AutomationControlRequest) {
+    return await Effect.runPromise(this.localControlClient.automationControl(message))
+  }
+
+  async activateLocalE2eeDevice(message: LocalE2eeActivateRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eeActivate(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                error._tag === 'IpcTimeoutError'
+                  ? 'e2ee_local_agent_pending'
+                  : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
+  }
+
   async sendLocalSessionControl(
     message: LocalSessionControlRequest,
     options: {
@@ -936,15 +1012,19 @@ export class CliService {
    * after that bounded wait fails quit instead of being orphaned.
    */
   async shutdownForQuit(graceMs = CLI_QUIT_GRACE_MS): Promise<void> {
+    let supervisorFailure: unknown
     if (this.supervisor) {
       // Stop polling/retry first so the supervisor does not relaunch the child
       // after we signal it. (This also asks its active child to shut down.)
+      // A failed stop keeps the supervisor: it still owns the child and host
+      // lease, so quit fails and recovery retries this same owner.
       try {
         await this.supervisor.stop({ terminationGraceMs: graceMs })
+        this.supervisor = null
       } catch (error) {
         console.error('[Electron] Supervisor shutdown barrier failed', error)
+        supervisorFailure = error
       }
-      this.supervisor = null
     }
     this.clearMachineIdCache()
 
@@ -954,6 +1034,7 @@ export class CliService {
     })
     this.updatePowerSaveBlocker()
     this.publishCliState()
+    if (supervisorFailure !== undefined) throw supervisorFailure
     if (survivors.length > 0) {
       const error = new Error(
         `Embedded CLI did not confirm exit after SIGKILL (${survivors.join('; ')})`
@@ -1223,6 +1304,9 @@ export class CliService {
       runtime: supervisorState.runtime,
       runtimeOwnership: supervisorState.runtimeOwnership,
       message: supervisorState.message,
+      ...(supervisorState.phase === 'fatal' && this.hostAccessDenied
+        ? { hostAccessDenied: true as const }
+        : {}),
       retryAttempt: supervisorState.retryAttempt,
       retryInMs: supervisorState.retryInMs,
       lastExitCode: supervisorState.lastExitCode,

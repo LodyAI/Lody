@@ -11,7 +11,7 @@ Radix ScrollArea 1.2.10 的滑块在滚动结束防抖期间卸载时，可能�
 
 ## 决策
 
-通过 pnpm 按版本绑定的 patchedDependencies 应用[依赖补丁](../../../../patches/@radix-ui__react-scroll-area@1.2.10.patch)。清理过程移除滚动事件监听、取消滑块正在运行的帧循环，并清空取消函数引用，也覆盖 effect 依赖变化。正常滚动结束时，原有防抖回调会取消轮询；但卸载会清除防抖定时器，因此卸载清理必须由 effect 自身负责。
+通过 pnpm 按版本绑定的 patchedDependencies 应用[依赖补丁](https://github.com/LodyAI/Lody/blob/683aaec1fe8cb9f1f1eb18ee447b8cd8341a1697/patches/@radix-ui__react-scroll-area@1.2.10.patch)。清理过程移除滚动事件监听、取消滑块正在运行的帧循环，并清空取消函数引用，也覆盖 effect 依赖变化。正常滚动结束时，原有防抖回调会取消轮询；但卸载会清除防抖定时器，因此卸载清理必须由 effect 自身负责。
 
 保留 Radix 和现有滚动行为。改用原生滚动条或 Base UI 会扩大改动，需要额外验证交互和样式。只有上游版本提供等效清理且通过[生命周期测试](../../../../packages/components/tests/scroll-area-lifecycle.test.tsx)后才移除补丁；升级规则放在 [UI 指南](../../../../packages/components/src/ui/AGENTS.md#scroll-area)。
 

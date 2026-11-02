@@ -103,6 +103,30 @@ Native 写入与其他客户端的增量正文读取，不足以作为发行验�
 把生产 RPC 加解密端点和两个渲染器副本加入同一消费者链路，并覆盖原生提交成功但回复丢失。
 其中发现的 reset 快捷路径是渲染器恢复缺陷；这项更正不需要继续修改原生写入。
 
+## SQLite namespace 统计
+
+流式预算测试直接检查临时 Native SQLite 数据库。三处统计查询同时支持当前安装的
+container v3（`roost_kv.space`）和 namespace 整数引用的 v4（通过 `space_id`
+关联 `roost_spaces.name`）。测试内的查询关系为两种格式提供相同的
+`space/key/value` 列，并显式断言支持的版本；更新字节、回执行数和投影行数预算不变。
+统计查询本身不改变生产读写行为。
+配套存储改动：[Roost #15](https://github.com/loro-dev/roost/pull/15)。
+统计兼容 PR：[#1735](https://github.com/LodyAI/Lody/pull/1735)。
+
+Roost 0.2.0 已统一发布。PR #1735 在共享 catalog 固定 TypeScript 包，在 CLI
+清单及发布校验中精确固定 Native，沿用运行时依赖发布合同。锁文件及发布冷却期
+豁免保留全部六个精确匹配的平台包。Native 运行时
+因此升级到 SQLite container v4，拒绝更早容器，不迁移、不自动重置、不清理数据。
+依赖它的[消息状态修复 #1737](https://github.com/LodyAI/Lody/pull/1737) 复用同一次
+catalog 更新，在 #1735 后合并。验收改用 npm 正式包，不再使用本地 SDK 产物。
+
+使用 npm 正式 0.2.0 包、没有 Native 覆盖时，冻结安装、完整 `pnpm check`、
+全仓格式和文档检查通过。CLI 全量 4,429 项通过、4 项原有跳过，包含流式存储预算
+及重开。Electron 四项 Native staging 测试通过：其他平台使用合成绑定验证选择，
+本机安装的真实绑定执行签名 SQLite 写入及重开。Native 发布 manifest 对应已合并的
+Roost 源码 `e85c970`；这不代表在本机完成其他平台的运行时验收。
+公开 CLI 在 2 GiB 堆上限内构建通过，包含发布包运行时探针；六项已有依赖版本策略测试通过。
+
 ## Outbox 与既有数据
 
 Outbox 行数不等于待发送数量。已安装 TypeScript Store 的 ACK 推进消费者游标而不删除行，

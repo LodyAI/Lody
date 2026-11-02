@@ -312,7 +312,7 @@ function GrokConfigShell() {
   );
 }
 
-function DeepSeekWarningShell() {
+function DeepSeekConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
     next.set(
@@ -453,9 +453,9 @@ export const GrokInteractionAndPermission: Story = {
   args: { isEmptyConversation: false },
   render: () => <GrokConfigShell />,
 };
-export const DeepSeekDelegationWarning: Story = {
+export const DeepSeekModels: Story = {
   args: { isEmptyConversation: false },
-  render: () => <DeepSeekWarningShell />,
+  render: () => <DeepSeekConfigShell />,
 };
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },

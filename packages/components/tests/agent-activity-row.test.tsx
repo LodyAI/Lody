@@ -203,7 +203,19 @@ describe('live agent status', () => {
     await advance(2_000);
     await deliverUpdate();
     await advance(250_000);
-    expect(statusRow()?.textContent).toBe('Waiting for permission (Worked for 8m 40s)');
+    expect(statusRow()?.textContent).toBe('Waiting for permission');
+  });
+
+  it('does not turn a question wait into growing command execution time', async () => {
+    useTickingClock('2026-09-19T00:04:29Z');
+    await render(
+      liveTurn([toolCall('a'), { type: 'text', text: 'Which storage should we use?' }]),
+      { label: 'Waiting for your answer', tone: 'warning' },
+      { live: { activity: 'awaitingUser', window: liveNow() } }
+    );
+    await advance(255_000);
+    expect(statusRow()?.textContent).toBe('Waiting for your answer');
+    expect(shimmering()).toEqual([]);
   });
 
   it('keeps a still status row while waiting on the user', async () => {
@@ -211,7 +223,7 @@ describe('live agent status', () => {
       label: 'Waiting for permission',
       tone: 'warning',
     });
-    expect(statusRow()?.textContent).toBe('Waiting for permission (Worked for 30s)');
+    expect(statusRow()?.textContent).toBe('Waiting for permission');
     expect(shimmering()).toEqual([]);
   });
 

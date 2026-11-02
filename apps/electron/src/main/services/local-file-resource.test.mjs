@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, writeFile, rm, open, rename } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, open, rename, realpath } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { LocalFileResources } from './local-file-resource.ts'
@@ -248,3 +248,21 @@ for (const extension of ['bmp', 'ico']) {
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
   })
 }
+
+void test('link resolution returns identity without allocating content resources', async (t) => {
+  const file = await fixture(t, 'link.md', 'synthetic content')
+  const request = { machineId: 'local', path: file.absolutePath, resolveMarkdownLink: true }
+  const resources = {
+    preview() {
+      throw new Error('Resolution must not read content')
+    }
+  }
+  assert.equal(
+    await previewLocalFile(resources, 1, { ...request, machineId: 'remote' }, 'local'),
+    null
+  )
+  const result = await previewLocalFile(resources, 1, request, 'local')
+  assert.equal(result.status, 'resolved-link')
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.candidates[0].absolutePath, await realpath(file.absolutePath))
+})

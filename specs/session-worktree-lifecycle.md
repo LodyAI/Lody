@@ -85,11 +85,19 @@ release must not be described as confirmed deletion.
 The daemon that owns a machine is the only actor that touches that machine's disk.
 It reconciles the directory tree it created against Session state:
 
-- The universe is the Lody-managed worktree tree: `<data>/repos/<repo>/worktrees/<session>`.
-  Each directory names the root Session that owns it. Nothing outside this tree is ever
+- The universe is the Lody-managed worktree tree: `<data>/repos/<repo>/worktrees/<session>`,
+  plus no-project chat workdirs at `<data>/chats/<session>`.
+  Each directory names the root Session that owns it. Nothing outside these managed trees is ever
   cleaned; a Session running directly in a user directory owns no worktree.
-- A directory is removed when its root Session is archived or deleted. Child Tabs share
+- A worktree directory is removed when its root Session is archived or deleted. Child Tabs share
   the root's worktree and never decide its fate; archiving a Tab alone removes nothing.
+- Chat workdirs also belong to the root Session and are shared by child Tabs. A deleted
+  root removes its chat workdir recursively; an archived root removes it only if empty,
+  retaining nonempty directories until deletion. Active and unknown owners are left alone.
+  Chat cleanup waits for runtime release, runs no cleanup script, and performs no Git
+  operations or branch recording. Read/removal failures are logged and retried with
+  backoff without interrupting other cleanup; a missing chats root is normal, and a
+  nonempty archived directory is retention, not failure.
 - A directory whose Session is unknown is left alone. One machine may serve several
   workspaces, so an unknown directory may belong to a Session this daemon cannot see.
   Deleted Sessions are known: the workspace keeps a deletion marker, so deletion and
@@ -118,12 +126,13 @@ It reconciles the directory tree it created against Session state:
 
 ## Operations
 
-| Operation                   | Effect on disk                                                                                                                                  | Effect on branch |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| Archive a root Session      | Worktree removed after a backup commit                                                                                                          | Kept             |
-| Restore an archived Session | Worktree recreated from the branch                                                                                                              | Kept             |
-| Delete an archived Session  | Nothing beyond archive; the deletion marker keeps the directory eligible for removal if archive cleanup had not converged                       | Kept             |
-| Remove a local project      | Its Sessions are archived, so their worktrees follow the archive rule; the optional immediate cleanup in the removal dialog only changes timing | Kept             |
+| Operation                                | Effect on disk                                                                                                                                  | Effect on branch |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Archive a root Session                   | Worktree removed after a backup commit                                                                                                          | Kept             |
+| Restore an archived Session              | Worktree recreated from the branch                                                                                                              | Kept             |
+| Delete an archived Session               | Nothing beyond archive; the deletion marker keeps the directory eligible for removal if archive cleanup had not converged                       | Kept             |
+| Remove a local project                   | Its Sessions are archived, so their worktrees follow the archive rule; the optional immediate cleanup in the removal dialog only changes timing | Kept             |
+| Archive/delete a no-project root Session | Archive removes only an empty chat workdir; delete removes it recursively                                                                       | None             |
 
 Archiving still releases the Session's runtime promptly: the agent process, terminals,
 presence, and preview tunnel are closed when the daemon observes the archived state.

@@ -17,6 +17,9 @@ export async function listMcpTools(
   options: {
     env?: NodeJS.ProcessEnv;
     createTransport?: (server: ResolvedMcpServer) => Transport;
+    headers?: Record<string, string>;
+    localEnv?: Record<string, string>;
+    fetch?: typeof fetch;
   } = {}
 ): Promise<McpToolListResult> {
   const env = options.env ?? process.env;
@@ -39,15 +42,24 @@ export async function listMcpTools(
     transport = new StreamableHTTPClientTransport(url, {
       requestInit: {
         redirect: 'error',
-        headers: Object.fromEntries(target.headers.map(({ name, value }) => [name, value])),
+        headers: {
+          ...Object.fromEntries(
+            target.headers.map(({ name, value }) => [name.toLowerCase(), value])
+          ),
+          ...options.headers,
+        },
       },
+      fetch: options.fetch,
     });
   } else {
     transport = new StdioClientTransport({
       command: target.command,
       args: target.args,
       stderr: 'ignore',
-      env: Object.fromEntries(target.env.map(({ name, value }) => [name, value])),
+      env: {
+        ...Object.fromEntries(target.env.map(({ name, value }) => [name, value])),
+        ...options.localEnv,
+      },
     });
   }
 

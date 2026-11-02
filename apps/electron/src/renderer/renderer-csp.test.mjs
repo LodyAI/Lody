@@ -20,6 +20,12 @@ function getDirectiveSources(html, name) {
   return directive.slice(1)
 }
 
+void test('renderer CSP allows WebAssembly compilation', () => {
+  // Loro and @lody/e2ee-core's strict Ed25519 compile WebAssembly. Without this
+  // source E2EE still verifies correctly, but in pure JS about 10x slower.
+  assert.ok(getDirectiveSources(rendererHtml, 'script-src').includes("'wasm-unsafe-eval'"))
+})
+
 void test('renderer CSP allows reading preview object URLs for image export', () => {
   assert.ok(getDirectiveSources(rendererHtml, 'connect-src').includes('blob:'))
 })

@@ -35,6 +35,7 @@ import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SaveTextConflictError } from '../src/hooks/use-code-collab-save-text';
 import { Tooltip } from '@lody/ui/tooltip';
 import { writeTextToClipboard } from '../src/lib/clipboard';
+import { SESSION_DEEP_LINK_EVENT } from '../src/lib/session-deep-link';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -1065,6 +1066,96 @@ describe('SessionFileContentView', () => {
     );
     expect(view.querySelector('button[aria-label="Preview"]')).not.toBeNull();
   });
+
+  it.each([true, false])(
+    'opens exact Markdown session links with fileProvider=%s',
+    async (withProvider) => {
+      const uri = 'lody://session/preview-target?workspace=preview-workspace';
+      const previewSession = {
+        ...session,
+        project: { kind: 'github', repoFullName: 'example/preview', branch: 'main' },
+      } satisfies SessionMeta;
+      const markdown = `[Target](${uri})\n\n[Legacy](session://legacy-target)\n\n[Guide](./guide.md)\n\n[Website](https://example.com/guide)`;
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'README.md', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'README.md': { kind: 'text', text: markdown } },
+      });
+      if (!withProvider) {
+        Object.defineProperty(window, '__LODY_ELECTRON__', {
+          configurable: true,
+          value: true,
+        });
+        Object.defineProperty(window, 'ipc', {
+          configurable: true,
+          value: {
+            invoke: async (channel: string) => {
+              if (channel === 'localProjects.readSessionWorktreeFile') {
+                return { path: 'README.md', content: markdown, truncated: false };
+              }
+              throw new Error(`Unexpected invoke ${channel}`);
+            },
+            on: () => () => {},
+            send: () => {},
+          },
+        });
+      }
+      const destinations: string[] = [];
+      const onDeepLink = (event: Event) => destinations.push((event as CustomEvent<string>).detail);
+      window.addEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
+      try {
+        const view = await render(
+          createElement(SessionFileContentView, {
+            sessionId: session.id,
+            session: previewSession,
+            filePath: 'README.md',
+            fileProvider: withProvider ? provider : null,
+            sessionLinksEnabled: true,
+          }),
+          { localMachine: !withProvider }
+        );
+        await flushMicrotasks();
+        const target = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
+        const legacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        expect(target?.tagName).toBe('BUTTON');
+        expect(legacy?.tagName).toBe('BUTTON');
+        await act(async () => target!.click());
+        expect(destinations).toEqual([uri]);
+        await act(async () => legacy!.click());
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+
+        const guide = [...view.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Guide'
+        );
+        expect(guide).toBeDefined();
+        await act(async () => guide!.click());
+        expect(vi.mocked(writeTextToClipboard).mock.lastCall?.[0]).toBe('./guide.md');
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+        expect(
+          view.querySelector('a[href="https://example.com/guide"]')?.getAttribute('target')
+        ).toBe('_blank');
+
+        await rerender(
+          createElement(SessionFileContentView, {
+            sessionId: session.id,
+            session: previewSession,
+            filePath: 'README.md',
+            fileProvider: withProvider ? provider : null,
+          })
+        );
+        const inertTarget = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
+        const inertLegacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        expect(inertTarget?.tagName).toBe('SPAN');
+        expect(inertLegacy?.tagName).toBe('SPAN');
+        await act(async () => {
+          inertTarget!.click();
+          inertLegacy!.click();
+        });
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+      } finally {
+        window.removeEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
+      }
+    }
+  );
 
   it('loads document-relative remote images only after a click, while keeping the prose visible', async () => {
     const provider = createFakeSessionFileProvider({

@@ -413,6 +413,7 @@ describe('session draft tabs', () => {
         tab: 'files',
         tabs: ['files'],
         sideSessionId: 'side-session-1',
+        split: null,
       },
     });
 
@@ -424,6 +425,7 @@ describe('session draft tabs', () => {
         tab: 'files',
         tabs: ['files'],
         sideSessionId: 'side-session-1',
+        split: null,
       },
     });
   });
@@ -439,6 +441,7 @@ describe('session draft tabs', () => {
         tab: 'ios-simulator',
         tabs: ['files', 'browser', 'ios-simulator'],
         sideSessionId: null,
+        split: null,
       },
     });
 
@@ -447,7 +450,43 @@ describe('session draft tabs', () => {
       tab: 'ios-simulator',
       tabs: ['files', 'browser', 'ios-simulator'],
       sideSessionId: null,
+      split: null,
     });
+  });
+
+  it('restores a device split only while both of its tabs are open', () => {
+    installWindowStorage();
+
+    writeStoredLastActiveTabState('session-1', {
+      sessionTabId: 'session-1',
+      viewerTab: null,
+      sidePanel: {
+        open: true,
+        tab: 'android-emulator',
+        tabs: ['ios-simulator', 'android-emulator'],
+        sideSessionId: null,
+        split: ['android-emulator', 'ios-simulator'],
+      },
+    });
+    expect(readStoredLastActiveTabState('session-1')?.sidePanel.split).toEqual([
+      'android-emulator',
+      'ios-simulator',
+    ]);
+
+    localStorage.setItem(
+      'lody:last-active-tab:session-1',
+      JSON.stringify({
+        sessionTabId: 'session-1',
+        viewerTab: null,
+        sidePanel: {
+          open: true,
+          tab: 'ios-simulator',
+          tabs: ['ios-simulator'],
+          split: ['ios-simulator', 'android-emulator'],
+        },
+      })
+    );
+    expect(readStoredLastActiveTabState('session-1')?.sidePanel.split).toBeNull();
   });
 
   it('migrates the old always-visible side panel tabs to the new empty state', () => {
@@ -466,6 +505,7 @@ describe('session draft tabs', () => {
       tab: null,
       tabs: [],
       sideSessionId: null,
+      split: null,
     });
   });
 

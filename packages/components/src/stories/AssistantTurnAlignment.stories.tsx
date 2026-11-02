@@ -9,9 +9,16 @@
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue } from 'jotai';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { useState, type ReactNode } from 'react';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryParsed,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
@@ -170,6 +177,68 @@ const mobileRhythmItems: ChatStreamItem[] = rhythmItems.map((item) =>
 export const ConversationRhythm: Story = {
   args: { sessionId, items: rhythmItems, renderMessageRow },
   render: () => <ConversationRhythmScene />,
+};
+
+const backgroundTaskItems: ChatStreamItem[] = [
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 0,
+    message: {
+      id: 'background-task-user',
+      role: 'user',
+      timestamp: '2026-10-01T08:00:00.000Z',
+      read: true,
+      items: [{ type: 'text', text: 'Run a background build and answer before it finishes.' }],
+    },
+  },
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 1,
+    message: {
+      id: 'background-task-assistant',
+      role: 'assistant',
+      timestamp: '2026-10-01T08:00:01.000Z',
+      finished: true,
+      read: true,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'background-build-call',
+          kind: 'execute',
+          title: 'pnpm build',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The answer is ready; the build is still running.' },
+        {
+          type: 'subagent_task',
+          taskId: 'background-build',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'in_progress',
+          description: 'pnpm build',
+          isBackgrounded: true,
+        },
+        {
+          type: 'subagent_task',
+          taskId: 'background-check',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'completed',
+          description: 'Check generated files',
+          isBackgrounded: true,
+        },
+      ],
+    },
+  },
+];
+
+export const FinishedAnswerWithRunningBackgroundTasks: Story = {
+  ...ConversationRhythm,
+  name: 'Finished answer with a running background task',
+  args: { ...ConversationRhythm.args, items: backgroundTaskItems },
+  render: () => <ConversationRhythmScene items={backgroundTaskItems} />,
 };
 
 /**
@@ -1123,16 +1192,21 @@ const planExitOutcomeTurn = (
       toolCallId: `${id}-plan-exit`,
       title: 'Ready to code?',
       kind: 'switch_mode',
-      status: 'completed',
-      /* CLAUDE's shape: `ExitPlanMode` carries the plan as a `content` text
-         block, so the card renders it above the outcome and there is no
-         separate `proposed_plan` item. */
+      status:
+        outcome.outcome === 'selected' && outcome.optionId === 'reject' ? 'failed' : 'completed',
+      // Claude retains the plan input when rejection replaces the tool content.
+      rawInput: {
+        plan: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+      },
       content: [
         {
           type: 'content',
           content: {
             type: 'text',
-            text: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+            text:
+              outcome.outcome === 'selected' && outcome.optionId === 'reject'
+                ? "The user doesn't want to proceed with this tool use."
+                : '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
           },
         },
       ],
@@ -1140,7 +1214,7 @@ const planExitOutcomeTurn = (
         requestId: `${id}-permission`,
         options: [
           { optionId: 'approve', name: 'Yes, implement the plan', kind: 'allow_once' },
-          { optionId: 'reject', name: 'No, and tell Codex what to change', kind: 'reject_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
         ],
         outcome,
       },
@@ -1458,4 +1532,153 @@ export const DesktopPlanModeTurn: Story = {
       </div>
     </WithRuntime>
   ),
+};
+
+const dshStore = createStore();
+dshStore.set(runtimeAtom, stubRuntime as never);
+dshStore.set(sessionMetaCacheAtom, {
+  [getSessionRoomId(sessionId)]: { cliType: 'builtin', agentType: 'deepseek' } as SessionMeta,
+});
+const dshMessage: SessionHistoryParsed = {
+  id: 'dsh-independent-prose',
+  role: 'assistant',
+  read: true,
+  timestamp: '2026-10-22T08:00:00.000Z',
+  finished: true,
+  items: [
+    { type: 'thought', text: '先检查输入边界，再执行测试。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'dsh-command',
+      kind: 'execute',
+      status: 'completed',
+      title: 'pnpm test',
+      content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
+    },
+    { type: 'text', text: '测试已经返回，继续核对结果。' },
+    { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
+    { type: 'text', text: '检查完成。' },
+  ],
+};
+const dshItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
+];
+
+/** Completed DSH work folds together; expanded prose retains answer typography. */
+export const DeepSeekIndependentProse: Story = {
+  play: async ({ canvasElement }) => {
+    const workedButton = () =>
+      canvasElement.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await waitFor(async () => {
+      await expect(workedButton()).not.toBeNull();
+      await expect(canvasElement.textContent).toContain('检查完成。');
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).not.toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
+      const thought = paragraphs.find(
+        (node) => node.textContent === '先检查输入边界，再执行测试。'
+      );
+      const answer = paragraphs.find((node) => node.textContent === '检查完成。');
+      await expect(thought).toBeDefined();
+      await expect(answer).toBeDefined();
+      const thoughtStyle = getComputedStyle(thought!);
+      const answerStyle = getComputedStyle(answer!);
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height']) {
+        await expect(thoughtStyle.getPropertyValue(property)).toBe(
+          answerStyle.getPropertyValue(property)
+        );
+      }
+      await expect(thoughtStyle.color).not.toBe(answerStyle.color);
+      await expect(
+        Math.abs(thought!.getBoundingClientRect().left - answer!.getBoundingClientRect().left)
+      ).toBeLessThan(1);
+      await expect(canvasElement.textContent).not.toContain('Synthetic command output');
+      await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).toContain('检查完成。');
+    });
+  },
+  args: { sessionId, items: dshItems, renderMessageRow },
+  render: () => (
+    <Provider store={dshStore}>
+      <ConversationRhythmScene items={dshItems} />
+    </Provider>
+  ),
+};
+
+/** A streaming DSH turn with the same rail guide as the plan examples. */
+export const DeepSeekThinking: Story = {
+  args: { sessionId, items: dshItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'dsh-thinking-preview',
+      finished: false,
+      items: [
+        {
+          type: 'thought',
+          text: [
+            'First, trace the message from the provider to the conversation view. The output can contain **structured Markdown**, not just plain paragraphs.',
+            '',
+            '| Content | Expected behavior | Check |',
+            '| --- | --- | --- |',
+            '| Paragraph | Align with the thought label | Inspect the left edge |',
+            '| Table | Keep columns readable | Scroll if the viewport is narrow |',
+            '| Code block | Preserve syntax highlighting | Compare both edges with the answer |',
+            '',
+            'Next, verify the rendering path:',
+            '',
+            '1. Find the `thought` item and preserve its original text.',
+            '2. Render Markdown while the response is streaming.',
+            '3. Check the finished state and search highlighting.',
+            '',
+            '```ts',
+            'const visibleItems = message.items.filter((item) =>',
+            "  item.type === 'thought' || item.type === 'text'",
+            ');',
+            '',
+            'for (const item of visibleItems) {',
+            '  renderMarkdown(item.text);',
+            '}',
+            '```',
+            '',
+            '> Keep the original order when a tool call arrives between thoughts.',
+          ].join('\n'),
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'preview-read',
+          title: 'Read conversation layout',
+          kind: 'read',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The layout uses a shared left edge for the conversation.' },
+        {
+          type: 'thought',
+          text: 'The tool returned successfully. Check the remaining cases:\n\n- A long line should wrap without moving the whole conversation.\n- Inline `code` and **emphasis** should remain readable.\n- A [link](https://example.com) should keep its usual treatment.',
+        },
+        { type: 'text', text: 'The updated display is ready for review.\n\n```sh\npnpm test\n```' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div className="relative h-[900px] w-full bg-background">
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+          <RailGuide />
+        </div>
+      </Provider>
+    );
+  },
 };

@@ -316,9 +316,10 @@ describe('v1 snapshot byte cache with separate independent trust', () => {
       const body = ok(decodeCbor(proposal.bodyBytes)) as CborValue[];
       body[4] = other.owner.publicKey.toBytes();
       const state = body[5] as CborValue[];
-      const devices = state[2] as CborValue[][];
-      devices[0]![0] = other.owner.publicKey.toBytes();
-      state[6] = [other.owner.publicKey.toBytes()];
+      // The device table's first row starts with that device's signing key.
+      const devices = new Uint8Array(state[1] as Uint8Array);
+      devices.set(other.owner.publicKey.toBytes(), 0);
+      state[1] = devices;
       const selfBody = ok(encodeCbor(body));
       const selfSignature = await Effect.runPromise(
         other.owner.sign(snapshotSigningBytes(selfBody))

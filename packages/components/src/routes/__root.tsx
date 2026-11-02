@@ -23,6 +23,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keepAppRootOffBodyTail } from '../lib/body-tail-sentinel';
 import { BootShellBoundary } from '@/components/boot-shell-boundary';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { StorageFullGuard } from '@/components/storage-full-guard';
 import { isMissingEmail } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { ConvexProvider, useAuthClient } from '../providers/convex-provider';
@@ -61,6 +62,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -100,7 +102,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootComponent() {
-  const { authClient } = useRouter().options.context;
+  const { authClient, createE2eeRuntime } = useRouter().options.context;
   useLayoutEffect(() => keepAppRootOffBodyTail(), []);
 
   // Local (open-source) platform: same inner app shell, but the auth/Convex
@@ -121,7 +123,7 @@ function RootComponent() {
     <ConvexProvider authClient={authClient}>
       <StableSessionProvider>
         <AuthenticatedConvexProvider>
-          <CloudPlatformProvider>
+          <CloudPlatformProvider createE2eeRuntime={createE2eeRuntime}>
             <RootApp />
           </CloudPlatformProvider>
         </AuthenticatedConvexProvider>
@@ -223,6 +225,13 @@ function RootApp() {
       {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
+      <ReferralLeadAttacher
+        userId={
+          hasRawUser && !isPending && !isRetrying && !error && !isOptimistic
+            ? (currentUser?.id ?? null)
+            : null
+        }
+      />
       {isElectron && <DesktopDeepLinkRouter />}
       <ThemeProvider>
         <InterfaceFontController enabled={isElectron} />
@@ -236,6 +245,8 @@ function RootApp() {
                 />
                 {/* Auth invalidation must remain mounted even if the runtime fails. */}
                 <RootLocationEffects />
+                {/* Outside the runtime boundary: a full disk can be what broke the runtime. */}
+                {isElectron && <StorageFullGuard />}
                 <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
                   <RuntimeProvider>
                     <RootOutletBoundary />
@@ -653,7 +664,8 @@ function DesktopDeepLinkRouter() {
       }
 
       if (invitePath) {
-        void navigate({ to: invitePath, replace: true });
+        const target = new URL(invitePath, 'https://lody.invalid');
+        void navigate({ to: target.pathname, hash: target.hash.slice(1), replace: true });
         return;
       }
 

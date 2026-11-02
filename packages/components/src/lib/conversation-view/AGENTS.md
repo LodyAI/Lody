@@ -2,6 +2,13 @@
 
 `CLAUDE.md` is a symlink to this file. Parent guidelines apply.
 
+- Use the paired optional display/run reader for Loro: turn hydration retains only
+  child metadata/latest-step previews. A non-enumerable task `history` capability
+  reads one owned run only inside its mounted detail. `readAll` remains complete;
+  display turns are never export, copy or write inputs. Readers without the pair
+  retain complete turns. Keep existing content-epoch fencing for display reads.
+  Detail reads ignore late results after source changes/unmount and offer retry;
+  full runs live only in the mounted detail, never in a global cache.
 - The shipped implementation is `createConversationViewFromReader`. Its index
   comes from directory reads; bodies are acquired by window. Loro imports its
   document and reads an O(total) directory. Roost opens the latest active-branch
@@ -25,6 +32,9 @@
   the previous small fact only after synchronously deriving and comparing its
   new semantic value. Empty `changed.ids` announces summary/cache bookkeeping;
   `indexIds` names changed metadata independently of body invalidation.
+- Pending permission/question prompts use all hydrated bodies in their leased tail
+  window; an unrelated unloaded body must not hide an available request. Readers
+  that require contiguous history keep the contiguous prefix.
 - Only the reported ids invalidate a body: a directory row cannot tell whether a
   body changed, and merging sparse targets into one span re-read the whole
   conversation. Refresh those rows in contiguous runs; escalate to a structural

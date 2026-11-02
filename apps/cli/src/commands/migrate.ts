@@ -133,6 +133,8 @@ export const migrateCommand = new Command('migrate')
           ])
         ).workspace;
       const workspace = selectWorkspaceSummary(candidates, selector);
+      if ('contentMode' in workspace && workspace.contentMode === 'e2ee')
+        throw new Error('加密工作区不支持导入');
       const sourcePath = await fs.realpath(
         options.source ?? path.join(os.homedir(), getInstallationProfile('local').dataDirectoryName)
       );
@@ -222,7 +224,14 @@ export const migrateCommand = new Command('migrate')
         });
         const program = withMigrationTokens(tokenProvider, (tokens) =>
           Effect.acquireRelease(
-            migrationStep(() => openMigrationTarget(tokens, workspace.id as WorkspaceId)),
+            migrationStep(() =>
+              openMigrationTarget(tokens, workspace.id as WorkspaceId, {
+                mode:
+                  'contentMode' in workspace && workspace.contentMode === 'e2ee'
+                    ? 'protected'
+                    : 'plaintext',
+              })
+            ),
             (target) => migrationStep(() => target.close()).pipe(Effect.orDie)
           ).pipe(
             Effect.flatMap((target) =>

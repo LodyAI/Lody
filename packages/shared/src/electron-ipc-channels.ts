@@ -10,6 +10,7 @@ import type {
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
   ElectronPublicBrowserInteraction,
+  ElectronStorageGuardState,
   ElectronUpdaterState,
   ElectronWindowTarget,
   PreparedWindowTarget,
@@ -28,6 +29,7 @@ export type IpcPushMap = {
   'cli.output': CliOutputEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
+  'storageGuard.state': ElectronStorageGuardState;
   'publicBrowser.state': ElectronPublicBrowserState;
   'publicBrowser.interaction': ElectronPublicBrowserInteraction;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
@@ -64,6 +66,7 @@ export const IPC_PUSH_CHANNELS = {
   cliOutput: 'cli.output',
   cliState: 'cli.state',
   updaterState: 'updater.state',
+  storageGuardState: 'storageGuard.state',
   publicBrowserState: 'publicBrowser.state',
   publicBrowserInteraction: 'publicBrowser.interaction',
   sessionControlResponse: 'sessionControl.response',
@@ -92,6 +95,16 @@ export const IPC_SEND_CHANNELS = {
   appWindowContentReady: 'app.windowContentReady',
   appPreparedWindowState: 'app.preparedWindowState',
 } as const satisfies { [K: string]: keyof IpcSendMap };
+
+/**
+ * E2E-only client-loss probe. Main registers both channels, and preload admits them,
+ * only when an unpackaged `LODY_E2E=1` main passes `argument` to the window.
+ */
+export const E2EE_CLIENT_LOSS_PROBE = {
+  argument: '--lody-e2ee-client-loss-probe',
+  inspect: 'e2ee.inspectClientLoss',
+  effects: 'e2ee.clientLossEffects',
+} as const;
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);
 const SEND_CHANNEL_VALUES: readonly string[] = Object.values(IPC_SEND_CHANNELS);

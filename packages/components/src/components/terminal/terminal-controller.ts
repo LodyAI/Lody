@@ -17,7 +17,7 @@ export const terminalDockOpenAtom = atom<boolean>(false);
 
 /**
  * Whether a terminal can actually be created right now (the local daemon is
- * `running`/`degraded` and the session is ready). Kept in sync by the mounted
+ * locally ready for this workspace and the session is ready). Kept in sync by the mounted
  * `TerminalDock` from its `canCreateTerminal` prop. Distinct from
  * `terminalDockAvailableAtom`: the header icon stays visible for a local session
  * but is disabled while this is false (e.g. right after launch, while the daemon

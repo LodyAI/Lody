@@ -9,8 +9,8 @@ this page is the full text of the rules summarised there.
 
 - `session-chat-interface.tsx` — conversation surface (draft variant:
   `draft-session-chat-interface.tsx`).
-  **Read receipts are gated on VISIBILITY, not on being mounted.** Every child
-  tab and side chat stays mounted behind the active one, so the mark-as-read
+  **Read receipts are gated on VISIBILITY, not on being mounted.** A child tab
+  or side chat stays mounted after its first selection, so the mark-as-read
   effect takes an explicit `isVisible` prop (`../../lib/session-read-receipt.ts`)
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
@@ -53,6 +53,9 @@ this page is the full text of the rules summarised there.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,
   `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.
+  Header "Copy URL" uses `buildAppSessionUrl` for the selected conversation’s
+  HTTPS page; "Copy deeplink" uses the workspace-scoped `lody://session/…` address.
+  The mobile menu offers the same two actions. Neither action publishes history.
   Header "Copy path" derives paths from the machine Flock doc `['dotlodyPath']`,
   falling back to local-project `rootPath`; `MachineMeta.workspacePaths[sessionId]` is
   legacy fallback only and must not get new writes.
@@ -84,3 +87,12 @@ this page is the full text of the rules summarised there.
   restoring the conversation to its tail must not unsubscribe before a query
   result arrives or discard an open editor. Workspace, user and surface visibility
   still gate the requests. Conversation provenance remains `leadingContent`.
+
+Session continuation uses the target machine's advertised protocol capability before
+starting reads: `sessionAutomations` for local IPC, `remoteAutomationControl` for
+remote control. Missing capabilities hide its settings and notes without polling;
+metadata updates enable the reader after a CLI upgrade. Supported owners retain
+connection-error recovery. Trailing connection warnings use `ConversationColumn`
+to align with messages in both normal and wide layouts. Workspace content and
+ownership admission remain unchanged; see the
+[continuation availability decision](../notes/implemented/feature/2026-10-30-session-continuation-general-availability.md).

@@ -38,8 +38,33 @@ type InputPorts = {
   visible(send: PendingSessionSend, signal: AbortSignal): Promise<boolean>;
   unknownMessage(): string;
   changed?: () => void;
+  /** Content-free diagnostics: ids, states, stages and error messages, never input text. */
+  diagnose?(
+    level: 'warn' | 'info',
+    event: SessionInputDiagnosticEvent,
+    details: SessionInputDiagnostic
+  ): void;
   paused?: boolean;
 };
+
+export type SessionInputDiagnosticEvent =
+  | 'session_input.stalled'
+  | 'session_input.slow'
+  | 'session_input.resolved';
+export type SessionInputDiagnostic = {
+  sessionId: string;
+  inputId?: string;
+  state?: StoredSessionInput['state'];
+  /** The step that failed, is still running (`slow`) or confirmed it (`resolved`). */
+  stage: 'lock' | 'write' | 'lookup' | 'deliver' | 'visible' | 'stored-failed' | 'unobserved';
+  /** Inputs of the same conversation ordered behind this one; they wait until it resolves. */
+  waiting?: number;
+  error?: string;
+  elapsedMs?: number;
+};
+
+/** A stage still running after this is reported once as `slow`; it keeps running. */
+export const SESSION_INPUT_SLOW_STAGE_MS = 15_000;
 
 /** Ready-input lifecycle. The workspace's native send scope owns every raw I/O task. */
 export function createAcceptedSessionInputs(ports: InputPorts) {
@@ -64,6 +89,68 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
   };
   const requested = new Map<SessionId, number>();
   const canceled = new Set<string>();
+  // One report per input/state/error, so a repeatedly retried stall does not flood the log.
+  const reported = new Map<string, string>();
+  const diagnose = (
+    level: 'warn' | 'info',
+    event: SessionInputDiagnosticEvent,
+    details: SessionInputDiagnostic
+  ) => {
+    try {
+      ports.diagnose?.(level, event, details);
+    } catch {
+      // Diagnostics only.
+    }
+  };
+  const stalled = (details: SessionInputDiagnostic & { inputId: string }) => {
+    const key = `${details.state}:${details.stage}:${details.error ?? ''}`;
+    if (reported.get(details.inputId) === key) return;
+    reported.set(details.inputId, key);
+    diagnose('warn', 'session_input.stalled', details);
+  };
+  /** Closes an earlier stall report once the owner confirms the same input. */
+  const resolved = (details: SessionInputDiagnostic & { inputId: string }) => {
+    if (reported.delete(details.inputId)) diagnose('info', 'session_input.resolved', details);
+  };
+  /** Reports a stage that has not settled in time; the stage itself is not interrupted. */
+  const watch = async <T>(details: SessionInputDiagnostic, work: () => Promise<T>): Promise<T> => {
+    if (!ports.diagnose) return work();
+    const timer = setTimeout(
+      () =>
+        diagnose('warn', 'session_input.slow', {
+          ...details,
+          elapsedMs: SESSION_INPUT_SLOW_STAGE_MS,
+        }),
+      SESSION_INPUT_SLOW_STAGE_MS
+    );
+    try {
+      return await work();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  /** The session lease is shared by every window; report a wait that has not acquired it. */
+  const lock = <T>(sessionId: SessionId, signal: AbortSignal, work: () => Promise<T>) => {
+    if (!ports.diagnose) return ports.lock(sessionId, signal, work);
+    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+      timer = undefined;
+      diagnose('warn', 'session_input.slow', {
+        sessionId,
+        stage: 'lock',
+        elapsedMs: SESSION_INPUT_SLOW_STAGE_MS,
+      });
+    }, SESSION_INPUT_SLOW_STAGE_MS);
+    const acquired = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    };
+    return ports
+      .lock(sessionId, signal, () => {
+        acquired();
+        return work();
+      })
+      .finally(acquired);
+  };
   const waitForChange = (signal: AbortSignal, observed: number) =>
     new Promise<void>((resolve, reject) => {
       const finish = () => {
@@ -157,13 +244,25 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
     }
   };
 
-  const process = async (row: StoredSessionInput, signal: AbortSignal): Promise<boolean> => {
+  /** `waiting` counts later inputs of the same conversation held behind this one. */
+  const process = async (
+    row: StoredSessionInput,
+    signal: AbortSignal,
+    waiting = 0
+  ): Promise<boolean> => {
     if (row.canceled || canceled.has(row.id)) return true;
+    const base = { sessionId: row.send.sessionId, inputId: row.id, waiting };
     if (row.state === 'failed') {
       project(row);
+      stalled({ ...base, state: 'failed', stage: 'stored-failed', error: row.error });
       return false;
     }
     let current = row;
+    let stage: SessionInputDiagnostic['stage'] = row.state === 'queued' ? 'write' : 'lookup';
+    const step = <T>(next: SessionInputDiagnostic['stage'], work: () => Promise<T>) => {
+      stage = next;
+      return watch({ ...base, state: current.state, stage: next }, work);
+    };
     try {
       let receipt: SessionInputAcceptanceResult & { readonly dispatchHandled?: boolean };
       if (row.state === 'queued') {
@@ -171,9 +270,9 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
         current =
           (await ports.storage.patch(row.id, { state: 'unknown', error: undefined })) ?? row;
         project(current, true);
-        receipt = await ports.write(current.send, signal);
+        receipt = await step('write', () => ports.write(current.send, signal));
       } else {
-        receipt = await ports.lookup(current.send, signal);
+        receipt = await step('lookup', () => ports.lookup(current.send, signal));
         if (receipt.status === 'unobserved') {
           // Absence is not non-delivery evidence. The immutable acceptance
           // operation can safely converge with a late original request using
@@ -181,7 +280,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
           const stored = await ports.storage.get(row.id);
           if (!stored || stored.canceled || signal.aborted || closed || canceled.has(row.id))
             return true;
-          receipt = await ports.write(stored.send, signal);
+          receipt = await step('write', () => ports.write(stored.send, signal));
         }
       }
       if (signal.aborted || closed || canceled.has(row.id)) return false;
@@ -199,6 +298,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
           error: ports.unknownMessage(),
         });
         if (unresolved) project(unresolved);
+        stalled({ ...base, state: 'unknown', stage: 'unobserved', error: ports.unknownMessage() });
         ports.changed?.();
         return false;
       }
@@ -214,6 +314,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
       current =
         (await ports.storage.patch(row.id, { state: 'confirmed', error: undefined })) ?? current;
       if (current.canceled) return true;
+      resolved({ ...base, state: 'confirmed', stage });
       project(current);
       if (!hasCompleted(row.id)) {
         // A guide may already have reached ACP even when no reply made it back.
@@ -223,7 +324,9 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
             current = (await ports.storage.patch(row.id, { deliveryStarted: true })) ?? current;
           }
           if (!current.canceled && !signal.aborted && !closed && !canceled.has(row.id)) {
-            const delivered = await ports.deliver(current.send, signal, receipt);
+            const delivered = await step('deliver', () =>
+              ports.deliver(current.send, signal, receipt)
+            );
             if (delivered?.status === 'accepted' && !delivered.active) {
               await ports.storage.remove(row.id);
               removeVisible(row.id);
@@ -235,7 +338,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
         deliveries.set(row.id, { kind: current.send.delivery.kind, completed: true });
       }
       if (signal.aborted || closed || canceled.has(row.id)) return false;
-      if (await ports.visible(current.send, signal)) {
+      if (await step('visible', () => ports.visible(current.send, signal))) {
         await ports.storage.remove(row.id);
         removeVisible(row.id);
       } else project(current);
@@ -253,6 +356,12 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
         error: error instanceof Error ? error.message : ports.unknownMessage(),
       });
       if (next) project(next);
+      stalled({
+        ...base,
+        state: next?.state ?? current.state,
+        stage,
+        error: error instanceof Error ? error.message : ports.unknownMessage(),
+      });
       ports.changed?.();
       return false;
     }
@@ -268,7 +377,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
       .run(
         async (signal) => {
           await ensureInitialized();
-          await ports.lock(sessionId, signal, async () => {
+          await lock(sessionId, signal, async () => {
             // Storage is shared across windows; reread under the session lease.
             for (;;) {
               if (signal.aborted || closed) return;
@@ -283,7 +392,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
                 (row) => row.send.sessionId === sessionId
               );
               let madeProgress = false;
-              for (const row of rows) {
+              for (const [index, row] of rows.entries()) {
                 if (signal.aborted || closed) return;
                 if (row.canceled) {
                   await ports.storage.remove(row.id);
@@ -292,7 +401,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
                   continue;
                 }
                 if (hasCompleted(row.id) && row.state === 'confirmed') continue;
-                if (!(await process(row, signal))) return;
+                if (!(await process(row, signal, rows.length - index - 1))) return;
                 madeProgress = true;
               }
               if (!madeProgress) return;
@@ -354,7 +463,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
     await Promise.all(selected.map((send) => running.get(send.sessionId)));
     await ports.resources.run(async (signal) => {
       for (const sessionId of new Set(selected.map((send) => send.sessionId))) {
-        await ports.lock(sessionId, signal, async () => {
+        await lock(sessionId, signal, async () => {
           for (const send of selected.filter((value) => value.sessionId === sessionId)) {
             if ((await ports.storage.get(send.id))?.canceled) await ports.storage.remove(send.id);
           }
@@ -503,7 +612,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
       const predecessors = new Set(ids);
       for (;;) {
         if (signal.aborted || closed) throw new DOMException('Input wait canceled', 'AbortError');
-        const outcome = await ports.lock(sessionId, signal, async () => {
+        const outcome = await lock(sessionId, signal, async () => {
           if (
             sends.some(
               (send) => predecessors.has(send.id) && !send.persisted && !canceled.has(send.id)
@@ -511,9 +620,11 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
           )
             return { ready: false as const, observed: revision };
           const rows = (await ports.storage.list()).filter((row) => predecessors.has(row.id));
-          for (const row of rows) {
+          for (const [index, row] of rows.entries()) {
             if (row.canceled || (hasCompleted(row.id) && row.state === 'confirmed')) continue;
-            if (!(await process(row, signal))) return { ready: false as const, observed: revision };
+            // Later predecessors plus the held work wait behind this input.
+            if (!(await process(row, signal, rows.length - index)))
+              return { ready: false as const, observed: revision };
           }
           if (signal.aborted || closed) throw new DOMException('Input wait canceled', 'AbortError');
           return { ready: true as const, value: await work() };

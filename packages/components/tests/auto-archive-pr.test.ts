@@ -1,214 +1,350 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
-import { createRoot } from 'react-dom/client';
-import { createStore, Provider } from 'jotai';
-import { describe, expect, it } from 'vitest';
-import type { SessionPullRequestMeta } from '@lody/shared';
-
-import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '../src/atoms/settings';
-import { AutoArchiveSection } from '../src/components/settings/auto-archive-setting';
-import { initI18n } from '../src/i18n';
-
+import { act, createElement, Fragment, useEffect } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Provider, createStore } from 'jotai';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  getAutoArchivePrDecision,
-  getAutoArchivePrSnapshot,
-  pickLatestPr,
-  type AutoArchivePrSnapshot,
-} from '../src/lib/auto-archive-pr';
+  getSessionRoomId,
+  readSessionOperationTargets,
+  type SessionHistory,
+  type SessionId,
+  type SessionMeta,
+  type WorkspaceId,
+} from '@lody/shared';
+import {
+  CLOUD_PLATFORM_CAPABILITIES,
+  createStaticStore,
+  type CloudApi,
+  type PlatformProvider,
+} from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { userAtom } from '../src/atoms';
+import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
+import { AuthenticatedWorkspaceContent } from '../src/components/authenticated-workspace-content';
+import { useSessionActions, type SessionActions } from '../src/hooks/use-session-actions';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
+import {
+  createPendingSessionSends,
+  type PendingSessionSend,
+} from '../src/lib/session-pending-sends';
+import { deliverUserTurn, writeUserTurn } from '../src/lib/session-send-delivery';
+import { finalizePreparedSend } from '../src/lib/session-attachment-preparation';
 
-const createPullRequest = (
-  overrides: Partial<SessionPullRequestMeta> = {}
-): SessionPullRequestMeta => ({
-  url: 'https://github.com/loro-dev/lody/pull/2000',
-  number: 2000,
-  repository: 'loro-dev/lody',
-  branch: 'fix/pr-auto-archive',
-  status: 'open',
-  reportedAt: '2026-05-05T10:00:00.000Z',
-  ...overrides,
+const { sendIpcMock } = vi.hoisted(() => ({ sendIpcMock: vi.fn() }));
+vi.mock('@/lib/auth-bootstrap', () => ({
+  readBootstrappedCurrentUser: () => null,
+  readStoredAuthToken: () => null,
+}));
+vi.mock('../src/lib/electron-ipc-client', () => ({ sendIpc: sendIpcMock }));
+vi.mock('../src/hooks/use-authenticated-convex', () => ({
+  useAuthenticatedConvex: () => ({ isAuthenticated: true, requestAuthRecovery: () => {} }),
+}));
+
+// Exercise the production workspace composition without unrelated visual hosts.
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-router')>()),
+  Outlet: () => null,
+}));
+vi.mock('../src/components/workspace-checkout-pending-dialog', () => ({
+  WorkspaceCheckoutPendingDialog: () => null,
+}));
+vi.mock('../src/components/electron-session-completion-notifier', () => ({
+  ElectronSessionCompletionNotifier: () => null,
+}));
+vi.mock('../src/components/electron-menu-handler', () => ({ ElectronMenuHandler: () => null }));
+vi.mock('../src/components/app-commands', () => ({ AppCommands: () => null }));
+vi.mock('../src/components/commands/command-palette', () => ({ CommandPalette: () => null }));
+
+vi.mock('../src/hooks/use-visible-session-metas', async (importOriginal) => {
+  const { useAtomValue: useTestAtomValue } = await import('jotai');
+  const { sessionMetaCacheAtom: projectedSessionCacheAtom } = await import('../src/atoms/doc-meta');
+  return {
+    ...(await importOriginal<typeof import('../src/hooks/use-visible-session-metas')>()),
+    useVisibleSessionMetas: () => ({
+      sessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => !session.isArchived
+      ),
+    }),
+    useVisibleArchivedSessionMetas: () => ({
+      archivedSessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
+        (session) => session.isArchived
+      ),
+    }),
+  };
 });
 
-const snapshot = (overrides: Partial<AutoArchivePrSnapshot> = {}): AutoArchivePrSnapshot => ({
-  url: 'https://github.com/loro-dev/lody/pull/2000',
-  status: 'open',
-  ...overrides,
-});
+const testPlatform: PlatformProvider = {
+  kind: 'cloud',
+  identity: {
+    session: createStaticStore({ status: 'unauthenticated' }),
+    signOut: async () => {},
+  },
+  workspaces: {
+    state: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
+    setActive: async () => {},
+  },
+  capabilities: CLOUD_PLATFORM_CAPABILITIES,
+  cloudApi: {
+    useQuery: () => ({ effectivePlanTier: 'plus', checkoutPending: false }),
+    useMutation: () => async () => ({}),
+    useAction: () => async () => undefined,
+  } as CloudApi,
+  sync: { mode: 'cloud' },
+};
 
-describe('pickLatestPr', () => {
-  it('picks the newest PR by reportedAt even when input is not sorted', () => {
-    expect(
-      pickLatestPr([
-        createPullRequest({
-          number: 1,
-          url: 'https://github.com/loro-dev/lody/pull/1',
-          reportedAt: '2026-05-05T10:00:00.000Z',
-        }),
-        createPullRequest({
-          number: 2,
-          url: 'https://github.com/loro-dev/lody/pull/2',
-          reportedAt: '2026-05-05T11:00:00.000Z',
-        }),
-      ])?.number
-    ).toBe(2);
-  });
-});
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe('getAutoArchivePrSnapshot', () => {
-  it('returns the latest PR identity and status', () => {
-    expect(
-      getAutoArchivePrSnapshot([
-        createPullRequest({
-          status: 'merged',
-          reportedAt: '2026-05-05T11:00:00.000Z',
-        }),
-      ])
-    ).toEqual({
-      url: 'https://github.com/loro-dev/lody/pull/2000',
-      status: 'merged',
-    });
-  });
-});
+function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
+  const actions = useSessionActions();
+  useEffect(() => onReady(actions), [actions, onReady]);
+  return null;
+}
 
-describe('getAutoArchivePrDecision', () => {
-  it('archives when an observed PR transitions from open to merged', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({ status: 'open' }),
-        current: snapshot({ status: 'merged' }),
-        archiveOnMerged: true,
-        archiveOnClosed: true,
-      })
-    ).toEqual({ shouldArchive: true, status: 'merged' });
-  });
-
-  it('does not archive a restored session whose PR is still merged', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({ status: 'merged' }),
-        current: snapshot({ status: 'merged' }),
-        archiveOnMerged: true,
-        archiveOnClosed: true,
-      })
-    ).toEqual({ shouldArchive: false, status: 'merged' });
-  });
-
-  it('does not retro-archive when the first observed PR state is terminal', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: undefined,
-        current: snapshot({ status: 'closed' }),
-        archiveOnMerged: true,
-        archiveOnClosed: true,
-      })
-    ).toEqual({ shouldArchive: false, status: 'closed' });
-  });
-
-  it('archives if a restored PR later changes to a new enabled terminal state', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({ status: 'open' }),
-        current: snapshot({ status: 'closed' }),
-        archiveOnMerged: true,
-        archiveOnClosed: true,
-      })
-    ).toEqual({ shouldArchive: true, status: 'closed' });
-  });
-
-  it('does not archive a different PR that is first observed as terminal', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({
-          url: 'https://github.com/loro-dev/lody/pull/1999',
-          status: 'open',
-        }),
-        current: snapshot({
-          url: 'https://github.com/loro-dev/lody/pull/2000',
-          status: 'merged',
-        }),
-        archiveOnMerged: true,
-        archiveOnClosed: true,
-      })
-    ).toEqual({ shouldArchive: false, status: 'merged' });
-  });
-
-  it('respects the merged and closed settings independently', () => {
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({ status: 'open' }),
-        current: snapshot({ status: 'merged' }),
-        archiveOnMerged: false,
-        archiveOnClosed: true,
-      }).shouldArchive
-    ).toBe(false);
-
-    expect(
-      getAutoArchivePrDecision({
-        previous: snapshot({ status: 'open' }),
-        current: snapshot({ status: 'closed' }),
-        archiveOnMerged: true,
-        archiveOnClosed: false,
-      }).shouldArchive
-    ).toBe(false);
-  });
-});
-
-describe('AutoArchiveSection', () => {
-  it.each([
+/** Real admission, held-send ownership and delivery over synthetic durable ports. */
+function createFixture() {
+  const store = createStore();
+  const rootSession = {
+    id: 'pr-status-root' as SessionId,
+    machineId: 'machine-1',
+    userId: 'user-1',
+    isArchived: false,
+    createdAt: '2026-08-24T00:00:00.000Z',
+    pullRequests: [{ url: 'https://github.com/example/repo/pull/1', status: 'open' }],
+  } as SessionMeta;
+  const tabSession = {
+    ...rootSession,
+    id: 'pr-status-tab' as SessionId,
+    parentSessionId: rootSession.id,
+    openedBySessionId: rootSession.id,
+    pullRequests: undefined,
+  };
+  const sessions: SessionMeta[] = [
+    rootSession,
+    tabSession,
     {
-      language: 'en',
-      notice: [
-        'chats and local branches',
-        'ignored by Git',
-        'cleanup scripts',
-        'outside the worktree',
-        'only here, for your sessions',
-      ],
+      ...rootSession,
+      id: 'pr-status-opened' as SessionId,
+      openedBySessionId: rootSession.id,
+      pullRequests: undefined,
     },
     {
-      language: 'zh_CN',
-      notice: [
-        '对话和分支还在',
-        '所属机器',
-        '被 Git 忽略',
-        '清理脚本改动、删除',
-        '工作树之外',
-        '仅在本机',
-      ],
+      ...rootSession,
+      id: 'pr-status-opened-from-tab' as SessionId,
+      openedBySessionId: tabSession.id,
+      openedByRootSessionId: rootSession.id,
+      pullRequests: undefined,
     },
-  ])(
-    'shows retention limits in $language while keeping the rules independent',
-    async ({ language, notice }) => {
-      Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
-      await initI18n(language);
-      const store = createStore();
-      store.set(autoArchiveOnPrMergedAtom, false);
-      store.set(autoArchiveOnPrClosedAtom, false);
-      const container = document.createElement('div');
+  ];
+  const docs = new Map(sessions.map((session) => [getSessionRoomId(session.id), { ...session }]));
+  const publish = () => store.set(sessionMetaCacheAtom, Object.fromEntries(docs));
+  const repo = {
+    listDoc: async () => [...docs].map(([docId, meta]) => ({ docId, meta: { ...meta } })),
+    getDocMeta: async (roomId: string) => ({ meta: docs.get(roomId) ?? {} }),
+    upsertDocMeta: async (roomId: string, patch: Partial<SessionMeta>) => {
+      docs.set(roomId, { ...docs.get(roomId), ...patch } as SessionMeta);
+      publish();
+    },
+    flush: async () => {},
+  } as unknown as WorkspaceRuntime['repo'];
+  const history: SessionHistory[] = [];
+  const control = { humanInputReceipts: {} as Record<string, { userId: string }> };
+  const sessionStore = {
+    getState: () => control,
+    setState: (update: (draft: typeof control) => void) => update(control),
+    waitUntilSynced: async () => {},
+    sessionData: {
+      history: {
+        readTurn: async (id: string) => {
+          const turn = history.find((entry) => entry.id === id);
+          return turn ? { state: 'ready', turn } : { state: 'missing' };
+        },
+        count: async () => history.length,
+        readDirectory: async (start: number, end: number) =>
+          history.slice(start, end).map((turn) => ({
+            turnId: turn.id,
+            state: 'ready',
+            scalars: { role: turn.role, status: turn.status },
+          })),
+      },
+    },
+  };
+  const runtime = {
+    accountId: 'user-1',
+    workspaceId: 'workspace-1' as WorkspaceId,
+    workspaceSlug: 'workspace-slug',
+    repo,
+    writer: {
+      upsertDocMeta: repo.upsertDocMeta.bind(repo),
+      appendSessionTurn: async (_id: string, entry: SessionHistory) => {
+        history.push(entry);
+        return 'direct';
+      },
+    },
+    readSessionOperationTargets: (
+      id: SessionId,
+      operation: Parameters<WorkspaceRuntime['readSessionOperationTargets']>[1]
+    ) => readSessionOperationTargets(repo, id, operation),
+    withSessionStore: async (_id: SessionId, callback: (store: typeof sessionStore) => unknown) =>
+      callback(sessionStore),
+    requestSessionDispatchTurn: async () => undefined,
+  } as unknown as WorkspaceRuntime;
+  const resources = createSessionSendResources({
+    acquire: (id) => runtime.withSessionStore(id, (doc) => doc),
+    releaseRef: () => {},
+  });
+  Object.defineProperty(runtime, 'sendResources', { value: resources });
+  const preparations: { signal: AbortSignal; finish: () => void }[] = [];
+  const pending = createPendingSessionSends({
+    prepare: (send, signal) =>
+      new Promise<Pick<PendingSessionSend, 'entry' | 'queue' | 'attachments'>>(
+        (resolve, reject) => {
+          preparations.push({
+            signal,
+            finish: () =>
+              resolve(
+                finalizePreparedSend({
+                  ...send,
+                  attachments: send.attachments.map((attachment) => ({
+                    ...attachment,
+                    ready: {
+                      type: 'image',
+                      imageId: `uploaded-${attachment.id}`,
+                      mimeType: attachment.mimeType,
+                      sizeBytes: 3,
+                    },
+                  })),
+                })
+              ),
+          });
+          signal.addEventListener('abort', () =>
+            reject(new DOMException('Attachment operation aborted', 'AbortError'))
+          );
+        }
+      ),
+    write: (send, signal) => resources.run((owned) => writeUserTurn(runtime, send, owned), signal),
+    deliver: (send) => deliverUserTurn(runtime, send),
+  });
+  Object.defineProperty(runtime, 'pendingSends', { value: pending });
+  store.set(runtimeAtom, runtime);
+  store.set(userAtom, { id: 'user-1' } as never);
+  store.set(docMetaCacheReadyAtom, true);
+  store.set(currentWorkspaceIdAtom, runtime.workspaceId);
+  store.set(currentWorkspaceSlugAtom, runtime.workspaceSlug);
+  publish();
+  return { store, runtime, rootSession, sessions, docs, history, preparations, pending, resources };
+}
+
+describe('PR status does not archive sessions', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let fixture: ReturnType<typeof createFixture> | undefined;
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    root = undefined;
+    fixture?.pending.dispose();
+    await fixture?.resources.dispose();
+    fixture = undefined;
+    container?.remove();
+    container = undefined;
+    sendIpcMock.mockClear();
+    localStorage.removeItem('lody-auto-archive-on-pr-merged');
+    localStorage.removeItem('lody-auto-archive-on-pr-closed');
+  });
+
+  const userInput = (text: string) =>
+    ({
+      role: 'user',
+      userId: 'user-1',
+      items: [{ type: 'text', text }],
+      timestamp: '2026-09-29T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      finished: true,
+      inputConfig: {
+        prompt: text,
+        inputBlocks: [{ type: 'text', text }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    }) as unknown as Parameters<SessionActions['addSessionHistory']>[1];
+
+  it.each(['merged', 'closed'] as const)(
+    'keeps sessions and held sends active when a PR becomes %s with legacy auto-archive preferences enabled',
+    async (status) => {
+      localStorage.setItem('lody-auto-archive-on-pr-merged', 'true');
+      localStorage.setItem('lody-auto-archive-on-pr-closed', 'true');
+      const test = createFixture();
+      fixture = test;
+      let actions: SessionActions | undefined;
+      container = document.createElement('div');
       document.body.appendChild(container);
-      const root = createRoot(container);
-      try {
-        await act(async () => {
-          root.render(createElement(Provider, { store }, createElement(AutoArchiveSection)));
+      root = createRoot(container);
+      await act(async () =>
+        root?.render(
+          createElement(
+            PlatformContext.Provider,
+            { value: testPlatform },
+            createElement(
+              Provider,
+              { store: test.store },
+              createElement(
+                Fragment,
+                null,
+                createElement(ActionsProbe, {
+                  onReady: (next) => {
+                    actions = next;
+                  },
+                }),
+                createElement(AuthenticatedWorkspaceContent)
+              )
+            )
+          )
+        )
+      );
+      if (!actions) throw new Error('Session actions were not initialized');
+      const held = await actions.addSessionHistory(test.rootSession.id, userInput('continue'), {
+        dispatch: true,
+        attachments: [
+          {
+            id: 'pr-status-attachment',
+            kind: 'image',
+            source: new Blob(['img']),
+            name: 'pr-status.png',
+            mimeType: 'image/png',
+            lastModified: 0,
+          },
+        ],
+      });
+      const pr = { url: test.rootSession.pullRequests![0]!.url, status };
+      await act(async () => {
+        await test.runtime.writer.upsertDocMeta(getSessionRoomId(test.rootSession.id), {
+          pullRequests: [pr],
         });
-        for (const boundary of notice) expect(container.textContent).toContain(boundary);
-        const switches = container.querySelectorAll<HTMLElement>('[role="switch"]');
-        expect(switches).toHaveLength(2);
-        await act(async () => switches[0]?.click());
-        expect(store.get(autoArchiveOnPrMergedAtom)).toBe(true);
-        expect(store.get(autoArchiveOnPrClosedAtom)).toBe(false);
-        expect(switches[0]?.getAttribute('aria-checked')).toBe('true');
-        await act(async () => switches[1]?.click());
-        expect(store.get(autoArchiveOnPrMergedAtom)).toBe(true);
-        expect(store.get(autoArchiveOnPrClosedAtom)).toBe(true);
-        expect(switches[1]?.getAttribute('aria-checked')).toBe('true');
-      } finally {
-        await act(async () => root.unmount());
-        container.remove();
-        localStorage.removeItem('lody-auto-archive-on-pr-merged');
-        localStorage.removeItem('lody-auto-archive-on-pr-closed');
-        await initI18n('en');
+      });
+      expect(test.docs.get(getSessionRoomId(test.rootSession.id))?.pullRequests).toEqual([pr]);
+      for (const session of test.sessions) {
+        expect(test.docs.get(getSessionRoomId(session.id))?.isArchived).toBe(false);
       }
+      expect(test.pending.getSnapshot().map((send) => send.id)).toEqual([held.id]);
+      expect(test.preparations[0].signal.aborted).toBe(false);
+      const drained = new Promise<void>((resolve) => {
+        const release = test.pending.subscribe(() => {
+          if (test.pending.getSnapshot().some((send) => !send.error)) return;
+          release();
+          resolve();
+        });
+      });
+      test.preparations[0].finish();
+      await drained;
+      expect(test.history.map((turn) => turn.id)).toContain(held.id);
+      expect(test.docs.get(getSessionRoomId(test.rootSession.id))?.latestUserMsgId).toBe(held.id);
+      expect(sendIpcMock.mock.calls).toEqual([]);
     }
   );
 });

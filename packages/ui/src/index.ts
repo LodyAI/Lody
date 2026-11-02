@@ -160,6 +160,12 @@ export type {
   SelectValueProps,
 } from './field/select';
 export { Separator } from './separator/separator';
+export { ScrollArea, nativeScrollbar } from './scroll-area/scroll-area';
+export type {
+  ScrollAreaProps,
+  ScrollAreaAxis,
+  ScrollAreaVisibility,
+} from './scroll-area/scroll-area';
 export type { SeparatorProps } from './separator/separator';
 export { Skeleton } from './feedback/skeleton';
 export type { SkeletonProps, SkeletonShape } from './feedback/skeleton';

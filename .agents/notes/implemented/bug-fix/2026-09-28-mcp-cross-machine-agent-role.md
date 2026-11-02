@@ -61,6 +61,14 @@ unreachable even for its intended users.
   elsewhere starts independently on its machine, in the local project passed as
   `workContext` or as a plain chat. An explicit child request for a remote Role
   still fails with the existing parent-machine error.
+- **Linked repository.** Without an explicit `workContext`, a remote Role
+  dispatched from a Local Project whose observed GitHub remote is enabled in the
+  workspace (`resolveRoleCloneableRepo`) starts in that repository, as from a
+  GitHub project, so it can clone the code. The checkout uses the default
+  branch: the requester's local branch may be unpushed, and a missing branch
+  would fail the clone. The caller names a pushed branch in the prompt or an
+  explicit `workContext`. Remote identity is not authorization, so an
+  unlisted repository keeps the plain-chat placement instead of failing.
 - **Composer mentions.** Every composer uses the authorized-machines scope; the
   `outside_work_context` reason and the pinning helpers are deleted.
 
@@ -90,5 +98,6 @@ older deploy.
   third-party teammate case.
 - `apps/cli/src/mcp/lody-mcp-server.test.ts` covers a chat requester resolving a
   remote Role to its own machine and a Local Project requester defaulting to a
-  child only for a same-machine Role; reverting the fix fails both.
+  child only for a same-machine Role; reverting the fix fails both. The same
+  suite covers the linked-repository default and its plain-chat fallback.
 - CLI typecheck and scoped lint pass.

@@ -17,7 +17,10 @@ opaque recovered keys transfer into C’s protected store; all temporary copies 
 disposed. Pending/Conflict return no workspace.
 
 The facade owns common close, command serialization, finite key rounds, installed
-history and content bindings. `execute` uses the existing Committed/Conflict/Pending
+history and content bindings. A receive failure still permits reconciliation and
+delivery. `WorkspaceKeyRoundFailure` retains both phase results and their independent
+retry cursors. Unknown sender rows request ledger refresh without digest rejection;
+only verified retired identities can supply deterministic retirement diagnostics. `execute` uses the existing Committed/Conflict/Pending
 P09 outcome and never silently re-signs. `rotate`/`removeMember` use the supplied
 staged publisher; an unconfigured publisher fails explicitly. `document` returns
 seal/open/position-bound snapshot plus the platform's native document owner.

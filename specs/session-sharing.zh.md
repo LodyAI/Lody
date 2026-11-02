@@ -34,8 +34,11 @@ Translation: current
 每个对象具有精确 ID、字节长度和 SHA-256 校验和。分享不授予源工作区、继承附件命名空间、
 原 Stream 或 agent runtime 的权限。不可用附件必须阻止冻结或明确披露，不得静默回源。
 
-工作区 Stream 加密属于未来独立功能：发布客户端解密后仍生成明文分享包。
+加密工作区的发布客户端在读取内容或上传之前要求明确确认：分享会把解密副本发布到
+E2EE 之外（服务器可读），撤销不能收回已经被看过或复制的内容。取消不会发布。
+确认后客户端按普通工作区的同一路径生成并发布明文分享包；普通工作区保持现有流程。
 分享 bearer 是访问凭据，不是解密钥匙；本版不包含分享 E2EE、加密封装或密钥托管。
+[确认决策](../.agents/notes/implemented/feature/2026-10-28-e2ee-share-plaintext-consent.zh.md)记录此边界。
 
 格式第 2 版可在体积变小时逐份使用 Zstd 保存 history。manifest 绑定压缩字节的长度和哈希，
 明确记录 `contentEncoding: zstd` 和 `decodedSizeBytes`；仍可读取第 1 版及未压缩对象。

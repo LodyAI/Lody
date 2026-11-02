@@ -21,11 +21,20 @@ export {
 } from '../internal/foundation/errors';
 export { decodeCbor, encodeCbor, type CborValue } from '../internal/foundation/cbor';
 export { verifySignature, verifyContentSignature } from '../internal/foundation/signature';
+/** Whether strict Ed25519 verification runs in WebAssembly in this isolate (false: the pure-JS fallback is in use); for host diagnostics. */
+export { ed25519WasmActive } from '../internal/foundation/ed25519-wasm';
 export {
   signVerified,
   nativeDeviceSigner,
   type DeviceSigner,
 } from '../internal/foundation/signing';
+
+export {
+  deviceCredentialBindingBytes,
+  signDeviceCredentialBinding,
+  verifyDeviceCredentialBinding,
+  type DeviceCredentialBinding,
+} from '../internal/foundation/device-credential-binding';
 
 // Content format and primitives
 export {
@@ -59,6 +68,43 @@ export {
   type EpochHpkeContext,
   type SealedEpochHpke,
 } from '../internal/crypto/hpke';
+
+// Purpose-specific opaque content primitives; no realtime authority or body profile.
+export {
+  sealPresenceContent,
+  openPresenceContent,
+  sealRpcRequestContent,
+  openRpcRequestContent,
+  sealRpcResponseContent,
+  openRpcResponseContent,
+} from '../internal/content/realtime';
+
+// Machine sharing
+export {
+  verifyMachineSharingGeneration,
+  type VerifiedMachineSharingGeneration,
+  type MachineSharingAdmission,
+} from '../internal/machine-sharing-generation';
+export {
+  updateMachineSharingState,
+  encodeMachineSharingPolicy,
+  decodeMachineSharingPolicy,
+  machineSharingContentScope,
+  machineSharingDigest,
+  sealMachineSharingPolicy,
+  openMachineSharingPolicy,
+  readMachineSharingHistoryStep,
+  verifyMachineSharingHistoryStep,
+  authorizeMachineExecution,
+  type MachineSharingBinding,
+  type MachineSharingState,
+  type MachineSharingChange,
+  type MachineSharingPolicy,
+  type MachineSharingHead,
+  type MachineSharingHistoryStep,
+  type VerifiedMachineSharingPolicy,
+  type MachineExecutionDecision,
+} from '../internal/machine-sharing';
 
 // Documents
 export {
@@ -142,8 +188,40 @@ export {
 } from '../internal/keys/reports';
 export { epochDeliveryId } from '../internal/keys/delivery';
 
+// Account-wide personal device pairing
+export {
+  PAIRING_STRING_LENGTH,
+  PAIRING_URL_PREFIX,
+  PAIRING_REQUEST_MAX_LIFETIME_MS,
+  PAIRING_CLOCK_SKEW_MS,
+  PAIRING_MAX_WORKSPACES,
+  PairingError,
+  encodePairingSecret,
+  formatPairingString,
+  pairingQrPayload,
+  parsePairingString,
+  derivePairingKeys,
+  disposePairingKeys,
+  encodePairingRequest,
+  encodePairingApproval,
+  decodePairingRequest,
+  decodePairingApproval,
+  pairingRequestDigest,
+  pairingRequestTag,
+  verifyPairingRequestTag,
+  pairingApprovalTag,
+  verifyPairingApprovalTag,
+  checkPairingRequestLifetime,
+  type PairingKeys,
+  type PairingRequest,
+  type PairingRequestRow,
+  type PairingApproval,
+  type PairingApprovalRow,
+} from '../internal/pairing';
+
 // Recovery
 export {
+  deriveRecoveryAccessCredential,
   generateRecoveryPackage,
   importRecoveryIdentity,
   parseRecoveryFile,
@@ -154,6 +232,7 @@ export {
   vaultCiphertextDigest,
   sameVaultCiphertext,
   RecoveryVaultError,
+  type RecoveryAccessCredential,
   type RecoveryIdentity,
   type RecoveryPrivatePackage,
   type VerifiedPasskeyPrf,

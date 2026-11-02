@@ -1,3 +1,4 @@
+import { closeDesktopE2eeAccount } from '../../services/e2ee-account-runtime'
 import { productWindows } from '../../window-state'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
@@ -46,7 +47,7 @@ export class AuthIpc extends IpcService {
     for (const window of productWindows) {
       if (window.webContents !== sender) window.destroy()
     }
-    await getIpcServiceDeps().authService.signOut()
+    await closeDesktopE2eeAccount({ signOut: () => getIpcServiceDeps().authService.signOut() })
   }
 
   @IpcMethod()

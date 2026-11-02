@@ -27,6 +27,7 @@ import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitat
 import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
 import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
+import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
 import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
 import { Route as WorkspaceNameAuthSchedulesRouteImport } from './routes/$workspaceName/_auth/schedules';
@@ -149,6 +150,11 @@ const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
 const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
   id: '/_auth',
   getParentRoute: () => WorkspaceNameRoute,
+} as any);
+const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
+  id: '/workspace/e2ee/$workspaceId',
+  path: '/workspace/e2ee/$workspaceId',
+  getParentRoute: () => rootRouteImport,
 } as any);
 const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
   id: '/settings',
@@ -350,6 +356,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -399,6 +406,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -453,6 +461,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/_auth/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
@@ -507,6 +516,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/schedules'
     | '/$workspaceName/sessions'
     | '/$workspaceName/settings'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
@@ -556,6 +566,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
     | '/$workspaceName/sessions'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
@@ -609,6 +620,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/sessions'
     | '/$workspaceName/_auth/settings'
+    | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/_auth/schedules/$scheduleId'
     | '/$workspaceName/_auth/sessions/$sessionId'
     | '/$workspaceName/_auth/settings/about'
@@ -656,6 +668,7 @@ export interface RootRouteChildren {
   InviteInvitationIdRoute: typeof InviteInvitationIdRoute;
   JoinTokenRoute: typeof JoinTokenRoute;
   WorkspaceCreateRoute: typeof WorkspaceCreateRoute;
+  WorkspaceE2eeWorkspaceIdRoute: typeof WorkspaceE2eeWorkspaceIdRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -785,6 +798,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/$workspaceName';
       preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
       parentRoute: typeof WorkspaceNameRoute;
+    };
+    '/workspace/e2ee/$workspaceId': {
+      id: '/workspace/e2ee/$workspaceId';
+      path: '/workspace/e2ee/$workspaceId';
+      fullPath: '/workspace/e2ee/$workspaceId';
+      preLoaderRoute: typeof WorkspaceE2eeWorkspaceIdRouteImport;
+      parentRoute: typeof rootRouteImport;
     };
     '/$workspaceName/_auth/settings': {
       id: '/$workspaceName/_auth/settings';
@@ -1157,6 +1177,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteInvitationIdRoute: InviteInvitationIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   WorkspaceCreateRoute: WorkspaceCreateRoute,
+  WorkspaceE2eeWorkspaceIdRoute: WorkspaceE2eeWorkspaceIdRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

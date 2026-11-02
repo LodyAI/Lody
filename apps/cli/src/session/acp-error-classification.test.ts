@@ -1,7 +1,9 @@
+import { AcpStartupProcessError, AcpStartupProcessExitError } from '../agent/acp-startup-monitor';
 import { describe, expect, it } from 'vitest';
 import { RequestError } from '@agentclientprotocol/sdk';
 import {
   ACP_ERROR_CODES,
+  classifyCapacityFailure,
   getACPErrorUserMessage,
   isAcpSessionStorageIncompatibleError,
   isAuthenticationRequiredACPError,
@@ -27,6 +29,23 @@ describe('ACP error classification', () => {
       message: 'Internal error',
       data: { details: 'Connection is disposed.' },
     });
+  });
+
+  it('keeps startup diagnostics out of generic disconnect classification', () => {
+    const options = {
+      sessionId: 'synthetic-startup',
+      command: 'npx',
+      args: [],
+      stderrTail: 'npm error EBADDEVENGINES; ACP connection closed',
+    };
+    for (const error of [
+      new AcpStartupProcessError({ ...options, cause: new Error('ACP connection closed') }),
+      new AcpStartupProcessExitError({ ...options, exitCode: 1, signal: null }),
+    ]) {
+      expect(parseACPError(error)).toBeNull();
+      expect(isAgentDisconnectedError(error)).toBe(false);
+      expect(error.message).toContain('EBADDEVENGINES');
+    }
   });
 
   it('maps disposed ACP connections to agent_disconnected', () => {
@@ -89,6 +108,7 @@ describe('ACP error classification', () => {
       throw new Error('expected ACP error to parse');
     }
     expect(isProviderOverloadedACPError(parsed)).toBe(true);
+    expect(classifyCapacityFailure(parsed)).toBe('provider_overloaded');
     expect(mapACPErrorToFailureReason(parsed)).toBe('acp_provider_overloaded');
     expect(shouldTerminateOnACPError(parsed, 'acp_provider_overloaded')).toBe(false);
   });

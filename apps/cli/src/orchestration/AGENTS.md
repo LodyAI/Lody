@@ -28,7 +28,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Accepted Operations freeze `requesterUserId`, `sourceTurnId` and notification origins; `requesterSessionId` names
   its source. Recovery uses that user for attribution/authorization and the current owner
   Machine credential to execute. Completion preserves userId. Matching includes both ids, kind,
-  and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry.
+  and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry. A same-Turn
+  identical single create under a new id adopts the active original.
   Author/attachment snapshots in `operation_authors` / `operation_inputs` freeze atomically.
   Missing authors retain frozen Session/Turn provenance, never human identity.
 - `operation-coordinator.ts` is owned only by the local Host-lease Worker. MCP
@@ -36,6 +37,10 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Reconciliation is level-checked. Loro subscriptions and SQLite directory
   watch events are hints; startup/lease acquisition scans active Operations and
   durable Inbox intents and unsettled progress once. The watcher never carries result data.
+- Synchronous Inbox startup failure disables only Inbox orchestration. Keep ordinary
+  dispatch available, reject Inbox-dependent tools before storage access, report no
+  Inbox turn work (schedules must not wait on it), and report a runtime warning. Coordinator owns capped startup retry and cancels it on stop;
+  incompatible schema/protocol never auto-retries or receives degraded writes.
 - Coordinator owns ONE connection from start to stop. Watch wakes are
   leading-edge coalesced; never do store work per raw fs event.
 - The MCP server holds ONE lazy store connection with `maintenance: false`.
@@ -55,26 +60,24 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - `inbox/service.ts` is native Effect v4. Scope owns its signal/fibers and repository connection;
   one per-Session admission covers Stop, fresh input acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
-- Inbox-aware Stop pauses/cancels queued eligibility; legacy Stop only cancels execution.
-  Pause blocks only automatic wakes; fresh human and Agent-chat input both clear it. New
-  acceptance cannot revive a canceled execution or discard an already prepared human input.
+- Stop pauses queues; legacy Stop cancels execution. Fresh human/
+  Agent-chat clears pause; Host `automation` cannot and yields to humans. Never
+  revive canceled execution or discard prepared input. Automation release proof
+  requires an execution receipt, not input-ended.
 - Fixed batch claims and submission fence precede synchronous transport start under the
   same gate, with no await between. Post-fence uncertainty never replays, including
   human-plus-batch stale-ACP recovery. Retry failed settlement only, never the request.
-- Physical request/resource release differs from waiter exit and Scope close. Keep immutable
-  execution IDs, shared close receipts, full Cause and retained recovery owners. Unknown
-  release blocks successors. Independent recovery proves release before clearing the slot.
-  Persist acquisition-incomplete before every sandbox spawn, then union spawned roots of every
-  Session the execution owns. Only explicitly complete identities can prove restart release;
-  legacy snapshots and interrupted journaling stay blocked. Coordinator recovery calls
-  `recoverClose`, not the cached failed `close`; never replay transport. Release finishes
+- Physical resource release differs from waiter exit. Keep immutable execution IDs,
+  shared close receipts and full Cause. Unconfirmed release must
+  not block successors or shutdown: detach the failed Agent before returning the slot,
+  report it and attempt bounded background cleanup using only the old handles.
+  Startup retires interrupted input as unknown without replay and clears legacy blocks.
+  Coordinator recovery calls `recoverClose`, not cached failed `close`. Release finishes
   input; a still-pending turn `withdraw`s before submit/acquisition.
-- Schema/Inbox v2 drops Delivery data/APIs; keep Operation rows and retired IDs.
-  Missing/incomplete journals stay blocked automatically. Offline operator recovery holds the
-  Host lease before opening SQLite, verifies known roots and requires explicit confirmation
-  of all unrecorded resources. Retire the exact execution and pause atomically; no replay or wake.
-  Keep current pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
-  workers before storage; end the prior Worker before handoff. Passive results are not busy.
+- Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Preserve queued
+  input/results, pause, unknown evidence and monotonic sequences. Host v3
+  rejects old workers before storage; end prior Workers before handoff. Passive
+  results are not busy. Never journal process identities or let cleanup state gate admission.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through
@@ -89,15 +92,13 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Unchanged progress must return before `updateHistory` / `Mirror.setState` to prevent
   self-waking loops. Test with real Mirror subscriptions.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
-  Machine Flock document is uncertainty, not permanent deletion/configuration
-  absence. Keep the item/result pending until positive evidence or deadline.
+  Machine Flock document is uncertainty, not permanent absence. Keep the item/result pending until positive evidence or deadline.
 - Deadlines finish the root with item `TARGET_TIMEOUT` results but never cancel
   target Turns. Operation cancel is the only best-effort remote-cancel path.
-- Store paths require explicit machineId (`getLodyOperationStorePath` has no default).
-  MCP resolves it from trusted Session context, never its environment or a local fallback.
+- Store paths require explicit machineId (`getLodyOperationStorePath` has no default),
+  resolved by MCP from trusted Session context, never its environment or a fallback.
 - `session_create_many` and `session_chat_many` target writes bypass cooperative
   Session/Turn quotas. Preserve the bypass in both MCP-process materialization
   and daemon recovery replay; otherwise quota rejection degrades into a false
   `TARGET_TIMEOUT`.
-- Tests use injected clocks and explicit reconciliation/idle barriers. Do not
-  add polling sleeps or wall-clock races.
+- Tests use injected clocks and explicit reconciliation/idle barriers.

@@ -298,6 +298,7 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
     sizeBytes: block.sizeBytes,
@@ -325,6 +326,7 @@ const toFilePayload = (
   return {
     type: 'file',
     fileId: block.fileId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     fileName: block.fileName,
     mimeType: block.mimeType,
     sizeBytes: block.sizeBytes,
@@ -518,6 +520,22 @@ export const resolveSessionExecutionInputBlocks = (input: {
   const prompt = input.prompt.trim();
   // Authored spans refer to the raw text, never to the composed execution text.
   return prompt ? [...attachments, { type: 'text', text: prompt }] : attachments;
+};
+
+/**
+ * The text the user actually wrote for a turn, for consumers that must name
+ * the task (title generation) rather than run it. Execution `prompt` also
+ * carries accepted Config/Role instructions, so authored text blocks win; only
+ * legacy inputs without any blocks fall back to the prompt. Attachment-only
+ * turns have no authored text and resolve to `''`.
+ */
+export const resolveSessionAuthoredText = (input: {
+  prompt?: string;
+  inputBlocks?: unknown;
+}): string => {
+  const blocks = normalizeSessionInputBlocks(input.inputBlocks, '');
+  if (blocks.length > 0) return extractPromptPreviewFromInputBlocks(blocks);
+  return input.prompt?.trim() ?? '';
 };
 
 export const inputBlocksToHistoryItems = (

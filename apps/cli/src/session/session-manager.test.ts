@@ -2,9 +2,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  encodeProjectPreparationProgress,
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -159,6 +160,121 @@ const createSessionInner = async (
     }
   ).createSessionInner(config);
 
+describe('SessionManager repository Member credentials', () => {
+  it('keeps a GitHub-source local-copy session native and never enrolls its host worktree', async () => {
+    const temp = mkdtempSync(path.join(os.tmpdir(), 'repository-member-auth-'));
+    for (const key of Object.keys(process.env)) {
+      if (/^(GIT_|SSH_|LODY_GIT_)/.test(key)) vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    vi.stubEnv('GIT_CONFIG_GLOBAL', os.devNull);
+    try {
+      const root = createLocalRepo(temp);
+      runGit(root, ['remote', 'add', 'origin', 'https://github.com/example/web.git']);
+      const workspaceDocument = createWorkspaceDocument(new Map());
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) =>
+        id === 'copy' ? root : temp
+      );
+      const phases: Array<{ phase: string; detail?: string }> = [];
+      const config = createSessionConfig({
+        onPresencePhase: (phase, detail) => phases.push({ phase, detail }),
+        sessionId: 'repo-member' as SessionId,
+        project: { kind: 'github', repoFullName: 'example/web' },
+        projectRun: {
+          id: '12345678-1234-4234-8234-123456789012' as never,
+          name: 'Group',
+          root: 'project-group-12345678-1234-4234-8234-123456789012',
+          members: {
+            ['docs' as keyof NonNullable<SessionConfig['projectRun']>['members']]: {
+              o: 1,
+              src: {
+                kind: 'local',
+                machineId: 'machine-1' as MachineId,
+                localProjectId: 'docs' as LocalProjectId,
+              },
+              placement: { kind: 'root', dir: 'docs' },
+              path: 'docs',
+              base: 'HEAD',
+            },
+            ['web' as keyof NonNullable<SessionConfig['projectRun']>['members']]: {
+              o: 0,
+              src: { kind: 'github', repoFullName: 'example/web', preferLocal: true },
+              placement: { kind: 'root', dir: 'web' },
+              path: 'web',
+              base: 'HEAD',
+              repositoryCheckout: {
+                kind: 'local',
+                machineId: 'machine-1' as MachineId,
+                localProjectId: 'copy' as LocalProjectId,
+              },
+            },
+          },
+        },
+      });
+      vi.spyOn(workspaceDocument, 'getOrCreateSessionDoc').mockResolvedValue({
+        getMetaState: async () => ({ projectRun: config.projectRun }),
+        setProjectRun: async (run: NonNullable<SessionConfig['projectRun']>) => {
+          config.projectRun = run;
+        },
+      } as never);
+      const internals = manager as unknown as {
+        prepareGitHubRepoSessionConfig(
+          config: SessionConfig
+        ): Promise<import('./session-credentials').SessionCredentials>;
+        ensureGitCredentialBrokerEnv(): Promise<never>;
+        resolveHostGitBrokerAuth(
+          source: WorktreeManagerSource,
+          config: SessionConfig,
+          credentials: import('./session-credentials').SessionCredentials
+        ): Promise<GitCredentialBrokerAuth | undefined>;
+      };
+      vi.spyOn(internals, 'ensureGitCredentialBrokerEnv').mockRejectedValue(
+        new Error('Unexpected broker enrollment')
+      );
+      const credentials = await internals.prepareGitHubRepoSessionConfig(config);
+      expect(phases).toContainEqual({
+        phase: 'git-clone',
+        detail: encodeProjectPreparationProgress({ step: 'resolve' }),
+      });
+      expect(credentials.mode).toBe('native');
+      expect(config.env).toBeUndefined();
+      const releasedManaged = {
+        mode: 'managed',
+        lease: { active: false },
+      } as unknown as import('./session-credentials').SessionCredentials;
+      expect(
+        await internals.resolveHostGitBrokerAuth(
+          { kind: 'local-shared', originalRootPath: root },
+          config,
+          releasedManaged
+        )
+      ).toBeUndefined();
+      await expect(
+        internals.resolveHostGitBrokerAuth(
+          { kind: 'github', repoUrl: 'https://github.com/example/managed.git' },
+          config,
+          releasedManaged
+        )
+      ).rejects.toMatchObject({ message: 'github_runtime_context_released' });
+      await credentials.release();
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('SessionManager ACP project identity', () => {
   it.each([undefined, 'parent-session' as SessionId])(
     'resolves the registered root for local worktree sessions, including child %s',
@@ -272,6 +388,24 @@ describe('SessionManager Codex provider binding', () => {
         configId: provider.id,
         profile: provider.codexAuth,
       });
+      const profileFile = path.join(root, readyProfile.profile.profileId, 'profile.json');
+      const original = readFileSync(profileFile, 'utf8');
+      writeFileSync(profileFile, '{broken');
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile({ ...restoredConfig(), codexAuth: undefined })).rejects.toThrow(
+        'This Codex provider account reference is missing'
+      );
+      await expect(
+        freezeProfile({
+          ...restoredConfig(),
+          agentConfigId: 'unrelated' as AgentConfigId,
+          codexAuth: undefined,
+        })
+      ).resolves.toBeUndefined();
+      getProvider.mockResolvedValue(provider);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow('metadata could not be read');
+      writeFileSync(profileFile, original);
+      await expect(freezeProfile(restoredConfig())).resolves.toBeUndefined();
     } finally {
       storeSpy.mockRestore();
       rmSync(root, { recursive: true, force: true });
@@ -280,7 +414,7 @@ describe('SessionManager Codex provider binding', () => {
 });
 
 describe('SessionManager cleanup phases', () => {
-  it('stops session producers before closing the workspace document', async () => {
+  it('finishes independent cleanup after failures and retries failed owners', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(
       createLogger(),
@@ -293,22 +427,40 @@ describe('SessionManager cleanup phases', () => {
         cloudPort: createTestCloudPort(),
       }
     );
-    const cleanupSessionsSpy = vi
-      .spyOn(manager as unknown as { cleanupSessions(): Promise<void> }, 'cleanupSessions')
-      .mockResolvedValue();
-
-    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(1);
-    expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
-
-    await manager.cleanUp();
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(2);
-    expect(workspaceDocument.cleanUp).toHaveBeenCalledTimes(1);
-    expect(cleanupSessionsSpy.mock.invocationCallOrder[1]).toBeLessThan(
-      vi.mocked(workspaceDocument.cleanUp).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    const events: string[] = [];
+    let failing = true;
+    const resource =
+      (name: string, fails = false) =>
+      async () => {
+        events.push(name);
+        if (fails && failing) throw new Error(name);
+      };
+    const sessionId = 'cleanup-failure' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const terminate = session.terminate.bind(session);
+    session.terminate = async () => {
+      await resource('session', true)();
+      await terminate(true);
+    };
+    Object.assign(manager, {
+      mcpAuthentication: { close: resource('mcp', true) },
+      workspaceDocument: { cleanUp: resource('workspace') },
+      gitCredentialBroker: { shutdown: resource('broker', true) },
+      githubTokenManager: { shutdown: resource('token') },
+    });
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
     );
+    expect(events).toEqual(['session']);
+    events.length = 0;
+    await expect(manager.cleanUp()).rejects.toBeInstanceOf(AggregateError);
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker', 'token']);
+    expect(manager.getSession(sessionId)).toBe(session);
+    failing = false;
+    events.length = 0;
+    await manager.cleanUp();
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker']);
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });
 
@@ -1253,6 +1405,45 @@ describe('SessionManager failed agent creation', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('rejects a replacement native conversation before changing the durable resume pointer', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'strict-native-resume' as SessionId;
+    let persisted = 'native-original';
+    const doc = {
+      ...createSessionDoc(),
+      setACPSessionId: async (id: ACPSessionId) => {
+        persisted = id;
+      },
+    };
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    vi.spyOn(Session.prototype, 'createAgent').mockResolvedValue('native-replacement');
+    await expect(
+      manager.createSession(
+        createSessionConfig({
+          sessionId,
+          agentCliType: 'custom',
+          agentType: 'synthetic',
+          customAcp: { command: 'never-started', args: [] },
+          workdir: sourceDir,
+        }),
+        { resumeSessionId: 'native-original' as ACPSessionId, requireExactResume: true }
+      )
+    ).rejects.toThrow('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
+    expect(persisted).toBe('native-original');
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+  });
+
   it('publishes no lifecycle events for an instance whose agent never started', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'agent-start-failed' as SessionId;
@@ -1315,6 +1506,10 @@ describe('SessionManager failed agent creation', () => {
     const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
     const reconfigured = await manager.createSession({ ...config, memory });
     expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    manager.detachSession(replacement);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    await replacement.terminate(true);
     expect(manager.getSession(sessionId)).toBe(reconfigured);
     await manager.terminateSession(sessionId, true);
     expect(terminated).toHaveBeenCalledTimes(1);

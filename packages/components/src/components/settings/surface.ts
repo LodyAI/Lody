@@ -137,6 +137,8 @@ export const settingsSurface = stylex.create({
     paddingBlock: space[2],
   },
   rowTop: { alignItems: { default: 'stretch', [WIDE]: 'start' } },
+  /** An identity mark travels with its text inside the label column. */
+  rowIdentity: { display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 },
   /** Helper copy is capped so it stays readable on a wide panel. */
   rowText: { minWidth: 0 },
   rowTextCapped: { maxWidth: { default: null, [WIDE]: '520px' } },

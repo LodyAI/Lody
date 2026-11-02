@@ -33,6 +33,54 @@ const createDocument = () => {
 };
 
 describe('SessionDocument ACP runtime config', () => {
+  it('keeps commands within one runtime across turns, clears them, and replaces the runtime', async () => {
+    const doc = createDocument();
+    await doc.applyAcpRuntimeConfigPatch('turn-1', {
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [{ name: 'review-a', description: 'Review A' }],
+    });
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [{ name: 'review-a', description: 'Review A' }],
+      })
+    ).toBe(false);
+    await updateTestHistory(doc, (history) => [...history, historyEntry('turn-2', 'user')]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      modelId: 'model-b',
+    });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-a', description: 'Review A' },
+    ]);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [{ name: 'stale' }],
+      })
+    ).toBe(false);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [],
+    });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
+    expect(
+      await doc.applyAcpRuntimeConfigPatch('turn-2', {
+        acpSessionId: 'acp-1' as never,
+        availableCommands: [],
+      })
+    ).toBe(false);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', {
+      acpSessionId: 'acp-2' as never,
+      availableCommands: [{ name: 'review-b' }],
+    });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([
+      { name: 'review-b' },
+    ]);
+    await doc.applyAcpRuntimeConfigPatch('turn-2', { acpSessionId: 'acp-3' as never });
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toBeUndefined();
+  });
+
   it('merges same-turn patches and makes replay idempotent', async () => {
     const doc = createDocument();
 

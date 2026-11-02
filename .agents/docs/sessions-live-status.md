@@ -18,6 +18,14 @@ this page is the full text of the rules summarised there.
   `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`
   use the same `ConversationColumn` as the stream and composer; keep full-bleed
   bands outside that column, but never let their interactive content span the pane.
+- While presence is active, the conversation activity line distinguishes pending
+  Core question metadata from ordinary tool approval using the composer's pending
+  request queue. Its history input includes all hydrated bodies in the leased tail,
+  including those beyond an unrelated body-loading gap; an old turn must not hide
+  an already available question while newer output streams. Questions say “Waiting for your answer”; both kinds of user wait
+  omit the live “Worked for” suffix. This is a presentation distinction over the
+  existing durable permission bridge, not a new ACP or presence status. Without
+  active presence, old unanswered history must not relight activity.
 - Explicit `running + phase: finalizing` presence displays “Finalizing…” /
   “收尾中…” until the execution owner clears presence or starts another phase.
   It still counts as busy for submission routing and Stop; a finished history

@@ -244,7 +244,9 @@ catch })`. Construct the Promise inside the thunk and pass the signal to the I/O
 `LoginShellEnvironmentLive` injects host selection and the existing official
 process service. Candidate shells share one Clock deadline; core composition
 never executes. `LoginShellCacheLive` owns one producer in a child Scope and
-retains its complete Exit for later readers. CLI readers retain their 3-second
+retains successful Exits for later readers. Completed failures retry on the next
+read after five seconds; unconfirmed process release retains its Exit and owner.
+CLI readers retain their 3-second
 pending-overlay behavior; cancellation and timeout affect only that local reader.
 Application shutdown rejects new readers, interrupts and joins the producer, then
 closes its child Scope. Process cleanup keeps its own bounded backend and recovery
@@ -351,6 +353,10 @@ Local-project Git is native as described above; full worktree ownership is separ
 
 ## Worktree Git execution
 
+The read-only Project group member probe also uses this boundary through
+`worktreeGitLegacy.probeLocalProjectMember`; the RPC owns the finite request and awaits
+command release. Remove this adapter when its dispatcher uses the native daemon runtime.
+
 `WorktreeGit` / `WorktreeGitLive` own native command execution, status checking and
 bounded credential-helper protocol. Layers provide official FileSystem, the process
 spawner and a per-command environment Effect. Each command owns its process Scope;
@@ -389,7 +395,9 @@ renderer and Machine RPC callers use the sole
 `createTokenProviderLegacy` port/type. Renderer teardown and CLI cloud-port
 shutdown await provider close. CLI durable transport and machine monitor borrow the
 workspace-native provider through `{provider, executor}` in that same facade,
-creating no extra runtime/cache. This is token ownership, not completion of upper
+creating no extra runtime/cache. In the CLI port those providers and Machine RPC's
+are views of one kernel per workspace (`loro/streams-token-shares.ts`): a view's
+close ends only its reads, and the last one closes the kernel. This is token ownership, not completion of upper
 Loro/daemon lifecycles. [API and decision](../../packages/shared/src/loro-streams-token/README.md).
 
 Native getToken/auth preserve terminal typed failure; only the explicit Legacy
@@ -465,6 +473,14 @@ migrated layer. Current facades:
 `pnpm check:cli-process-boundary` fails when code in those packages bypasses
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
+
+`publishTurnCompletionLegacy` in `session/turn-completion-legacy.ts` is consumed by
+`SessionExecutionService.releaseVisibleTurn`. The native publication policy owns
+confirmation retry/deadline; the existing host drain owns its Promise and shutdown
+signal. History/backend/notification Promise adapters remain unfinished dependencies,
+so this does not complete Turn migration. Delete the facade when these owners and
+the Session caller compose native Effects. See the
+[completion decision](../notes/implemented/bug-fix/2026-10-26-turn-completion-signals.md).
 
 Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
 facade (`session/session-credentials.ts`): the Effect broker lease's scope belongs

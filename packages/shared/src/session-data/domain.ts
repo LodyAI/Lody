@@ -47,6 +47,7 @@ export type SessionTurn = {
   readonly modelInfo?: ModelInfo;
   readonly tokenUsage?: SessionTurnTokenUsage;
   readonly scheduleRun?: unknown;
+  readonly derivedFrom?: unknown;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
   readonly cancellationReason?: 'user_stop';
@@ -99,6 +100,8 @@ export type SessionTurnRead =
 
 /** A shallow directory row: identity and state without the turn body. */
 export type SessionDirectoryRow = {
+  /** Marks a complete v1 attribution/config/schedule projection. */
+  readonly metadataVersion?: 1;
   readonly position: number;
   readonly state: 'ready' | 'invalid' | 'missing' | 'unavailable';
   /** Business id when the slot declares one; absent for invalid/unknown slots. */
@@ -115,6 +118,8 @@ export type SessionDirectoryRow = {
    * the body is hydrated.
    */
   readonly inputConfig?: unknown;
+  readonly userId?: string;
+  readonly scheduleRun?: unknown;
   /** Item / plan counts when cheaply available; omitted rather than guessed. */
   readonly itemCount?: number;
   readonly planCount?: number;
@@ -126,6 +131,8 @@ export type SessionDirectoryScalars = {
   readonly role: SessionTurnRole;
   readonly timestamp: string;
   readonly status?: SessionTurnStatus;
+  /** Legacy dispatch eligibility, read without materializing the body. */
+  readonly read?: boolean;
   readonly cancellationReason?: 'user_stop';
   readonly finished?: boolean;
   readonly endedAt?: number;
@@ -136,11 +143,16 @@ export type SessionDirectoryScalars = {
   readonly permissionWaitMs?: number;
 };
 
+/** Detached identity, state and configuration fields. */
+export type SessionHistoryMetadata = SessionDirectoryScalars &
+  Pick<SessionTurn, 'userId' | 'scheduleRun'> & { readonly inputConfig?: SessionTurnInputConfig };
+
 /**
  * The body-independent send-config keys a directory row may carry. Kept here so
  * an adapter and any consumer pick the same subset in one place.
  */
 export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
+  '_lodyDeliveryKind',
   'agentRoleId',
   'agentRoleRevision',
   'agentRoleSnapshot',

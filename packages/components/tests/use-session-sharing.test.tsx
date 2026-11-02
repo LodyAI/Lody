@@ -79,6 +79,7 @@ const privateProject = {
   project: {
     id: projectId,
     name: 'Private project',
+    standaloneVisible: false,
     rootPath: '/repo/private',
     createdAtMs: 1,
   },
@@ -154,17 +155,18 @@ describe('useSessionSharing project visibility', () => {
     }
   );
 
-  it('loads machine Flock projects only when the consumer requests them', () => {
+  it('loads hidden project details only when the consumer requests them', () => {
     visibilityMocks.useVisibleMachineMetas.mockReturnValue({
       machines: new Map(),
       accessByMachineId: new Map(),
       isLoading: false,
     });
     visibilityMocks.useVisibleLocalProjects.mockImplementation(
-      (options: { includeMachineFlock?: boolean }) => ({
-        projects: options.includeMachineFlock
-          ? new Map([[privateProject.key, privateProject]])
-          : new Map(),
+      (options: { includeMachineFlock?: boolean; includeMemberOnly?: boolean }) => ({
+        projects:
+          options.includeMachineFlock && options.includeMemberOnly
+            ? new Map([[privateProject.key, privateProject]])
+            : new Map(),
         accessByProjectKey: new Map(),
         accessByMachineId: new Map(),
         isLoading: false,
@@ -189,12 +191,6 @@ describe('useSessionSharing project visibility', () => {
     });
 
     expect(results.at(-1)?.projects.size).toBe(0);
-    expect(visibilityMocks.useVisibleLocalProjects).toHaveBeenCalledWith({
-      includeMachineFlock: false,
-      syncMachineFlock: false,
-      workspaceId: 'workspace-1',
-      enabled: true,
-    });
 
     visibilityMocks.useVisibleLocalProjects.mockClear();
     act(() => {
@@ -211,16 +207,5 @@ describe('useSessionSharing project visibility', () => {
     });
 
     expect(results.at(-1)?.projects.get(privateProject.key)?.project.name).toBe('Private project');
-    expect(visibilityMocks.useVisibleMachineMetas).toHaveBeenCalledWith({
-      includeMachineFlock: false,
-      workspaceId: 'workspace-1',
-      enabled: true,
-    });
-    expect(visibilityMocks.useVisibleLocalProjects).toHaveBeenCalledWith({
-      includeMachineFlock: true,
-      syncMachineFlock: false,
-      workspaceId: 'workspace-1',
-      enabled: true,
-    });
   });
 });

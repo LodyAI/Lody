@@ -1,4 +1,5 @@
 export * from './types';
+export * from './history-patches';
 export { type SessionSnapshot, type SessionSnapshotService } from './snapshot';
 export * from './domain';
 export {
@@ -37,7 +38,12 @@ export {
 
 export * from './history-import';
 
-export { applyHistoryAction, historyActionTarget, type HistoryAction } from './history-actions';
+export {
+  applyHistoryAction,
+  planHistoryAction,
+  historyActionTarget,
+  type HistoryAction,
+} from './history-actions';
 
 export {
   findProgressMessageId,
@@ -48,7 +54,27 @@ export {
   type OperationProgressStatusByTarget,
 } from './operation-progress';
 
-export { readLatestTurn, readSessionHistory, selectTurnOutput } from './read';
+export {
+  readLatestTurn,
+  readLatestUserId,
+  readSessionHistory,
+  readSessionHistoryMetadata,
+  selectTurnOutput,
+} from './read';
+export {
+  SESSION_DIRECTORY_SCALAR_KEYS,
+  pickDirectoryScalars,
+  pickDirectoryInputConfig,
+} from './directory';
 
 export { markAssistantTurnFinished } from './assistant-finalize';
 export * from './token-usage';
+
+export {
+  summarizeHistoryQuery,
+  historyQueryRow,
+  selectTranscriptHistoryPositions,
+  selectHistoryActionRows,
+  selectAgentHistoryRows,
+  type HistoryQueryRow,
+} from './history-selection';

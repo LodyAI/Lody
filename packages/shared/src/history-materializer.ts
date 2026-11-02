@@ -239,7 +239,7 @@ export function populateContainer(
       infer
     );
   } else if (kind === 'Text') {
-    if (typeof value === 'string') (container as LoroText).update(value);
+    if (typeof value === 'string') writeText(container as LoroText, value);
   } else {
     throw new Error(`Unsupported container kind for history: ${kind}`);
   }
@@ -394,6 +394,38 @@ export function writeDiffListInsert(
 
 export { isContainer };
 
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+/**
+ * Rewrites a text to `next` in linear time: keep the common prefix and suffix,
+ * splice only the middle. `LoroText.update` runs an unbounded Myers diff, which
+ * takes minutes on ~100k-char rewrites that are not appends (a rolling output
+ * tail, or a list diff pairing unrelated items) and blocks the CLI event loop.
+ * Appends and small edits produce the same ops; a large rewrite trades a
+ * minimal diff for one delete plus one insert. Positions are UTF-16 units.
+ */
+export function writeText(text: LoroText, next: string): void {
+  const current = text.toString();
+  if (current === next) return;
+  const max = Math.min(current.length, next.length);
+  let start = 0;
+  while (start < max && current.charCodeAt(start) === next.charCodeAt(start)) start++;
+  // Never split a surrogate pair.
+  if (start > 0 && isHighSurrogate(current.charCodeAt(start - 1))) start--;
+  let end = 0;
+  while (
+    end < max - start &&
+    current.charCodeAt(current.length - 1 - end) === next.charCodeAt(next.length - 1 - end)
+  )
+    end++;
+  if (end > 0 && isLowSurrogate(current.charCodeAt(current.length - end))) end--;
+  const removed = current.length - start - end;
+  if (removed > 0) text.delete(start, removed);
+  const inserted = next.slice(start, next.length - end);
+  if (inserted) text.insert(start, inserted);
+}
+
 // Minimal field diff extracted from PR #376 (cc49d259).
 export function diffHistoryContainer(
   container: Container,
@@ -434,7 +466,7 @@ export function diffHistoryContainer(
     if (typeof oldValue !== 'string' || typeof newValue !== 'string') {
       throw new Error('Failed to diff container(text). Old and new state must be strings');
     }
-    if (oldValue !== newValue) (container as LoroText).update(newValue);
+    if (oldValue !== newValue) writeText(container as LoroText, newValue);
     return;
   }
   throw new Error(`Unsupported container kind in a history turn: ${kind}`);
@@ -497,7 +529,7 @@ function diffMap(
     ) {
       const stored = map.get(key);
       if (isContainer(stored) && stored.kind() === 'Text') {
-        (stored as LoroText).update(newItem);
+        writeText(stored as LoroText, newItem);
         continue;
       }
       if (typeof stored === 'string') {

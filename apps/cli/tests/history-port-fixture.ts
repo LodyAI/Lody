@@ -1,5 +1,10 @@
+import { historyQueryRow } from '../../../packages/shared/src/session-data/history-selection';
+import { resolveLatestSessionGoalFromHistory } from '@lody/shared';
 import { selectTurnOutput } from '../../../packages/shared/src/session-data/read';
-import { pickDirectoryScalars } from '../../../packages/shared/src/session-data/directory';
+import {
+  pickDirectoryScalars,
+  pickDirectoryInputConfig,
+} from '../../../packages/shared/src/session-data/directory';
 import { createHistoryWriter } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
@@ -48,6 +53,55 @@ export function withHistoryPort<T extends object>(
   };
   storage.sessionData = {
     ...storage.sessionData,
+    readLatestGoal: () => resolveLatestSessionGoalFromHistory(read()),
+    readLatestUserId: () =>
+      [...read()]
+        .reverse()
+        .find((row) => row.role === 'user' && typeof row.userId === 'string' && row.userId.trim())
+        ?.userId,
+    writer: {
+      readQuery: (options?: { transcriptVisibility?: boolean }) =>
+        read().map((row) =>
+          historyQueryRow(
+            row,
+            {
+              field: (value, key) =>
+                value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+              scalar: (value) => value,
+              length: (value) => (Array.isArray(value) ? value.length : 0),
+              at: (value, index) => (value as unknown[])[index],
+              keys: (value) =>
+                value && typeof value === 'object' && !Array.isArray(value)
+                  ? Object.keys(value)
+                  : [],
+            },
+            options?.transcriptVisibility
+          )
+        ),
+      readSelected: (
+        select: (
+          rows: readonly import('@lody/shared/session-data').HistoryQueryRow[]
+        ) => readonly number[],
+        options?: { transcriptVisibility?: boolean }
+      ) => {
+        const snapshot = read();
+        const query = snapshot.map((row) =>
+          historyQueryRow(
+            row,
+            {
+              field: (value, key) =>
+                value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+              scalar: (value) => value,
+              length: (value) => (Array.isArray(value) ? value.length : 0),
+              at: (value, index) => (value as unknown[])[index],
+            },
+            options?.transcriptVisibility
+          )
+        );
+        return select(query).map((index) => snapshot[index]);
+      },
+      forEachStored: (visit: (entry: SessionEntry) => void) => read().forEach(visit),
+    },
     history: {
       readTurnOutput: (userTurnId: string) => {
         const snapshot = read();
@@ -60,7 +114,7 @@ export function withHistoryPort<T extends object>(
       },
       count: () => read().length,
       readTurn: (id: string) => {
-        const turn = read().find((t) => t.id === id);
+        const turn = [...read()].reverse().find((t) => t.id === id);
         return turn ? { state: 'ready', turn } : { state: 'missing' };
       },
       readDirectory: (from: number, to: number) =>
@@ -70,7 +124,8 @@ export function withHistoryPort<T extends object>(
             position: from + i,
             turnId: t.id,
             state: 'ready',
-            scalars: { ...t, items: undefined },
+            scalars: pickDirectoryScalars(t),
+            inputConfig: pickDirectoryInputConfig(t.inputConfig),
           })),
       observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
       ...storage.sessionData?.history,

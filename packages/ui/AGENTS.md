@@ -116,5 +116,5 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
 - `corner.shape` goes with every radius except `radius.full` and ringed
   corners — both `corner.round`: spread shadows can't parallel-offset a
   superellipse; round is the non-Chromium fallback.
-- A Radix file in `packages/components/src/ui` is deleted when its in-repo
-  callers reach zero; private consumers sync on typecheck.
+- `ScrollArea` exposes its native viewport ref. Delete obsolete Radix files once
+  all in-repo callers migrate; private consumers sync on typecheck.

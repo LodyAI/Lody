@@ -6,6 +6,10 @@ const LODY_INTERNAL_PROMPT_MARKERS = [
   'The "lody" MCP server provides tools for this conversation:',
 ] as const;
 
+/** Prefix context sufficient to detect an instruction marker across an append. */
+export const LODY_INTERNAL_PROMPT_SCAN_TAIL =
+  Math.max(...LODY_INTERNAL_PROMPT_MARKERS.map((marker) => marker.length)) - 1;
+
 export type SessionGoalMessage = Extract<MessageContent, { type: 'goal' }>;
 
 export const SESSION_GOAL_COMMANDS = ['pause', 'resume', 'clear'] as const;

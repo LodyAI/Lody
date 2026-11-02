@@ -11,11 +11,14 @@ popover.
   surface shares. Never fetch per component: `SessionUsagePopover` is mounted per open
   tab AND side chat (hidden ones included) and `ProviderRow` per provider, so a
   mount-time fetch is a request storm.
-- **Nothing loads on mount.** A request happens only when a user OPENS a surface that
-  shows the forecast — the provider row's direct forecast button (the click that
-  opens its dialog) and the composer's usage popover (its content mounts
-  `CodexResetForecastUsageRow`, which loads from its own mount). `useCodexResetForecast`
-  therefore has no load effect; call `revalidate()` from the interaction.
+- **Only three surfaces load, and each from its own entry.** The provider row's direct
+  forecast button (the click that opens its dialog), the composer's usage popover (its
+  content mounts `CodexResetForecastUsageRow`, which loads from its own mount), and the
+  new-chat page's usage tile (`HomeDashboardHost` calls `revalidate()` when the "now" board,
+  which holds the usage, is shown for an eligible Codex provider; the owner chose this over
+  waiting for a click). On the week board, or folded, it makes no request. Nothing else
+  loads on mount, and a composer, chip or closed dialog never does. `useCodexResetForecast`
+  has no load effect of its own; every surface calls `revalidate()` itself.
 - Concurrent callers coalesce onto one in-flight request. Freshness is the served
   `Cache-Control: max-age` clamped to 1m–5m — the endpoint's CDN-shaped 4h is wrong for
   someone who just opened the panel — and a lapsed TTL revalidates with `If-None-Match`,
@@ -28,7 +31,8 @@ popover.
   Never put forecast probabilities beside remaining-quota percentages in the
   provider overview. The composer's usage-popover row appears
   while a watch is live or a scheduled reset awaits execution. There is deliberately NO always-visible composer band: it
-  would have to load in the background to know whether to render.
+  would have to load in the background to know whether to render. The new-chat page's usage
+  tile is the exception, and it shows the forecast as one line beside the plan usage.
 - The composer's usage-popover entry must NOT own the dialog. Opening a forecast
   dialog dismisses its popover and unmounts content, so `SessionUsagePopover` hosts
   `CodexResetForecastDialogHost` as a sibling. Provider rows open that dialog
