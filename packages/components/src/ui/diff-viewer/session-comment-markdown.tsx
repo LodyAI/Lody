@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { PrRemoteImageContext } from '@/components/ai-gui/pr-remote-image';
 import { cn } from '@/lib/utils';
 
 interface SessionCommentMarkdownProps {
@@ -29,11 +30,13 @@ export const SessionCommentMarkdown = memo(function SessionCommentMarkdown({
   className,
 }: SessionCommentMarkdownProps) {
   return (
-    <MarkdownRenderer
-      text={body}
-      size="sm"
-      allowHtml={allowHtml}
-      className={cn(FLUSH_PROSE, className)}
-    />
+    <PrRemoteImageContext.Provider value={true}>
+      <MarkdownRenderer
+        text={body}
+        size="sm"
+        allowHtml={allowHtml}
+        className={cn(FLUSH_PROSE, className)}
+      />
+    </PrRemoteImageContext.Provider>
   );
 });

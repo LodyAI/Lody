@@ -5,6 +5,7 @@ import test from 'node:test'
 
 const rendererHtml = await readFile(new URL('./index.html', import.meta.url), 'utf8')
 const devbarHtml = await readFile(new URL('./devbar.html', import.meta.url), 'utf8')
+const prImageHtml = await readFile(new URL('./pr-image.html', import.meta.url), 'utf8')
 
 function getDirectiveSources(html, name) {
   const content = html.match(
@@ -28,6 +29,15 @@ void test('renderer CSP allows WebAssembly compilation', () => {
 
 void test('renderer CSP allows reading preview object URLs for image export', () => {
   assert.ok(getDirectiveSources(rendererHtml, 'connect-src').includes('blob:'))
+})
+
+void test('the isolated PR image document can run its loader without broadening the main renderer', () => {
+  const script = prImageHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  assert.ok(script)
+  const digest = createHash('sha256').update(script).digest('base64')
+  assert.ok(getDirectiveSources(prImageHtml, 'script-src').includes(`'sha256-${digest}'`))
+  assert.deepEqual(getDirectiveSources(prImageHtml, 'img-src'), ['https:'])
+  assert.ok(!getDirectiveSources(rendererHtml, 'img-src').includes('https:'))
 })
 
 void test('renderer CSP allows the Codex reset forecast API', () => {
