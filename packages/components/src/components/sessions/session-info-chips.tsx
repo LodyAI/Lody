@@ -618,7 +618,7 @@ export function ContextChip({
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
   const prNumber = pr
-    ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
+    ? (parseGitHubPrNumber(pr.url) ?? getSessionPullRequestLegacyFields(pr).number)
     : null;
   const value = pr ? (prNumber ? `#${prNumber}` : 'PR') : undefined;
   const label = pr
@@ -820,27 +820,31 @@ function getPrCiOverallFromState(
   return null;
 }
 
-/** The metadata verdict wins so the pill matches the sidebar; runs decide only
- *  when metadata has no CI code yet. */
+/** The verdict is the metadata CI code, the same one the sidebar and the Fix CI
+ *  gate read; without one the pill only lists the runs. */
 export function usePrCiPresentation(
   runs: readonly PrCiRun[],
   state?: SessionPullRequestCiState | null
 ) {
   const { t } = useTranslation();
-  const overall = getPrCiOverallFromState(state) ?? summarizePrCiRuns(runs);
+  const overall = getPrCiOverallFromState(state);
   const settled = runs.filter((run) => run.status !== 'running' && run.status !== 'queued').length;
   const overallLabel =
     overall === 'passing'
       ? t('sessions.prCi.passing', 'CI passed')
       : overall === 'failing'
         ? t('sessions.prCi.failing', 'CI failed')
-        : t('sessions.prCi.running', 'CI running');
+        : overall === 'running'
+          ? t('sessions.prCi.running', 'CI running')
+          : null;
   const toneClassName =
     overall === 'passing'
       ? 'text-status-success'
       : overall === 'failing'
         ? 'text-destructive'
-        : 'text-status-warning';
+        : overall === 'running'
+          ? 'text-status-warning'
+          : 'text-muted-foreground';
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
   return { overall, settled, overallLabel, toneClassName, VerdictIcon };
@@ -861,7 +865,9 @@ function PrCiPopoverBody({
   return (
     <div className="flex flex-col gap-1.5 p-3">
       <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
-        <span className={cn('font-medium', toneClassName)}>{overallLabel}</span>
+        <span className={cn('font-medium', toneClassName)}>
+          {overallLabel ?? t('sessions.prCi.label', 'CI checks')}
+        </span>
         <span className="text-muted-foreground">
           · {settled}/{runs.length}
         </span>
@@ -930,7 +936,9 @@ export function PrCiPill({
   if (!hasRuns) return null;
 
   const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
-  const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
+  const label = overallLabel
+    ? `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`
+    : t('sessions.prCi.label', 'CI checks');
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
