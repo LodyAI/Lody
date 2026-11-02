@@ -919,11 +919,32 @@ describe('AgentConfigDialog', () => {
     expect(onRefreshCapabilities).not.toHaveBeenCalled();
   });
 
-  it('queues Sorbet creation and requires provider setup support', async () => {
+  it('offers Lody Agent and creates its builtin configuration', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
+      onSubmit
+    );
+    await act(async () => {
+      getOptionByText('Lody Agent').click();
+    });
+    expect(getSelectedOption()?.textContent).toContain('Lody Agent');
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ cliType: 'builtin', agentType: 'sorbet', name: 'Lody Agent' })
+      );
+    });
+  });
+
+  it('queues Lody Agent creation and requires provider setup support', async () => {
     const onSubmit = vi.fn(async () => {});
     const mode: AgentConfigDialogMode = {
       kind: 'create',
-      initialForm: { agentType: 'sorbet', cliType: 'builtin', name: 'Sorbet' },
+      initialForm: { agentType: 'sorbet', cliType: 'builtin', name: 'Lody Agent' },
     };
     await renderDialog(mode, createMachine('Legacy workstation'), onSubmit);
     expect(getPrimaryAction('Create').disabled).toBe(true);

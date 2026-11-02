@@ -45,7 +45,7 @@ export const BUILTIN_AGENTS = [
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
   { agentType: 'dimcode', displayName: 'Dimcode' },
-  { agentType: 'sorbet', displayName: 'Sorbet' },
+  { agentType: 'sorbet', displayName: 'Lody Agent' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
