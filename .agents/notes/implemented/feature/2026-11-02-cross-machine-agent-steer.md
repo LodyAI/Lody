@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2223](https://github.com/LodyAI/Lody/pull/2223)
 
 [中文](2026-11-02-cross-machine-agent-steer.zh.md)
 
