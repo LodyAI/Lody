@@ -185,6 +185,12 @@ describe('project skills helpers', () => {
     expect(getSkillScanCandidateDirs()).not.toContain('.kimi/skills');
   });
 
+  it('maps Lody Agent to its workspace skills without adding a global directory', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'sorbet' };
+    expect([...getRegisteredSkillDirs([agent])]).toEqual([DEFAULT_PROJECT_SKILL_DIR]);
+    expect([...getRegisteredGlobalSkillDirs([agent])]).toEqual([]);
+  });
+
   it('registers every builtin agent type so none falls back to an unfiltered menu', () => {
     for (const { agentType } of BUILTIN_AGENTS) {
       expect(isRegisteredSkillAgentType(agentType)).toBe(true);
