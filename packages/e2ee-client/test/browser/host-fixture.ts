@@ -463,6 +463,32 @@ export async function boot(
       });
       const remote = PersonalHostRemote.of({
         accountId: 'account',
+        ...(localStorage.getItem('qualify-approval-history')
+          ? {
+              history: (_credential: Uint8Array) =>
+                Effect.gen(function* () {
+                  if (localStorage.getItem('synthetic-offline'))
+                    return yield* new LedgerFeedError({ code: 'native-unavailable' });
+                  const historyRecords = localStorage.getItem('truncate-approval-history')
+                    ? records.slice(0, 1)
+                    : records;
+                  return [
+                    {
+                      workspaceId: offer.workspaceId,
+                      genesisHash: offer.genesisHash,
+                      checkpoint: {
+                        length: historyRecords.length,
+                        headHash: toHex(hashRecordBytes(historyRecords.at(-1)!).toBytes()),
+                      },
+                      startIndex: 0,
+                      recordsHex: historyRecords.map(toHex),
+                      position: 'opaque/' + records.length,
+                      nextCursor: null,
+                    },
+                  ];
+                }),
+            }
+          : {}),
         exchange: (request: PersonalExchange) =>
           Effect.gen(function* () {
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
@@ -963,7 +989,10 @@ export async function invoke(action: string) {
             );
           case 'resumeForeign':
             return yield* session!.resume();
+          case 'forkBeforeApproval':
           case 'addMachine': {
+            const machineId = action === 'forkBeforeApproval' ? 'fork-machine' : 'fixture-machine';
+            if (action === 'forkBeforeApproval') records = records.slice(0, 1);
             const machine = yield* importBrowserDevice({
               signingPrivate: new Uint8Array(32).fill(12),
               encryptionPrivate: new Uint8Array(32).fill(13),
@@ -973,14 +1002,14 @@ export async function invoke(action: string) {
               membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
               encryptionPublicKey: machine.enc,
               kind: 'machine',
-              machineId: 'fixture-machine',
+              machineId,
               signer: machine,
             });
             const proposal = Result.getOrThrow(
               prepareLedgerCommand(view(), owner.publicKey, {
                 _tag: 'AdmitDevice',
                 kind: 'machine',
-                machineId: 'fixture-machine',
+                machineId,
                 replaces: null,
                 signingPublicKey: machine.publicKey,
                 encryptionPublicKey: machine.enc,
@@ -1286,9 +1315,11 @@ export async function bootRuntime(withSharing = false) {
           : Effect.succeed({ userId: runtimeAccount, source: 'offline' as const }),
       ledgerRecords: (checked) =>
         Effect.succeed(
-          records
-            .slice(checked.historyStart, checked.length)
-            .map((record, index) => ({ position: checked.historyStart + index, record }))
+          localStorage.getItem('empty-local-originals')
+            ? []
+            : records
+                .slice(checked.historyStart, checked.length)
+                .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);
@@ -1310,6 +1341,24 @@ export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
     switch (action) {
+      case 'observeCheckpoint':
+        value = {
+          genesisHash: offer.genesisHash,
+          length: view().length,
+          headHash: toHex(view().head.toBytes()),
+        };
+        localStorage.setItem('pre-approval-checkpoint', JSON.stringify(value));
+        break;
+      case 'openObserved': {
+        const status = await runtime.open(
+          offer.workspaceId,
+          JSON.parse(localStorage.getItem('pre-approval-checkpoint')!),
+          'account'
+        );
+        runtimeLease = status.readerOwner;
+        value = status;
+        break;
+      }
       case 'prepare':
         value = await runtime.preparePersonalJoin!(offer);
         break;

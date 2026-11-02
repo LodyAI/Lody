@@ -138,6 +138,24 @@ genesis. Both must admit the exact personal signing/encryption keys and member.
 The protected credential packet also authenticates immutable offer pins. Raw
 approval pages and their checksums remain evidence to replay, never authority.
 
+Compositions that supply `PersonalHostRemote.history` qualify a snapshot's earlier
+prefix from complete signed originals before claim reports success. The host retains
+those public pages in the existing identity/session-bound approval-evidence store;
+it replays signatures and checks the original snapshot's head, count and state on
+every reopen. Approval originals, snapshot bytes/offset, feed and rollback pins stay
+unchanged. An older snapshot installation needs one online qualification when this
+capability is first added; subsequent reopens use the saved proof offline. A failed
+proof is never saved or treated as permission to reset. Hosts without this optional
+capability retain their existing snapshot-only contract.
+
+Control-page continuity checks use the genuine ledger view, including its verified
+prefix hashes. Runtime exports merge retained approval originals with the local suffix;
+each absolute position is checked against the host's genuine view. When complete
+originals are available, the renderer replays them against the same exported head and
+state digest because retained-state serialization omits older hashes. Sparse exports
+do not invent a prefix. Reset history position only clears renderer
+observations; it neither supplies missing proof nor removes the host's durable pin.
+
 `personalLedgerControl({ approval })` composes a persistent `LedgerFeed` over
 injected `LedgerFeedStore`, `LedgerPinStore`, `SubmissionJournal`, `LedgerLog`,
 `LedgerFeedSource` and `WorkspaceScope`. Keep the feed/pins in a stable database;

@@ -7,6 +7,8 @@ import {
   snapshotTrustFromView,
   verifyLedgerSnapshot,
   exportVerifiedState,
+  hasVerifiedCheckpoint,
+  Bytes,
   extendLedger,
   hashRecordBytes,
 } from '@lody/e2ee-core/protocol';
@@ -39,6 +41,41 @@ const history = appendLedgerHistory(
 );
 const sixth = history.records[5]!.hash;
 const code = ledgerVerificationCode(history);
+
+it('preserves earlier checkpoints across the real host export and restore boundary', () => {
+  const exported = Result.getOrThrow(exportVerifiedState(history.view));
+  const received = {
+    status: {
+      workspaceId: 'w',
+      genesisHash: vector.anchor,
+      length: history.view.length,
+      headHash: head,
+      stateDigest: bytesToHex(exported.stateDigest.toBytes()),
+      position: 'opaque',
+      epoch: history.view.inspectState().epoch.number,
+      rotationRequired: false,
+      deviceKind: 'personal' as const,
+      hasCurrentKey: true,
+      continuityPending: false,
+    },
+    stateHex: bytesToHex(exported.bytes),
+    recordsHex: history.records.map((record) => record.rawHex),
+  };
+  const restored = hostLedgerHistory(received);
+  expect(
+    Result.getOrThrow(
+      hasVerifiedCheckpoint(restored.view, {
+        length: 6,
+        head: Result.getOrThrow(Bytes.recordHash(Buffer.from(sixth, 'hex'))),
+      })
+    )
+  ).toBe(true);
+  const damaged = [...received.recordsHex];
+  const bytes = Buffer.from(damaged[1]!, 'hex');
+  bytes[bytes.length - 1]! ^= 1;
+  damaged[1] = bytes.toString('hex');
+  expect(() => hostLedgerHistory({ ...received, recordsHex: damaged })).toThrow();
+});
 
 describe('ledger verification code', () => {
   it('is the core comparison digest at the verified head and round-trips through its QR', () => {

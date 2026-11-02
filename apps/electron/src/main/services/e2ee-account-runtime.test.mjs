@@ -1201,7 +1201,9 @@ void test('cold renderer marker recovery reads the real IPC boundary without gra
   storage.setItem(known, 'damaged marker')
   const { recoverE2eeWorkspaceIdentity } = await load(
     '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts',
-    {}
+    // The VM transpiles this helper to CJS. Keep its protocol dependency on
+    // the real ESM namespace instead of requiring ESM-only crypto packages.
+    { '@lody/e2ee-core/protocol': await import('@lody/e2ee-core/protocol') }
   )
   await recoverE2eeWorkspaceIdentity({
     storage,

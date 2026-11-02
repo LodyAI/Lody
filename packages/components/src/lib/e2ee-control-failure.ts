@@ -94,6 +94,7 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
       return { kind: `custody-${reason}`, code: reason };
   }
   const portable = personalHostFailureCode(error);
+  if (portable === 'history-conflict') return { kind: 'progress-conflict', code: portable };
   if (portable === 'identity-lost' || portable === 'approval-required')
     return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';

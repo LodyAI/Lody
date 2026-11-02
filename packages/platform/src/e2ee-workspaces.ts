@@ -96,7 +96,8 @@ export interface E2eeRuntimeStatus {
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The host's own public export, for ledger display without another replay. */
+/** The host's own public export. Complete originals can recover prefix hashes
+ * omitted by retained-state serialization at the same head and state digest. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;

@@ -191,6 +191,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         binding: raw.binding,
         close: () => closeSession(state),
         ledger: () => call(raw.ledger()),
+        approvalOriginals: () => call(raw.approvalOriginals()),
         refresh: () => call(raw.refresh()),
         keyRound: () => call(raw.keyRound()),
         status: () => call(raw.status()),
