@@ -17,8 +17,12 @@ possible duplication over permanent non-delivery; the target is never canceled.
 ## Decision and limits
 
 The [orchestration contract](../../../../specs/session-orchestration.md) owns the behavior.
-Local steering and encrypted member derivation rules stay intact. Setup and offer share
-five seconds; late setup cannot submit a steer. No RPC retry is added.
+Local steering and encrypted member derivation rules stay intact. Setup has a separate
+15-second budget for cold token/gateway lookup and client subscription. Entering the
+connected-client callback clears that timer; the request then has its own five-second
+response timeout, matching the UI. Sharing one deadline would shorten response time
+and promote input while the remote provider could still accept it. Late setup cannot
+submit a steer after fallback. No RPC retry is added.
 `requeueUndeliveredSteer` documents that dispatch skips `pending_apply`: an RPC that
 never arrives leaves an orphan with no execution owner. Unreachable setup, timeout,
 transport failure and responses without recovery ownership therefore promote only

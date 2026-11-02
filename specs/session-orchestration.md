@@ -48,8 +48,10 @@ ordinary turn, as it does for a human. An uncertain delivery is never replayed: 
 non-retryable `STEER_DELIVERY_UNKNOWN`, and the requesting Agent decides whether
 to resend.
 
-Remote targets use the shared active-assistant history resolver. If remote setup
-or delivery cannot confirm an outcome and no daemon owns recovery, promote only
+Remote targets use the shared active-assistant history resolver. Connection setup
+has a separate 15-second deadline; once connected, the steer request gets its own
+five-second response timeout, matching the UI. Late setup cannot send after fallback.
+If remote setup or delivery cannot confirm an outcome and no daemon owns recovery, promote only
 an unchanged `pending_apply` turn to ordinary dispatch. This favors availability
 over duplicate avoidance: a lost acknowledgement can cause a duplicate follow-up,
 but must never strand an input whose RPC did not arrive. Never resend the steer

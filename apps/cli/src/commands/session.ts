@@ -4114,6 +4114,9 @@ async function validateSessionChatTargetForRequester(args: {
   return session;
 }
 
+// Cold token/gateway lookup and subscription setup need more time than an offer.
+const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
+
 export async function sendSessionChatResult(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -4306,15 +4309,23 @@ export async function sendSessionChatResult(
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    // Bound setup as well as the request. A late setup must never send a steer
-    // after we have fallen back to ordinary dispatch.
+    // Bound setup separately: cold connections must not consume the offer's
+    // five-second response budget. Late setup must never send after fallback.
     let accepting = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const inputConfig = userTurn.inputConfig;
+    const setupTimeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        accepting = false;
+        resolve(null);
+      }, REMOTE_STEER_CONNECT_TIMEOUT_MS);
+    });
     const request = withMachineRpcClient(
       { auth, workspaceId: workspace.id as WorkspaceId, machineId: session.machineId },
       async (client) => {
         if (!accepting) return null;
+        clearTimeout(timer);
+        timer = undefined;
         return client.requestSessionSteer({
           sessionId,
           expectedTurnId: steerTurnId,
@@ -4327,12 +4338,7 @@ export async function sendSessionChatResult(
       }
     );
     try {
-      const response = await Promise.race([
-        request,
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), 5_000);
-        }),
-      ]);
+      const response = await Promise.race([request, setupTimeout]);
       if (response?.applied) {
         await backend.applyHistoryAction({
           kind: 'user-status',

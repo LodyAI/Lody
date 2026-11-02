@@ -17,7 +17,10 @@ PR: [#2223](https://github.com/LodyAI/Lody/pull/2223)
 ## 决策与边界
 
 行为由[编排契约](../../../../specs/session-orchestration.zh.md)拥有。
-本机 steer 和加密成员派生规则不变。启动与发送共用五秒期限；晚到客户端不得再发 steer。
+本机 steer 和加密成员派生规则不变。建连单独预留 15 秒，用于冷启动时获取 token、
+准备 gateway 和订阅客户端。进入已连接客户端的回调后清除建连计时器，请求再独立等待
+五秒响应，与 UI 一致。共用期限会压缩响应时间，在远端仍可能接受输入时过早提升消息。
+建连超时回退后，晚到客户端不得再发 steer。
 不增加 RPC 重试。`requeueUndeliveredSteer` 说明普通派发跳过 `pending_apply`；
 RPC 未到达时，执行端没有恢复责任，消息会永久滞留。因此启动失败、超时、传输失败及
 没有恢复所有权的响应，只提升仍为 `pending_apply` 的消息，再复用持久派发。

@@ -2064,6 +2064,7 @@ describe('agent chat to a remote busy target', () => {
     run: (input: {
       expectedTurnId: string;
       userTurnId: string;
+      timeoutMs: number;
     }) => Promise<SessionSteerResponse | null>
   ) {
     const client = {
@@ -2129,13 +2130,13 @@ describe('agent chat to a remote busy target', () => {
       );
     } else {
       let offered = false;
-      rpc(async () => {
+      rpc(async (input) => {
         if (offered) throw new Error('Steer was resent');
         offered = true;
         if (failure === 'transport-error') throw new Error('Synthetic transport failure');
         if (failure === 'timeout') {
           submitted();
-          return new Promise<null>(() => {});
+          return new Promise<null>((resolve) => setTimeout(() => resolve(null), input.timeoutMs));
         }
         return response(failure);
       });
@@ -2177,6 +2178,67 @@ describe('agent chat to a remote busy target', () => {
     );
   });
 
+  it.each(['applied', 'timeout'] as const)(
+    'gives %s a full response budget after slow setup',
+    async (outcome) => {
+      vi.useFakeTimers();
+      const fixture = await remoteFixture();
+      let entered = () => {};
+      const starting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let offers = 0;
+      const client = {
+        requestSessionDispatchTurn: async () => null,
+        requestSessionSteer: async (input: { timeoutMs: number }) => {
+          offers += 1;
+          return new Promise<SessionSteerResponse | null>((resolve) => {
+            setTimeout(
+              () => resolve(outcome === 'applied' ? response('applied') : null),
+              outcome === 'applied' ? 4_000 : input.timeoutMs
+            );
+          });
+        },
+      } as unknown as Parameters<Parameters<typeof commandRuntime.withMachineRpcClient>[1]>[0];
+      let first = true;
+      vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, fn) => {
+        if (first) {
+          first = false;
+          entered();
+          await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
+        }
+        return fn(client);
+      });
+      const sending = fixture.run();
+      await starting;
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
+      // Cross the connection deadline: only the connected RPC's timeout applies now.
+      await vi.advanceTimersByTimeAsync(outcome === 'applied' ? 3_999 : 4_999);
+      expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
+      expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
+        'latestUserMsgId'
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      await sending;
+      expect((await fixture.history()).at(-1)?.status).toBe(
+        outcome === 'applied' ? 'processing' : 'pending'
+      );
+      if (outcome === 'timeout') {
+        expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
+          'latestUserMsgId',
+          userTurnId
+        );
+        await fixture.run(false);
+      } else {
+        expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
+          'latestUserMsgId'
+        );
+      }
+      expect(offers).toBe(1);
+    }
+  );
+
   it('bounds startup and prevents a late client from offering an already queued turn', async () => {
     vi.useFakeTimers();
     try {
@@ -2213,7 +2275,9 @@ describe('agent chat to a remote busy target', () => {
       });
       const sending = fixture.run();
       await starting;
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
+      await vi.advanceTimersByTimeAsync(1);
       await sending;
       start();
       await late;
