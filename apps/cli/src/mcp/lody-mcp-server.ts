@@ -3879,7 +3879,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (accepted.operation.state === 'finished') {
       return await withOperationStore((store) => store.snapshot(accepted.operation));
     }
-    const deliveries: Array<{ index: number; delivery: SessionChatDelivery }> = [];
+    const deliveryByIndex: Array<SessionChatDelivery | undefined> = [];
     const nextItems = await mapWithConcurrency(
       accepted.operation.items,
       5,
@@ -3927,7 +3927,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               materializationClaimToken
             )
           );
-          if (sent.delivery) deliveries.push({ index, delivery: sent.delivery });
+          deliveryByIndex[index] = sent.delivery;
           return markOperationItemInputDurable(storedItem);
         } catch {
           // See create_many above: post-acceptance transport failure is
@@ -3943,7 +3943,9 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     );
     const snapshot = await snapshotOperation(ctx.sessionId as SessionId, args.operationId);
     // Response-only receipts for items sent by this call, in item order.
-    deliveries.sort((a, b) => a.index - b.index);
+    const deliveries = deliveryByIndex.flatMap((delivery, index) =>
+      delivery ? [{ index, delivery }] : []
+    );
     return deliveries.length > 0 ? { ...snapshot, deliveries } : snapshot;
   });
 };

@@ -4124,6 +4124,11 @@ const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
  */
 export type SessionChatDelivery = 'steered' | 'queued' | 'dispatched';
 
+const withDelivery = <T extends object>(
+  result: T,
+  delivery: SessionChatDelivery | undefined
+): T & { delivery?: SessionChatDelivery } => (delivery ? { ...result, delivery } : result);
+
 /** Maps a steer verdict to a receipt; rejected steers become ordinary input. */
 export const deliveryFromSteerResponse = (
   response: Pick<SessionSteerResponse, 'applied' | 'disposition'>
@@ -4375,8 +4380,7 @@ export async function sendSessionChatResult(
         return { ...result, delivery: 'steered' };
       }
       if (response?.recoveryOwned) {
-        const delivery = deliveryFromSteerResponse(response);
-        return delivery ? { ...result, delivery } : result;
+        return withDelivery(result, deliveryFromSteerResponse(response));
       }
     } catch {
       // Setup, transport and response failures never fail the accepted chat.
@@ -4417,8 +4421,7 @@ export async function sendSessionChatResult(
       timestamp: userTurn.timestamp,
       inputConfig: userTurn.inputConfig,
     });
-    const delivery = deliveryFromSteerResponse(response);
-    return delivery ? { ...result, delivery } : result;
+    return withDelivery(result, deliveryFromSteerResponse(response));
   }
   // A busy target without an applied steer (including an unconfirmed remote one)
   // runs this input after the current turn. Retries keep their earlier outcome.
