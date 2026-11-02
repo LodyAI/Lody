@@ -1959,7 +1959,8 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
     const matches: Array<{
       session: SessionMeta;
       live: SessionLiveWorking;
-      execution: SessionExecutionSnapshot;
+      /** Undefined when the doc could not be read; the summary uses `live`. */
+      execution: SessionExecutionSnapshot | undefined;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
     for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
@@ -1978,18 +1979,22 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
           nowMs,
           rpc: liveStatuses.get(session.id),
         });
+        // One unreadable Session doc must not fail the whole page. Its summary
+        // falls back to the live presence/RPC signal, as without a doc read.
         const execution = await readSessionExecutionSnapshot(
           manager,
           session,
           live,
           auth.machineId
-        );
+        ).catch(() => undefined);
         return { session, live, execution };
       });
       matches.push(
         ...entries.filter(
           (entry) =>
-            !input.executionState || entry.execution.executionState === input.executionState
+            !input.executionState ||
+            (entry.execution?.executionState ?? (entry.live.working ? 'busy' : 'idle')) ===
+              input.executionState
         )
       );
     }
@@ -2000,7 +2005,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
         sessionSummaryForMcp(session, {
           currentUserId: auth.userId,
           live,
-          executionState: execution.executionState,
+          ...(execution ? { executionState: execution.executionState } : {}),
         })
       ),
       ...(matches.length > page.length && last
@@ -2073,12 +2078,19 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           nowMs,
           rpc: live,
         });
-        const execution = await readSessionExecutionSnapshot(
-          manager,
-          session,
-          liveWorking,
-          auth.machineId
-        );
+        let execution: SessionExecutionSnapshot;
+        try {
+          execution = await readSessionExecutionSnapshot(
+            manager,
+            session,
+            liveWorking,
+            auth.machineId
+          );
+        } catch (error) {
+          // Items are independently fallible: report this one with its original
+          // classification instead of failing every sibling.
+          return { sessionId, ok: false as const, error: normalizeMcpError(error) };
+        }
         return {
           sessionId,
           ok: true as const,

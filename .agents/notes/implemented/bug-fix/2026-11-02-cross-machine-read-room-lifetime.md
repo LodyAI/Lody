@@ -67,7 +67,9 @@ protection, so it does not explain the plaintext reports.
    manager cleanup cancel it. A failed wrapper cleanup is logged and never
    replaces the completed read. The doc stays loaded while a local renderer room
    or a retained room still uses it. This Machine's own Sessions keep the cached
-   execution doc.
+   execution doc. A Session whose doc cannot be read degrades only its own item:
+   list falls back to the live presence/RPC state, and status reports that item's
+   original error. Neither fails its siblings or caches the failure.
 
 ## Alternatives
 
@@ -115,8 +117,9 @@ protection, so it does not explain the plaintext reports.
 - `apps/cli/src/mcp/daemon-session-tools.test.ts` covers another Machine's Session:
   status keeps the room until its first sync and then releases it; history
   answers from the replica when the first sync stalls, does not wait again while
-  that room is retained, and releases it at the bound; a later read joins again; a failed wrapper cleanup keeps the
-  completed read.
+  that room is retained, and releases it at the bound; a later read joins again;
+  a failed wrapper cleanup keeps the completed read; adopting the doc releases a
+  retained room; one unreadable Session leaves list and status siblings intact
+  and recovers on the next call.
 - Not verified against live Streams with a stalled room. The renderer-protection
-  and cancellation branches of the retained room are covered by review, not by a
-  test.
+  branch of the retained room is covered by review, not by a test.

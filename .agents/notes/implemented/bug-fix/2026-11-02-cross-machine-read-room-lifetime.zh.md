@@ -52,7 +52,8 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
    保留的 room 与 renderer bridge 共用登记表，因此正式的 `getOrCreateSessionDoc`、renderer 离开以及
    manager 清理都会取消它。临时 wrapper 清理失败只记录日志，绝不替换已完成的读取结果。
    本地 renderer room 或保留中的 room 仍在使用该 doc 时，不会卸载它。当前 Machine 自己的会话继续使用
-   缓存中的执行 doc。
+   缓存中的执行 doc。某个会话的 doc 读不出来时，只降级它自己那一项：list 退回到实时
+   presence/RPC 状态，status 在该项上报告原始错误；不影响同批其他会话，也不缓存这次失败。
 
 ## 备选方案
 
@@ -85,6 +86,7 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 - `apps/cli/src/lib/loro/workspace-catalog-sync.test.ts` 覆盖其他 Machine 的 catalog 始终不同步
   的情况：闲置窗口后释放，读取会延长租约，没有读取时不重新 join，之后可以再次 join。
 - `apps/cli/src/mcp/daemon-session-tools.test.ts` 覆盖其他 Machine 的会话：status 会保留 room
-  直到首次同步后释放；首次同步卡住时 history 用本地副本作答，该 room 保留期间不再重复等待，并在上限时释放；之后的读取会重新
-  join；临时 wrapper 清理失败时保留已完成的读取结果。
-- 未在真实 Streams 和卡住的 room 上验证。保留 room 时保护 renderer 和取消的分支只经过代码审查，没有测试覆盖。
+  直到首次同步后释放；首次同步卡住时 history 用本地副本作答，该 room 保留期间不再重复等待，并在上限时
+  释放；之后的读取会重新 join；临时 wrapper 清理失败时保留已完成的读取结果；当前 Machine 正式接管该 doc
+  时会释放保留的 room；单个会话读不出来时，list 和 status 的其他条目不受影响，下一次调用即可恢复。
+- 未在真实 Streams 和卡住的 room 上验证。保留 room 时保护 renderer 的分支只经过代码审查，没有测试覆盖。

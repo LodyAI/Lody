@@ -904,6 +904,60 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect((await again).isError).not.toBe(true);
   });
 
+  it('isolates one unreadable Session from list and status siblings', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const original = new Error('Synthetic Session doc read failure');
+    const readTransiently = manager.readSessionDocTransiently.bind(manager);
+    let failing = true;
+    vi.spyOn(manager, 'readSessionDocTransiently').mockImplementation(async (id, read, options) => {
+      if (failing && id === remoteSessionId) throw original;
+      return await readTransiently(id, read, options);
+    });
+
+    const listed = await callTool('lody_session_list', {});
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: sessionId }),
+        expect.objectContaining({ id: remoteSessionId, executionState: 'idle' }),
+      ]),
+    });
+    const status = await callTool('lody_session_status_many', {
+      sessionIds: [sessionId, remoteSessionId],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        { sessionId, ok: true },
+        {
+          sessionId: remoteSessionId,
+          ok: false,
+          error: { code: 'INTERNAL_ERROR', message: expect.stringContaining(original.message) },
+        },
+      ],
+    });
+
+    // The failure is not cached once the doc is readable again.
+    failing = false;
+    const recovered = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+  });
+
+  it('releases a retained remote room when this Machine adopts the Session doc', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+
+    // A live owner takes the doc over; the transient room must not linger.
+    await manager.getOrCreateSessionDoc(remoteSessionId);
+    expect(rooms[0]!.released).toBe(true);
+  });
+
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
     await seedRoles();
     vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));

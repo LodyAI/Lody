@@ -114,7 +114,7 @@ Parent instructions apply. Background: [README.md](README.md).
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
   Machine RPC snapshot. Another Machine's Session is read through
   `readSessionDocTransiently`: only history waits (8 s) for the room, which is kept
-  until its first sync or a bound ([rationale](../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
+  until its first sync or a bound. An unreadable Session degrades only its own item ([rationale](../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
   Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
