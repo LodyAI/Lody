@@ -27,9 +27,12 @@ import {
   requireLedgerContinuation,
   decodeRecord,
   prepareLedgerCommand,
+  signLedgerRecord,
+  signLedgerSnapshot,
   type LedgerCommand,
   Bytes,
 } from '@lody/e2ee-core/protocol';
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
 import {
   makeStreamsUpdateBinding,
   makeRealtimeContentBinding,
@@ -68,7 +71,8 @@ import {
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
 import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
-import { toHex } from './bytes';
+import { fromHex, toHex } from './bytes';
+import { encodePersonalInvitation } from './pairing';
 
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
@@ -506,8 +510,125 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           })),
         };
       });
+    /** The admitted personal device a record from this signer admits, if the current
+     * verified ledger already contains it. Signing keys are never admitted twice. */
+    const ownAdmission = (record: Uint8Array) =>
+      Effect.gen(function* () {
+        const signed = yield* Effect.fromResult(decodeRecord(new Uint8Array(record)));
+        if (
+          signed.body.type !== 'ordinary' ||
+          signed.body.operation.type !== 'admitDevice' ||
+          signed.body.operation.kind !== 'personal' ||
+          !signed.body.signer.equals(device.publicKey)
+        )
+          return yield* fail('invalid-input');
+        const view = yield* admitted();
+        const admittedDevice = view
+          .inspectState()
+          .devices.get(toHex(signed.body.operation.signingPublicKey.toBytes()));
+        return { view, signed: signed.body, admittedDevice };
+      });
+    // Account pairing, approver side. The shared workflow journals each original and
+    // never asks for a second signature over one request.
+    const accountApproval = {
+      /** Signs one personal `AdmitDevice` against the current verified ledger. No network. */
+      sign: (row: {
+        signingPublicKey: Uint8Array;
+        encryptionPublicKey: Uint8Array;
+        possessionProof: Uint8Array;
+      }) =>
+        run(
+          serial.withPermit(
+            Effect.gen(function* () {
+              const view = yield* admitted();
+              const proposal = yield* Effect.fromResult(
+                prepareLedgerCommand(view, device.publicKey, {
+                  _tag: 'AdmitDevice',
+                  kind: 'personal',
+                  signingPublicKey: yield* Effect.fromResult(
+                    Bytes.signingPublicKey(row.signingPublicKey)
+                  ),
+                  encryptionPublicKey: yield* Effect.fromResult(
+                    Bytes.encryptionPublicKey(row.encryptionPublicKey)
+                  ),
+                  possessionSignature: yield* Effect.fromResult(
+                    Bytes.signature(row.possessionProof)
+                  ),
+                })
+              );
+              return {
+                requestId: `account-device-${globalThis.crypto.randomUUID()}`,
+                record: yield* signLedgerRecord(proposal, device),
+              };
+            })
+          )
+        ),
+      /** Where a signed original stands after a refresh: in the verified ledger,
+       * displaced (its parent is no longer the head and its device is absent), or
+       * not yet decided. */
+      settle: (record: Uint8Array) =>
+        run(
+          serial.withPermit(
+            Effect.gen(function* () {
+              yield* control.refresh();
+              const { view, signed, admittedDevice } = yield* ownAdmission(record);
+              if (admittedDevice) return 'committed' as const;
+              return signed.previousHash.equals(view.head)
+                ? ('unknown' as const)
+                : ('lost' as const);
+            })
+          )
+        ),
+      /** A signed snapshot invitation for an admission this device signed, once the
+       * verified ledger contains it; `null` for a Member, which cannot endorse one. */
+      invitation: (record: Uint8Array) =>
+        run(
+          Effect.gen(function* () {
+            const { view, admittedDevice } = yield* ownAdmission(record);
+            if (!admittedDevice) return yield* fail('conflict');
+            const state = view.inspectState(),
+              own = state.devices.get(toHex(device.publicKey.toBytes()));
+            const role = own && state.members.get(toHex(own.membershipId.toBytes()))?.role;
+            if (role !== 'owner' && role !== 'admin') return null;
+            // One feed position for both the snapshot and the offset it continues from.
+            const feed = yield* sync.current();
+            const snapshot = yield* signLedgerSnapshot({
+              signer: device,
+              ledger: () => Effect.succeed(feed.view),
+            });
+            const receipt = {
+              workspaceId: prepared.binding.workspaceId,
+              snapshot: snapshot.snapshot,
+              head: snapshot.head,
+              length: snapshot.length,
+              headSignature: snapshot.headSignature,
+              offset: feed.offset,
+            };
+            yield* Effect.fromResult(
+              verifyWorkspaceInvitationSnapshot(
+                {
+                  workspaceId: prepared.binding.workspaceId,
+                  genesis: prepared.binding.genesis,
+                  endorser: device.publicKey,
+                },
+                receipt
+              )
+            );
+            return fromHex(encodePersonalInvitation(receipt));
+          })
+        ),
+      /** Device access for the account pairing relay and its admission append. It
+       * stays inside the host's account-pairing composition. */
+      access: () =>
+        run(
+          admitted().pipe(
+            Effect.as({ workspaceId: prepared.binding.workspaceId, credential: toHex(credential) })
+          )
+        ),
+    };
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
+      accountApproval: Object.freeze(accountApproval),
       close: () => close,
       ledgerState: () =>
         run(

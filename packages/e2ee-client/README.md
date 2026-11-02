@@ -174,6 +174,7 @@ successful sibling when another phase failed. There is no plaintext fallback.
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
 It owns the tag and expiry checks, the single-signature admission journal and local
 terminal states. Hosts supply four things:
+
 - an `AccountPairingStore` for durable state, which holds no secret and no private key;
 - the relay;
 - the per-workspace ports;
@@ -184,6 +185,7 @@ separate work. Identity protection is a per-workspace port decision, never this
 workflow's.
 
 `@lody/e2ee-client/account-pairing/browser` adds the browser pieces:
+
 - `makeIndexedDbAccountPairingStore` keeps one account database. Each mutation resolves
   only after its transaction completes, and an abort or quota error advances nothing.
 - `makeAccountPairingTabOwnership` with `withAccountPairingTabOwnership` lets only one
@@ -192,6 +194,7 @@ workflow's.
   lock.
 
 `@lody/e2ee-client/account-requester` is the portable new-device side:
+
 - **`AccountPairingIdentityHost`** is the per-workspace host port. It prepares or reuses
   this workspace's identity for a verified genesis record and membership, reports an
   unfinished per-workspace join, installs a snapshot invitation for a given endorser,
@@ -203,6 +206,14 @@ workflow's.
     ledger hash the approval tag authenticated.
   - It reports an unrelated pending join as `pairing-journal-busy`, which the workflow
     shows as `blocked`.
+- **`makePortableAccountPairingApprover`** is the approver side. A device with an
+  open, admitted session in a workspace (`session.accountApproval`) can approve there:
+  - it signs the personal `AdmitDevice` locally, with no network;
+  - it appends the journaled original with the new device's credential hash through
+    the injected account-authenticated `appendRecord`, then settles the outcome from
+    the verified ledger (committed, lost, or not yet decided);
+  - it delivers a signed snapshot invitation as Owner or Admin, and `null` as Member;
+  - its device access for the relay stays inside this composition.
 - **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
   per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
   accurate.

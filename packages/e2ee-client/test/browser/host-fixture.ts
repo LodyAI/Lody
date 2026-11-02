@@ -14,6 +14,9 @@ import {
   Duration,
 } from 'effect';
 import { importBrowserDevice, type BrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
+import { makePortableAccountPairingApprover } from '../../src/account-requester';
+import { decodePersonalInvitation } from '../../src/pairing';
 import {
   browserClientCustody,
   browserClientWriter,
@@ -772,6 +775,65 @@ export async function invoke(action: string) {
               })
             );
             return true;
+          // This admitted device approves another new device of the same account.
+          case 'accountApproveNewDevice': {
+            const fresh = yield* importBrowserDevice({
+              signingPrivate: new Uint8Array(32).fill(14),
+              encryptionPrivate: new Uint8Array(32).fill(15),
+            }).pipe(Scope.provide(scope));
+            const proof = yield* prepareDeviceAdmission({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+              encryptionPublicKey: fresh.enc,
+              kind: 'personal',
+              signer: fresh,
+            });
+            const approver = makePortableAccountPairingApprover({
+              workspaces: () => [
+                { workspaceId: offer.workspaceId, name: 'Alpha', genesisHash: offer.genesisHash },
+              ],
+              session: () => Effect.succeed(session!),
+              // The service appends the original under the account's authentication.
+              appendRecord: (request) =>
+                Effect.sync(() => {
+                  records.push(fromHex(request.recordHex));
+                  retain();
+                }),
+            });
+            const [workspace] = yield* approver();
+            const signed = yield* workspace!.sign({
+              genesis: fromHex(offer.genesisHash),
+              signingPublicKey: fresh.publicKey.toBytes(),
+              encryptionPublicKey: fresh.enc.toBytes(),
+              possessionProof: proof.possessionSignature.toBytes(),
+              credentialHash: new Uint8Array(32).fill(0x66),
+            });
+            const before = yield* session!.accountApproval.settle(signed.record);
+            yield* workspace!.append(
+              signed.requestId,
+              signed.record,
+              new Uint8Array(32).fill(0x66)
+            );
+            const invitation = yield* workspace!.invitation(signed.record);
+            // The new device's own check: the snapshot verifies for this approver.
+            yield* Effect.fromResult(
+              verifyWorkspaceInvitationSnapshot(
+                {
+                  workspaceId: offer.workspaceId,
+                  genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+                  endorser: session!.binding.device,
+                },
+                decodePersonalInvitation(toHex(invitation!))
+              )
+            );
+            const access = yield* workspace!.access();
+            return {
+              before,
+              length: records.length,
+              invitation: invitation !== null,
+              access: access.workspaceId === offer.workspaceId && access.credential.length === 64,
+            };
+          }
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);
