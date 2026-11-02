@@ -27,6 +27,15 @@ lives in its `README.md`.
 5. **Before send.** One hook rewrites the ranges that need rewriting, and the
    resulting spans are frozen into the message.
 
+## Scheduled task prompts
+
+`ScheduleMentionForm` connects the shared mention input to `ScheduleForm`'s prompt
+slot. Its sources follow the task's project (or destination chat's project) and
+selected Agent. Saving runs `useMentionPromptExpansion` before handing the prompt
+to the schedule repository, so the stored string contains durable Session links,
+Role instructions and Skill paths instead of display tokens. Reopening shows that
+stored text; schedule documents do not persist composer ranges or transcript spans.
+
 ## Menu placement
 
 The main desktop chat composer follows the textarea's laid-out caret and

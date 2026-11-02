@@ -7,9 +7,43 @@ import { initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
 import { ScheduledMessageTimeFields } from '../src/components/schedules/scheduled-message-time';
 import { ScheduleForm } from '../src/components/schedules/schedule-view';
+import { ScheduleMentionForm } from '../src/components/schedules/schedule-mention-form';
 import { evaluateSchedule, ScheduleDefinitionSchema, ScheduleAgentSchema } from '@lody/shared';
 
 import { ScheduleAgentControls } from '../src/components/schedules/schedule-agent-controls';
+
+vi.mock('../src/components/mentions/mention-project-file-source', async (original) => ({
+  ...(await original<object>()),
+  useMentionProjectFiles: () => ({
+    fileData: { entry: null, status: 'ready' },
+    initializeLazyDirectory: async () => undefined,
+    getKnownFileTokens: () => new Set<string>(),
+  }),
+}));
+vi.mock('../src/components/mentions/mention-skill-source', async (original) => ({
+  ...(await original<object>()),
+  useMentionProjectSkills: () => ({
+    skillState: { status: 'ready' },
+    skillItems: [],
+    knownSkillTokens: new Set<string>(),
+  }),
+}));
+vi.mock('../src/components/mentions/mention-session-source', async (original) => ({
+  ...(await original<object>()),
+  useSessionMentionItems: () => [
+    {
+      sessionId: 'sess_review',
+      title: 'Review changes',
+      slug: 'review-changes',
+      projectKey: 'chat',
+      activityAt: 1,
+    },
+  ],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (original) => ({
+  ...(await original<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
 
 // Exercise the schedule adapter with the composer's typed change contract.
 vi.mock('../src/components/sessions/desktop-run-config-menu', () => ({
@@ -94,6 +128,47 @@ describe('Schedule editor', () => {
       setter.call(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
     });
+
+  it('selects a session from the mention menu without submitting and saves its identity', async () => {
+    props.initial = { ...props.initial, prompt: '' };
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    const input = field(en['schedules.prompt']) as HTMLTextAreaElement;
+    await act(async () => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        input,
+        '@session:review'
+      );
+      input.setSelectionRange(15, 15);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain('Review changes');
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(input.value).toBe('@review-changes ');
+    expect(props.onSave).not.toHaveBeenCalled();
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].prompt).toBe(
+      '[@Review changes](lody://session/sess_review) '
+    );
+  });
+
+  it('expands a selected session mention when saving and preserves it when reopened', async () => {
+    props.initial = { ...props.initial, prompt: '@review-changes' };
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    submit();
+    const saved = vi.mocked(props.onSave).mock.calls[0]![0];
+    expect(saved.prompt).toBe('[@Review changes](lody://session/sess_review)');
+    act(() => root.unmount());
+    root = createRoot(container);
+    props.initial = saved;
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[1]![0].prompt).toBe(saved.prompt);
+  });
 
   it('selects five hours from now across midnight', async () => {
     let chosen = '';
