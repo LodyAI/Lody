@@ -530,6 +530,12 @@ const styles = stylex.create({
       '@media (min-width: 640px)': 'calc(var(--spacing) * 3)',
     },
   },
+  continuationNotesColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
   pageOutlineOverlay: {
     position: 'absolute',
     inset: 0,
@@ -7453,26 +7459,37 @@ export const SessionChatInterface = memo(
                                   unsentFirstMessage ? undefined : (
                                     <>
                                       {pendingMessages.trailingContent}
-                                      {continuation.views.map((view) => (
-                                        <SessionContinuationNote
-                                          key={view.id}
-                                          view={
-                                            continuation.error
-                                              ? { ...view, block: 'unavailable' }
-                                              : view
-                                          }
-                                          now={continuationNow}
-                                          compact={isMobile}
-                                          onCancel={continuation.cancel}
-                                          onResume={() => {
-                                            void setTreeCollaborationStopped(session.id, false)
-                                              .then(continuation.refresh)
-                                              .catch(() =>
-                                                toast.error(t('sessions.relations.controlFailed'))
-                                              );
-                                          }}
-                                        />
-                                      ))}
+                                      {continuation.views.length > 0 ? (
+                                        // The stream's trailing row is full-bleed, so the
+                                        // note mounts its own conversation column like every
+                                        // other region; otherwise it paints the whole pane.
+                                        <ConversationColumn
+                                          {...stylex.props(styles.continuationNotesColumn)}
+                                        >
+                                          {continuation.views.map((view) => (
+                                            <SessionContinuationNote
+                                              key={view.id}
+                                              view={
+                                                continuation.error
+                                                  ? { ...view, block: 'unavailable' }
+                                                  : view
+                                              }
+                                              now={continuationNow}
+                                              compact={isMobile}
+                                              onCancel={continuation.cancel}
+                                              onResume={() => {
+                                                void setTreeCollaborationStopped(session.id, false)
+                                                  .then(continuation.refresh)
+                                                  .catch(() =>
+                                                    toast.error(
+                                                      t('sessions.relations.controlFailed')
+                                                    )
+                                                  );
+                                              }}
+                                            />
+                                          ))}
+                                        </ConversationColumn>
+                                      ) : null}
                                       {continuation.error && (
                                         <ConversationColumn>
                                           {t(
