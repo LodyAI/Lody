@@ -1119,7 +1119,7 @@ describe('LodyOperationCoordinator', () => {
   describe('steer handoff', () => {
     const steerHandoff = async (
       successor: { status: SessionHistoryInput['status']; cancellationReason?: 'user_stop' },
-      successorFinished: boolean,
+      successorFinished: boolean | 'absent',
       deadlineAt?: string
     ) => {
       const harness = await makeHarness(deadlineAt ? { deadlineAt } : undefined);
@@ -1143,15 +1143,19 @@ describe('LodyOperationCoordinator', () => {
           fileDiff: [],
           ...successor,
         },
-        {
-          id: 'assistant:turn-steer',
-          role: 'assistant',
-          userTurnId: 'turn-steer',
-          timestamp: '2026-07-20T00:00:00.700Z',
-          items: [{ type: 'text', text: 'final summary' }],
-          fileDiff: [],
-          finished: successorFinished,
-        }
+        ...(successorFinished === 'absent'
+          ? []
+          : [
+              {
+                id: 'assistant:turn-steer',
+                role: 'assistant' as const,
+                userTurnId: 'turn-steer',
+                timestamp: '2026-07-20T00:00:00.700Z',
+                items: [{ type: 'text' as const, text: 'final summary' }],
+                fileDiff: [],
+                finished: successorFinished,
+              },
+            ])
       );
       harness.metas.set(harness.targetSessionId, {
         ...harness.metas.get(harness.targetSessionId)!,
@@ -1208,6 +1212,29 @@ describe('LodyOperationCoordinator', () => {
         },
       });
     });
+
+    it.each(['handled', 'failed'] as const)(
+      'keeps the original result when an applied steer settles %s without a successor turn',
+      async (status) => {
+        // stale-turn after provider acceptance, or a failure before handoff:
+        // no successor turn exists, so the original turn's reply stands.
+        expect(await steerHandoff({ status }, 'absent')).toMatchObject({
+          state: 'finished',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  assistantTurnId: 'assistant:turn-1',
+                  output: { text: 'partial output' },
+                },
+              ],
+            },
+          },
+        });
+      }
+    );
 
     it('reports a user Stop of the successor as the delegated cancellation', async () => {
       expect(
