@@ -4114,6 +4114,9 @@ async function validateSessionChatTargetForRequester(args: {
   return session;
 }
 
+// Cold token/gateway lookup and subscription setup need more time than an offer.
+const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
+
 export async function sendSessionChatResult(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -4131,7 +4134,7 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-    /** Agent chat: steer a running turn on this daemon instead of queueing behind it. */
+    /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
   },
   delegatedRequester?: DelegatedSessionRequester,
@@ -4243,10 +4246,13 @@ export async function sendSessionChatResult(
     delegatedRequester,
     session.machineId
   );
+  const remoteMachine = session.machineId !== auth.machineId;
   // A shared member's derivation never steers another principal's running turn.
   const steerTurnId =
     orchestration?.steerActiveTurn && !derivedFrom
-      ? environment?.host.readActiveTurnId(sessionId)
+      ? remoteMachine
+        ? resolveActiveAssistantTurnId(historyForDefaults)
+        : environment?.host.readActiveTurnId(sessionId)
       : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
@@ -4283,13 +4289,93 @@ export async function sendSessionChatResult(
     workspaceId: workspace.id as WorkspaceId,
     userTurnId,
   };
-  // A steer is never activated here: the owning daemon applies it, requeues a
-  // proven refusal as a follow-up, or records `delivery_unknown`. An existing
-  // `pending_apply` turn is a steer already offered; activating it could run it twice.
-  if (userTurn.existingStatus === 'pending_apply') return result;
+  // Local steer recovery stays execution-owned. A remote replay may instead be
+  // an orphan left by a sender crash or failed fallback write; never offer it twice.
+  if (userTurn.existingStatus === 'pending_apply') {
+    if (!remoteMachine) return result;
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    if (!promoted.matched) return result;
+  }
+  if (
+    remoteMachine &&
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    // Bound setup separately: cold connections must not consume the offer's
+    // five-second response budget. Late setup must never send after fallback.
+    let accepting = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const inputConfig = userTurn.inputConfig;
+    const setupTimeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        accepting = false;
+        resolve(null);
+      }, REMOTE_STEER_CONNECT_TIMEOUT_MS);
+    });
+    const request = withMachineRpcClient(
+      { auth, workspaceId: workspace.id as WorkspaceId, machineId: session.machineId },
+      async (client) => {
+        if (!accepting) return null;
+        clearTimeout(timer);
+        timer = undefined;
+        return client.requestSessionSteer({
+          sessionId,
+          expectedTurnId: steerTurnId,
+          userTurnId,
+          userId: requesterUserId,
+          timestamp: userTurn.timestamp,
+          inputConfig,
+          timeoutMs: 5_000,
+        });
+      }
+    );
+    try {
+      const response = await Promise.race([request, setupTimeout]);
+      if (response?.applied) {
+        await backend.applyHistoryAction({
+          kind: 'user-status',
+          turnId: userTurnId,
+          status: 'processing',
+          deliveredSteer: true,
+          onlyPendingApply: true,
+        });
+        return result;
+      }
+      if (response?.recoveryOwned) return result;
+    } catch {
+      // Setup, transport and response failures never fail the accepted chat.
+    } finally {
+      accepting = false;
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    // An RPC lost before arrival has no execution-owned recovery. pending_apply
+    // is skipped forever by dispatch, so prefer a possible duplicate follow-up
+    // over an orphan. Never retry the steer; preserve any already-settled status.
+    getLogger('session').warn(
+      `Remote steer unconfirmed; queueing follow-up ${sessionId}/${userTurnId}`
+    );
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    const current = await readHistoryEntry(backend, userTurnId);
+    if (!promoted.matched && current?.status !== 'pending' && current?.status !== 'seen')
+      return result;
+  }
   if (
     steerTurnId !== undefined &&
     userTurn.existingStatus === undefined &&
+    !remoteMachine &&
     environment &&
     userTurn.inputConfig
   ) {
