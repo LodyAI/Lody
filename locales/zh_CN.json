@@ -228,6 +228,7 @@
   "e2ee.accountPair.error.pairing-tampered": "这个请求在另一台设备创建后被改动过，已被拒绝；请不要批准。",
   "e2ee.accountPair.error.pairing-expired": "这个配对请求已结束或过期。请在新设备上重新发起。",
   "e2ee.accountPair.error.pairing-used": "这个配对码已经用过。请在新设备上重新发起。",
+  "e2ee.accountPair.error.pairing-elsewhere": "配对已在这个浏览器的另一个标签页中进行。请在那里继续，或先关闭那个标签页。",
   "e2ee.accountPair.error.failed": "配对失败，请重试。",
   "e2ee.accountPair.request.title": "把这台设备加入你的加密工作区",
   "e2ee.accountPair.request.web": "只在你信任的浏览器上请求访问。由你另一台已有访问权的设备批准。",

@@ -183,6 +183,14 @@ The pairing secret stays in memory. The desktop uses a SQLite store; a browser s
 separate work. Identity protection is a per-workspace port decision, never this
 workflow's.
 
+`@lody/e2ee-client/account-pairing/browser` adds the browser pieces:
+- `makeIndexedDbAccountPairingStore` keeps one account database. Each mutation resolves
+  only after its transaction completes, and an abort or quota error advances nothing.
+- `makeAccountPairingTabOwnership` with `withAccountPairingTabOwnership` lets only one
+  tab own the account's pairing, through Web Locks, because the secret lives only in
+  that tab's memory. Other tabs get `pairing-elsewhere`, and a closed tab releases the
+  lock.
+
 ## Verification and limits
 
 `pnpm --filter @lody/e2ee-client test` runs fixed proof/credential-boundary tests.

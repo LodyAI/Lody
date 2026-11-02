@@ -130,6 +130,10 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 
 配对密钥只保存在内存里。桌面端使用 SQLite 存储，浏览器端的存储另行实现。身份保护方式由按工作区的端口决定，不在这个流程里决定。
 
+`@lody/e2ee-client/account-pairing/browser` 提供浏览器端的组件：
+- `makeIndexedDbAccountPairingStore` 为每个账号维护一个数据库。每次修改都要等事务完成后才返回；事务中止或超出存储配额时，状态不会前进。
+- `makeAccountPairingTabOwnership` 与 `withAccountPairingTabOwnership` 通过 Web Locks 保证同一时间只有一个标签页负责该账号的配对，因为配对密钥只保存在那个标签页的内存里。其他标签页会收到 `pairing-elsewhere`；标签页关闭后锁会自动释放。
+
 ## 验证与限制
 
 `pnpm --filter @lody/e2ee-client test` 检查固定证明和 credential 边界。
