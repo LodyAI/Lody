@@ -709,6 +709,11 @@ describe('SessionExecutionService', () => {
         sourceTurnId: 'user-1',
         requesterUserId: 'user-1',
         inputConfig: { prompt: 'initial prompt' },
+        notificationAudience: {
+          kind: 'agent' as const,
+          sessionId: 'original-sender' as SessionId,
+          turnId: 'original-turn',
+        },
       },
       activePromptRun: initialPromptRun,
       yieldedFinalization: Promise.resolve(),
@@ -718,6 +723,11 @@ describe('SessionExecutionService', () => {
         turnRuntimeBySession: Map<SessionId, typeof runtime>;
       }
     ).turnRuntimeBySession.set(sessionId, runtime);
+
+    expect(service.getActiveInvocationContext(sessionId)?.sender).toEqual({
+      kind: 'agent',
+      sessionId: 'original-sender',
+    });
 
     await expect(
       service.steerSession({
@@ -11757,6 +11767,9 @@ describe('SessionExecutionService goal control', () => {
     expect(delivered).toEqual([expect.objectContaining({ goalControl: { action: 'resume' } })]);
     expect(failures).toEqual([]);
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(true);
+    expect(service.getActiveInvocationContext(goalSessionId)).toMatchObject({
+      sender: { kind: 'user' },
+    });
     const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
     expect(service.getActiveInvocationContext(goalSessionId)?.notificationOriginTurnIds).toEqual([
       expect.stringMatching(/^goal:resume:/),
@@ -14699,6 +14712,13 @@ describe('Operation Inbox execution boundary', () => {
   ])('preserves the $kind audience when an input carries eight Inbox results', async (audience) => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
+      expect(f.service.getActiveInvocationContext(f.message.sessionId)?.sender).toEqual(
+        audience.kind === 'unknown'
+          ? undefined
+          : audience.kind === 'user'
+            ? { kind: 'user' }
+            : { kind: 'agent', sessionId: audience.sessionId }
+      );
       received.push(structuredClone(blocks));
       return { stopReason: 'end_turn' };
     });

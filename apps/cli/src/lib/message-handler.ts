@@ -7201,18 +7201,22 @@ export class MessageHandler {
       case 'session/get-active-invocation-context': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        return invocation
-          ? {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: true as const,
-              ...invocation,
-            }
-          : {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: false as const,
-            };
+        if (!invocation) {
+          return {
+            type: 'session/active-invocation-context' as const,
+            sessionId,
+            active: false as const,
+          };
+        }
+        // Session tools consume sender in-process. Keep the legacy socket shape
+        // unchanged: older MCP processes parse this response with a strict schema.
+        const { sender: _sender, ...legacyInvocation } = invocation;
+        return {
+          type: 'session/active-invocation-context' as const,
+          sessionId,
+          active: true as const,
+          ...legacyInvocation,
+        };
       }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession(
