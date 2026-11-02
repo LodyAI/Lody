@@ -181,6 +181,17 @@ export interface ReviewRendererProps {
   readonly onDiffStyleChange?: (diffStyle: ReviewDiffStyle) => void;
 }
 
+const explicitGlyphStyles = stylex.create({
+  standard: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  small: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
 const privateButtonStyles = stylex.create({
   mutedInk: {
     '--crh-muted-button-label': {
@@ -1518,7 +1529,12 @@ export function ReviewRenderer({
               aria-pressed={sidebarVisible}
               title={sidebarVisible ? 'Hide review map' : 'Show review map'}
             >
-              <PanelLeft className="size-4" />
+              <PanelLeft
+                className={cn(
+                  'crh-size-explicit',
+                  stylex.props(explicitGlyphStyles.standard).className
+                )}
+              />
             </Button>
             <div {...stylex.props(rootLayoutStyles.totalStats)}>
               <span {...stylex.props(rootLayoutStyles.mono)} title="Total added / removed lines">
@@ -1536,7 +1552,21 @@ export function ReviewRenderer({
               onClick={() => void copyComments()}
               aria-label={`Copy ${comments.length} comments as markdown`}
             >
-              {copyState === 'copied' ? <Check className="size-4" /> : <Copy className="size-4" />}
+              {copyState === 'copied' ? (
+                <Check
+                  className={cn(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
+              ) : (
+                <Copy
+                  className={cn(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
+              )}
               {copyState === 'copied'
                 ? 'Copied'
                 : copyState === 'failed'
@@ -1555,7 +1585,12 @@ export function ReviewRenderer({
                 aria-pressed={panelVisible}
                 title={panelVisible ? 'Hide review thread' : 'Show review thread'}
               >
-                <PanelRight className="size-4" />
+                <PanelRight
+                  className={cn(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
               </Button>
             )}
           </div>
@@ -1720,7 +1755,9 @@ function DiffStyleControl({
         size="sm"
         gap="calc(var(--spacing) * 1.5)"
       >
-        <Rows3 className="size-3.5" />
+        <Rows3
+          className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+        />
         Unified
       </ToggleGroupItem>
       <ToggleGroupItem
@@ -1729,7 +1766,9 @@ function DiffStyleControl({
         size="sm"
         gap="calc(var(--spacing) * 1.5)"
       >
-        <Columns2 className="size-3.5" />
+        <Columns2
+          className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+        />
         Split
       </ToggleGroupItem>
     </ToggleGroup>
@@ -2855,7 +2894,12 @@ function GroupMenu({
           className={stylex.props(privateButtonStyles.mutedInk).className}
           aria-label="Group actions"
         >
-          <MoreHorizontal className="size-4" />
+          <MoreHorizontal
+            className={cn(
+              'crh-size-explicit',
+              stylex.props(explicitGlyphStyles.standard).className
+            )}
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -4269,7 +4313,12 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
               aria-label={`Add a review comment to ${block.path}`}
               title="Add a review comment"
             >
-              <MessageSquarePlus className="size-3.5" />
+              <MessageSquarePlus
+                className={cn(
+                  'crh-size-explicit',
+                  stylex.props(explicitGlyphStyles.small).className
+                )}
+              />
             </Button>
             <ReviewCheck
               state={reviewed ? 'checked' : 'unchecked'}
@@ -5237,7 +5286,9 @@ function ThreadCard({
             aria-label="Delete comment"
             title="Delete comment"
           >
-            <Trash2 className="size-3.5" />
+            <Trash2
+              className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+            />
           </Button>
         )}
       </header>

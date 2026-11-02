@@ -15,7 +15,7 @@ comparisons verify their computed behavior. The migration is incomplete.
 | [Visual harness](../../tests/visual/visual-regression.mjs) | Real screenshots, interaction states and self-contained HTML reports.                                                 |
 
 The legacy declaration bridge preserves original selector identity and rule
-position for two reviewed public owners. Its eight aliases still depend on
+position for three reviewed public owners. Its thirteen aliases still depend on
 Tailwind ordering; imported bindings are not net utility-removal credit. Keep
 ordinary component styling in normal StyleX blocks. The
 [bridge decision](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)

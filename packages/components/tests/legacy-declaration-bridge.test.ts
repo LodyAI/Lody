@@ -29,6 +29,12 @@ describe('closed legacy declaration bridge', () => {
     expect(cn(actualBindings.tabStripClass, '[width:0px]')).toBe(
       'flex w-full items-center [width:0px]'
     );
+    expect(cn(actualBindings.sidebarStackLayoutClass, 'gap-4 p-0')).toBe('flex flex-col gap-4 p-0');
+    // This cn-only input must not add a production CSS candidate through test scanning.
+    const minHeightCaller = `[${['min-height', '60px'].join(':')}]`;
+    expect(cn(actualBindings.sidebarContentLayoutClass, minHeightCaller)).toBe(
+      `flex min-h-0 flex-1 flex-col gap-2 ${minHeightCaller}`
+    );
   });
 
   it('replaces actual Tailwind declarations with actual metadata in the same slots', async () => {
@@ -39,7 +45,7 @@ describe('closed legacy declaration bridge', () => {
     result.root.walkDecls((d) => {
       if (d.source?.input.file === filename) owned++;
     });
-    expect(owned).toBe(8);
+    expect(owned).toBe(legacyDeclarations.length);
     const map = new TraceMap(result.map!.toJSON(), pathToFileURL(path.resolve('owned.css')).href);
     const generated = postcss.parse(result.css);
     for (const spec of legacyDeclarations) {
@@ -199,6 +205,14 @@ describe('closed legacy declaration bridge', () => {
       filename
     );
     expect(() => replaceLegacyDeclarations(css, 'owned.css', literalZero)).toThrow();
+    const literalHeightZero = compileLegacyDeclarations(
+      raw.replace(
+        "minimumHeight: { minHeight: 'calc(var(--spacing) * 0)' }",
+        'minimumHeight: { minHeight: 0 }'
+      ),
+      filename
+    );
+    expect(() => replaceLegacyDeclarations(css, 'owned.css', literalHeightZero)).toThrow();
     const recovered = replaceLegacyDeclarations(
       css,
       'owned.css',
@@ -208,7 +222,7 @@ describe('closed legacy declaration bridge', () => {
     recovered.root.walkDecls((d) => {
       if (d.source?.input.file === filename) owned++;
     });
-    expect(owned).toBe(8);
+    expect(owned).toBe(legacyDeclarations.length);
   });
 
   it('leaves unrelated rules, layers and declarations in their original order', async () => {

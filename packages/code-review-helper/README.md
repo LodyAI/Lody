@@ -16,6 +16,14 @@ private-writer and third-party compatibility. Keep the original dark theme,
 responsive layout and interactions; a styling change does not change reference
 navigation, diff readiness or comment ownership.
 
+Nine reviewed private renderer glyphs use local StyleX dimensions, reading
+`--spacing` at the glyph. Their `crh-size-explicit` marker preserves the existing
+Button/Toggle SVG-size opt-out selector without changing exported raw control
+classes or adding an API. Diagnostics remains owned by Alert, and the unmounted
+gutter glyph stays on its legacy path. Actual standalone/viewer hosts and the
+renderer props provide no arbitrary SVG-utility wrapper contract; the preserved
+DOM-only ancestor counterexample is not a promise of such compatibility.
+
 The local DropdownMenu, Tooltip, Button, ToggleGroup and Separator use StyleX on ordinary
 elements while preserving the original Tailwind cascade for legal Radix `asChild`
 children. Slot concatenates parent and

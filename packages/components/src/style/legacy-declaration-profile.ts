@@ -8,6 +8,11 @@ export const legacyDeclarations = [
   { key: 'minimum', alias: 'min-w-0', js: 'minWidth', css: 'min-width' },
   { key: 'remainder', alias: 'flex-1', js: 'flex', css: 'flex' },
   { key: 'clipped', alias: 'overflow-hidden', js: 'overflow', css: 'overflow' },
+  { key: 'positioned', alias: 'relative', js: 'position', css: 'position' },
+  { key: 'column', alias: 'flex-col', js: 'flexDirection', css: 'flex-direction' },
+  { key: 'gapTwo', alias: 'gap-2', js: 'gap', css: 'gap' },
+  { key: 'paddingTwo', alias: 'p-2', js: 'padding', css: 'padding' },
+  { key: 'minimumHeight', alias: 'min-h-0', js: 'minHeight', css: 'min-height' },
 ] as const;
 
 export const legacyBindings = {
@@ -16,4 +21,17 @@ export const legacyBindings = {
   tabContainerClass: ['container'],
   tabStripClass: ['row', 'fullWidth', 'centered'],
   tabItemClass: ['minimum', 'clipped'],
+  sidebarInsetLayoutClass: ['positioned', 'row', 'fullWidth', 'remainder', 'column'],
+  sidebarStackLayoutClass: ['row', 'column', 'gapTwo', 'paddingTwo'],
+  sidebarContentLayoutClass: ['row', 'minimumHeight', 'remainder', 'column', 'gapTwo'],
+  sidebarGroupLayoutClass: ['positioned', 'row', 'fullWidth', 'minimum', 'column', 'paddingTwo'],
+  sidebarMenuLayoutClass: ['row', 'fullWidth', 'minimum', 'column'],
+  sidebarFlexClass: ['row'],
+  sidebarWidthClass: ['fullWidth'],
+  sidebarItemsCenterClass: ['centered'],
+  sidebarRelativeClass: ['positioned'],
+  sidebarMinWidthClass: ['minimum'],
+  sidebarColumnClass: ['column'],
+  sidebarGapClass: ['gapTwo'],
+  sidebarOverflowClass: ['clipped'],
 } as const;

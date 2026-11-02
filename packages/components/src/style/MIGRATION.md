@@ -45,8 +45,8 @@ source-removal credit, and a counterexample withdraws the claimed mapping.
 
 The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
 keeps original selectors, class strings and rule positions while replacing each
-original declaration with actual StyleX metadata. It currently serves two fixed
-owners through eight flat declarations and five static bindings; ordinary StyleX
+original declaration with actual StyleX metadata. It currently serves three fixed
+owners through thirteen flat declarations and eighteen static bindings; ordinary StyleX
 uses its normal collector. A missing, unequal or unsupported slot rejects. The
 single profile retains the legacy aliases through the existing source scan, so
 Tailwind candidate ordering remains an explicit dependency. Moving a literal into

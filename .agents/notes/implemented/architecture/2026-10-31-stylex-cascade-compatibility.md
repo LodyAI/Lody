@@ -9,16 +9,16 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of eight flat declarations used at ten locations in MobileInlinePicker and AdaptiveTabStrip, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of thirteen flat declarations with eighteen bindings used at fifty-nine utility positions in MobileInlinePicker, AdaptiveTabStrip and the public legacy Sidebar, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
-| Owner                                                                                                          | Responsibility                                                                                                                         |
-| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Eight real StyleX declarations and five scalar/group class bindings.                                                                   |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its eight aliases. |
-| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                          |
-| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                      |
+| Owner                                                                                                          | Responsibility                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Thirteen real StyleX declarations and eighteen scalar/group class bindings.                                                               |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its thirteen aliases. |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                             |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                         |
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal flat declarations and the five approved `stylex.props`
+It accepts literal flat declarations and the eighteen approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -67,8 +67,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Ten consumer literals becoming imported bindings is not ten fewer remaining
-legacy utility occurrences. The eight aliases and ten compiled output occurrences
+Fifty-nine consumer utility positions becoming imported bindings are not fifty-nine fewer
+remaining legacy occurrences. The thirteen aliases and fifty-nine compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -119,6 +119,27 @@ only at those three equivalent returns. The original six-error lint result and
 both source versions remain. The6,218-test run belongs to its recorded earlier
 cut; cleanup does not claim a fresh full-suite run. Final real-build qualification
 also checks this adapter and the final source-scanned documentation together.
+
+The Sidebar extension preserves every original `cn` position, public/ancestor and
+Slot precedence. Scope217 adds five flat properties and28 utility positions;
+scope218 reuses the same thirteen properties at21 more positions, without changing
+the compiler algorithm. Their original21-pair matrices are19 and20 PNG/RGBA exact.
+Three mobile-layout frames remain OPEN:217 has32,090 raw pixels with maximum
+channel difference1;218 has21,320 with maximum3. All threshold12 counts are zero,
+but target ROIs contain differences, so they are not dismissed as background-only.
+The Chromium iPhone-UA/DPR3 runs exercise mobile layout with fine-pointer/hover
+behavior; they are not Safari, real-device or touch acceptance. Both106-resource
+CSS comparisons match and each frozen component cut passes620 files/6,218 tests.
+
+The218 registration-order rejection remains evidence for the closed grammar.
+Fourteen development CSS slots and eight scalar bindings have author mappings,
+but the newly bound GroupAction owner maps to null: that is a real debug mapping
+loss, not complete source-map equivalence. Original217 test-only arbitrary-height
+candidates and their builds remain frozen. The final Root `cn` test constructs
+its same60px input at runtime so implicit Tailwind scanning does not introduce a
+production rule absent from Root's original stories; final Root build qualification
+is separate from those original captures. Source and visual evidence are owned by
+`leaves217-delivery.json`, `leaves218-delivery.json` and their independent reviews.
 
 The original production Vite pipeline does not publish a usable CSS source map.
 JS and real development CSS author mappings are verified; complete production CSS

@@ -3,6 +3,21 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, VariantProps } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import {
+  sidebarFlexClass,
+  sidebarWidthClass,
+  sidebarItemsCenterClass,
+  sidebarRelativeClass,
+  sidebarMinWidthClass,
+  sidebarColumnClass,
+  sidebarGapClass,
+  sidebarOverflowClass,
+  sidebarInsetLayoutClass,
+  sidebarStackLayoutClass,
+  sidebarContentLayoutClass,
+  sidebarGroupLayoutClass,
+  sidebarMenuLayoutClass,
+} from '@/style/legacy-defaults.stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -154,7 +169,10 @@ function SidebarProvider({
             } as React.CSSProperties
           }
           className={cn(
-            'group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex min-h-svh w-full',
+            'group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar',
+            sidebarFlexClass,
+            'min-h-svh',
+            sidebarWidthClass,
             className
           )}
           {...props}
@@ -333,7 +351,8 @@ function SidebarInset({ className, ...props }: React.ComponentProps<'main'>) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        'bg-background relative flex w-full flex-1 flex-col',
+        'bg-background',
+        sidebarInsetLayoutClass,
         'md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-xs md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2',
         className
       )}
@@ -358,7 +377,7 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={cn('flex flex-col gap-2 p-2', className)}
+      className={cn(sidebarStackLayoutClass, className)}
       {...props}
     />
   );
@@ -369,7 +388,7 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn('flex flex-col gap-2 p-2', className)}
+      className={cn(sidebarStackLayoutClass, className)}
       {...props}
     />
   );
@@ -392,7 +411,8 @@ function SidebarContent({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        'flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden',
+        sidebarContentLayoutClass,
+        'overflow-auto group-data-[collapsible=icon]:overflow-hidden',
         className
       )}
       {...props}
@@ -405,7 +425,7 @@ function SidebarGroup({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn('relative flex w-full min-w-0 flex-col p-2', className)}
+      className={cn(sidebarGroupLayoutClass, className)}
       {...props}
     />
   );
@@ -423,7 +443,11 @@ function SidebarGroupLabel({
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
       className={cn(
-        "text-sidebar-foreground/70 ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        'text-sidebar-foreground/70 ring-sidebar-ring',
+        sidebarFlexClass,
+        'h-8 shrink-0',
+        sidebarItemsCenterClass,
+        "rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
         'group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0',
         className
       )}
@@ -444,7 +468,11 @@ function SidebarGroupAction({
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
       className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground absolute top-3.5 right-3',
+        sidebarFlexClass,
+        'aspect-square w-5',
+        sidebarItemsCenterClass,
+        "justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'group-data-[collapsible=icon]:hidden',
@@ -460,7 +488,7 @@ function SidebarGroupContent({ className, ...props }: React.ComponentProps<'div'
     <div
       data-slot="sidebar-group-content"
       data-sidebar="group-content"
-      className={cn('w-full text-sm', className)}
+      className={cn(sidebarWidthClass, 'text-sm', className)}
       {...props}
     />
   );
@@ -471,7 +499,7 @@ function SidebarMenu({ className, ...props }: React.ComponentProps<'ul'>) {
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn('flex w-full min-w-0 flex-col gap-1', className)}
+      className={cn(sidebarMenuLayoutClass, 'gap-1', className)}
       {...props}
     />
   );
@@ -482,7 +510,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<'li'>) {
     <li
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
-      className={cn('group/menu-item relative', className)}
+      className={cn('group/menu-item', sidebarRelativeClass, className)}
       {...props}
     />
   );
@@ -576,7 +604,11 @@ function SidebarMenuAction({
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
       className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground peer-hover/menu-button:text-sidebar-hover-foreground absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground peer-hover/menu-button:text-sidebar-hover-foreground absolute top-1.5 right-1',
+        sidebarFlexClass,
+        'aspect-square w-5',
+        sidebarItemsCenterClass,
+        "justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'peer-data-[size=sm]/menu-button:top-1',
@@ -598,7 +630,11 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) 
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
       className={cn(
-        'text-sidebar-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none',
+        'text-sidebar-foreground pointer-events-none absolute right-1',
+        sidebarFlexClass,
+        'h-5 min-w-5',
+        sidebarItemsCenterClass,
+        'justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none',
         'peer-hover/menu-button:text-sidebar-hover-foreground peer-data-[active=true]/menu-button:text-sidebar-selection-foreground',
         'peer-data-[size=sm]/menu-button:top-1',
         'peer-data-[size=default]/menu-button:top-1.5',
@@ -651,7 +687,12 @@ function SidebarMenuSub({ className, ...props }: React.ComponentProps<'ul'>) {
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
       className={cn(
-        'border-sidebar-border mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l px-2.5 py-0.5',
+        'border-sidebar-border mx-3.5',
+        sidebarFlexClass,
+        sidebarMinWidthClass,
+        'translate-x-px',
+        sidebarColumnClass,
+        'gap-1 border-l px-2.5 py-0.5',
         'group-data-[collapsible=icon]:hidden',
         className
       )}
@@ -665,7 +706,7 @@ function SidebarMenuSubItem({ className, ...props }: React.ComponentProps<'li'>)
     <li
       data-slot="sidebar-menu-sub-item"
       data-sidebar="menu-sub-item"
-      className={cn('group/menu-sub-item relative', className)}
+      className={cn('group/menu-sub-item', sidebarRelativeClass, className)}
       {...props}
     />
   );
@@ -691,7 +732,15 @@ function SidebarMenuSubButton({
       data-size={size}
       data-active={isActive}
       className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 outline-hidden focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
+        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground',
+        sidebarFlexClass,
+        'h-7',
+        sidebarMinWidthClass,
+        '-translate-x-px',
+        sidebarItemsCenterClass,
+        sidebarGapClass,
+        sidebarOverflowClass,
+        "rounded-md px-2 outline-hidden focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
         'data-[active=true]:bg-sidebar-selection data-[active=true]:text-sidebar-selection-foreground',
         size === 'sm' && 'text-xs',
         size === 'md' && 'text-sm',

@@ -37,7 +37,7 @@ const member = (node: Ast, object: string, property: string) =>
   node.object?.name === object &&
   node.property?.name === property;
 
-/** Compile only these eight flat declarations and five scalar/group bindings. */
+/** Compile only the fixed flat declarations and approved class bindings. */
 export function compileLegacyDeclarations(
   raw: string,
   filename: string
