@@ -19,6 +19,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSkeleton,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
@@ -37,6 +38,8 @@ const styles = stylex.create({
   opaqueFooter: { flexDirection: 'row', gap: 31, padding: 19 },
   opaqueButton: { width: 83, height: 43, padding: 17, borderRadius: 19 },
   slotChild: { width: 79, height: 41 },
+  opaqueControl: { width: 111, height: 47 },
+  opaqueSkeleton: { display: 'grid', height: 53, gap: 17, paddingInline: 19, borderRadius: 21 },
 });
 
 function Probe() {
@@ -231,3 +234,81 @@ export const ZeroSpecificityLabelHeight: Story = {
 };
 
 export const Palette: Story = { render: () => <Fixture palette /> };
+
+function InputSkeletonFixture() {
+  const [mounted, setMounted] = useState(false);
+  const [event, setEvent] = useState('Ready');
+  return (
+    <SidebarProvider
+      data-input-skeleton-fixture
+      style={{ '--sidebar-width': '20rem', '--sidebar-width-icon': '3rem' } as CSSProperties}
+    >
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <SidebarTrigger aria-label="Toggle input skeleton sidebar" />
+          <SidebarInput
+            aria-label="Plain synthetic input"
+            placeholder="Plain input"
+            onChange={(e) => setEvent('Input: ' + e.currentTarget.value)}
+          />
+          <SidebarInput
+            aria-label="Leading caller synthetic input"
+            placeholder="Leading input"
+            leading={<File />}
+            className="h-12 w-40"
+          />
+          <SidebarInput
+            aria-label="Disabled opaque synthetic input"
+            placeholder="Disabled input"
+            disabled
+            className={stylex.props(styles.opaqueControl).className}
+          />
+          <Button type="button" onClick={() => setMounted(true)} disabled={mounted}>
+            Mount synthetic skeletons
+          </Button>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Real Sidebar skeleton components</SidebarGroupLabel>
+            <SidebarMenu>
+              {mounted && (
+                <>
+                  <SidebarMenuItem>
+                    <SidebarMenuSkeleton data-input-skeleton="plain" showIcon />
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuSkeleton
+                      data-input-skeleton="utility"
+                      className="grid h-12 gap-4 rounded-none px-5"
+                    />
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuSkeleton
+                      data-input-skeleton="opaque"
+                      showIcon
+                      className={stylex.props(styles.opaqueSkeleton).className}
+                    />
+                  </SidebarMenuItem>
+                </>
+              )}
+            </SidebarMenu>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
+      <SidebarInset>
+        <div {...stylex.props(styles.main)}>
+          <SidebarTrigger aria-label="Open input skeleton sidebar" />
+          <Probe />
+          <output data-input-skeleton-event>{event}</output>
+          <p>
+            Skeleton widths use the component's real mount-time random input. The visual driver
+            records its explicit synthetic input and restores the original random function
+            immediately after mount.
+          </p>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+export const InputAndSkeleton: Story = { render: () => <InputSkeletonFixture /> };

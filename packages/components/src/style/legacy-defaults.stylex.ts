@@ -434,3 +434,17 @@ export const mentionRaisedCaretClass = legacyClass(
   stylex.props(styles.mentionCaretRaised).className
 );
 export const mentionRestCaretClass = legacyClass(stylex.props(styles.dragIndex).className);
+
+export const sidebarInputGeometryClass = legacyClass(
+  stylex.props(styles.sidebarHeightEight, styles.fullWidth).className
+);
+export const sidebarMenuSkeletonLayoutClass = legacyClass(
+  stylex.props(
+    styles.row,
+    styles.sidebarHeightEight,
+    styles.centered,
+    styles.gapTwo,
+    styles.sidebarCornerMedium,
+    styles.acpInlineTwo
+  ).className
+);

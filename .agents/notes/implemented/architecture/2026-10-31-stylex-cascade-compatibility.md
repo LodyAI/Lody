@@ -9,13 +9,13 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of ninety single-field keys and one closed font-weight pair with one hundred and eleven authored bindings used at two hundred and fifty-nine utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions, window-drag geometry, CommandDialog and the two Mention field owners, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of ninety single-field keys and one closed font-weight pair with one hundred and thirteen authored bindings used at two hundred and sixty-seven utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer, ContextSwitch, ContainerQueryProvider, SessionMonacoTextViewer, LocalTerminalPanel, AcpSessionSelect, UnifiedProjectSelector, ChatComposer, LoroSidebar, AttachmentAddMenu, message actions, window-drag geometry, CommandDialog and the two Mention field owners, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
 | Owner                                                                                                          | Responsibility                                                                                                                              |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Ninety-one StyleX keys, ninety-two physical declarations and one hundred and eleven authored scalar/group class bindings.                   |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Ninety-one StyleX keys, ninety-two physical declarations and one hundred and thirteen authored scalar/group class bindings.                 |
 | [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its ninety-one aliases. |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                               |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                           |
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal single-field declarations, the closed font-weight pair and the one hundred and eleven approved `stylex.props`
+It accepts literal single-field declarations, the closed font-weight pair and the one hundred and thirteen approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -98,8 +98,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Two hundred and fifty-nine consumer utility positions becoming imported bindings are not that many fewer
-remaining legacy occurrences. The ninety-one aliases and two hundred and fifty-nine compiled output occurrences
+Two hundred and sixty-seven consumer utility positions becoming imported bindings are not that many fewer
+remaining legacy occurrences. The ninety-one aliases and two hundred and sixty-seven compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -347,7 +347,7 @@ from these isolated reports. That frozen cut excludes243 and245.
 | Existing font pair242 | Four consumers reuse the existing pair at five positions;108 CSS pairs and complete compiled bank remain equal. Thirty of35 formal PNGs match.                                 | Five OPENs total216,383 raw/66,585 threshold pixels. One natural mobile Back endpoint has27 linked focus/highlight fields; its timing history was not captured. One separate Back→Home pair is exact and does not close that endpoint.                                                                                 |
 | Sidebar frame/Rail244 | Fifteen positions;28/30 PNGs exact,3,988 body/117 targets and107 CSS pairs match. Final unowned-format restoration has identical actual production JS and389 Oxide candidates. | Two UA Drawer OPENs total32,151 raw/zero threshold pixels, maximum channel delta1. Both viewport-height aliases retain their additional supports fallback. The rejected Provider-omission candidate and invalid first AST visitor remain evidence, not acceptance. Legacy Sidebar is absent from the actual App graph. |
 
-The integrated243/245 continuation transfers fourteen more positions through
+The qualified243/245 continuation transfers fourteen more positions through
 four new keys and seven bindings, producing91 keys/92 physical declarations/
 111 bindings and259 retained outputs across nineteen source owners. CommandDialog
 keeps the actual42rem maximum rather than substituting a container token; z-index
@@ -368,6 +368,17 @@ lowered whole ASTs match after precisely those two bound-identifier renames, and
 all244 Oxide candidates match; lowered JS bytes differ. This is qualified alpha
 equivalence, not a new final-source build or screenshot. Original errors and source
 versions remain in the evidence.
+
+Sidebar Input/Skeleton246 adds eight positions through two existing-field
+bindings, leaving91 keys/92 physical declarations unchanged and raising the current
+bank to113 bindings/267 retained outputs. Its isolated twelve pairs contain eight
+exact PNGs and four OPENs totaling56,902 raw/22 threshold pixels; all sampled fields
+match apart from24 qualified URLs. Current Root integration has a separate
+qualification. The fixture's explicit random input does not establish CSS-variable
+forwarding: the existing Skeleton primitive replaces the caller style with its
+own StyleX style. Responsive Drawer evidence uses an independent iPhone-UA Chrome
+session, not width alone, Safari or hardware touch. Original driver/port failures
+and the corrected namespace-export summary remain evidence.
 
 The full AST checker visits every child with a void callback and retains JSX text;
 a mutation in the second statement and the omitted Provider class both reject.

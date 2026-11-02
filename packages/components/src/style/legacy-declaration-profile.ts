@@ -253,4 +253,13 @@ export const legacyBindings = {
   mentionInputFlowClass: ['row', 'fullWidth'],
   mentionRaisedCaretClass: ['mentionCaretRaised'],
   mentionRestCaretClass: ['dragIndex'],
+  sidebarInputGeometryClass: ['sidebarHeightEight', 'fullWidth'],
+  sidebarMenuSkeletonLayoutClass: [
+    'row',
+    'sidebarHeightEight',
+    'centered',
+    'gapTwo',
+    'sidebarCornerMedium',
+    'acpInlineTwo',
+  ],
 } as const;

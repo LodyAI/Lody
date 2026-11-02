@@ -9,13 +9,13 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
-把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百一十一个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions、window-drag几何、CommandDialog及两个Mention field owner共二百五十九个utility位置使用的九十个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
+把公开Tailwind默认值移到其他层或更换class身份，会改变受支持调用方的优先级。有限构建adapter现通过一百一十三个源码绑定，让StyleX拥有MobileInlinePicker、AdaptiveTabStrip、公开旧Sidebar、WorkspaceCard、SessionMentionDropLayer、ContextSwitch、ContainerQueryProvider、SessionMonacoTextViewer、LocalTerminalPanel、AcpSessionSelect、UnifiedProjectSelector、ChatComposer、LoroSidebar、AttachmentAddMenu、message actions、window-drag几何、CommandDialog及两个Mention field owner共二百六十七个utility位置使用的九十个单字段key与一个封闭字重pair，同时保留原selector、class与规则位置。它先移除原声明，再插入真正StyleX compiler metadata，普通StyleX收集器保持独立。真实生产、开发及当前源码组合比较保持渲染与CSS，但过渡桥仍依赖Tailwind候选保留和排序。这是迁移边界，不代表移除Tailwind，也不是通用样式API。
 
 ## 归属与编译
 
 | Owner                                                                                                          | 职责                                                                            |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 九十一个StyleX key、九十二条物理声明及一百一十一个源码scalar／group class绑定。 |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | 九十一个StyleX key、九十二条物理声明及一百一十三个源码scalar／group class绑定。 |
 | [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | 唯一声明／属性／旧alias映射及有序绑定成员；现有源码扫描保留九十一alias。        |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | 闭合源码编译、声明等价门禁与原CSS槽位替换。                                     |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | 真实compiler、cn、source map、拒绝及恢复行为。                                  |
@@ -31,7 +31,7 @@ flowchart LR
   N[普通StyleX收集器] --> P[普通StyleX产物]
 ```
 
-pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及一百一十一个批准的
+pre-transform在React／docgen之前校验固定AST语法，只接受literal单字段声明、封闭字重pair及一百一十三个批准的
 stylex.props绑定，以锁定原生compiler折叠后输出原有顺序的旧class字符串。动态值、条件、
 namespace逃逸、混合class构造及不安全query loader均拒绝；缺少adapter时源码模块直接抛错。
 
@@ -74,7 +74,7 @@ Babel7.29.7、StyleX0.19.0、PostCSS8.5.6，trace-mapping0.3.31核map；版本�
 StyleX、祖先及真正Radix Slot的优先级。原366px container query及冻结transition utility沿用旧路径。
 DOM、ref、事件、disabled及响应式行为不迁入adapter。
 
-二百五十九个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。九十一alias及二百五十九个编译后输出出现次数
+二百六十七个consumer utility位置换成import绑定不等于剩余旧utility减少同样次数。九十一alias及二百六十七个编译后输出出现次数
 仍是明确兼容依赖。v2 scanner仍只报告它识别的AST次数；桥的已知输出另列，并加回保守剩余边界。
 精确源码切面及数字由[迁移Note](2026-10-22-tailwind-to-stylex-migration.zh.md#公开调用方与剩余层叠边界)负责。
 
@@ -239,7 +239,7 @@ leaves236至leaves240的delivery、HTML及独审保留实际输入、URL载体�
 | 既有字重pair242        | 四consumer五位置复用既有pair；108CSS及完整编译bank同，35正式对30PNG同。                                  | 五OPEN共216,383raw／66,585threshold，一个自然mobile Back端点有27个相连focus／高亮字段差，原时序未采；另一个Back→Home对同不关闭原端点。                                                  |
 | Sidebar frame／Rail244 | 十五位置，30对28PNG同，3,988body／117target与107CSS同；最终无关格式复原的实际prod JS及389个Oxide候选同。 | 两UA Drawer OPEN共32,151raw／零阈值，最大通道差1；两个viewport高度alias有额外supports回退，仍保TW。误删Provider候选和失效的首次AST visitor均保留，非验收。legacy Sidebar不在实际App图。 |
 
-已集成243／245再转移十四处归属，新增四key、七绑定；当前91key／92物理声明／111绑定，
+已验243／245再转移十四处归属，新增四key、七绑定；当前91key／92物理声明／111绑定，
 十九个源码owner共259个保留输出。CommandDialog保真实42rem最大宽，不换container token；
 z-index及radius读取本元素变量。Mention只改class绑定，caret／selection／range／mirror同步
 算法不变。compiler语法与净依赖移除范围均未扩展。
@@ -252,6 +252,13 @@ Root243／245组合验证单列，不把隔离成功当组合验收。
 共同Mention fixture真实有两个updater参数遮蔽的lint错误，采集后只改这两个局部绑定名及formatter空白。
 真实Oxc lowering的完整AST仅在精确还原两处bound identifier后相等，244个Oxide候选同，
 lowered JS字节不同。这是有界alpha等价资格，不是新final-source构建或截图；原错误与版本保留。
+
+Sidebar Input／Skeleton246复用既有字段，经两个绑定再转移八位置；91key／92物理声明不变，
+当前113绑定／267保留输出。隔离十二对八PNG同，四OPEN共56,902raw／22threshold，
+除24个已核URL外采样字段同；当前Root集成单独验收。fixture明确随机输入不证明CSS变量透传：
+原Skeleton primitive以自身StyleX style覆盖caller style。响应式Drawer采用独立iPhone-UA Chrome
+会话，不能仅凭宽度认定，也不是Safari或触控硬件。原driver／端口失败及namespace export摘要
+更正均保留。
 
 完整AST checker以void callback遍历每个child，保JSX text；第二statement变异与误删Provider均拒。
 整文件逆还原保护未拥有源码字节；后置纯格式资格不是新final-source build、截图或debug map字节同。

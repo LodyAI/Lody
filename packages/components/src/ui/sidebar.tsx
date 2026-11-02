@@ -1,5 +1,7 @@
 import {
   sidebarDockFrameClass,
+  sidebarInputGeometryClass,
+  sidebarMenuSkeletonLayoutClass,
   sidebarLeadingZeroClass,
   sidebarTrailingZeroClass,
   sidebarUncollapsedGeometryClass,
@@ -394,7 +396,7 @@ function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      className={cn(`h-8 w-full ${sidebarFieldFillClass} shadow-none`, className)}
+      className={cn(`${sidebarInputGeometryClass} ${sidebarFieldFillClass} shadow-none`, className)}
       {...props}
     />
   );
@@ -692,7 +694,7 @@ function SidebarMenuSkeleton({
     <div
       data-slot="sidebar-menu-skeleton"
       data-sidebar="menu-skeleton"
-      className={cn('flex h-8 items-center gap-2 rounded-md px-2', className)}
+      className={cn(sidebarMenuSkeletonLayoutClass, className)}
       {...props}
     >
       {showIcon && <Skeleton width={16} height={16} data-sidebar="menu-skeleton-icon" />}
