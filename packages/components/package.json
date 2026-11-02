@@ -203,11 +203,14 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@jridgewell/trace-mapping": "0.3.31",
     "@lody/configs": "workspace:*",
     "@playwright/test": "^1.58.2",
     "@radix-ui/react-avatar": "^1.1.10",
     "@storybook/react": "^10.6.2",
     "@storybook/react-vite": "^10.6.2",
+    "@stylexjs/babel-plugin": "0.19.0",
     "@stylexjs/unplugin": "0.19.0",
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/postcss": "^4.3.0",
@@ -228,7 +231,7 @@
     "fflate": "0.8.3",
     "jsdom": "^26.1.0",
     "oxfmt": "^0.65.0",
-    "postcss": "^8.5.4",
+    "postcss": "8.5.6",
     "react-router-dom": "^7.10.1",
     "storybook": "^10.6.2",
     "tailwindcss": "^4.3.0",

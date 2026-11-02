@@ -2612,19 +2612,25 @@ Accepted scoped migrations since147 remove200 source utilities, including the si
 private spacing consumers in189 and25 accepted declarations in211/212/214 and two description consumers in216.
 The two opacity candidates in192 remain Tailwind. Six redundant size/shrink
 occurrences remain separate cleanup; the nine restored native compiler-trial
-defaults receive zero credit. The215 build adapter remains isolated and receives no accepted migration credit.
+defaults receive zero credit. The215 adapter separately transfers declaration ownership while retaining its legacy outputs.
 
-The accepted216 full non-story components cut contains1,325 occurrences in145
-files and720 unresolved expressions across1,397 sources. The separately frozen
-helper214 cut contains203 occurrences in8 files and21 unresolved expressions
-across30 sources. Their combined static lower bound is **1,528 occurrences in153
-files with741 unresolved expressions**, not an exact total, completion percentage
-or whole-branch visual approval. The scanner method is unchanged.
-`inventory-source-through216-accepted-proof.json` and
-`inventory-v2-through216-accepted-fullsrc.json` own the component inputs and scan;
+The accepted215 component cut contains1,315 recognized AST occurrences in144
+files and730 unresolved expressions across1,399 production sources. The separately
+frozen helper214 cut contains203 occurrences in8 files and21 unresolved expressions.
+Their scanner-v2 union is1,518 occurrences/152 files/751 unresolved expressions.
+The bridge still emits ten original utility occurrences in two consumers; one
+consumer is no longer in the recognized-AST file list. Adding these known outputs
+back gives a **conservative compatibility lower bound of1,528 occurrences in153
+files**. It earns ten declaration-ownership migrations, not ten net Tailwind removals.
+The eight aliases and Tailwind sorting dependency remain. Unresolved expressions
+are scanner limits, not751 confirmed Tailwind usages or a completion percentage.
+
+`inventory-source-through215-accepted-proof.json` and
+`inventory-v2-through215-accepted-fullsrc.json` own the component source cut;
 `inventory-helper-source-through214-proof.json` and
-`inventory-helper-v2-after214.json` own the helper cut. Both overlays verify their
-previous frozen inputs before applying only accepted owner files.
+`inventory-helper-v2-after214.json` own the helper cut. The215 component overlay
+starts from the exact accepted216 snapshot and changes only its four source owners.
+The earlier216 cut remains available as1,325/145/720 across1,397 sources.
 
 Earlier204 template-class removals changed unresolved counts without extra utility
 removal. Scope185 removes twenty manually audited literals but only seven were in
@@ -2695,6 +2701,7 @@ not a new whole-render or Electron capture, the later 161 source, or the isolate
 | Private Checkbox211 | Fifteen wrapper/material/transition utilities move to local StyleX; native input, refs, effects, events and glyphs remain unchanged. Fifteen formal pairs and one mixed-directory focus supplement are PNG/RGBA exact, with778 target,688 navigation and8,381 geometry records. | Only240 wrapper-class and four fixed CSS-URL carriers differ. All63 registrations and733 retained rules preserve order; whole at-rule185→183 differs. Original forceExpanded preparation drift remains; the final gate verifies actual collapse and reopening without injected state. |
 | Modal title weight212 | Dialog.Title and Drawer.Title accept optional physical fontWeight, preserving default600 and omitted style objects. Four consumer utilities cover five real title paths;54 formal PNG/RGBA pairs match,270 records/1,112 geometry differ only at88 exact class/inline carriers, and106 CSS files are byte-identical. | Sixteen Gallery views are After-only. Base UI render/hidden/ARIA contracts remain; no Title.asChild API is invented. Post-capture lint cleanup has separate final-bundle DOM qualification, not54 recaptured PNGs. Original caret mutation, Gallery transition/readiness failures and missing old terminal DOM evidence remain recorded. |
 | Native focus rings214 | Six ReviewCheck/Checkbox focus utilities move to native :has(:focus-visible), with no React focus state or marker. Eleven pairs retain519 targets,473 navigation and5,759 geometry records; nine PNG/RGBA pairs match and physical box-shadow is exactly equal. | Two original OPENs retain1,968 raw/1,632 threshold pixels in header corners and group-title text, with cause unknown. Thirty named ring color/shadow comma-space differences retain both raw values and have locked grammar/consumer verification; raw objects are not equal. All63 registrations and732 retained rules match, but whole at-rule183→181 differs. Earlier207/208 OPENs stay open. |
+| Selector-preserving declarations215 | StyleX owns eight flat declarations used ten times in MobileInlinePicker/AdaptiveTabStrip; five bindings preserve exact class strings and cn/Slot behavior. Original eight production/four DEV pairs match PNG/RGBA;106 CSS files and two official renderer-only CSS outputs match. Current215+216 integration adds eight exact pairs/456 nodes,106 exact CSS resources and a stable620-file/6,218-test component run. | Eight aliases/Tailwind retention and ordering remain; ten imported literals are not ten net removals. DEV40 exact source-line carriers and current14 verified CSS URLs are separate raw differences. HMR actual200→404→200 rejects0.6 with overlay while old UI stays0.7; no whole-page fail-closed claim. Production CSS map gap, earlier Vite-close failure, old matrices and all historical OPENs remain. Final documentation/fixture qualification is separate. |
 | Legacy description size216 | A physical fontSize field on the Vaul-backed DrawerDescription preserves omission, caller style and Radix child priority. Two workspace-sheet utilities and their ineffective duplicate StyleX sizes are removed. Twenty-two formal pairs retain66 complete target/ancestor records,464 geometry and36 exact class/style carriers;21 PNG/RGBA pairs match. Real typing, blocked/pending states and close/reopen reset remain verified. | One original light390 input-focused state retains719 raw/zero-threshold pixels, max channel delta9, outside the target description; cause unknown and input full computed styles were not captured. Twelve API states are After-only. Actual CSS removes only the old utility rule; module graph loses only the now-unused pure helper import. Float/readiness and overbroad graph-oracle failures remain; no real workspace-creation success is claimed. |
 | ShareCard shadow counterexample | A real public className descendant shadow-none rule wins Before but loses to an unlayered StyleX private writer After. The three-utility candidate is rejected, with zero migration credit and Root source unchanged. | One actual endpoint keeps49 complete descendant records stable within each capture but changes the large physical shadow;95,906 raw/12,307 threshold pixels differ. Original highlight-readiness/preparation failures remain in next-native-share-card-counter-acceptance.html. This rejects the demonstrated candidate, not every future ShareCard migration. |
 | Spinner opacity192 and queued pulse | Both opacity candidates are rejected: four direct controls match, but four actual zero-specificity ancestor cases change0.7→1,721raw pixels. Root sources stay unchanged. | Tailwind's named default wins by specificity inside utilities; ordinary StyleX is earlier than the caller utility layer. A naive move cannot preserve that contract. The separate full animation-variable shorthand probe emits no CSS under the locked compiler mode; default keyframes cannot replace the element-local variable contract. No compiler mode, primitive API or specificity patch is adopted. |
@@ -2744,15 +2751,15 @@ spacing. One separate twelve-pixel context OPEN remains unexplained; the popup
 itself matches in that control. The320px Rail is genuinely suppressed, not a popup
 whose locator merely missed. All candidates were restored and receive zero credit.
 
-The isolated156 extraction experiment supports a
-[proposed, bounded route](../../proposed/architecture/2026-10-31-stylex-cascade-compatibility.md).
-A distinct namespace/prefix in flat utilities before Tailwind preserves thirteen
-native Adaptive cases, but not general Slot source order. Late injection breaks
-other Slot/query/caller cases; reused atoms change ordinary StyleX overflow even
-when pixels match. Native sublayers and two unplugin instances are not substitutes.
-No product compiler, dependency, lockfile or global layer order was changed, and
-no universal compatibility route was adopted. Continue owned migrations while
-keeping these specific caller contracts explicit.
+The isolated156 extraction and subsequent188 caller rejection constrain the
+[accepted, bounded215 declaration bridge](2026-10-31-stylex-cascade-compatibility.md).
+Earlier flat utilities, shared atoms and altered class identities failed Slot,
+arbitrary-property or named `cn` controls; those original trials stay restored
+and receive zero credit. The accepted bridge instead preserves selectors, class
+strings and rule positions while replacing actual declaration nodes with real
+StyleX metadata. Its eight aliases, static grammar and Tailwind ordering dependency
+remain explicit. It does not provide a universal compatibility route or change
+global layer order.
 
 ## Remaining work
 

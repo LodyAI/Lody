@@ -1,3 +1,4 @@
+import { legacyDeclarationBridge } from '../../packages/components/vite-legacy-declarations'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
@@ -183,6 +184,7 @@ export default defineConfig(({ mode }) => {
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
         tailwindcss(),
+        ...legacyDeclarationBridge(),
         stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),

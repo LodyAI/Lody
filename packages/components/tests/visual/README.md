@@ -936,6 +936,8 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `drawer-description216-acceptance.html` | Two workspace-description utilities via legacy DrawerDescription fontSize;22 formal/21 PNG-RGBA exact,66 records/464 geometry/36 exact carriers;12 API states After-only | Original focused-input719raw/0threshold OPEN,max9,outside target description;input complete computed not captured and cause unknown. Real create fixture rejects,no creation success claim;single removed CSS rule/pure helper edge qualified;all readiness/float/module-oracle failures retained |
 | `next-native-share-card-counter-acceptance.html` | Zero migration;one real public descendant shadow-none counterexample rejects three utilities;49 full descendants per endpoint | Unlayered private writer restores large shadow,95906raw/12307threshold pixels;original highlight gate/preparation failure and report-layout failure preserved |
 
+| `leaves215-acceptance.html`, `root215216-current-cut-delivery.json` | Selector-preserving declaration ownership at10 consumer occurrences/8 aliases;original8prod+4DEV PNG/RGBA exact,current8prod/456nodes exact and106 CSS byte-identical;stable620/6218 component tests | Tailwind retention/order remain;no10 net removal. Original prepared-cut scope,40 DEV source-line differences,14 exact current CSS URLs,production CSS map gap,Vite-close failure and HMR old-UI behavior retained;final doc/format bridge separate |
+
 The unchanged workspace-inset browser spec passes16 after-only cases in the
 healthy190 build. The prior32 failures remain recorded as a different environment;
 this adds durable behavior coverage and does not replace the original185 visual

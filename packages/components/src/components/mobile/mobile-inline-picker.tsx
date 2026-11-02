@@ -1,3 +1,4 @@
+import { pickerSpinnerClass } from '../../style/legacy-defaults.stylex';
 import {
   createContext,
   useContext,
@@ -767,7 +768,7 @@ export function MobileInlinePicker<T extends string = string>({
           <>
             <Spinner
               diameter="calc(var(--spacing) * 3.5)"
-              className="opacity-70"
+              className={pickerSpinnerClass}
               aria-hidden="true"
             />
             {loadingText ? (

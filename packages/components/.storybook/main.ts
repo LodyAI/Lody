@@ -1,3 +1,4 @@
+import { legacyDeclarationBridge } from '../vite-legacy-declarations';
 import type { StorybookConfig } from '@storybook/react-vite';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
@@ -62,6 +63,7 @@ const config: StorybookConfig = {
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
+    viteConfig.plugins.push(...legacyDeclarationBridge());
     viteConfig.plugins.push(stylex.vite(stylexOptions));
     viteConfig.plugins.push({
       name: 'storybook-diffs-web-component-registration',

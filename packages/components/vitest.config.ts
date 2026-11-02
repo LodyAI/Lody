@@ -1,3 +1,4 @@
+import { legacyDeclarationBridge } from './vite-legacy-declarations';
 import { fileURLToPath } from 'node:url';
 import stylex from '@stylexjs/unplugin';
 import { defineConfig } from 'vitest/config';
@@ -7,7 +8,12 @@ import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-
 
 export default defineConfig({
   define: {},
-  plugins: [stylex.rollup({ ...stylexOptions, dev: false }), loroCrdtWasmUrlWorkaround(), wasm()],
+  plugins: [
+    ...legacyDeclarationBridge({ testOnlyBindings: true }),
+    stylex.rollup({ ...stylexOptions, dev: false }),
+    loroCrdtWasmUrlWorkaround(),
+    wasm(),
+  ],
   resolve: {
     alias: [
       // Must precede the general `@/` rule: Vite matches aliases in order

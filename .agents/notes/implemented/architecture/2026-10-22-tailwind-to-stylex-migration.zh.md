@@ -1852,14 +1852,18 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 自147起已接受的有界迁移移除200处源码 utility，含189六处私有间距调用及211／212／214共25处声明与216两处描述consumer。
 192两处opacity候选仍保留Tailwind。另六处重复尺寸／shrink单列清理；九个恢复的native编译试验默认值信用零。
-215构建adapter仍在隔离验证，尚无已接受迁移信用。
+215 adapter另行转移声明归属，仍保留旧输出。
 
-已接受216的全非story components源码为1,325处／145文件／720未解析，覆盖1,397源。
-单独冻结的helper214为203处／8文件／21未解析，覆盖30源。合计静态下界为
-**1,528处／153文件／741个未解析表达式**，不是精确总量、完成百分比或整branch视觉通过。
-扫描方法未变。components精确输入及扫描见inventory-source-through216-accepted-proof.json与
-inventory-v2-through216-accepted-fullsrc.json；helper见inventory-helper-source-through214-proof.json与
-inventory-helper-v2-after214.json。两套overlay均先核对此前冻结输入，再只应用已接受owner文件。
+已接受215的components切面在1,399个产品源中识别1,315处AST出现次数／144文件／730未解析。
+单独冻结helper214为203处／8文件／21未解析。v2扫描合计1,518处／152文件／751未解析表达式。
+桥仍在两个consumer输出十个原utility，其中一个consumer已不在AST识别文件列表；加回这些已知输出，
+**保守兼容下界仍为1,528处／153文件**。它获得十处声明归属迁移，不是净移除十处Tailwind。
+八alias与Tailwind排序依赖保留。751未解析表达式是扫描边界，不等于751个已确认Tailwind用法或完成百分比。
+
+components精确源码／扫描见inventory-source-through215-accepted-proof.json与
+inventory-v2-through215-accepted-fullsrc.json；helper见inventory-helper-source-through214-proof.json与
+inventory-helper-v2-after214.json。215从准确已接受216快照仅overlay四个source owner；此前216的
+1,397源／1,325处／145文件／720未解析切面继续保留。
 
 此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
 在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，
@@ -1923,6 +1927,7 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 私有Checkbox211 | 十五个wrapper／material／transition utility迁为本地StyleX；native input、ref、effect、事件及glyph不变。十五正式对加一个mixed-directory焦点补充对PNG／RGBA全同，保778目标、688导航及8,381几何记录。 | 仅240 wrapper class及四固定CSS URL载体变化。63注册及733保留规则原序同，whole at-rule185→183不同。原forceExpanded准备漂移保留；最终门禁以真实折叠再展开确认，不注入状态。 |
 | Modal标题字重212 | Dialog.Title与Drawer.Title新增可选物理fontWeight，保默认600及省略时原style对象。四consumer utility覆盖五条真实标题路径；54正式对PNG／RGBA同，270记录／1,112几何仅88精确class／inline载体不同，106 CSS文件字节同。 | 十六Gallery视图仅After-only；保Base UI render／hidden／ARIA，不虚构Title.asChild。采集后lint清理另有最终bundle DOM资格，不称重采54图。原caret修改、Gallery transition／readiness失败及缺失旧terminal DOM证据保留。 |
 | 原生焦点环214 | 六个ReviewCheck／Checkbox焦点utility迁为原生:has(:focus-visible)，无React焦点状态或marker。十一对保519目标、473导航及5,759几何，九PNG／RGBA同；物理box-shadow严格同。 | 原两OPEN保1,968原始／1,632阈值像素，位于header角及group标题文字，具体原因未知。三十个具名ring color／shadow逗号空白差异保两侧raw并逐项核锁定语法／consumer，不称raw对象相同。63注册及732保留规则同，whole at-rule183→181不同。207／208旧OPEN不关闭。 |
+| 保selector声明215 | StyleX拥有MobileInlinePicker／AdaptiveTabStrip使用十次的八flat声明，五绑定保class字符串及cn／Slot合同。原八生产／四DEV对PNG／RGBA同，106 CSS及两官方renderer-only CSS同；当前215＋216另补八对／456节点同、106 CSS同及稳定620文件／6,218组件测试。 | 八alias与Tailwind保留／排序仍在，十literal改import不是净移除十处。DEV40精确source-line载体及当前14个已核CSS URL另列。HMR实际200→404→200拒绝0.6且有overlay，旧UI仍0.7，不称整页fail closed。生产CSS map缺口、旧Vite close失败及全部旧矩阵／OPEN保留；最终文档／fixture另验。 |
 | Legacy描述字号216 | Vaul-backed DrawerDescription新增物理fontSize，保省略路径、caller style及Radix child优先级。移除两处工作区面板utility及原被覆盖的重复StyleX字号。22正式对保66完整目标／祖先记录、464几何及36精确class／style载体，21 PNG／RGBA同。真实输入、blocked／pending及关闭重开重置保留。 | 原light390输入聚焦状态保719原始／零阈值像素、最大通道差9，位于目标描述之外；具体原因未知，未采input完整computed。十二API状态仅After-only。真实CSS仅删除旧utility规则，模块图仅少一条已无用pure helper import。浮点／readiness及过强图oracle失败保留，不称真正工作区创建成功。 |
 | ShareCard阴影反例 | 真实公开className后代shadow-none规则Before胜出，After被无层StyleX私有writer压过。三utility候选拒绝，信用零，Root源码未改。 | 一个真实端点两侧各自采集内49完整后代记录稳定，但物理大阴影改变；95,906原始／12,307阈值像素不同。原高亮readiness／准备失败保留在next-native-share-card-counter-acceptance.html；只拒绝已证明候选，不表示所有未来ShareCard迁移均阻塞。 |
 | Spinner透明度192与queued pulse | 两opacity候选拒绝：4个direct控制同，4个真实零特异性祖先使0.7→1，共721原始像素；Root源码未改。 | 旧named默认在utilities中凭特异性胜出，普通StyleX则早于caller utility层，直接替换不能保合同。另完整animation变量简写在锁定compiler模式下不产CSS；默认keyframes不能替代元素本地变量合同。未采用compiler模式、新primitive API或特异性补丁。 |
@@ -1958,11 +1963,10 @@ popup host带回公开零特异性祖先，使12→48px，局部spacing下18→7
 popup本体同，但整页十二像素OPEN原因未定。320px Rail确实被抑制，不是locator缺失即
 误称popup关闭。候选均已恢复，迁移信用为零。
 
-隔离156实验提供一条[仍为proposed的有限路径](../../proposed/architecture/2026-10-31-stylex-cascade-compatibility.zh.md)：
-独立namespace／前缀、Tailwind之前utilities本层，十三个原生Adaptive用例可同，但不保
-任意Slot顺序。后置注入破坏其他Slot／query／caller，共享atom又改变普通StyleX overflow，
-即使PNG同也失败；原生子层与双unplugin实例不能代替隔离提取。没有改产品compiler、
-依赖、锁文件或全局层序，没有采纳通用兼容路径；继续闭合owned范围，并保留这些具体合同。
+隔离156提取与后续188公开反例约束[已采用的有限215声明桥](2026-10-31-stylex-cascade-compatibility.zh.md)。
+此前flat utilities、共享atom及class身份替换破坏Slot、arbitrary-property或named cn；原试验继续恢复，信用零。
+已接受桥保selector、class字符串及规则位置，以真正StyleX metadata替换原声明节点；八alias、静态语法及
+Tailwind排序依赖均明确保留。它不是通用兼容路径，也不改变全局层序。
 
 ## 后续工作
 

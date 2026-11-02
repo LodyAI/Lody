@@ -1,4 +1,10 @@
 import {
+  tabViewportClass,
+  tabContainerClass,
+  tabStripClass,
+  tabItemClass,
+} from '../../style/legacy-defaults.stylex';
+import {
   createContext,
   forwardRef,
   useContext,
@@ -588,11 +594,7 @@ export function AdaptiveTabStrip({
   return (
     <div
       ref={viewportRef}
-      className={cn(
-        'min-w-0 flex-1 overflow-hidden',
-        itemIds.length > 1 && '@container',
-        viewportClassName
-      )}
+      className={cn(tabViewportClass, itemIds.length > 1 && tabContainerClass, viewportClassName)}
       data-adaptive-tab-strip-viewport=""
       onPointerDown={() => {
         // Chromium only enters rapid-close mode for a pointer-triggered close:
@@ -613,7 +615,7 @@ export function AdaptiveTabStrip({
         <div
           {...props}
           ref={stripRef}
-          className={cn('flex w-full items-center', className)}
+          className={cn(tabStripClass, className)}
           style={
             {
               ...style,
@@ -674,7 +676,7 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
         {...props}
         ref={ref}
         className={cn(
-          'min-w-0 overflow-hidden',
+          tabItemClass,
           itemLayout &&
             'transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
           !itemLayout && isActive && ACTIVE_MIN_WIDTH_CLASS,

@@ -43,14 +43,21 @@ Keep public composition intact until its full supported caller contract has an
 equivalent replacement. Runtime mappings with retained source literals are not
 source-removal credit, and a counterexample withdraws the claimed mapping.
 
-A [separate extraction proposal](../../../../.agents/notes/proposed/architecture/2026-10-31-stylex-cascade-compatibility.md)
-records the measured boundary for native defaults. Early flat utilities pass
-selected native matrices but reverse supported arbitrary-property callers:
-`[width:0px]`, `[min-width:840px]` and `[overflow:visible]` change actual size or
-hit testing because `twMerge` retains them beside named defaults. The compiler
-trial was fully restored; no build/dependency route is adopted. Preserve named,
-arbitrary-property, variant and shorthand order before replacing these defaults;
-do not use a class-name guard, a specificity patch or default-only screenshots.
+The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
+keeps original selectors, class strings and rule positions while replacing each
+original declaration with actual StyleX metadata. It currently serves two fixed
+owners through eight flat declarations and five static bindings; ordinary StyleX
+uses its normal collector. A missing, unequal or unsupported slot rejects. The
+single profile retains the legacy aliases through the existing source scan, so
+Tailwind candidate ordering remains an explicit dependency. Moving a literal into
+that binding is declaration ownership migration, not net utility removal.
+
+Earlier flat extraction remains rejected: arbitrary-property callers changed
+width, clipping and hit testing, while changed hashes broke named cn merging.
+Preserve named, arbitrary-property, variant and shorthand order; do not replace
+this contract with a class-name guard, specificity patch or default-only images.
+The closed adapter does not authorize dynamic values, variants or additional
+same-property keys without a separately verified extension.
 
 The independent helper controls' reviewed internal call graph and original raw
 selectors are separate contracts. Their local ordinary/Slot split is not a recipe

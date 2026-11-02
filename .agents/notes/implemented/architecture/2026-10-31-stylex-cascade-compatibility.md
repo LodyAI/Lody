@@ -1,0 +1,145 @@
+# StyleX declarations with legacy cascade contracts
+
+Status: implemented
+Translation: current
+
+PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
+
+[中文](2026-10-31-stylex-cascade-compatibility.zh.md)
+
+## Abstract
+
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of eight flat declarations used at ten locations in MobileInlinePicker and AdaptiveTabStrip, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+
+## Ownership and compilation
+
+| Owner                                                                                                          | Responsibility                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Eight real StyleX declarations and five scalar/group class bindings.                                                                   |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its eight aliases. |
+| [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                          |
+| [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                      |
+
+```mermaid
+flowchart LR
+  S[StyleX declarations] --> B[Binding compiler]
+  B --> J[Original class strings]
+  T[Tailwind CSS] --> O[Validate every original slot]
+  S --> M[Real StyleX metadata]
+  M --> O
+  O --> C[Replace declaration bodies in place]
+  N[Ordinary StyleX collector] --> P[Normal StyleX output]
+```
+
+The pre-transform validates a fixed AST grammar before React/docgen transforms.
+It accepts literal flat declarations and the five approved `stylex.props`
+bindings, folds them with the pinned native compiler, and emits their original
+class strings in the original order. Dynamic values, conditions, namespace
+escapes, mixed class construction and unsafe query loaders reject. The source
+module throws if consumed without its build adapter.
+
+The CSS transform runs after Vite's CSS processing and before CSS publication.
+It validates all original selectors, `utilities` contexts, single declarations,
+values and importance before mutating anything. Each old declaration is detached
+and replaced by a clone of the real metadata declaration at that same position.
+There is no second effective Tailwind body, new specificity, layer reordering,
+shared ordinary atom or extra inline source-retention declaration.
+
+The locked container-query plugin and Tailwind v4 both emit the same
+`@container` slot in development; production merges them. Only this alias permits
+two slots, each independently validated and replaced without deduplication. Other
+duplicate, missing, unequal, important or extra-body slots reject. Static opacity
+numbers/percentages compare numerically within 0–1; the original element-local
+`calc(var(--spacing) * 0)` remains an expression, not literal zero.
+
+Storybook, components Vite, the Electron renderer and components Vitest install
+the adapter. Vitest's binding-only route is a test transform, not application SSR.
+The normal StyleX collector remains unchanged. Compiler inputs use direct pinned
+Babel 7.29.7, StyleX 0.19.0 and PostCSS 8.5.6 dependencies; trace-mapping 0.3.31 verifies
+maps. These versions already existed in the lock/cache. There is no compiler
+cache, epoch, generated shared stylesheet or experiment-directory import.
+
+## Public compatibility and counting
+
+The original class identities keep `cn`/`twMerge` group recognition and preserve
+named, arbitrary-property, opaque StyleX, ancestor and real Radix Slot precedence.
+The retained 366px container query and frozen-transition utilities keep their
+existing paths. DOM, refs, events, disabled state and responsive behavior do not
+move into the compiler adapter.
+
+Ten consumer literals becoming imported bindings is not ten fewer remaining
+legacy utility occurrences. The eight aliases and ten compiled output occurrences
+remain explicit compatibility dependencies. Scanner v2 continues to report only
+its recognized AST occurrences; the bridge's known outputs are listed separately
+and added back for the conservative remaining boundary. The
+[migration note](2026-10-22-tailwind-to-stylex-migration.md#public-callers-and-the-remaining-cascade-boundary)
+owns those exact source cuts and counts.
+
+Widen only a demonstrated flat owner after its real Before capture and caller
+checks. The current profile has one key per CSS property; a second key for that
+property is not implicitly supported. Preserve single ownership and reject
+unsupported syntax instead of extending the adapter into a generic CSS framework.
+When consumers no longer need these legacy selector contracts, remove their
+bindings, aliases, adapter wiring and compiler dependencies together. No public
+compatibility contract is retired by this change.
+
+## Evidence and limits
+
+Local artifacts live under `packages/components/artifacts/visual/`.
+
+| Boundary                   | Measured evidence                                                                                                                                                                                                                             | Limit                                                                                                                                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen215 production       | Eight real pairs,456 complete nodes, PNG/RGBA exact;106 CSS resources byte-identical.                                                                                                                                                         | Prepared212 closure, not the later full Root tree. Four asset path names differ while their paired CSS bytes match.                                                                                                    |
+| Frozen215 development      | Four real pairs,304 complete nodes, PNG/RGBA exact; only40 exact debug-source line attributes differ. JS bindings, owners and nine CSS slots map to source.                                                                                   | Eight unique declarations include two real container slots. This is not a Windows OS run or application SSR.                                                                                                           |
+| Official renderer builds   | Two actual renderer-only builds and their complete CSS match; ordinary collectors remain isolated.                                                                                                                                            | Build verification, not a newly captured whole Electron App or backend acceptance.                                                                                                                                     |
+| Current215+216 integration | Eight new production pairs/456 nodes are PNG/RGBA exact; only14 individually hashed CSS resource URLs differ. All106 CSS files match;620 component files/6,218 tests pass with4,789 inputs unchanged.                                         | Includes recorded user working-tree edits. The two sides freeze the same documented source cut; later Markdown and fixture formatting have separate build qualification. Original216's719raw-pixel OPEN is not closed. |
+| Compiler and HMR           | Seventeen actual compiler/binding/map/rejection tests pass. The final real update observes HTTP 200→404→200 and an error overlay while unequal0.6 metadata is rejected; the loaded page stays0.7 and recovery returns0.7 without the overlay. | Rejecting unequal publication does not make the whole page fail closed. Earlier cached-last-good responses and four rejected HMR gate assumptions remain recorded.                                                     |
+
+`leaves215-acceptance.html`, `leaves215-delivery.json` and
+`root215216-current-cut-delivery.json` own the raw records, original PNGs, build
+inputs, exact CSS comparisons and failures. The formatted persistent controls
+fixture has equal runtime AST after actual JSX lowering; that is separate from
+new PNG credit. The final documentation/fixture build retains its own source bank
+rather than rewriting the original eight-pair matrix.
+
+The formatted-fixture/documentation build preserves all106 CSS resources. Its
+6,875 emitted module identities match, while12 original strict AST differences
+remain explicit: four preload dependency tables carry new artifact references,
+and eight modules change ten interop mode arguments. The real React and ReactDOM
+exports and emitted helper take the same default/descriptor branch in both modes;
+a synthetic truthy-module/default counterexample differs, so this qualification
+is specific to those actual inputs. It is not whole-module raw AST equality or
+new screenshot credit. Initial identity collisions and overbroad React-only
+assumptions remain rejected evidence.
+
+The final adapter lint cleanup uses existing PostCSS map types, one documented
+opaque-AST type boundary and three explicit undefined returns. Seventeen owning
+tests, component/tool types and scoped lint pass; actual Vite/Oxc lowering differs
+only at those three equivalent returns. The original six-error lint result and
+both source versions remain. The6,218-test run belongs to its recorded earlier
+cut; cleanup does not claim a fresh full-suite run. Final real-build qualification
+also checks this adapter and the final source-scanned documentation together.
+
+The original production Vite pipeline does not publish a usable CSS source map.
+JS and real development CSS author mappings are verified; complete production CSS
+mapping is not claimed and no global Vite workaround is included. Actual component
+Vite CSS transforms returned, but its earlier `server.close()` retained an
+unsettled-await failure. The source generated by that check was preserved and
+restored to its locked bytes; it does not establish normal cleanup.
+
+## Rejected routes that still constrain the design
+
+The original immutable reports remain evidence, not adopted implementations.
+
+| Route                                                       | Demonstrated failure and retained boundary                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Native utilities sublayers and early/late extraction156/159 | Unlayered utility rules beat sublayers. Early insertion changes a real Slot grid parent/flex child from55→28px; late insertion breaks reverse Slot, caller width840→0 and the retained active minimum180→0. Thirteen selected Adaptive successes and66 exact screenshots do not repair those contracts.                                                                                                                  |
+| Shared collectors or hashes                                 | Two locked unplugin instances share a rule store; the declared legacy layer option is not forwarded. Reusing ordinary atoms changes overflow despite equal pixels. Even exact-position independent hashes break named `w-0`, `opacity-50` and `block` because `twMerge` does not recognize them. A second merge registry would not preserve exported raw strings.                                                        |
+| Generated output and history164/168                         | An old JS response outlives its center atom when CSS changes with HMR disconnected. A private history extension repaired that window experimentally, but introduced ownership machinery that this stable-class bridge does not need. The55raw/32threshold spacing OPEN stays open.                                                                                                                                       |
+| Trial171/180/184 and restoration188                         | Earlier66 paired images and actual App crops match, while whole-App39raw and312raw OPENs remain. Three real arbitrary-property callers later change width598→16, minimum598→840 and clipping/hit chains. All thirteen trial paths were restored; those trials receive zero production credit. Virtual Win/POSIX normalization tests were not an actual Windows run.                                                      |
+| Exact-slot/206 prototype                                    | Twelve static controls and one actual opacity owner established the smaller boundary. Its seven production plus two DEV pairs cover 505 nodes, but corrected percentage handling did not recapture the seven production images. Transitive compiler resolution, proof-directory wiring and incomplete pipelines were not accepted. Its CSS 404 retained last-good0.7 with no overlay; it is not the later215 HMR result. |
+
+All original source-map gaps, unknown cleanup outcomes, wrong-fixture captures,
+readiness failures and visual OPENs remain in their owning reports. Neither a
+new default-only success nor CSS byte equality closes unrelated historical
+layout, state, paint or observer-history differences.

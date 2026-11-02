@@ -1467,6 +1467,12 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@babel/core':
+        specifier: 7.29.7
+        version: 7.29.7
+      '@jridgewell/trace-mapping':
+        specifier: 0.3.31
+        version: 0.3.31
       '@lody/configs':
         specifier: workspace:*
         version: link:../configs
@@ -1482,6 +1488,9 @@ importers:
       '@storybook/react-vite':
         specifier: ^10.6.2
         version: 10.6.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(rollup@4.57.1)(storybook@10.6.2(@types/react@19.2.17)(prettier@3.9.9)(react@19.2.0))(typescript@5.9.3)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
+      '@stylexjs/babel-plugin':
+        specifier: 0.19.0
+        version: 0.19.0
       '@stylexjs/unplugin':
         specifier: 0.19.0
         version: 0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.11)(rollup@4.57.1)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))
@@ -1543,7 +1552,7 @@ importers:
         specifier: ^0.65.0
         version: 0.65.0
       postcss:
-        specifier: ^8.5.4
+        specifier: 8.5.6
         version: 8.5.6
       react-router-dom:
         specifier: ^7.10.1

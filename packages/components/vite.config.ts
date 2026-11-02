@@ -1,3 +1,4 @@
+import { legacyDeclarationBridge } from './vite-legacy-declarations';
 import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import * as path from 'node:path';
@@ -20,6 +21,7 @@ const isStorybook =
 
 export default defineConfig(async () => {
   const plugins = [
+    ...(!isStorybook ? legacyDeclarationBridge() : []),
     ...(isStorybook
       ? []
       : [
