@@ -33,18 +33,22 @@ Spec。
 
 ## Agent chat 发给正在工作的会话
 
-编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标在发起调用的同一
-Machine 上运行，且其 agent 接受 steer，`lody_session_chat` 和
+编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标的 agent 接受 steer，无论在本机还是另一台
+Machine 上运行，`lody_session_chat` 和
 `lody_session_chat_many` 就把输入 steer 进当前 turn，不受用户排队或引导偏好
 影响，也不管当前 turn 由谁发起。被 steer 的输入有自己的回复，作为 Operation
 结果；被它打断的更早 turn 在该处结束。
 
-能证明未送达的 steer 与人类发送一样转为下一个普通 turn。送达不确定时绝不重放：
+本机能证明未送达的 steer 与人类发送一样转为下一个普通 turn。送达不确定时绝不重放：
 该项以不可重试的 `STEER_DELIVERY_UNKNOWN` 失败，由发起请求的 Agent 决定是否重发。
-空闲目标、其他 Machine 上的目标和恢复重放仍走普通派发。证据：
+远端目标复用共享的历史函数确定活跃 assistant turn。远端启动或投递未确认，且没有
+执行端接管恢复时，只把仍为 `pending_apply` 的消息转为普通派发。此处优先保证可用性：
+确认丢失可能导致重复的下一轮，但 RPC 未到达时消息不能永久滞留。绝不重发 steer，
+也不取消目标；执行端已经写入的开始或终态保留。空闲目标、没有活跃 turn 证据和
+恢复重放仍走普通派发；远端遗留的待 steer 消息直接提升，不再发送 steer。证据：
 `apps/cli/src/commands/session.ts` 中的 `sendSessionChatResult`、其测试
 `session-default-fallback.test.ts`，以及 `apps/cli/src/orchestration/coordinator-workflow.ts`
-中的项协调。
+中的项协调。远端回退取舍见[决策记录](../.agents/notes/implemented/feature/2026-11-02-cross-machine-agent-steer.zh.md)。
 
 ## 会话创建配置
 

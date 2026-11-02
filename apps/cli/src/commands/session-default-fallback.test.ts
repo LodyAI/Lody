@@ -29,6 +29,8 @@ import {
   runWithSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionBackend } from '@/session/session-backend';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as workspaceAccess from '@/lib/workspace';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
@@ -99,7 +101,11 @@ const createModelCapability = (): AcpCapabilityCacheEntry => ({
 });
 
 /** Real command resolution and Loro history, with only transport/storage replaced. */
-function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapabilityCacheEntry) {
+function createFixture(
+  agentType: 'codex' | 'claude',
+  capability?: AcpCapabilityCacheEntry,
+  skipAutoRead = false
+) {
   let freshnessConfirmed = false;
   let failDispatchPointer = false;
   let invocationInputConfig: SessionHistoryInput['inputConfig'];
@@ -161,6 +167,7 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
       }),
       flush: async () => undefined,
     },
+    getOnlineMachineIds: async () => new Set([machineId]),
     getAgentConfigById: async () => agentConfig,
     syncMetaOrThrow: async () => undefined,
     syncDocOrThrow: async () => undefined,
@@ -176,6 +183,8 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
       const existing = sessions.get(id);
       if (existing) return existing;
       const sessionDoc = new SessionDocument(manager.repo, id, async () => {});
+      // Cloud command replicas open with skipAutoRead; preserve exact pending state.
+      if (skipAutoRead) sessionDoc.attachAutoRead = () => {};
       composeTestSessionDoc(sessionDoc, { doc: new LoroDoc() });
       sessionDoc.appendUserTurn = async (entry: SessionHistoryInput) => {
         await sessionDoc.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
@@ -392,6 +401,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const store of mcpStores) store.close();
   mcpStores.clear();
@@ -1999,6 +2009,222 @@ describe('agent chat to a busy target', () => {
 
     expect(fixture.steered).toEqual([]);
     expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
+  });
+});
+
+describe('agent chat to a remote busy target', () => {
+  async function remoteFixture() {
+    const fixture = createFixture('codex', undefined, true);
+    await fixture.seedChat();
+    fixture.environment.auth.machineId = 'synthetic-sender' as MachineId;
+    const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'remote-assistant',
+      role: 'assistant',
+      finished: false,
+      timestamp: '2026-10-10T00:00:00.000Z',
+      items: [],
+      fileDiff: [],
+    });
+    vi.spyOn(workspaceAccess, 'canRequestMachineForCliToken').mockResolvedValue({ allowed: true });
+    return {
+      ...fixture,
+      backend,
+      run: (steer = true) =>
+        sendSessionChatResult(
+          fixture.environment.auth,
+          fixture.environment.workspace,
+          fixture.manager,
+          sessionId,
+          'Continue',
+          {},
+          undefined,
+          undefined,
+          { userTurnId, chainDepth: 0, bypassSessionQuota: true, steerActiveTurn: steer }
+        ),
+    };
+  }
+
+  function response(
+    disposition: SessionSteerResponse['disposition'],
+    recoveryOwned = false
+  ): SessionSteerResponse {
+    return {
+      type: 'session/steer_response',
+      sessionId,
+      userTurnId,
+      applied: disposition === 'applied',
+      disposition,
+      recoveryOwned,
+    };
+  }
+
+  function rpc(
+    run: (input: {
+      expectedTurnId: string;
+      userTurnId: string;
+    }) => Promise<SessionSteerResponse | null>
+  ) {
+    const client = {
+      requestSessionSteer: run,
+      requestSessionDispatchTurn: async () => null,
+    } as unknown as Parameters<Parameters<typeof commandRuntime.withMachineRpcClient>[1]>[0];
+    return vi
+      .spyOn(commandRuntime, 'withMachineRpcClient')
+      .mockImplementation(async (_args, fn) => fn(client));
+  }
+
+  it('uses the synced active assistant and records an applied steer without dispatch', async () => {
+    const fixture = await remoteFixture();
+    rpc(async (input) => {
+      expect(input.expectedTurnId).toBe('remote-assistant');
+      expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
+      return response('applied');
+    });
+    await fixture.run();
+    expect((await fixture.history()).at(-1)).toMatchObject({
+      id: userTurnId,
+      status: 'processing',
+      inputConfig: { _lodyDeliveryKind: 'steer' },
+    });
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty('latestUserMsgId');
+    expect(fixture.steered).toEqual([]);
+  });
+
+  it('leaves unsupported recovery to the remote daemon without a second activation', async () => {
+    const fixture = await remoteFixture();
+    rpc(async () => {
+      await fixture.backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: userTurnId,
+        status: 'pending',
+        onlyPendingApply: true,
+      });
+      return response('unsupported', true);
+    });
+    await fixture.run();
+    expect((await fixture.history()).at(-1)?.status).toBe('pending');
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty('latestUserMsgId');
+    expect(fixture.dispatched).toEqual([]);
+  });
+
+  it.each([
+    'unreachable',
+    'timeout',
+    'transport-error',
+    'delivery-unknown',
+    'no-active-turn',
+    'promotion-failed',
+  ] as const)('queues a follow-up on %s without another steer', async (failure) => {
+    const fixture = await remoteFixture();
+    let submitted = () => {};
+    const sent = new Promise<void>((resolve) => {
+      submitted = resolve;
+    });
+    if (failure === 'timeout') vi.useFakeTimers();
+    if (failure === 'unreachable') {
+      vi.spyOn(commandRuntime, 'withMachineRpcClient').mockRejectedValue(
+        new Error('Synthetic start failure')
+      );
+    } else {
+      let offered = false;
+      rpc(async () => {
+        if (offered) throw new Error('Steer was resent');
+        offered = true;
+        if (failure === 'transport-error') throw new Error('Synthetic transport failure');
+        if (failure === 'timeout') {
+          submitted();
+          return new Promise<null>(() => {});
+        }
+        return response(failure);
+      });
+    }
+    const sending = fixture.run();
+    if (failure === 'timeout') {
+      await sent;
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    await sending;
+    const turn = (await fixture.history()).at(-1);
+    expect(turn).toMatchObject({ id: userTurnId, status: 'pending' });
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
+      'latestUserMsgId',
+      userTurnId
+    );
+    // Operation recovery dispatches the same ordinary turn, without offering it again.
+    await fixture.run(false);
+    expect((await fixture.history()).filter((entry) => entry.id === userTurnId)).toHaveLength(1);
+  });
+
+  it('recovers an orphan after a failed promotion without reoffering the steer', async () => {
+    const fixture = await remoteFixture();
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockRejectedValue(
+      new Error('Synthetic offline')
+    );
+    // Fail the durable fallback once, as a sender/storage interruption would.
+    const doc = await fixture.manager.getOrCreateSessionDoc(sessionId);
+    vi.spyOn(doc.sessionData.commands, 'applyHistoryAction').mockRejectedValueOnce(
+      new Error('Synthetic write failure')
+    );
+    await expect(fixture.run()).rejects.toThrow('Synthetic write failure');
+    expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
+    await fixture.run(false);
+    expect((await fixture.history()).at(-1)?.status).toBe('pending');
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
+      'latestUserMsgId',
+      userTurnId
+    );
+  });
+
+  it('bounds startup and prevents a late client from offering an already queued turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = await remoteFixture();
+      let start = () => {};
+      let entered = () => {};
+      const starting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const ready = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      const client = {
+        requestSessionDispatchTurn: async () => null,
+        requestSessionSteer: async () => {
+          await fixture.backend.applyHistoryAction({
+            kind: 'user-status',
+            turnId: userTurnId,
+            status: 'processing',
+            deliveredSteer: true,
+          });
+          return null;
+        },
+      } as unknown as Parameters<Parameters<typeof commandRuntime.withMachineRpcClient>[1]>[0];
+      let first = true;
+      let late: Promise<unknown> = Promise.resolve();
+      vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation((_args, fn) => {
+        if (!first) return fn(client);
+        first = false;
+        entered();
+        const attempt = ready.then(() => fn(client));
+        late = attempt;
+        return attempt;
+      });
+      const sending = fixture.run();
+      await starting;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await sending;
+      start();
+      await late;
+      expect((await fixture.history()).at(-1)?.status).toBe('pending');
+      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
+        'latestUserMsgId',
+        userTurnId
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
