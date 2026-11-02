@@ -1854,17 +1854,18 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
 六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-已接受221的components切面在1,399产品源中识别1,257处AST出现次数／143文件／776未解析。
-helper222在30源中识别191处／8文件／21未解析。v2合计1,448处／151文件／797未解析表达式。
-桥仍输出68个utility位置（原10、217新增28、218新增21、221新增九），两个仅桥consumer不在AST
-utility文件列表；加回后，**保守兼容下界为1,516处／153文件**。十三alias与Tailwind排序保留；
-217／218／221共58个位置是归属迁移，不是净删除58处。未解析含普通StyleX／runtime表达式，
-不是797个已确认Tailwind用法或完成百分比。此前215与220下界继续冻结为1,528与1,519。
+已集成226的components切面在1,399产品源识别1,239处AST／143文件／802未解析。
+helper222仍为30源／191处／八文件／21未解析；v2合计1,430处／151文件／823未解析表达式。
+已知桥输出86个位置：此前68、223九个、224／225各四个及226一个；两个仅桥consumer不在AST
+utility文件列表。**保守兼容下界仍为1,516处／153文件**。新增十八位置转移声明归属，不净删除
+Tailwind依赖；十八保留alias和排序仍在。未解析含普通StyleX／runtime值，不是823个已确认utility或
+完成率。历史源码切面保留原有数字。构建扩展227只改key关联atom，consumer信用零，sample不进产品。
 
-components切面见inventory-source-through221-accepted-proof.json与
-inventory-v2-through221-accepted-fullsrc.json；helper见inventory-helper-source-through222-proof.json与
-inventory-helper-v2-after222.json。仅在各自此前冻结快照覆盖四个221源及222 renderer；story不计入
-产品源码库存，但其literal仍可能进入隐式CSS扫描。库存不代表新增组合Root整套测试／renderer资格。
+inventory-source-through226-integrated-proof.json及inventory-v2-through226-integrated-fullsrc.json
+拥有此前225快照上的有guard覆盖；helper仍是冻结222切面。源码库存排除story，但CSS扫描仍可消费其literal。
+最终组合Root资格另验，各单元矩阵保持实际源码切面。
+[桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有226 pointer-transform差异、
+被拒集成及227三原像素OPEN；CSS或稳定截图相同都不关闭它们。
 
 此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
 在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，
@@ -1930,6 +1931,8 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 原生焦点环214 | 六个ReviewCheck／Checkbox焦点utility迁为原生:has(:focus-visible)，无React焦点状态或marker。十一对保519目标、473导航及5,759几何，九PNG／RGBA同；物理box-shadow严格同。 | 原两OPEN保1,968原始／1,632阈值像素，位于header角及group标题文字，具体原因未知。三十个具名ring color／shadow逗号空白差异保两侧raw并逐项核锁定语法／consumer，不称raw对象相同。63注册及732保留规则同，whole at-rule183→181不同。207／208旧OPEN不关闭。 |
 | 保selector声明215 | StyleX拥有MobileInlinePicker／AdaptiveTabStrip使用十次的八flat声明，五绑定保class字符串及cn／Slot合同。原八生产／四DEV对PNG／RGBA同，106 CSS及两官方renderer-only CSS同；当前215＋216另补八对／456节点同、106 CSS同及稳定620文件／6,218组件测试。 | 八alias与Tailwind保留／排序仍在，十literal改import不是净移除十处。DEV40精确source-line载体及当前14个已核CSS URL另列。HMR实际200→404→200拒绝0.6且有overlay，旧UI仍0.7，不称整页fail closed。生产CSS map缺口、旧Vite close失败及全部旧矩阵／OPEN保留；最终文档／fixture另验。 |
 | Sidebar声明归属217／218 | 49个utility位置保留原cn／Slot顺序，桥共十三声明／十八绑定。原21＋21对为19＋20 PNG同，两批106 CSS同，各冻结620文件／6,218测试通过。 | 三个UA移动布局OPEN保留：217共32,090raw／max1，218共21,320／max3，threshold12均零，target ROI含差异。fine-pointer Chromium UA模拟不是touch／Safari。GroupAction DEV映射新增null。测试扫描候选清理及最终Root另验，不计净删除。 |
+| 旧Sidebar223 | 三分支九个归属位置，23 PNG对、3,414节点／238 target及120完整CVA／cn返回值同；共同fixture切面的106 CSS资源同。 | 新desktop-frame DEV映射143:25→null保留。两个源码helper只增加一个生产bank export，padding实际内联，不能称23个产物export。原driver失败及源／fixture范围保持。 |
+| ContextSwitch224／225 | 八个源码位置保named／public／opaque调用顺序、根／子树变量及真实键盘／callback；224为32对中27 PNG同，225为39对中34同，另有独立reselect一对同。 | 224五OPEN共812raw、225五OPEN共924raw，阈值均零。原225 spacingInitial有四个真实published-bottom差，reselect不关闭其历史。Root十七声明／三十源码绑定合并保223独立追加，不计净移除或笼统full-field相同。 |
 | Workspace／drop声明221 | 九个utility位置通过三个新绑定复用十三flat声明。十七真实Storybook对PNG／RGBA同，覆盖2,377 body／36 target，含trusted原生拖放、self／disabled及draft。另两对真实隔离Electron图同，覆盖633节点／四target。 | 实际App固定ID与boot elapsed差异（含两个隐藏mark物理animation-delay字段）仍保，不称启动历史或App拖放等价。首容器CLI-marker发现失败保留。共同fixture候选会影响隐式CSS扫描；106份CSS相同只属于共同fixture冻结切面，不计净移除。 |
 | 私有commit Tooltip222 | 三处尺寸utility改精确局部StyleX字段，不改primitive／API。20可见Storybook＋2官方file://对PNG／RGBA同；576 target记录物理字段全同。 | 两个390px popup box仍屏外，其中一诊断73raw／零阈值OPEN、原因未知；总24对23 PNG同。原hover／keyboard／readiness失败保留；四次剪贴板读取均被拒绝，Check成功不代表独立读取到SHA。固定Vesper，不称普遍light-theme／全App覆盖。 |
 | 私有helper SVG220 | 九个实际glyph utility改局部精确spacing表达式及原控件opt-out marker。32 Storybook＋7官方file://对PNG／RGBA同；171完整target及1,638导航geometry／state记录同。 | phone-map active BODY textContent少71字符、原因未知。独立真实文件导航补充在两侧显示完整注释DOM并有相同新PNG，但不恢复原挂载历史或关闭原OPEN。两DOM-only祖先反例保留，非已识别host合同，不称任意外部SVG utility等价。39处prepared主题／依赖有明确匹配hash。viewer仅源审，不是第三运行矩阵。 |

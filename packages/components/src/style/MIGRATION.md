@@ -45,12 +45,17 @@ source-removal credit, and a counterexample withdraws the claimed mapping.
 
 The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
 keeps original selectors, class strings and rule positions while replacing each
-original declaration with actual StyleX metadata. It currently serves five fixed
-owners through thirteen flat declarations and twenty-one static bindings; ordinary StyleX
+original declaration with actual StyleX metadata. It currently serves six fixed
+owners through eighteen flat declarations and thirty-one authored static bindings; ordinary StyleX
 uses its normal collector. A missing, unequal or unsupported slot rejects. The
 single profile retains the legacy aliases through the existing source scan, so
 Tailwind candidate ordering remains an explicit dependency. Moving a literal into
 that binding is declaration ownership migration, not net utility removal.
+
+Keep non-alias profile metadata out of implicit candidate scanning. A CSS property
+name can also be a legacy utility alias. Preserve its compiled value while avoiding
+an accidental source candidate, and verify both renderer and Storybook CSS; equal
+Storybook output alone does not qualify the renderer.
 
 Earlier flat extraction remains rejected: arbitrary-property callers changed
 width, clipping and hit testing, while changed hashes broke named cn merging.

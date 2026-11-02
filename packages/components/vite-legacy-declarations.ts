@@ -112,8 +112,31 @@ export function compileLegacyDeclarations(
       }),
       keys
     );
+    assert.equal(
+      new Set(
+        keys.map((key) => {
+          const spec = legacyDeclarations.find((s) => s.key === key);
+          assert(spec);
+          return spec.css;
+        })
+      ).size,
+      keys.length,
+      'Overlapping CSS properties in a binding remain unsupported'
+    );
   }
-  const result = babel.transformSync(raw, {
+  const probePrefix = '__lodyLegacyKeyProbe_';
+  assert(
+    bindings.every(([name]) => !name.startsWith(probePrefix)),
+    'Reserved key-probe name'
+  );
+  const probes = legacyDeclarations.map((spec, index) => ({ spec, name: probePrefix + index }));
+  const probeSource =
+    raw +
+    '\n' +
+    probes
+      .map(({ spec, name }) => `export const ${name} = stylex.props(styles.${spec.key}).className;`)
+      .join('\n');
+  const result = babel.transformSync(probeSource, {
     ...baseOptions,
     filename,
     ast: true,
@@ -130,12 +153,17 @@ export function compileLegacyDeclarations(
     ],
   });
   const metadata: Ast[] = result.metadata.stylex;
-  assert.equal(metadata.length, legacyDeclarations.length);
-  const atoms = new Map<string, string>();
-  const declarations = metadata.map((tuple) => {
+  assert.equal(
+    metadata.length,
+    legacyDeclarations.length,
+    'Each style key requires one distinct flat atom'
+  );
+  const metadataById = new Map<string, Declaration>();
+  for (const tuple of metadata) {
     assert(Array.isArray(tuple) && tuple.length === 3);
     const [id, css, priority] = tuple;
     assert.equal(typeof id, 'string');
+    assert(!metadataById.has(id), 'Duplicate metadata atom');
     assert.deepEqual(Object.keys(css).sort(), ['ltr', 'rtl']);
     assert.equal(typeof css.ltr, 'string');
     assert.equal(css.rtl, null);
@@ -147,16 +175,15 @@ export function compileLegacyDeclarations(
     assert.equal(rule.nodes.length, 1);
     const value = rule.first;
     assert(value?.type === 'decl' && !value.important);
-    const spec = legacyDeclarations.find((s) => s.css === value.prop);
-    assert(spec, 'Unexpected or non-flat declaration');
-    assert(!atoms.has(spec.key));
-    atoms.set(spec.key, id);
-    return { alias: spec.alias, declaration: value, author: authors.get(spec.key) };
-  });
-  const folded: Ast[] = result.ast.program.body.filter(
+    metadataById.set(id, value);
+  }
+  const allFolded: Ast[] = result.ast.program.body.filter(
     (n: Ast) => n.type === 'ExportNamedDeclaration'
   );
-  assert.equal(folded.length, bindings.length);
+  assert.deepEqual(
+    allFolded.map((n: Ast) => n.declaration.declarations[0].id.name),
+    [...bindings.map(([name]) => name), ...probes.map(({ name }) => name)]
+  );
   assert(
     result.ast.program.body.every(
       (n: Ast) =>
@@ -165,13 +192,8 @@ export function compileLegacyDeclarations(
         n.type === 'ExportNamedDeclaration'
     )
   );
-  for (const [index, [name, keys]] of bindings.entries()) {
-    const value = folded[index].declaration.declarations[0];
-    assert.equal(value.id.name, name);
-    assert.equal(value.init.type, 'CallExpression');
-    assert.equal(value.init.callee.name, 'legacyClass');
-    assert.equal(value.init.arguments.length, 1);
-    let classes = value.init.arguments[0];
+  const foldedClassNode = (input: Ast): Ast => {
+    let classes = input;
     if (classes.type === 'MemberExpression') {
       assert(!classes.computed && classes.property.name === 'className');
       assert.equal(classes.object.type, 'ObjectExpression');
@@ -182,6 +204,32 @@ export function compileLegacyDeclarations(
       classes = property.value;
     }
     assert.equal(classes.type, 'StringLiteral');
+    return classes;
+  };
+  const atoms = new Map<string, string>();
+  const usedAtoms = new Set<string>();
+  const declarations = probes.map(({ spec }, index) => {
+    const probe = allFolded[bindings.length + index].declaration.declarations[0];
+    const classes = foldedClassNode(probe.init);
+    assert.equal(classes.value.split(' ').length, 1, 'A key probe must resolve to one atom');
+    const id = classes.value;
+    const atomDeclaration = metadataById.get(id);
+    assert(atomDeclaration, 'Unknown key-probe atom');
+    assert.equal(atomDeclaration.prop, spec.css, 'Unexpected property for key: ' + spec.key);
+    assert(!usedAtoms.has(id), 'Deduplicated style keys remain unsupported');
+    usedAtoms.add(id);
+    atoms.set(spec.key, id);
+    return { alias: spec.alias, declaration: atomDeclaration, author: authors.get(spec.key) };
+  });
+  assert.equal(usedAtoms.size, metadataById.size, 'Unassociated metadata atom');
+  const folded = allFolded.slice(0, bindings.length);
+  for (const [index, [name, keys]] of bindings.entries()) {
+    const value = folded[index].declaration.declarations[0];
+    assert.equal(value.id.name, name);
+    assert.equal(value.init.type, 'CallExpression');
+    assert.equal(value.init.callee.name, 'legacyClass');
+    assert.equal(value.init.arguments.length, 1);
+    const classes = foldedClassNode(value.init.arguments[0]);
     assert.deepEqual(
       classes.value.split(' '),
       keys.map((k) => atoms.get(k))

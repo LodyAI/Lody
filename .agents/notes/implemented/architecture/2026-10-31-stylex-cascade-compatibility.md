@@ -9,14 +9,14 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of thirteen flat declarations with twenty-one bindings used at sixty-eight utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard and SessionMentionDropLayer, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of eighteen flat declarations with thirty-one authored bindings used at eighty-six utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard, SessionMentionDropLayer and ContextSwitch, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
 | Owner                                                                                                          | Responsibility                                                                                                                            |
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Thirteen real StyleX declarations and twenty-one scalar/group class bindings.                                                             |
-| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its thirteen aliases. |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Eighteen real StyleX declarations and thirty-one authored scalar/group class bindings.                                                    |
+| [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its eighteen aliases. |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                             |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                         |
 
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal flat declarations and the twenty-one approved `stylex.props`
+It accepts literal flat declarations and the thirty-one approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -44,6 +44,15 @@ values and importance before mutating anything. Each old declaration is detached
 and replaced by a clone of the real metadata declaration at that same position.
 There is no second effective Tailwind body, new specificity, layer reordering,
 shared ordinary atom or extra inline source-retention declaration.
+
+Non-alias metadata must not introduce Tailwind candidates. The first combined
+renderer build turned the new literal CSS property name into an extra legacy
+selector, although Storybook CSS matched. Actual locked source scanning and a
+minimal compiler control isolate that property string as the cause. Splitting
+only its source literal preserves the same metadata value and removes the
+unintended candidate; no stylesheet or collector patch is used. The original
+four-build cut, selector difference and eight-pair browser supplement remain
+frozen. The repaired source cut has its own build/test qualification.
 
 The locked container-query plugin and Tailwind v4 both emit the same
 `@container` slot in development; production merges them. Only this alias permits
@@ -67,8 +76,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Sixty-eight consumer utility positions becoming imported bindings are not sixty-eight fewer
-remaining legacy occurrences. The thirteen aliases and sixty-eight compiled output occurrences
+Eighty-six consumer utility positions becoming imported bindings are not eighty-six fewer
+remaining legacy occurrences. The eighteen aliases and eighty-six compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -76,9 +85,13 @@ and added back for the conservative remaining boundary. The
 owns those exact source cuts and counts.
 
 Widen only a demonstrated flat owner after its real Before capture and caller
-checks. The current profile has one key per CSS property; a second key for that
-property is not implicitly supported. Preserve single ownership and reject
-unsupported syntax instead of extending the adapter into a generic CSS framework.
+checks. Distinct keys may use different values of the same CSS property. The
+compiler adds one private native `stylex.props` probe per validated key, associates
+its actual atom ID with flat metadata, and removes every probe before publication.
+It does not infer key identity from property/value sets or metadata ordering.
+Overlapping properties inside one binding, atom deduplication, unknown atoms and
+reserved probe-name collisions reject. This remains a closed build transform,
+without runtime probes or a general CSS framework.
 When consumers no longer need these legacy selector contracts, remove their
 bindings, aliases, adapter wiring and compiler dependencies together. No public
 compatibility contract is retired by this change.
@@ -159,6 +172,44 @@ new literal candidates can enter Tailwind's implicit production scan, while its
 StyleX atoms belong to the story graph. Therefore those106 matching resources
 prove the frozen common-fixture comparison, not CSS identity against the older
 Root tree without that fixture. Final combined Root qualification stays separate.
+
+Sidebar/ContextSwitch extensions223–225 preserve the original complete class
+strings and caller/Slot ordering. Scope223's23 pairs/3,414 nodes/238 targets are
+PNG/RGBA exact and120 real CVA/cn combinations return identical bytes. It authors
+two new bindings, but production emits only one: the padding scalar is inlined
+as its original literal at real readers. Source export counts are not runtime-bank
+counts. A previously non-null desktop-frame owner mapping becomes null; the
+fourteen development CSS slots and two new helper mappings remain verified.
+
+ContextSwitch224 retains27/32 exact PNG pairs; five paint OPENs total812 raw pixels
+(maximum channel difference1), while716 full target records differ only at32
+resource URLs. Scope225 adds four distinct property slots with the locked actual
+expressions: height from local spacing, a20rem maximum, local large-radius variable
+and muted HSL with its explicit alpha1. Its original39 pairs retain34 exact PNGs,
+five paint OPENs/924 raw pixels and four real published-indicator differences at
+spacing initial. A separate actual reselect pair matches nineteen new records;
+it neither reconstructs the old measurement history nor closes those originals.
+The twenty-one compiler tests include real preset-derived values and individual
+rejection mutations; no algorithm, state logic or specificity patch is added.
+
+Sidebar Label226 adds one non-shrinking declaration/binding while retaining its
+public native/Slot class identity. All18 original PNG/RGBA pairs match over3,600
+body records and32 targets; two actual post-pointer Header thumb transforms
+remain different. Three proposed Switch cleanups were not adopted because their
+public popup-container contract is unresolved. The original flat-comparator
+RangeError and report-path overflow are preserved; the final report fixes only
+its own text wrapping. A Root integration first matched a different h-8 Input
+line; source-diff/inventory checks rejected it before commit. The saved bad source
+and its corrected GroupLabel-only diff remain explicit evidence.
+
+Build extension227 has28 real compiler/slot/map tests. Eight production, four DEV
+and twelve separate two-height controls pairs preserve all324 captured target
+records apart from24 precise iframe URL ports. Twenty-one PNG pairs match;
+three original production OPENs total762 raw pixels, with no threshold12 pixels.
+All106 production Storybook CSS files, one official renderer CSS file and the
+original thirty compiled exports match bytes. The sample has no consumer credit;
+Root's Label extension is a separate18-declaration/31-binding cut. Its report-only
+Escape cleanup failure is retained and fixed in the final offline viewer.
 
 The original production Vite pipeline does not publish a usable CSS source map.
 JS and real development CSS author mappings are verified; complete production CSS

@@ -13,6 +13,12 @@ export const legacyDeclarations = [
   { key: 'gapTwo', alias: 'gap-2', js: 'gap', css: 'gap' },
   { key: 'paddingTwo', alias: 'p-2', js: 'padding', css: 'padding' },
   { key: 'minimumHeight', alias: 'min-h-0', js: 'minHeight', css: 'min-height' },
+  { key: 'contextHeight', alias: 'h-10', js: 'height', css: 'height' },
+  { key: 'contextMaximum', alias: 'max-w-xs', js: 'maxWidth', css: 'max-width' },
+  { key: 'contextCorner', alias: 'rounded-lg', js: 'borderRadius', css: 'border-radius' },
+  { key: 'contextMuted', alias: 'bg-muted', js: 'backgroundColor', css: 'background-color' },
+  // oxlint-disable-next-line no-useless-concat -- Keep metadata out of implicit utility scanning.
+  { key: 'nonShrinking', alias: 'shrink-0', js: 'flexShrink', css: 'flex-' + 'shrink' },
 ] as const;
 
 export const legacyBindings = {
@@ -37,4 +43,14 @@ export const legacyBindings = {
   workspaceCardLayoutClass: ['row', 'minimum', 'fullWidth', 'remainder', 'column', 'clipped'],
   sessionDropPositionClass: ['positioned'],
   sessionDropClipClass: ['minimumHeight', 'clipped'],
+  sidebarMenuButtonLayoutClass: ['row', 'fullWidth', 'centered', 'gapTwo', 'clipped'],
+  sidebarPaddingClass: ['paddingTwo'],
+  contextWidthClass: ['fullWidth'],
+  contextRowClass: ['row'],
+  contextRemainderClass: ['remainder'],
+  contextHeightClass: ['contextHeight'],
+  contextMaximumClass: ['contextMaximum'],
+  contextCornerClass: ['contextCorner'],
+  contextMutedClass: ['contextMuted'],
+  sidebarLabelShrinkClass: ['nonShrinking'],
 } as const;

@@ -61,7 +61,9 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
       ? '[&_*]:w-7 [&_*]:p-0 [&_*]:gap-1 [&_*]:rounded-none [&_*]:rotate-0'
       : mode === 'targeted'
         ? '[&_[data-sidebar=menu-button]]:w-7 [&_[data-sidebar=menu-button]]:p-0 [&_[data-sidebar=menu-button]]:gap-1 [&_[data-sidebar=menu-button]]:rounded-none [&_[data-sidebar=menu-button]]:block'
-        : undefined;
+        : mode === 'zero'
+          ? '[&_:where([data-sidebar=menu-button])]:block [&_:where([data-sidebar=menu-button])]:w-20 [&_:where([data-sidebar=menu-button])]:items-start [&_:where([data-sidebar=menu-button])]:gap-1 [&_:where([data-sidebar=menu-button])]:overflow-visible [&_:where([data-sidebar=menu-button])]:p-0'
+          : undefined;
   return (
     <div
       className={['group', stylex.props(styles.outer).className].join(' ')}
@@ -77,7 +79,7 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
       dir={mode === 'scoped' ? 'rtl' : undefined}
     >
       <SidebarProvider
-        className={mode === 'wildcard' ? wildcard : undefined}
+        className={mode === 'wildcard' || mode === 'zero' ? wildcard : undefined}
         style={{ '--sidebar-width': '16rem', '--sidebar-width-icon': '3rem' } as CSSProperties}
       >
         <Sidebar collapsible="icon">
@@ -90,6 +92,11 @@ function Fixture({ mode = 'natural' }: { mode?: string }) {
                   <SidebarMenuItem key={size}>
                     <SidebarMenuButton
                       data-case={size}
+                      className={
+                        mode === 'arbitrary'
+                          ? '[display:block] [width:80px] [align-items:flex-start] [gap:1px] [overflow:visible] [padding:0px]'
+                          : undefined
+                      }
                       size={size}
                       variant={size === 'lg' ? 'outline' : 'default'}
                       isActive={size === 'sm'}
@@ -178,3 +185,6 @@ export const Natural: Story = { args: { mode: 'natural' } };
 export const Wildcard: Story = { args: { mode: 'wildcard' } };
 export const Targeted: Story = { args: { mode: 'targeted' } };
 export const Scoped: Story = { args: { mode: 'scoped' } };
+
+export const ArbitraryDefaults: Story = { args: { mode: 'arbitrary' } };
+export const ZeroSpecificityDefaults: Story = { args: { mode: 'zero' } };

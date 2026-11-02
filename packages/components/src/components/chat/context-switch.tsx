@@ -5,6 +5,15 @@ import { Tabs } from '@lody/ui/tabs';
 import { disclosure } from '@lody/ui/disclosure/disclosure.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  contextWidthClass,
+  contextRowClass,
+  contextRemainderClass,
+  contextHeightClass,
+  contextMaximumClass,
+  contextCornerClass,
+  contextMutedClass,
+} from '@/style/legacy-defaults.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -163,7 +172,8 @@ export function ContextSwitch({
   // physical/state classes preserve their precedence over the primitive.
   const triggerClassName = cn(
     stylex.props(styles.tabTypography).className,
-    'flex-1 rounded-md py-1.5 font-medium transition-all',
+    contextRemainderClass,
+    'rounded-md py-1.5 font-medium transition-all',
     triggerJustifyClassName,
     isDark
       ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'
@@ -174,12 +184,18 @@ export function ContextSwitch({
     <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as SessionContextType)}
-      className={cn('w-full max-w-xs sm:max-w-sm', className)}
+      className={cn(contextWidthClass, contextMaximumClass, 'sm:max-w-sm', className)}
     >
       <Tabs.List
         className={cn(
-          'flex h-10 w-full rounded-lg p-1',
-          isDark ? 'bg-card/70 border border-border/70' : 'bg-muted border border-border/40'
+          contextRowClass,
+          contextHeightClass,
+          contextWidthClass,
+          contextCornerClass,
+          'p-1',
+          isDark
+            ? 'bg-card/70 border border-border/70'
+            : cn(contextMutedClass, 'border border-border/40')
         )}
       >
         {localDisabled ? (

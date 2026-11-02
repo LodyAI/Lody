@@ -18,6 +18,11 @@ const styles = stylex.create({
   gapTwo: { gap: 'calc(var(--spacing) * 2)' },
   paddingTwo: { padding: 'calc(var(--spacing) * 2)' },
   minimumHeight: { minHeight: 'calc(var(--spacing) * 0)' },
+  contextHeight: { height: 'calc(var(--spacing) * 10)' },
+  contextMaximum: { maxWidth: '20rem' },
+  contextCorner: { borderRadius: 'var(--radius-lg)' },
+  contextMuted: { backgroundColor: 'hsl(var(--muted) / 1)' },
+  nonShrinking: { flexShrink: 0 },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -78,3 +83,20 @@ export const sessionDropPositionClass = legacyClass(stylex.props(styles.position
 export const sessionDropClipClass = legacyClass(
   stylex.props(styles.minimumHeight, styles.clipped).className
 );
+
+export const sidebarMenuButtonLayoutClass = legacyClass(
+  stylex.props(styles.row, styles.fullWidth, styles.centered, styles.gapTwo, styles.clipped)
+    .className
+);
+export const sidebarPaddingClass = legacyClass(stylex.props(styles.paddingTwo).className);
+
+export const contextWidthClass = legacyClass(stylex.props(styles.fullWidth).className);
+export const contextRowClass = legacyClass(stylex.props(styles.row).className);
+export const contextRemainderClass = legacyClass(stylex.props(styles.remainder).className);
+
+export const contextHeightClass = legacyClass(stylex.props(styles.contextHeight).className);
+export const contextMaximumClass = legacyClass(stylex.props(styles.contextMaximum).className);
+export const contextCornerClass = legacyClass(stylex.props(styles.contextCorner).className);
+export const contextMutedClass = legacyClass(stylex.props(styles.contextMuted).className);
+
+export const sidebarLabelShrinkClass = legacyClass(stylex.props(styles.nonShrinking).className);
