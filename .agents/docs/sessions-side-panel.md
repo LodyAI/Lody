@@ -7,6 +7,12 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+The hosted PR detail panel displays GitHub's explicit stack membership and ordered
+layers when available. Layer links open GitHub. A failed stack detail read leaves
+membership visible; stack merge is delegated to GitHub rather than the legacy
+synchronous merge endpoint. Local PR summary access still opens GitHub externally.
+[Decision](../notes/implemented/feature/2026-11-02-github-pr-stack-view.md).
+
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
   mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). The desktop split's resize
   handle paints nothing at rest: hover shows one centred ink block, keyboard focus a darker and
