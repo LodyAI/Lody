@@ -70,7 +70,8 @@ function matchesLayout(db: IDBDatabase): boolean {
   }
 }
 
-const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
+const fail = <Code extends string>(code: Code) =>
+  Object.assign(new Error(`e2ee_${code}`), { code });
 const copy = (value: Uint8Array) => new Uint8Array(value);
 
 /** One account's pairing state in its own IndexedDB database. Every mutation
@@ -293,7 +294,7 @@ export function makeIndexedDbAccountPairingStore(options: {
  * Release first closes the entry, then waits for operations already running here,
  * so check, sign and journal never interleave between two tabs. */
 export function makeAccountPairingTabOwnership(options: { name: string; locks?: LockManager }) {
-  const locks = options.locks ?? globalThis.navigator.locks;
+  const locks = options.locks ?? globalThis.navigator?.locks;
   /** Ends the held lock's callback; set before a claim reports ownership. */
   let unlock: (() => void) | undefined;
   /** The Web Lock request; settles once the lock is given back or was unavailable. */
@@ -327,14 +328,19 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
   };
   return {
     /** Runs `work` only while this tab owns the pairing; `false` means another tab
-     * owns it, or this tab is handing it over. */
+     * owns it, or this tab is handing it over. Missing Web Locks fails with
+     * `unsupported` without entering the operation. */
     run: <A, E>(
       work: Effect.Effect<A, E>
-    ): Effect.Effect<{ owned: true; value: A } | { owned: false }, E> =>
+    ): Effect.Effect<
+      { owned: true; value: A } | { owned: false },
+      E | (Error & { code: 'unsupported' })
+    > => {
+      if (typeof locks?.request !== 'function') return Effect.fail(fail('unsupported'));
       // Claiming and counting is one uninterruptible acquire: an interrupted caller
       // still waits for its claim to settle, and the matching release always runs,
       // so a claim can never leave the running count raised.
-      Effect.acquireUseRelease(
+      return Effect.acquireUseRelease(
         Effect.promise(async () => {
           const owned = await claim();
           // A handover that started while claiming wins: take nothing new.
@@ -352,7 +358,8 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
             running--;
             if (running === 0) for (const wake of idle.splice(0)) wake();
           })
-      ),
+      );
+    },
     /** Gives the pairing up so another tab can take it: refuses new work, settles a
      * claim still waiting for its lock, drains running work, then gives the lock
      * back. Concurrent calls share one handover. */
