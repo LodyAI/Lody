@@ -53,11 +53,18 @@ protection, so it does not explain the plaintext reports.
 3. **Session reads of another Machine are transient.**
    `readSessionDocTransiently` reads a cached or initializing doc in place.
    Otherwise it opens a temporary `SessionDocument` outside `sessions`, under the
-   doc's local ownership chain, and destroys it with status preserved. List and
-   status read only the local replica (`remoteSync: false`). History joins and
-   waits at most 8 s for the first sync, then releases the room. The temporary
-   wrapper does not unload the doc while a local renderer room or its cloud bridge
-   still uses it. This Machine's own Sessions keep the cached execution doc.
+   doc's local ownership chain, and destroys it with status preserved. The cloud
+   room is joined outside that wrapper. History waits at most 8 s for the first
+   sync; list and status do not wait. The room is then kept until its first sync
+   completes or `TRANSIENT_DOC_ROOM_RETAIN_MS` (150 s, longer than the 120 s
+   Streams deadline) elapses. Releasing it right after the read would abort every
+   slow first sync, so a large transcript would never reach the replica and a
+   finished turn would keep reporting busy. The retained room shares the renderer
+   bridge registry, so a live `getOrCreateSessionDoc`, a renderer leave and
+   manager cleanup cancel it. A failed wrapper cleanup is logged and never
+   replaces the completed read. The doc stays loaded while a local renderer room
+   or a retained room still uses it. This Machine's own Sessions keep the cached
+   execution doc.
 
 ## Alternatives
 
@@ -84,8 +91,11 @@ protection, so it does not explain the plaintext reports.
   retried by the 30 s sweep instead of a 1 s backoff reconnect.
 - After 5 idle minutes, the first catalog read reports `catalog_syncing` again
   until the new reader reaches its baseline.
-- List and status for another Machine's Session can use a stale local replica.
-  Liveness still comes from presence and the owner's RPC snapshot.
+- List and status for another Machine's Session answer from the replica as it
+  is; the retained room refreshes it for the next read. Liveness still comes from
+  presence and the owner's RPC snapshot.
+- A room that never syncs is joined again by each later read and released after
+  150 s. Its failures stay `rooms-degraded` and do not affect the machine.
 - Why some rooms never finish their initial sync from another machine
   (server, proxy or room data) is not addressed here.
 
@@ -101,7 +111,11 @@ protection, so it does not explain the plaintext reports.
 - `apps/cli/src/lib/loro/workspace-catalog-sync.test.ts` covers another Machine's
   catalog that never syncs: it is released after the idle window, extended by
   reads, not rejoined without a read, and can be joined again later.
-- `apps/cli/src/mcp/daemon-session-tools.test.ts` covers list and status of another
-  Machine's Session with no room join, and history that joins once and releases.
+- `apps/cli/src/mcp/daemon-session-tools.test.ts` covers another Machine's Session:
+  status keeps the room until its first sync and then releases it; history
+  answers from the replica when the first sync stalls and releases the room at
+  the bound; a later read joins again; a failed wrapper cleanup keeps the
+  completed read.
 - Not verified against live Streams with a stalled room. The renderer-protection
-  branch of the temporary wrapper is covered by review, not by a test.
+  and cancellation branches of the retained room are covered by review, not by a
+  test.

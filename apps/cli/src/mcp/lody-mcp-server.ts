@@ -1721,7 +1721,8 @@ const readSessionExecutionSnapshot = async (
         queuedTurnCount,
       });
     },
-    // Status reads the local replica; the owner's presence and RPC carry liveness.
+    // Status does not wait: presence and RPC carry liveness, and the briefly
+    // retained room refreshes the replica for the next read.
     0
   );
 

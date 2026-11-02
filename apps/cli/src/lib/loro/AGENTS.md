@@ -33,8 +33,10 @@ Rules:
   filtered candidates, under a concurrency bound (`mapWithConcurrency`, 4).
 - Observation reads of another Machine's Session use
   `LoroDocumentManager.readSessionDocTransiently`: it reads a cached doc in
-  place, otherwise opens a temporary wrapper outside `sessions` and destroys it,
-  so no one-off read keeps that cloud room joined
+  place, otherwise opens a temporary wrapper outside `sessions` and destroys it.
+  The room stays joined only until its first sync or `TRANSIENT_DOC_ROOM_RETAIN_MS`,
+  so slow rooms still converge and no one-off read holds the room forever. A
+  failed wrapper cleanup never replaces the completed read
   ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
 - To drop a doc you opened for inspection, first prove no other holder adopted
   it: `LoroDocumentManager.sessions` is a shared cache with **no refcounting**,

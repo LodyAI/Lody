@@ -113,8 +113,8 @@ Parent instructions apply. Background: [README.md](README.md).
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
   Machine RPC snapshot. Another Machine's Session is read through
-  `readSessionDocTransiently`: list/status read the local replica, history joins
-  briefly, and none stays joined ([rationale](../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
+  `readSessionDocTransiently`: only history waits (8 s) for the room, which is kept
+  until its first sync or a bound ([rationale](../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
   Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and

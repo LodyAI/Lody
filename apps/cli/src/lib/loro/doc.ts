@@ -377,6 +377,13 @@ export type LoroRepoPersistReason =
   | 'session-edit-and-resend-commit'
   | 'session-edit-and-resend-rollback';
 
+/**
+ * Upper bound for keeping a transient read's room joined while its first sync
+ * runs. It exceeds the Streams initial-sync deadline (120 s), so one complete
+ * attempt can finish and land in the replica.
+ */
+export const TRANSIENT_DOC_ROOM_RETAIN_MS = 150_000;
+
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
   sessions: Map<SessionId, SessionDocument> = new Map();
@@ -1642,12 +1649,13 @@ export class LoroDocumentManager {
   /**
    * Observation read of a Session doc without adopting it into the shared
    * `sessions` cache. A cached or initializing doc is read in place. Otherwise
-   * a temporary wrapper reads the local replica and is destroyed afterwards, so
-   * the request never leaves a cloud room joined for the life of the process.
-   * With `remoteSyncTimeoutMs > 0` it joins the room and waits at most that long
-   * for the first remote sync; `0` reads the local replica without joining.
-   * Holding other Machines' rooms after one-off reads made a room that never
-   * finished its initial sync retry until daemon restart (#2194).
+   * a temporary wrapper reads the local replica and is destroyed afterwards.
+   * The cloud room is joined outside that wrapper and waited on for at most
+   * `remoteSyncTimeoutMs` (0 reads the replica as it is). It is then retained
+   * until its first sync completes or {@link TRANSIENT_DOC_ROOM_RETAIN_MS}
+   * elapses, so a slow first sync still reaches the replica for the next read
+   * while no one-off read keeps the room joined for the life of the process
+   * (#2194).
    */
   async readSessionDocTransiently<T>(
     sessionId: SessionId,
@@ -1664,7 +1672,7 @@ export class LoroDocumentManager {
       const sessionDoc = new SessionDocument(
         this.repo,
         sessionId,
-        // A local renderer or its cloud bridge still uses the loaded doc.
+        // A local renderer or a retained room still uses the loaded doc.
         async (readDocId) => {
           if (this.localRendererDocRooms.has(readDocId) || this.localDocRoomBridges.has(readDocId))
             return;
@@ -1679,16 +1687,17 @@ export class LoroDocumentManager {
         : undefined;
       if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
         throw new Error('e2ee_history_backend_unavailable');
-      const remoteSync = options.remoteSyncTimeoutMs > 0;
       await sessionDoc.init({
         skipAutoRead: true,
-        remoteSync,
+        remoteSync: false,
         ...(historyBackend ? { historyBackend } : {}),
       });
+      const room = await this.joinTransientDocRoom(sessionId, docId);
+      let outcome: { ok: true; value: T } | { ok: false; error: unknown };
       try {
-        if (remoteSync) {
+        if (room && options.remoteSyncTimeoutMs > 0) {
           await withTimeout(
-            sessionDoc.waitForRemoteSync(),
+            streamsRoomBinding(room).firstSyncedWithRemote,
             options.remoteSyncTimeoutMs,
             `Timeout waiting for transient session doc sync (room=${docId})`
           ).catch((error: unknown) => {
@@ -1697,12 +1706,104 @@ export class LoroDocumentManager {
             );
           });
         }
-        return { value: await read(sessionDoc) };
-      } finally {
-        await sessionDoc.destroy({ preserveStatus: true });
+        outcome = { ok: true, value: await read(sessionDoc) };
+      } catch (error) {
+        outcome = { ok: false, error };
       }
+      // Registered before the wrapper is destroyed, so its unload is skipped
+      // and the in-flight first sync is not aborted.
+      if (room) this.retainTransientDocRoom(sessionId, docId, room);
+      // The read already completed; a failed wrapper cleanup only leaves the
+      // doc loaded for its next holder and must not replace that result.
+      await sessionDoc.destroy({ preserveStatus: true }).catch((error: unknown) => {
+        this.logger.debug(
+          `[${sessionId}] Transient session doc cleanup failed: ${formatErrorMessage(error)}`
+        );
+      });
+      return outcome;
     });
-    return temporary ? temporary.value : await read(await this.getOrCreateSessionDoc(sessionId));
+    if (!temporary) return await read(await this.getOrCreateSessionDoc(sessionId));
+    if (!temporary.ok) throw temporary.error;
+    return temporary.value;
+  }
+
+  private async joinTransientDocRoom(
+    sessionId: SessionId,
+    docId: string
+  ): Promise<RepoRoomSubscription | null> {
+    let room: RepoRoomSubscription;
+    try {
+      room = await this.repo.joinDocRoom(docId);
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Transient session read uses the local replica; room join failed: ${formatErrorMessage(error)}`
+      );
+      return null;
+    }
+    // Without an attached transport there is nothing to sync or retain.
+    if (streamsRoomBinding(room).status === 'detached') {
+      room.unsubscribe();
+      return null;
+    }
+    return room;
+  }
+
+  /**
+   * Keeps a transient read's room until its first sync or a bound. It shares the
+   * renderer bridge registry, so a live `getOrCreateSessionDoc`, renderer leave
+   * and manager cleanup all cancel it. The doc is unloaded afterwards unless
+   * another holder appeared.
+   */
+  private retainTransientDocRoom(
+    sessionId: SessionId,
+    docId: string,
+    room: RepoRoomSubscription
+  ): void {
+    if (this.cleaningUp || this.localDocRoomBridges.has(docId)) {
+      room.unsubscribe();
+      return;
+    }
+    let cancel!: () => void;
+    const canceled = new Promise<void>((resolve) => {
+      cancel = resolve;
+    });
+    const bridge = { sub: room, cancel, canceled };
+    this.localDocRoomBridges.set(docId, bridge);
+    const generation = this.localDocRoomBridgeGeneration;
+    let timer: NodeJS.Timeout | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, TRANSIENT_DOC_ROOM_RETAIN_MS);
+      timer.unref?.();
+    });
+    void Promise.race([streamsRoomBinding(room).firstSyncedWithRemote, canceled, bound])
+      .catch((error: unknown) => {
+        this.logger.debug(
+          `[${sessionId}] Transient session room sync failed: ${formatErrorMessage(error)}`
+        );
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        room.unsubscribe();
+        if (this.localDocRoomBridges.get(docId) !== bridge) return;
+        this.localDocRoomBridges.delete(docId);
+        void this.withLocalDocOwnership(docId, async () => {
+          if (
+            this.cleaningUp ||
+            generation !== this.localDocRoomBridgeGeneration ||
+            this.sessions.has(sessionId) ||
+            this.pendingSessionDocs.has(sessionId) ||
+            this.localDocRoomBridges.has(docId) ||
+            this.localRendererDocRooms.has(docId)
+          ) {
+            return;
+          }
+          await this.unloadDocRoom(docId);
+        }).catch((error: unknown) => {
+          this.logger.debug(
+            `[${sessionId}] Failed to release transient session doc: ${formatErrorMessage(error)}`
+          );
+        });
+      });
   }
 
   async createSession(

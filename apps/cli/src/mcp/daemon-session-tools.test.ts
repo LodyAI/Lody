@@ -45,7 +45,7 @@ import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
-import { LoroDocumentManager } from '@/lib/loro/doc';
+import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import {
   createLocalSessionCommandEnvironment,
@@ -769,10 +769,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
-  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
-    // #2194: these reads joined other Machines' Session rooms for the life of
-    // the daemon, so a room that never synced kept retrying forever.
-    stubCreateOptionsReaders();
+  async function createRemoteSession() {
     const otherMachineId = 'synthetic-other-machine' as MachineId;
     await manager.registerMachine(otherMachineId, {
       id: otherMachineId,
@@ -781,43 +778,119 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
     const remoteSessionId = await manager.createSession(otherMachineId, 'custom', 'claude');
     await manager.repo.flush();
+    return remoteSessionId;
+  }
+
+  /** A joined Streams room whose first sync completes only when the test says so. */
+  function stubRemoteRoom(remoteSessionId: SessionId) {
     const remoteRoomId = getSessionRoomId(remoteSessionId);
     const joinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
-    const remoteRooms: Array<{ released: boolean }> = [];
+    const rooms: Array<{ released: boolean; firstSync: ReturnType<typeof testSignal> }> = [];
     vi.spyOn(manager.repo, 'joinDocRoom').mockImplementation(async (roomId, ...rest) => {
-      const room = await joinDocRoom(roomId, ...rest);
-      if (roomId !== remoteRoomId) return room;
-      const tracked = { released: false };
-      remoteRooms.push(tracked);
-      const unsubscribe = room.unsubscribe.bind(room);
-      room.unsubscribe = () => {
-        tracked.released = true;
-        unsubscribe();
+      if (roomId !== remoteRoomId) return await joinDocRoom(roomId, ...rest);
+      const tracked = { released: false, firstSync: testSignal() };
+      rooms.push(tracked);
+      const binding = {
+        status: 'joined' as const,
+        firstSyncedWithRemote: tracked.firstSync.promise,
+        onStatusChange: () => () => {},
+        waitUntilSynced: async () => {},
       };
-      return room;
+      return {
+        subscription: () => binding,
+        unsubscribe: () => {
+          tracked.released = true;
+        },
+      } as unknown as Awaited<ReturnType<typeof joinDocRoom>>;
     });
-    const call = (name: string, args: Record<string, unknown>) =>
-      runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+    return rooms;
+  }
 
-    const listed = await call('lody_session_list', {});
-    const status = await call('lody_session_status_many', { sessionIds: [remoteSessionId] });
-    // List and status read the local replica only.
-    expect(remoteRooms).toEqual([]);
-    const cachedAfterReads = manager.getConnectedRoomCount();
-    const history = await call('lody_session_history', { sessionId: remoteSessionId });
+  const callTool = (name: string, args: Record<string, unknown>) =>
+    runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
 
-    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
-    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
-      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
-    });
+  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
+    // #2194: these reads joined other Machines' Session rooms for the life of
+    // the daemon, so a room that never synced kept retrying forever.
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const cachedBefore = manager.getConnectedRoomCount();
+
+    // Status does not wait for the room, but keeps it while its first sync runs.
+    const status = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
     expect(status.isError, JSON.stringify(status)).not.toBe(true);
     expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
       items: [{ sessionId: remoteSessionId, ok: true }],
     });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+    rooms[0]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+
+    // History waits briefly for a synced room and releases it after the read.
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    const history = await historyCall;
     expect(history.isError, JSON.stringify(history)).not.toBe(true);
-    // History joins once for a bounded first sync, then releases the room.
-    expect(remoteRooms).toEqual([{ released: true }]);
-    expect(manager.getConnectedRoomCount()).toBe(cachedAfterReads);
+    await vi.waitFor(() => expect(rooms[1]!.released).toBe(true));
+
+    const listed = await callTool('lody_session_list', {});
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
+    });
+    rooms[2]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[2]!.released).toBe(true));
+    // Only this Machine's own listed Session joined the shared cache.
+    expect(manager.getConnectedRoomCount()).toBe(cachedBefore + 1);
+  });
+
+  it('answers history from the replica when a remote first sync stalls, then releases the room', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(8_000);
+    const history = await historyCall;
+    // A stalled first sync is not a failed read.
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(rooms[0]!.released).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(TRANSIENT_DOC_ROOM_RETAIN_MS);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The next read joins again, so a recovered room can still reach the replica.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('keeps a completed remote history read when its temporary wrapper cleanup fails', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const destroy = SessionDocument.prototype.destroy;
+    vi.spyOn(SessionDocument.prototype, 'destroy').mockImplementationOnce(
+      async function (this: SessionDocument, options) {
+        await destroy.call(this, options);
+        throw new Error('Synthetic wrapper cleanup failure');
+      }
+    );
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    rooms[0]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The failure is not cached: the next read succeeds normally.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
   });
 
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
