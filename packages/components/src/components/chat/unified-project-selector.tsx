@@ -20,6 +20,7 @@ import { toast } from '@/lib/toast';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
+import { composerSurface } from '@/components/shared/composer-surface';
 import { getSessionSharingDescription, ProjectShareDialog } from '@/components/session-sharing';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import {
@@ -561,6 +562,7 @@ export function UnifiedProjectSelectorView({
               {...withClassName(
                 stylex.props(
                   !isPropertyRow && contextPill.surface,
+                  !isPropertyRow && composerSurface.contextLabel,
                   !isPropertyRow && contextPill.interactive,
                   !isPropertyRow && open && contextPill.open
                 ),
@@ -576,7 +578,7 @@ export function UnifiedProjectSelectorView({
                       ]
                     : [
                         'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                        'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                        'text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
                         'hover:text-foreground',
                         selectedPrivateSharing && 'rounded-r-none',
                       ],
@@ -603,6 +605,7 @@ export function UnifiedProjectSelectorView({
             {...withClassName(
               stylex.props(
                 !isPropertyRow && contextPill.surface,
+                !isPropertyRow && composerSurface.contextLabel,
                 !isPropertyRow && contextPill.interactive,
                 !isPropertyRow && open && contextPill.open
               ),
@@ -618,7 +621,7 @@ export function UnifiedProjectSelectorView({
                     ]
                   : [
                       'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                      'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                      'text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
                       'hover:text-foreground',
                       selectedPrivateSharing && 'rounded-r-none',
                     ],

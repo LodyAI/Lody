@@ -268,7 +268,9 @@ export function DesktopMachineMenu({
         render={<Button type="button" variant="secondary" size="mini" />}
       >
         <Monitor {...stylex.props(surface.glyph14)} aria-hidden="true" />
-        <span {...stylex.props(surface.truncate, styles.machineName)}>{label}</span>
+        <span {...stylex.props(surface.contextLabel, surface.truncate, styles.machineName)}>
+          {label}
+        </span>
         {selectedIsLocal ? <Badge>{t('chat.machineSelector.local', 'Local')}</Badge> : null}
         {selectedOption?.isPrivate ? (
           <LockKeyhole {...stylex.props(surface.glyph12, surface.hint)} aria-hidden="true" />
