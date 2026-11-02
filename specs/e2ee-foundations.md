@@ -452,6 +452,7 @@ workspace its account lists. It then draws a fresh 128-bit secret S and shows a 
 and a copyable pairing string, both encoding S.
 
 **Request.** N submits one account-scoped request carrying:
+
 - N's display name and an expiry;
 - per workspace, the genesis, N's signing and encryption public keys, possession proof
   and credential hash;
@@ -478,6 +479,7 @@ scans it and submits its request under that S, and A then verifies it in the sam
 a code that is showing on another device of your own. Never enter a code someone sent
 you. Once approved, this device gets access to the selected workspaces and all their
 history." The confirmation names the specific target device and its scope:
+
 - the number and names of the workspaces to join, each deselectable;
 - the device name, labeled "provided by the requesting device";
 - the location, labeled "approximate, estimated by the server".
@@ -503,6 +505,7 @@ endorsement key. Current and historical keys use the existing mailbox and histor
 paths. Workspaces A cannot sign for stay pending for another approver.
 
 **Lifetime and refusal.**
+
 - The request's own expiry is covered by its MAC and is at most 10 minutes. A checks it
   independently before signing, and N checks it before accepting an approval; a late
   approval is refused.
@@ -517,6 +520,7 @@ paths. Workspaces A cannot sign for stay pending for another approver.
   bounds the impact of a leaked string.
 
 **Progress and failure.**
+
 - A journals each workspace's exact signed admission before any network step. It
   resumes per workspace, retries the original bytes, reconciles unknown outcomes and
   never re-signs.
@@ -531,9 +535,10 @@ paths. Workspaces A cannot sign for stay pending for another approver.
 
 ### Member approvers deliver history instead of a snapshot (pending increment)
 
-**Increment status: draft, pending owner approval.** This increment is not implemented.
-Until the owner approves it, an approver whose role is Member admits the device but
-reports that workspace as awaiting delivery.
+**Increment status: draft, implementation proposed in
+[#2240](https://github.com/LodyAI/Lody/pull/2240) at the coordinator's direction (option A);
+it takes effect only when the owner approves that PR.** Until then, an approver whose role
+is Member admits the device but reports that workspace as awaiting delivery.
 
 **Problem.** Any active personal device of the user may approve, whatever the user's
 role. A Member can append the personal `AdmitDevice` for its own new device, but it
@@ -543,6 +548,7 @@ workspace cannot use account-wide pairing to add a second device there. They hav
 fall back to the per-workspace pairing exchange.
 
 **Decision proposed.**
+
 - **Rows without an invitation.** An approval row may name the workspace's genesis and
   admission record without a snapshot invitation. The approval HMAC still binds the
   request digest, A's signing key and every row.
@@ -556,10 +562,12 @@ fall back to the per-workspace pairing exchange.
 
   It then pins that genesis and that endorser, exactly as the existing per-workspace
   history path does.
+
 - **Unchanged.** Owners and Admins keep delivering snapshot invitations, and N keeps
   verifying them as before.
 
 **Why security is unchanged.**
+
 - **The genesis is authenticated.** The genesis in each row is covered by the approval
   HMAC, keyed from `S`, which the service never sees. A substituted genesis fails the
   MAC with probability about 2⁻¹²⁸. So N anchors trust on the same approver-confirmed
@@ -574,6 +582,7 @@ fall back to the per-workspace pairing exchange.
   its own personal devices, and this increment adds no permission.
 
 **User impact.**
+
 - **With this increment.** A Member pairs a second device for all their workspaces at
   once, the same as an Owner or Admin.
 - **Without it.** Workspaces where the user is only a Member stay awaiting delivery

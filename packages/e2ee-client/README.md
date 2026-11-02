@@ -174,6 +174,7 @@ successful sibling when another phase failed. There is no plaintext fallback.
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
 It owns the tag and expiry checks, the single-signature admission journal and local
 terminal states. Hosts supply four things:
+
 - an `AccountPairingStore` for durable state, which holds no secret and no private key;
 - the relay;
 - the per-workspace ports;
@@ -184,6 +185,7 @@ separate work. Identity protection is a per-workspace port decision, never this
 workflow's.
 
 `@lody/e2ee-client/account-pairing/browser` adds the browser pieces:
+
 - `makeIndexedDbAccountPairingStore` keeps one account database. Each mutation resolves
   only after its transaction completes, and an abort or quota error advances nothing.
 - `makeAccountPairingTabOwnership` with `withAccountPairingTabOwnership` lets only one
@@ -192,10 +194,12 @@ workflow's.
   lock.
 
 `@lody/e2ee-client/account-requester` is the portable new-device side:
+
 - **`AccountPairingIdentityHost`** is the per-workspace host port. It prepares or reuses
   this workspace's identity for a verified genesis record and membership, reports an
   unfinished per-workspace join, installs a snapshot invitation for a given endorser,
-  and can optionally activate the workspace.
+  optionally installs from verified full history (`acceptAccountHistory`, for rows a
+  Member approved without an invitation), and can optionally activate the workspace.
 - **`makePortableAccountPairingRequester`** turns such hosts into the shared workflow's
   requester ports:
   - It verifies the full history and finds this account's single membership.

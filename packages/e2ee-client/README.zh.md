@@ -123,6 +123,7 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 ## 账号级配对流程
 
 `@lody/e2ee-client/account-pairing` 是各宿主共用的账号级个人设备配对流程（[基础规范](../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)）。它负责标签和有效期检查、单次签名的接纳日志，以及本地终态。宿主需要提供四样东西：
+
 - `AccountPairingStore`，保存持久状态，其中不含任何密钥或私钥；
 - 中继；
 - 按工作区的端口；
@@ -131,14 +132,17 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 配对密钥只保存在内存里。桌面端使用 SQLite 存储，浏览器端的存储另行实现。身份保护方式由按工作区的端口决定，不在这个流程里决定。
 
 `@lody/e2ee-client/account-pairing/browser` 提供浏览器端的组件：
+
 - `makeIndexedDbAccountPairingStore` 为每个账号维护一个数据库。每次修改都要等事务完成后才返回；事务中止或超出存储配额时，状态不会前进。
 - `makeAccountPairingTabOwnership` 与 `withAccountPairingTabOwnership` 通过 Web Locks 保证同一时间只有一个标签页负责该账号的配对，因为配对密钥只保存在那个标签页的内存里。其他标签页会收到 `pairing-elsewhere`；标签页关闭后锁会自动释放。
 
 `@lody/e2ee-client/account-requester` 是便携宿主上新设备一侧的实现：
-- **`AccountPairingIdentityHost`** 是按工作区的宿主端口。它负责四件事：
+
+- **`AccountPairingIdentityHost`** 是按工作区的宿主端口。它负责以下几件事：
   - 根据已验证的 genesis 记录和成员身份，生成或复用该工作区的身份；
   - 报告未完成的按工作区配对；
   - 按给定的背书者安装快照邀请；
+  - 可选地从已验证的完整历史安装（`acceptAccountHistory`，用于 Member 批准、不带邀请的行）；
   - 可选地激活工作区。
 - **`makePortableAccountPairingRequester`** 把这类宿主转换成共享流程需要的新设备端口：
   - 它校验完整历史，并找出本账号唯一的成员身份。
