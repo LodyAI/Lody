@@ -2,6 +2,7 @@
 
 Status: implemented
 Type: architecture
+PR: [#2229](https://github.com/LodyAI/Lody/pull/2229)
 Translation: current
 
 [English](2026-11-02-cli-wasm-assets.md)
