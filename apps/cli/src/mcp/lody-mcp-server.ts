@@ -79,6 +79,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
+  type LodyOperationSnapshot,
   type SessionTurnInputConfig,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
@@ -122,6 +123,7 @@ import {
   resolveTurnDispatchConfig,
   readSessionMcpIdsForAuthoring,
   sendSessionChatResult,
+  type SessionChatDelivery,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -2451,7 +2453,10 @@ const activeOperationItem = (
 const markOperationItemInputDurable = (item: LodyOperationItemResult): LodyOperationItemResult =>
   item.status === 'active' ? { ...item, inputDurable: true } : item;
 
-const snapshotOperation = (requesterSessionId: SessionId, operationId: string): Promise<unknown> =>
+const snapshotOperation = (
+  requesterSessionId: SessionId,
+  operationId: string
+): Promise<LodyOperationSnapshot> =>
   withOperationStore((store) => store.snapshot(store.get(requesterSessionId, operationId)));
 
 const assertDifferentMcpSession = (
@@ -3253,6 +3258,9 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           materializationClaimToken
         )
       );
+      const snapshot = await snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
+      // Response-only receipt: never persisted, so older readers are unaffected.
+      return result.delivery ? { ...snapshot, delivery: result.delivery } : snapshot;
     }
     return snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
   });
@@ -3871,6 +3879,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (accepted.operation.state === 'finished') {
       return await withOperationStore((store) => store.snapshot(accepted.operation));
     }
+    const deliveries: Array<{ index: number; delivery: SessionChatDelivery }> = [];
     const nextItems = await mapWithConcurrency(
       accepted.operation.items,
       5,
@@ -3893,7 +3902,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           );
         }
         try {
-          await sendSessionChatResult(
+          const sent = await sendSessionChatResult(
             auth,
             workspace,
             manager,
@@ -3918,6 +3927,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               materializationClaimToken
             )
           );
+          if (sent.delivery) deliveries.push({ index, delivery: sent.delivery });
           return markOperationItemInputDurable(storedItem);
         } catch {
           // See create_many above: post-acceptance transport failure is
@@ -3931,7 +3941,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       args.operationId,
       nextItems
     );
-    return snapshotOperation(ctx.sessionId as SessionId, args.operationId);
+    const snapshot = await snapshotOperation(ctx.sessionId as SessionId, args.operationId);
+    // Response-only receipts for items sent by this call, in item order.
+    deliveries.sort((a, b) => a.index - b.index);
+    return deliveries.length > 0 ? { ...snapshot, deliveries } : snapshot;
   });
 };
 
@@ -4552,7 +4565,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn. A steer hands the running work forward; work delegated earlier still completes with the final reply. The response delivery field reports steered, queued (runs after the current turn) or dispatched (target was idle); it is absent when uncertain or on retries. A failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4645,7 +4658,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn. The response deliveries list gives {index, delivery} (steered, queued or dispatched) for items sent by this call; an item is absent when uncertain or on retries. A failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,

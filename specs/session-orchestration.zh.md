@@ -43,8 +43,10 @@ steer 是交接正在进行的工作，而不是让它失败。被委派的输�
 steer 进来的输入后，经由该后继 turn 继续推进。它的 Operation 在工作完成时完成，
 结果是后继 turn 的最终回复；不会仅因被 steer 而报告 `TARGET_FAILED`。
 
-每次被接受的 chat 都返回投递回执，说明实际发生了什么：`steered`、带排队位置的
-`queued`，或者发给空闲目标的 `dispatched`。steer 回退到排队时报告 `queued`。
+发送了输入的 chat 返回投递回执，说明实际发生了什么：`steered`、排在当前 turn
+之后的 `queued`，或者发给空闲目标的 `dispatched`。steer 回退到排队时报告 `queued`。
+回执只出现在响应中、从不持久化，因此旧版本读取方不受影响。结果不确定，或由先前的
+尝试或重放决定时，不返回回执。
 
 本机能证明未送达的 steer 与人类发送一样转为下一个普通 turn。送达不确定时绝不重放：
 该项以不可重试的 `STEER_DELIVERY_UNKNOWN` 失败，由发起请求的 Agent 决定是否重发。
@@ -200,7 +202,9 @@ Stop、新输入接受和实际提交使用同一个会话准入。支持 Inbox 
 
 steer 交接完成依据会话 `steerOperationLedger` 中已应用的记录（`coordinator-model.ts`
 中的 `findSteerSuccessor`），由 `operation-coordinator.test.ts` 的 `steer handoff` 用例覆盖。
-投递回执和“协调多个会话”一节是尚未实现的预期行为；状态仍只有 `idle`/`busy`。
+投递回执由 `apps/cli/src/commands/session.ts` 中的 `deliveryFromSteerResponse` 映射，
+由 `session-default-fallback.test.ts` 覆盖。“协调多个会话”一节是尚未实现的预期行为；
+状态仍只有 `idle`/`busy`。
 
 本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。

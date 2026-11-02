@@ -1933,8 +1933,9 @@ describe('agent chat to a busy target', () => {
     await fixture.seedChat(inputConfig);
     fixture.setActiveTurn('assistant:earlier-turn');
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'steered');
     expect(fixture.steered).toEqual([
       { expectedTurnId: 'assistant:earlier-turn', userTurnId, prompt: 'Continue' },
     ]);
@@ -1953,8 +1954,9 @@ describe('agent chat to a busy target', () => {
     fixture.setActiveTurn('assistant:earlier-turn');
     fixture.setSteerDisposition('unsupported');
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'queued');
     expect(fixture.steered).toHaveLength(1);
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
       'latestUserMsgId',
@@ -1967,8 +1969,9 @@ describe('agent chat to a busy target', () => {
     const fixture = createFixture('codex');
     await fixture.seedChat(inputConfig);
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const result = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(result).toHaveProperty('delivery', 'dispatched');
     expect(fixture.steered).toEqual([]);
     expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
   });
@@ -1995,8 +1998,9 @@ describe('agent chat to a busy target', () => {
     await fixture.run('chat', {}, userTurnId, true);
     fixture.setActiveTurn(`assistant:${userTurnId}`);
 
-    await fixture.run('chat', {}, userTurnId, true);
+    const retried = await fixture.run('chat', {}, userTurnId, true);
 
+    expect(retried).not.toHaveProperty('delivery');
     expect(fixture.steered).toEqual([]);
   });
 
@@ -2083,7 +2087,7 @@ describe('agent chat to a remote busy target', () => {
       expect((await fixture.history()).at(-1)?.status).toBe('pending_apply');
       return response('applied');
     });
-    await fixture.run();
+    expect(await fixture.run()).toHaveProperty('delivery', 'steered');
     expect((await fixture.history()).at(-1)).toMatchObject({
       id: userTurnId,
       status: 'processing',
@@ -2104,7 +2108,7 @@ describe('agent chat to a remote busy target', () => {
       });
       return response('unsupported', true);
     });
-    await fixture.run();
+    expect(await fixture.run()).toHaveProperty('delivery', 'queued');
     expect((await fixture.history()).at(-1)?.status).toBe('pending');
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty('latestUserMsgId');
     expect(fixture.dispatched).toEqual([]);
@@ -2146,7 +2150,7 @@ describe('agent chat to a remote busy target', () => {
       await sent;
       await vi.advanceTimersByTimeAsync(5_000);
     }
-    await sending;
+    expect(await sending).toHaveProperty('delivery', 'queued');
     const turn = (await fixture.history()).at(-1);
     expect(turn).toMatchObject({ id: userTurnId, status: 'pending' });
     expect(fixture.metadata.get(getSessionRoomId(sessionId))).toHaveProperty(
@@ -2154,7 +2158,7 @@ describe('agent chat to a remote busy target', () => {
       userTurnId
     );
     // Operation recovery dispatches the same ordinary turn, without offering it again.
-    await fixture.run(false);
+    expect(await fixture.run(false)).not.toHaveProperty('delivery');
     expect((await fixture.history()).filter((entry) => entry.id === userTurnId)).toHaveLength(1);
   });
 
@@ -2293,6 +2297,50 @@ describe('agent chat to a remote busy target', () => {
 });
 
 describe('MCP chat steering', () => {
+  it('returns response-only delivery receipts from session_chat and session_chat_many', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-chat-receipt-'));
+    roots.add(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const fixture = createFixture('codex');
+    await fixture.seedChat({ prompt: 'Running target', cliType: 'builtin', agentType: 'codex' });
+    const requesterSessionId = 'chat-receipt-requester' as SessionId;
+    await fixture.seedChat(
+      { prompt: 'Coordinate the child', cliType: 'builtin', agentType: 'codex' },
+      requesterSessionId
+    );
+    fixture.setActiveTurn('assistant:earlier-turn');
+
+    const single = await fixture.runMcp(requesterSessionId, () =>
+      __lodyMcpServerInternals.startSessionChatOperation({
+        operationId: 'chat-receipt-single',
+        sessionId,
+        prompt: 'Change direction',
+      })
+    );
+    expect(single).toHaveProperty('delivery', 'steered');
+
+    fixture.setActiveTurn(undefined);
+    const many = await fixture.runMcp(requesterSessionId, () =>
+      __lodyMcpServerInternals.startSessionChatManyOperation(
+        __lodyMcpServerInternals.SessionChatManyToolInputSchema.parse({
+          operationId: 'chat-receipt-many',
+          items: [{ sessionId, prompt: 'Next step' }],
+        })
+      )
+    );
+    expect(many).toHaveProperty('deliveries', [{ index: 0, delivery: 'dispatched' }]);
+
+    const store = new LodyOperationStore(getLodyOperationStorePath(machineId));
+    try {
+      // The receipt is never persisted with the Operation.
+      expect(JSON.stringify(store.get(requesterSessionId, 'chat-receipt-single'))).not.toContain(
+        '"delivery"'
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   it('steers a busy target and fails the Operation when delivery is unknown', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-steer-chat-'));
     roots.add(root);
@@ -2307,13 +2355,14 @@ describe('MCP chat steering', () => {
       requesterSessionId
     );
     const operationId = 'steer-chat-operation';
-    await fixture.runMcp(requesterSessionId, () =>
+    const accepted = await fixture.runMcp(requesterSessionId, () =>
       __lodyMcpServerInternals.startSessionChatOperation({
         operationId,
         sessionId,
         prompt: 'Change direction',
       })
     );
+    expect(accepted).not.toHaveProperty('delivery');
 
     const storePath = getLodyOperationStorePath(machineId);
     const store = new LodyOperationStore(storePath);

@@ -49,9 +49,11 @@ running turn is handed off to a steered input continues through that successor.
 Its Operation completes when the work completes, with the successor's final reply,
 and never reports `TARGET_FAILED` merely because it was steered.
 
-Every accepted chat returns a delivery receipt saying what actually happened:
-`steered`, `queued` with its position, or `dispatched` to an idle target. A steer
-that falls back to the queue reports `queued`.
+A chat that sends its input returns a delivery receipt saying what actually
+happened: `steered`, `queued` behind the running turn, or `dispatched` to an idle
+target. A steer that falls back to the queue reports `queued`. The receipt is
+response-only and never persisted, so older readers are unaffected. It is absent
+when the outcome is uncertain or was decided by an earlier attempt or replay.
 
 On the calling Machine, a steer that is provably not delivered becomes the next
 ordinary turn, as it does for a human. An uncertain delivery is never replayed: the item fails with
@@ -307,9 +309,11 @@ transport failure, claim/settlement races, restart and result expiry.
 
 Steer handoff completion follows applied records in the Session's
 `steerOperationLedger` (`findSteerSuccessor` in `coordinator-model.ts`), covered by
-the `steer handoff` cases in `operation-coordinator.test.ts`. Delivery receipts and
-the Coordinating many Sessions section are intended behavior not yet implemented;
-status still exposes only `idle`/`busy`.
+the `steer handoff` cases in `operation-coordinator.test.ts`. Delivery receipts are
+mapped by `deliveryFromSteerResponse` in `apps/cli/src/commands/session.ts` and
+covered by `session-default-fallback.test.ts`. The Coordinating many Sessions
+section is intended behavior not yet implemented; status still exposes only
+`idle`/`busy`.
 
 This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.
