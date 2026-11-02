@@ -185,7 +185,9 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   notice with its file actions. The viewer starts at fit width and offers page
   thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
   and expandable search. Thumbnail rendering follows the visible sidebar range;
-  file actions remain in the existing side-panel menu.
+  file actions remain in the existing side-panel menu. The PDF viewer owns its
+  scrollport in a definite-height panel and reapplies fit zoom on resize; see
+  [PDF side-panel layout](../notes/implemented/bug-fix/2026-10-24-pdf-side-panel-layout.md).
   Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
   export for the main-thread fallback. Clear the viewer document before aborting
   its lifetime. The PDF.js patch makes global selection listeners belong to all

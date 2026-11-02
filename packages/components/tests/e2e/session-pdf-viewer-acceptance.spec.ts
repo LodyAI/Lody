@@ -558,3 +558,43 @@ test.describe('high-density document regions', () => {
     expect(result.logicalWidth).toBe('1500px');
   });
 });
+
+for (const story of ['pdf-file-panel', 'pdf-collapsed-file-panel']) {
+  test(`PDF fills its file panel and refits after resizing: ${story}`, async ({ page }) => {
+    await page.goto(`/iframe.html?id=sessions-sessionfilebinarypreview--${story}&viewMode=story`);
+    if (story === 'pdf-collapsed-file-panel') {
+      await expect(page.locator('.pdfViewer .page')).toHaveCount(0);
+    }
+    await page.getByRole('button', { name: 'Open PDF', exact: true }).click();
+    const viewer = page.locator('.pdfViewer');
+    const firstPage = viewer.locator('.page[data-page-number="1"]');
+    await expect
+      .poll(() => viewer.evaluate((element) => element.parentElement!.clientHeight))
+      .toBeGreaterThan(400);
+    await expect(firstPage.locator('canvas[role="presentation"]')).toBeVisible();
+    await expect(firstPage.locator('.textLayer')).toContainText('Overview');
+    await expect(page.getByRole('combobox', { name: 'Zoom level' })).toContainText('Fit width');
+    const fittedWidth = (await firstPage.boundingBox())!.width;
+    const handle = (await page.getByRole('separator').boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x - 120, handle.y + handle.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await firstPage.boundingBox())!.width)
+      .toBeGreaterThan(fittedWidth + 80);
+    await expect(firstPage.locator('.textLayer')).toContainText('Overview');
+    await page.getByRole('combobox', { name: 'Zoom level' }).click();
+    await page.getByRole('option', { name: '50%', exact: true }).click();
+    const fixedWidth = (await firstPage.boundingBox())!.width;
+    const resizedHandle = (await page.getByRole('separator').boundingBox())!;
+    await page.mouse.move(resizedHandle.x, resizedHandle.y + resizedHandle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizedHandle.x + 100, resizedHandle.y + resizedHandle.height / 2, {
+      steps: 8,
+    });
+    await page.mouse.up();
+    await expect(page.getByRole('combobox', { name: 'Zoom level' })).toContainText('50%');
+    expect((await firstPage.boundingBox())!.width).toBeCloseTo(fixedWidth, 0);
+  });
+}
