@@ -52,11 +52,20 @@ function Probe() {
   );
 }
 
+const paintPalette = {
+  '--sidebar-background': '215 35% 28%',
+  '--sidebar-foreground': '38 85% 72%',
+  '--background': '198 45% 90%',
+  '--input-field': '188 42% 76%',
+} as CSSProperties;
+
 function Fixture({
   opaque = false,
+  palette = false,
   ancestorClassName,
 }: {
   opaque?: boolean;
+  palette?: boolean;
   ancestorClassName?: string;
 }) {
   const [external, setExternal] = useState('none');
@@ -74,7 +83,13 @@ function Fixture({
     >
       <SidebarProvider
         data-sidebar-parts-fixture
-        style={{ '--sidebar-width': '16rem', '--sidebar-width-icon': '3rem' } as CSSProperties}
+        style={
+          {
+            '--sidebar-width': '16rem',
+            '--sidebar-width-icon': '3rem',
+            ...(palette ? paintPalette : {}),
+          } as CSSProperties
+        }
       >
         <Sidebar collapsible="icon">
           <SidebarHeader
@@ -214,3 +229,5 @@ export const ZeroSpecificityMenuWidth: Story = {
 export const ZeroSpecificityLabelHeight: Story = {
   render: () => <Fixture ancestorClassName="[:where(&)_:where([data-sidebar=group-label])]:h-12" />,
 };
+
+export const Palette: Story = { render: () => <Fixture palette /> };

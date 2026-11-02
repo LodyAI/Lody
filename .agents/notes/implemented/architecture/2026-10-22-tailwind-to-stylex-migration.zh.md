@@ -1854,18 +1854,19 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
 六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-工作树已集成229，components在1,399产品源识别1,219处AST／141文件／837未解析。
-helper222仍为30源／191处／八文件／21未解析；v2合计1,410处／149文件／858未解析表达式。
-九个owner的已知桥输出106处，另四个仅桥consumer不在AST utility文件列表。
-**保守兼容下界仍为1,516处／153文件**。228／229再迁二十个归属位置；二十四保留alias仍依赖
-Tailwind排序。未解析含正常StyleX／runtime值与import绑定，不是858个已确认utility或完成率。
-历史切面不回写。构建单元227不给consumer信用，sample不进产品。
+工作树已集成234／235，components在1,399产品源识别1,141处AST／141文件／935未解析。
+helper222仍为30源／191处／八文件／21未解析；v2合计1,332处／149文件／956未解析表达式。
+十二个owner的已知桥输出184处，另四个仅桥consumer不在AST utility文件列表。
+**保守兼容下界仍为1,516处／153文件**。最新78处转移声明归属，仍保alias与Tailwind排序。
+未解析含正常StyleX／runtime值与import绑定，不是956个已确认utility或完成率。
+历史切面不回写；仅构建232／235不给consumer信用。
 
-inventory-source-through229-integrated-proof.json及inventory-v2-through229-integrated-fullsrc.json
-拥有227上的六文件guard覆盖，全部1,399产品源与Root逐字节核对；helper仍为冻结222切面。
-库存排除story，但其literal可影响CSS扫描。新组合Root资格与原21＋18对全同的单元矩阵、
-已完成223–227资格分列。[桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)
-拥有真实公开容器反例、元数据扫描修复、pointer／cursor历史及全部原OPEN；新CSS或帧同不关闭旧差。
+inventory-source-through234235-integrated-proof.json及inventory-v2-through234235-integrated-fullsrc.json
+拥有全部1,399份已hash产品输入；helper仍为冻结222切面。库存排除story，但其literal可影响CSS扫描。
+当前Root资格与原230–234矩阵及235的44key工具证明分列，保233五个绘制OPEN及原未采selection
+endpoints、26对组合补充的四OPEN、234五个mobile-UA OPEN。
+[桥决定](2026-10-31-stylex-cascade-compatibility.zh.md#证据与限制)拥有显式producer阶段、canonical
+key复用、真实公开容器反例、元数据扫描修复及全部原OPEN；新CSS或帧同不关闭旧差。
 
 此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
 在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，

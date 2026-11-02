@@ -3,6 +3,17 @@ import { ChevronDown } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 
 import { cn } from '@/lib/utils';
+import {
+  acpCompactIconClass,
+  acpCompactTextLeadClass,
+  acpCompactTextTailClass,
+  acpMinimumClass,
+  acpGapClass,
+  acpIconClass,
+  acpLabelClass,
+  acpPlainCornerClass,
+  acpPlainPaddingClass,
+} from '@/style/legacy-defaults.stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@/ui/armed-overlays';
 import { Menu } from '@/ui/menu';
@@ -48,8 +59,8 @@ const styles = stylex.create({
 const compactClassName = (_isDark: boolean, iconOnly: boolean) =>
   cn(
     iconOnly
-      ? 'h-6 w-6 rounded-[4px] px-0'
-      : 'h-6 w-auto min-w-0 shrink rounded-[4px] px-2 gap-1 [&_span]:text-xs [&_span]:leading-tight',
+      ? acpCompactIconClass
+      : `${acpCompactTextLeadClass} shrink ${acpCompactTextTailClass} [&_span]:text-xs [&_span]:leading-tight`,
     'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
   );
 
@@ -86,12 +97,14 @@ export function AcpSessionSelect({
       size="mini"
       icon={iconOnly}
       className={cn(
-        'min-w-0 select-none gap-1 text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
+        `${acpMinimumClass} select-none ${acpGapClass} text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0`,
         variant === 'compact' && compactClassName(isDark, iconOnly),
-        variant !== 'compact' && iconOnly && 'h-6 w-6 rounded-[4px]',
-        variant !== 'compact' && !iconOnly && 'h-8 px-2',
+        variant !== 'compact' && iconOnly && acpIconClass,
+        variant !== 'compact' && !iconOnly && acpLabelClass,
         variant === 'default' && !iconOnly && 'rounded-full hover:bg-hover',
-        variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
+        variant === 'text' &&
+          !iconOnly &&
+          `${acpPlainCornerClass} bg-transparent ${acpPlainPaddingClass} hover:bg-transparent`,
         className
       )}
       aria-label={withSelectedLabel(ariaLabel)}

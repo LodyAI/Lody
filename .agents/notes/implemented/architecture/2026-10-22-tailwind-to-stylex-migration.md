@@ -2616,27 +2616,29 @@ Six redundant size/shrink occurrences remain separate cleanup; restored native
 compiler-trial defaults receive zero credit. The declaration bridge transfers
 ownership while retaining legacy output.
 
-The working integrated229 component cut recognizes1,219 AST occurrences in141
-files and837 unresolved expressions across1,399 production sources. Helper222
+The working integrated234/235 component cut recognizes1,141 AST occurrences in141
+files and935 unresolved expressions across1,399 production sources. Helper222
 remains191 occurrences/eight files/21 unresolved expressions across30 sources.
-Their v2 union is1,410 occurrences/149 files/858 unresolved expressions. Known
-bridge output is106 positions across nine owners; four bridge-only consumers
+Their v2 union is1,332 occurrences/149 files/956 unresolved expressions. Known
+bridge output is184 positions across twelve owners; four bridge-only consumers
 are outside the AST utility file list. The **conservative compatibility lower
-bound remains1,516 occurrences in153 files**. Scope228/229 transfers twenty more
-positions; its twenty-four retained aliases still depend on Tailwind ordering.
+bound remains1,516 occurrences in153 files**. The latest78 positions transfer
+declaration ownership while retaining their aliases and Tailwind ordering.
 Unresolved expressions include ordinary StyleX/runtime values and imported
-bindings, not858 confirmed utilities or a completion ratio. Earlier cuts remain
-frozen. Build-only227 has zero consumer credit; its sample is not production.
+bindings, not956 confirmed utilities or a completion ratio. Earlier cuts remain
+frozen; build-only232/235 have zero consumer credit.
 
-`inventory-source-through229-integrated-proof.json` and
-`inventory-v2-through229-integrated-fullsrc.json` own the guarded six-file overlay
-on227 and verify all1,399 production source bytes against Root. Helper remains
-its frozen222 cut. Stories are excluded from this inventory but can affect CSS
-scanning. The new combined Root qualification is separate from the original
-21+18 exact per-unit matrices and the completed223–227 qualification. The
+`inventory-source-through234235-integrated-proof.json` and
+`inventory-v2-through234235-integrated-fullsrc.json` own all1,399 hashed production
+inputs. Helper remains its frozen222 cut. Stories are excluded from inventory but
+can affect CSS scanning. Current Root qualification remains separate from the
+original230–234 matrices and235's44-key tool proof. This includes233's five paint
+OPENs/uncaptured original selection endpoints, the combined26-pair supplement's
+four OPENs and234's five mobile-UA OPENs. The
 [bridge decision](2026-10-31-stylex-cascade-compatibility.md#evidence-and-limits)
-owns the real public-container rejection, metadata scan repair, pointer/cursor
-history and all original OPENs; later matching CSS or frames do not close them.
+owns the explicit producer phases, canonical key reuse, real public-container
+rejection, metadata scan repair and all original OPENs; later matching CSS or
+frames do not close them.
 
 Earlier204 template-class removals changed unresolved counts without extra utility
 removal. Scope185 removes twenty manually audited literals but only seven were in

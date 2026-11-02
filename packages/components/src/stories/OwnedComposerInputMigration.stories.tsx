@@ -26,11 +26,13 @@ function InputFixture({
   fallback = false,
   outerGroup = false,
   disabled = false,
+  secondary = false,
 }: {
   variant?: 'landing' | 'session' | 'dialog';
   fallback?: boolean;
   outerGroup?: boolean;
   disabled?: boolean;
+  secondary?: boolean;
 }) {
   const [value, setValue] = useState('');
   return (
@@ -65,6 +67,9 @@ function InputFixture({
             promptDisabled={disabled}
             promptPlaceholder="Write a message with the mention field branch."
             primaryAction={<Button disabled={disabled}>Send</Button>}
+            secondaryAction={
+              secondary ? { label: 'Cancel', onClick: () => setValue(''), disabled } : undefined
+            }
           />
         )}
       </div>
@@ -117,3 +122,8 @@ export const PlainFallback: Story = { args: { fallback: true } };
 
 export const KeyboardHint: Story = { render: () => <BoundInputFixture /> };
 export const OuterGroupKeyboardHint: Story = { render: () => <BoundInputFixture outerGroup /> };
+
+export const LandingSecondary: Story = { args: { secondary: true } };
+export const SessionSecondary: Story = { args: { variant: 'session', secondary: true } };
+export const DialogSecondary: Story = { args: { variant: 'dialog', secondary: true } };
+export const DisabledSecondary: Story = { args: { secondary: true, disabled: true } };

@@ -1,3 +1,21 @@
+import {
+  composerLandingMinimumClass,
+  composerLandingInsetClass,
+  composerSessionInsetClass,
+  composerMobileMinimumClass,
+  composerDesktopMinimumClass,
+  composerDialogInsetClass,
+  composerDialogShapeClass,
+  composerTransparentClass,
+  composerDialogActionClass,
+  composerLandingActionClass,
+  composerSessionActionClass,
+  composerLandingActionWidthClass,
+  composerActionWidthClass,
+  composerHintInsetClass,
+  composerPastedPaddingClass,
+  composerPastedMaximumClass,
+} from '@/style/legacy-defaults.stylex';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useEffect,
@@ -732,11 +750,16 @@ export function getChatComposerTextareaClassName({
     'input-scrollbar transition-shadow',
     stylex.props(typography.prompt).className,
     isLanding
-      ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
+      ? cn(
+          composerLandingMinimumClass,
+          'border-transparent',
+          composerLandingInsetClass,
+          'sm:min-h-[140px]'
+        )
       : cn(
-          'border-transparent bg-transparent px-1 py-0',
+          cn('border-transparent', composerSessionInsetClass),
           // Mobile session composer floors at a single line; desktop keeps two.
-          isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
+          isMobile ? composerMobileMinimumClass : composerDesktopMinimumClass
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
@@ -1143,9 +1166,14 @@ export function ChatComposer({
     : undefined;
 
   const dialogTextareaClassName = cn(
-    'input-scrollbar min-h-[120px] px-4 py-3 transition-shadow sm:min-h-[120px]',
+    cn('input-scrollbar', composerDialogInsetClass, 'transition-shadow sm:min-h-[120px]'),
     stylex.props(typography.prompt).className,
-    'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
+    cn(
+      composerDialogShapeClass,
+      'border-transparent',
+      composerTransparentClass,
+      'focus-visible:ring-0 focus-visible:ring-offset-0'
+    ),
     'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
@@ -1153,13 +1181,15 @@ export function ChatComposer({
     stylex.props(isLanding ? typography.caption : typography.code).className,
     'select-none border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
     isDialog
-      ? 'h-10 rounded-lg px-5'
+      ? composerDialogActionClass
       : isLanding
-        ? 'h-6 rounded-[4px] px-2'
-        : 'h-7 rounded-md px-2.5'
+        ? composerLandingActionClass
+        : composerSessionActionClass
   );
 
-  const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
+  const actionWidthClassName = isLanding
+    ? composerLandingActionWidthClass
+    : composerActionWidthClass;
 
   // Focus stays quiet: the caret and placeholder already show where typing
   // goes, so the composer keeps its resting border instead of an accent ring.
@@ -1569,7 +1599,7 @@ export function ChatComposer({
                 // placeholder would otherwise run under the top-right ⌘L chip. Reserve
                 // room for it so the placeholder wraps before the chip; the padding is
                 // dropped once the user types (showFocusHint → false → full width).
-                className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
+                className={cn(boxTextareaClassName, showFocusHint && composerHintInsetClass)}
                 data-keyboard-nav="composer"
               />
 
@@ -1765,7 +1795,7 @@ export function ChatComposer({
                 closeButton={false}
                 className={cn(
                   stylex.props(styles.pastedDrawerContent).className,
-                  'rounded-t-2xl p-0'
+                  cn('rounded-t-2xl', composerPastedPaddingClass)
                 )}
               >
                 {previewPastedTextDraft ? (
@@ -1833,7 +1863,10 @@ export function ChatComposer({
               width="48rem"
               padding="none"
               gap="none"
-              className={cn(stylex.props(styles.pastedDialogContent).className, 'max-h-[85vh]')}
+              className={cn(
+                stylex.props(styles.pastedDialogContent).className,
+                composerPastedMaximumClass
+              )}
             >
               {previewPastedTextDraft ? (
                 <>

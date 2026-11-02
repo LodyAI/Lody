@@ -1,10 +1,18 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import tailwindPostcss from '@tailwindcss/postcss';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import postcss from 'postcss';
+import { optimize } from '@tailwindcss/node';
 import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping';
 import { describe, expect, it, vi } from 'vitest';
-import { compileLegacyDeclarations, replaceLegacyDeclarations } from '../vite-legacy-declarations';
+import {
+  compileLegacyDeclarations,
+  replaceLegacyDeclarations,
+  legacyDeclarationBridge as configuredDeclarationBridge,
+  type LegacyPostcssOptions,
+} from '../vite-legacy-declarations';
 import { legacyBindings, legacyDeclarations } from '../src/style/legacy-declaration-profile';
 import * as actualBindings from '../src/style/legacy-defaults.stylex';
 import { cn } from '../src/lib/utils';
@@ -14,17 +22,30 @@ import preset from '@lody/configs/tailwind-preset';
 
 const filename = fileURLToPath(new URL('../src/style/legacy-defaults.stylex.ts', import.meta.url));
 const raw = readFileSync(filename, 'utf8');
-const originalCSS = async (candidates = legacyDeclarations.map((s) => s.alias)) => {
+const originalSource = () => {
   // Use configured values through Tailwind's CSS theme API; @config also installs unrelated width utilities.
   const maximum = defaultTheme.maxWidth({ theme: () => ({}), colors: defaultTheme.colors }).xs;
   const radius = preset.theme.extend.borderRadius.lg;
   const mediumRadius = preset.theme.extend.borderRadius.md;
-  const muted = preset.theme.extend.colors.muted.DEFAULT.replace('<alpha-value>', '1');
-  const theme = `@theme inline { --container-xs: ${maximum}; --radius-lg: ${radius}; --radius-md: ${mediumRadius}; --color-muted: ${muted}; }`;
+  const colors = preset.theme.extend.colors;
+  const opaque = (color: string) => color.replace('<alpha-value>', '1');
+  const theme = `@theme inline {
+    --container-xs: ${maximum};
+    --radius-lg: ${radius};
+    --radius-md: ${mediumRadius};
+    --color-muted: ${opaque(colors.muted.DEFAULT)};
+    --color-sidebar: ${opaque(colors.sidebar.DEFAULT)};
+    --color-background: ${opaque(colors.background)};
+    --color-input-field: ${opaque(colors.input.field)};
+    --color-sidebar-foreground: ${opaque(colors.sidebar.foreground)};
+  }`;
   return (
-    await compile('@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; }' + theme)
-  ).build(candidates);
+    '@layer utilities { @tailwind utilities; } @theme { --spacing: .25rem; --radius-2xl: 1rem; }' +
+    theme
+  );
 };
+const originalCSS = async (candidates = legacyDeclarations.map((s) => s.alias)) =>
+  (await compile(originalSource())).build(candidates);
 
 describe('closed legacy declaration bridge', () => {
   it('folds real bindings without changing cn public class identity', () => {
@@ -460,5 +481,275 @@ describe('style keys with distinct values of the same property', () => {
       duplicateSpecs,
       bindings
     );
+  });
+});
+
+const optimizedSpecs = [
+  { key: 'shrinking', alias: 'shrink', js: 'flexShrink', css: ['flex', 'shrink'].join('-') },
+  { key: 'fullCorner', alias: 'rounded-full', js: 'borderRadius', css: 'border-radius' },
+  { key: 'transparent', alias: 'bg-transparent', js: 'backgroundColor', css: 'background-color' },
+];
+const optimizedBindings = {
+  shrinkClass: ['shrinking'],
+  cornerClass: ['fullCorner'],
+  transparentClass: ['transparent'],
+};
+const optimizedSource = `import * as stylex from '@stylexjs/stylex';
+function legacyClass(_classes: string | undefined): string { throw new Error('fixture'); }
+const styles = stylex.create({
+  shrinking: { flexShrink: 1 },
+  fullCorner: { borderRadius: 'calc(infinity * 1px)' },
+  transparent: { backgroundColor: 'transparent' },
+});
+export const shrinkClass = legacyClass(stylex.props(styles.shrinking).className);
+export const cornerClass = legacyClass(stylex.props(styles.fullCorner).className);
+export const transparentClass = legacyClass(stylex.props(styles.transparent).className);
+`;
+describe('same-phase native declaration optimization', () => {
+  it.each([false, { minify: false }, { minify: true }] as const)(
+    'keeps the full original stylesheet and author maps with phase %j',
+    async (phase) => {
+      await withKeyProfile(
+        async (api) => {
+          const aliases = [...optimizedSpecs.map((spec) => spec.alias), optimizedSpecs[0].css];
+          const rawCSS = await originalCSS(aliases);
+          const css = phase ? optimize(rawCSS, phase).code : rawCSS;
+          const compiled = api.compileLegacyDeclarations(optimizedSource, filename);
+          const result = api.replaceLegacyDeclarations(
+            css,
+            'owned.css',
+            compiled,
+            undefined,
+            phase
+          );
+          expect(result.css).toBe(css);
+          const owned: postcss.Declaration[] = [];
+          result.root.walkDecls((decl) => {
+            if (decl.source?.input.file === filename) owned.push(decl);
+          });
+          expect(owned).toHaveLength(3);
+          const map = new TraceMap(
+            result.map!.toJSON(),
+            pathToFileURL(path.resolve('owned.css')).href
+          );
+          const generated = postcss.parse(result.css);
+          for (const spec of optimizedSpecs) {
+            generated.walkRules((rule) => {
+              if (!postcss.list.comma(rule.selector).includes('.' + spec.alias)) return;
+              const decl = rule.first!;
+              const location = originalPositionFor(map, {
+                line: decl.source!.start!.line,
+                column: decl.source!.start!.column - 1,
+              });
+              const offset = optimizedSource.indexOf(
+                spec.js + ':',
+                optimizedSource.indexOf(spec.key + ':')
+              );
+              const lines = optimizedSource.slice(0, offset).split('\n');
+              expect(location.line).toBe(lines.length);
+              expect(location.column).toBe(lines.at(-1)!.length);
+              expect(fileURLToPath(location.source!)).toBe(filename);
+            });
+          }
+          for (const [from, to] of [
+            ['flexShrink: 1', 'flexShrink: 0'],
+            ["'calc(infinity * 1px)'", "'111px'"],
+            ["backgroundColor: 'transparent'", "backgroundColor: 'red'"],
+          ]) {
+            const invalid = api.compileLegacyDeclarations(
+              optimizedSource.replace(from, to),
+              filename
+            );
+            expect(() =>
+              api.replaceLegacyDeclarations(css, 'owned.css', invalid, undefined, phase)
+            ).toThrow('Unequal compatibility declaration');
+          }
+        },
+        optimizedSpecs,
+        optimizedBindings
+      );
+    }
+  );
+  it('rejects complex, repeated, ambiguous and multiply claimed selector slots', async () => {
+    await withKeyProfile(
+      async (api) => {
+        const rawCSS = await originalCSS([
+          ...optimizedSpecs.map((spec) => spec.alias),
+          optimizedSpecs[0].css,
+        ]);
+        const css = optimize(rawCSS, { minify: true }).code;
+        const compiled = api.compileLegacyDeclarations(optimizedSource, filename);
+        for (const selector of ['.shrink, .other:hover', '.shrink,.shrink']) {
+          const ast = postcss.parse(css);
+          ast.walkRules((rule) => {
+            if (postcss.list.comma(rule.selector).includes('.shrink')) rule.selector = selector;
+          });
+          expect(() =>
+            api.replaceLegacyDeclarations(ast.toString(), 'owned.css', compiled, undefined, {
+              minify: true,
+            })
+          ).toThrow();
+        }
+        const duplicate = postcss.parse(css);
+        duplicate.walkRules((rule) => {
+          if (postcss.list.comma(rule.selector).includes('.shrink')) {
+            rule.after(rule.clone({ selector: '.shrink' }));
+            return false;
+          }
+          return undefined;
+        });
+        expect(() =>
+          api.replaceLegacyDeclarations(duplicate.toString(), 'owned.css', compiled, undefined, {
+            minify: true,
+          })
+        ).toThrow('Missing or ambiguous compatibility slot');
+        const shared = {
+          ...compiled,
+          declarations: [
+            ...compiled.declarations,
+            { ...compiled.declarations[0], alias: optimizedSpecs[0].css },
+          ],
+        };
+        expect(() =>
+          api.replaceLegacyDeclarations(css, 'owned.css', shared, undefined, { minify: true })
+        ).toThrow('Ambiguous shared compatibility declaration');
+      },
+      optimizedSpecs,
+      optimizedBindings
+    );
+  });
+});
+
+describe('explicit Tailwind pipeline options', () => {
+  it.each([
+    { command: 'serve', tailwindOptions: {}, cssMinify: true, phase: false },
+    { command: 'build', tailwindOptions: {}, cssMinify: true, phase: { minify: true } },
+    { command: 'build', tailwindOptions: {}, cssMinify: false, phase: { minify: false } },
+    { command: 'build', tailwindOptions: { optimize: false }, cssMinify: true, phase: false },
+    {
+      command: 'build',
+      tailwindOptions: { optimize: { minify: false } },
+      cssMinify: true,
+      phase: { minify: false },
+    },
+  ] as const)(
+    'validates the actual CSS hook for %j',
+    async ({ command, tailwindOptions, cssMinify, phase }) => {
+      const { legacyDeclarationBridge } = await import('../vite-legacy-declarations');
+      const plugin = legacyDeclarationBridge({ tailwindOptions })[1];
+      const configHook = plugin.configResolved!;
+      const configure = typeof configHook === 'function' ? configHook : configHook.handler;
+      Reflect.apply(configure, {}, [{ command, build: { cssMinify } }]);
+      const rawCSS = await originalCSS();
+      const css = phase ? optimize(rawCSS, phase).code : rawCSS;
+      const transformHook = plugin.transform!;
+      const transform = typeof transformHook === 'function' ? transformHook : transformHook.handler;
+      const result = Reflect.apply(
+        transform,
+        {
+          addWatchFile() {},
+          getCombinedSourcemap() {
+            return undefined;
+          },
+        },
+        [css, fileURLToPath(new URL('../src/tailwind/index.css', import.meta.url))]
+      );
+      const expected = postcss.parse(css);
+      if (!phase)
+        expected.walkRules('.opacity-70', (rule) => {
+          (rule.first as postcss.Declaration).value = '.7';
+        });
+      expect(result.code.split('\n/*# sourceMappingURL=')[0]).toBe(expected.toString());
+      expect(result.map.sourcesContent).toContain(raw);
+    }
+  );
+});
+
+describe('explicit configured PostCSS phase', () => {
+  it.each([
+    { name: 'production default', environment: 'production', command: 'build', setting: undefined },
+    {
+      name: 'development default',
+      environment: 'development',
+      command: 'serve',
+      setting: undefined,
+    },
+    { name: 'explicit false', environment: 'production', command: 'build', setting: false },
+    { name: 'object default', environment: 'production', command: 'build', setting: {} },
+    {
+      name: 'object false',
+      environment: 'production',
+      command: 'build',
+      setting: { minify: false },
+    },
+    { name: 'object true', environment: 'production', command: 'build', setting: { minify: true } },
+    {
+      name: 'explicit true during serve',
+      environment: 'production',
+      command: 'serve',
+      setting: true,
+    },
+  ] as const)(
+    '$name uses the real producer and bridge with the same options',
+    async ({ environment, command, setting }) => {
+      const require = createRequire(import.meta.url);
+      const configFile = fileURLToPath(new URL('../postcss.config.cjs', import.meta.url));
+      const cached = require.cache[configFile];
+      let producer: LegacyPostcssOptions;
+      vi.stubEnv('NODE_ENV', environment);
+      try {
+        delete require.cache[configFile];
+        const config = require(configFile) as {
+          plugins: { '@tailwindcss/postcss': LegacyPostcssOptions };
+        };
+        producer = config.plugins['@tailwindcss/postcss'];
+        expect(producer.optimize).toBe(environment === 'production');
+        if (setting !== undefined) producer.optimize = setting;
+      } finally {
+        delete require.cache[configFile];
+        if (cached) require.cache[configFile] = cached;
+        vi.unstubAllEnvs();
+      }
+      const cssFile = fileURLToPath(new URL('../src/tailwind/index.css', import.meta.url));
+      const boundedSource =
+        originalSource().replace('@tailwind utilities;', '@tailwind utilities source(none);') +
+        `\n@source inline(${JSON.stringify(legacyDeclarations.map((entry) => entry.alias).join(' '))});`;
+      const actual = await postcss([tailwindPostcss(producer)]).process(boundedSource, {
+        from: cssFile,
+        map: false,
+      });
+      expect(actual.messages.some((message) => message.type === 'dir-dependency')).toBe(false);
+      const bridge = configuredDeclarationBridge({ postcssOptions: producer })[1];
+      const configHook = bridge.configResolved!;
+      Reflect.apply(typeof configHook === 'function' ? configHook : configHook.handler, {}, [
+        { command, build: { cssMinify: false } },
+      ]);
+      const transformHook = bridge.transform!;
+      const result = Reflect.apply(
+        typeof transformHook === 'function' ? transformHook : transformHook.handler,
+        {
+          addWatchFile() {},
+          getCombinedSourcemap() {
+            return undefined;
+          },
+        },
+        [actual.css, cssFile]
+      );
+      const expected = postcss.parse(actual.css);
+      if (producer.optimize === false)
+        expected.walkRules('.opacity-70', (rule) => {
+          (rule.first as postcss.Declaration).value = '.7';
+        });
+      expect(result.code.split('\n/*# sourceMappingURL=')[0]).toBe(expected.toString());
+      expect(result.map.sourcesContent).toContain(raw);
+    }
+  );
+  it('rejects an implicit PostCSS phase or two different producers', () => {
+    expect(() =>
+      configuredDeclarationBridge({ postcssOptions: {} as LegacyPostcssOptions })
+    ).toThrow('PostCSS phase must be explicit');
+    expect(() =>
+      configuredDeclarationBridge({ tailwindOptions: {}, postcssOptions: { optimize: false } })
+    ).toThrow('Choose one stylesheet producer');
   });
 });

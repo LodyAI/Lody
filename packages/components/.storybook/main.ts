@@ -62,8 +62,9 @@ const config: StorybookConfig = {
       if (name.startsWith('vite-plugin-top-level-await')) return false;
       return true;
     });
-    viteConfig.plugins.push(tailwindcss());
-    viteConfig.plugins.push(...legacyDeclarationBridge());
+    const tailwindOptions = {};
+    viteConfig.plugins.push(tailwindcss(tailwindOptions));
+    viteConfig.plugins.push(...legacyDeclarationBridge({ tailwindOptions }));
     viteConfig.plugins.push(stylex.vite(stylexOptions));
     viteConfig.plugins.push({
       name: 'storybook-diffs-web-component-registration',

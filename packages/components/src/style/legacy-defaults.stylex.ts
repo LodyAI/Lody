@@ -29,6 +29,37 @@ const styles = stylex.create({
   sidebarHeightFive: { height: 'calc(var(--spacing) * 5)' },
   sidebarCornerMedium: { borderRadius: 'var(--radius-md)' },
   heightFull: { height: '100%' },
+  acpHeightSix: { height: 'calc(var(--spacing) * 6)' },
+  acpWidthSix: { width: 'calc(var(--spacing) * 6)' },
+  acpWidthAuto: { width: 'auto' },
+  acpCornerFour: { borderRadius: '4px' },
+  acpInlineZero: { paddingInline: 'calc(var(--spacing) * 0)' },
+  acpInlineOne: { paddingInline: 'calc(var(--spacing) * 1)' },
+  acpInlineTwo: { paddingInline: 'calc(var(--spacing) * 2)' },
+  acpGapOne: { gap: 'calc(var(--spacing) * 1)' },
+  sidebarFill: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
+  pageFill: { backgroundColor: 'hsl(var(--background) / 1)' },
+  inputFill: { backgroundColor: 'hsl(var(--input-field) / 1)' },
+  sidebarInk: { color: 'hsl(var(--sidebar-foreground) / 1)' },
+  paddingZero: { padding: 'calc(var(--spacing) * 0)' },
+  centeredContent: { justifyContent: 'center' },
+  squareAspect: { aspectRatio: '1 / 1' },
+  ignorePointer: { pointerEvents: 'none' },
+  projectBottomOne: { marginBottom: 'calc(var(--spacing) * 1)' },
+  projectBlockZero: { paddingBlock: 'calc(var(--spacing) * 0)' },
+  projectBlockOneHalf: { paddingBlock: 'calc(var(--spacing) * 1.5)' },
+  projectItemsStart: { alignItems: 'flex-start' },
+  composerMinimum120: { minHeight: '120px' },
+  composerMinimum24: { minHeight: '24px' },
+  composerMinimum48: { minHeight: '48px' },
+  composerTransparent: { backgroundColor: 'transparent' },
+  composerInlineTwoHalf: { paddingInline: 'calc(var(--spacing) * 2.5)' },
+  composerInlineFour: { paddingInline: 'calc(var(--spacing) * 4)' },
+  composerInlineFive: { paddingInline: 'calc(var(--spacing) * 5)' },
+  composerBlockThree: { paddingBlock: 'calc(var(--spacing) * 3)' },
+  composerCorner2xl: { borderRadius: 'var(--radius-2xl)' },
+  composerRightSixteen: { paddingRight: 'calc(var(--spacing) * 16)' },
+  composerMaximum85vh: { maxHeight: '85vh' },
 });
 
 export const pickerSpinnerClass = legacyClass(stylex.props(styles.dimmed).className);
@@ -127,4 +158,130 @@ export const editorWidthClipClass = legacyClass(
 );
 export const editorContainClass = legacyClass(
   stylex.props(styles.heightFull, styles.container).className
+);
+
+export const acpCompactIconClass = legacyClass(
+  stylex.props(styles.acpHeightSix, styles.acpWidthSix, styles.acpCornerFour, styles.acpInlineZero)
+    .className
+);
+
+export const acpCompactTextLeadClass = legacyClass(
+  stylex.props(styles.acpHeightSix, styles.acpWidthAuto, styles.minimum).className
+);
+
+export const acpCompactTextTailClass = legacyClass(
+  stylex.props(styles.acpCornerFour, styles.acpInlineTwo, styles.acpGapOne).className
+);
+
+export const acpMinimumClass = legacyClass(stylex.props(styles.minimum).className);
+
+export const acpGapClass = legacyClass(stylex.props(styles.acpGapOne).className);
+
+export const acpIconClass = legacyClass(
+  stylex.props(styles.acpHeightSix, styles.acpWidthSix, styles.acpCornerFour).className
+);
+
+export const acpLabelClass = legacyClass(
+  stylex.props(styles.sidebarHeightEight, styles.acpInlineTwo).className
+);
+
+export const acpPlainCornerClass = legacyClass(stylex.props(styles.sidebarCornerMedium).className);
+
+export const acpPlainPaddingClass = legacyClass(stylex.props(styles.acpInlineOne).className);
+
+export const sidebarSurfaceClass = legacyClass(
+  stylex.props(styles.sidebarFill, styles.sidebarInk).className
+);
+
+export const sidebarPageFillClass = legacyClass(stylex.props(styles.pageFill).className);
+
+export const sidebarFieldFillClass = legacyClass(stylex.props(styles.inputFill).className);
+
+export const sidebarInkClass = legacyClass(stylex.props(styles.sidebarInk).className);
+
+export const sidebarPaddingZeroClass = legacyClass(stylex.props(styles.paddingZero).className);
+
+export const sidebarJustifyClass = legacyClass(stylex.props(styles.centeredContent).className);
+
+export const sidebarSquareClass = legacyClass(stylex.props(styles.squareAspect).className);
+
+export const sidebarPointerNoneClass = legacyClass(stylex.props(styles.ignorePointer).className);
+
+export const projectInputLeadClass = legacyClass(
+  stylex.props(styles.projectBottomOne, styles.sidebarHeightEight, styles.sidebarCornerMedium)
+    .className
+);
+
+export const projectInputTailClass = legacyClass(
+  stylex.props(styles.inputFill, styles.projectBlockZero).className
+);
+
+export const projectRowLayoutClass = legacyClass(
+  stylex.props(styles.gapTwo, styles.projectBlockOneHalf).className
+);
+
+export const projectItemsStartClass = legacyClass(stylex.props(styles.projectItemsStart).className);
+
+export const projectItemsCenterClass = legacyClass(stylex.props(styles.centered).className);
+
+export const composerLandingMinimumClass = legacyClass(
+  stylex.props(styles.composerMinimum120).className
+);
+
+export const composerLandingInsetClass = legacyClass(
+  stylex.props(styles.composerTransparent, styles.acpInlineZero, styles.projectBlockZero).className
+);
+
+export const composerSessionInsetClass = legacyClass(
+  stylex.props(styles.composerTransparent, styles.acpInlineOne, styles.projectBlockZero).className
+);
+
+export const composerMobileMinimumClass = legacyClass(
+  stylex.props(styles.composerMinimum24).className
+);
+
+export const composerDesktopMinimumClass = legacyClass(
+  stylex.props(styles.composerMinimum48).className
+);
+
+export const composerDialogInsetClass = legacyClass(
+  stylex.props(styles.composerMinimum120, styles.composerInlineFour, styles.composerBlockThree)
+    .className
+);
+
+export const composerDialogShapeClass = legacyClass(
+  stylex.props(styles.fullWidth, styles.composerCorner2xl).className
+);
+
+export const composerTransparentClass = legacyClass(
+  stylex.props(styles.composerTransparent).className
+);
+
+export const composerDialogActionClass = legacyClass(
+  stylex.props(styles.contextHeight, styles.contextCorner, styles.composerInlineFive).className
+);
+
+export const composerLandingActionClass = legacyClass(
+  stylex.props(styles.acpHeightSix, styles.acpCornerFour, styles.acpInlineTwo).className
+);
+
+export const composerSessionActionClass = legacyClass(
+  stylex.props(styles.sidebarHeightSeven, styles.sidebarCornerMedium, styles.composerInlineTwoHalf)
+    .className
+);
+
+export const composerLandingActionWidthClass = legacyClass(
+  stylex.props(styles.acpWidthAuto, styles.nonShrinking).className
+);
+
+export const composerActionWidthClass = legacyClass(stylex.props(styles.acpWidthAuto).className);
+
+export const composerHintInsetClass = legacyClass(
+  stylex.props(styles.composerRightSixteen).className
+);
+
+export const composerPastedPaddingClass = legacyClass(stylex.props(styles.paddingZero).className);
+
+export const composerPastedMaximumClass = legacyClass(
+  stylex.props(styles.composerMaximum85vh).className
 );

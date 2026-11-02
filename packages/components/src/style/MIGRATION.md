@@ -45,8 +45,8 @@ source-removal credit, and a counterexample withdraws the claimed mapping.
 
 The [bounded declaration bridge](../../../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
 keeps original selectors, class strings and rule positions while replacing each
-original declaration with actual StyleX metadata. It currently serves nine fixed
-owners through twenty-four flat declarations and thirty-nine authored static bindings; ordinary StyleX
+original declaration with actual StyleX metadata. It currently serves twelve fixed
+owners through fifty-five flat declarations and seventy-seven authored static bindings; ordinary StyleX
 uses its normal collector. A missing, unequal or unsupported slot rejects. The
 single profile retains the legacy aliases through the existing source scan, so
 Tailwind candidate ordering remains an explicit dependency. Moving a literal into
@@ -61,8 +61,14 @@ Earlier flat extraction remains rejected: arbitrary-property callers changed
 width, clipping and hit testing, while changed hashes broke named cn merging.
 Preserve named, arbitrary-property, variant and shorthand order; do not replace
 this contract with a class-name guard, specificity patch or default-only images.
-The closed adapter does not authorize dynamic values, variants or additional
-same-property keys without a separately verified extension.
+The closed adapter accepts separately probed values of the same property while
+rejecting overlapping properties inside a binding and atom deduplication. It does
+not authorize dynamic values or variants. Its optimizer follows the actual shared
+Tailwind Vite options. The default components PostCSS entry shares the actual
+configuration's explicit optimization value through `postcssOptions`, including
+during serve. An empty PostCSS optimize object defaults to non-minified output;
+Vite's producer has different defaults. Producer options are mutually exclusive.
+Raw/library callers must opt into a matching phase explicitly.
 
 The independent helper controls' reviewed internal call graph and original raw
 selectors are separate contracts. Their local ordinary/Slot split is not a recipe

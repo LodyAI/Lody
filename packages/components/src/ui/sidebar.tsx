@@ -25,6 +25,14 @@ import {
   sidebarCornerMediumClass,
   sidebarMenuButtonLayoutClass,
   sidebarPaddingClass,
+  sidebarSurfaceClass,
+  sidebarPageFillClass,
+  sidebarFieldFillClass,
+  sidebarInkClass,
+  sidebarPaddingZeroClass,
+  sidebarJustifyClass,
+  sidebarSquareClass,
+  sidebarPointerNoneClass,
 } from '@/style/legacy-defaults.stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -211,7 +219,7 @@ function Sidebar({
       <div
         data-slot="sidebar"
         className={cn(
-          'bg-sidebar text-sidebar-foreground',
+          sidebarSurfaceClass,
           sidebarFlexClass,
           'h-full w-(--sidebar-width)',
           sidebarColumnClass,
@@ -240,7 +248,7 @@ function Sidebar({
           // scrolling column, so it takes the panel without the panel's padding
           // and without the cross: the way out is the overlay or the trigger.
           closeButton={false}
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0"
+          className={`${sidebarSurfaceClass} w-(--sidebar-width) ${sidebarPaddingZeroClass}`}
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
@@ -362,7 +370,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<'main'>) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        'bg-background',
+        sidebarPageFillClass,
         sidebarInsetLayoutClass,
         'md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-xs md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2',
         className
@@ -377,7 +385,7 @@ function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      className={cn('h-8 w-full bg-input-field shadow-none', className)}
+      className={cn(`h-8 w-full ${sidebarFieldFillClass} shadow-none`, className)}
       {...props}
     />
   );
@@ -480,11 +488,11 @@ function SidebarGroupAction({
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
       className={cn(
-        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground absolute top-3.5 right-3',
+        `${sidebarInkClass} ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground absolute top-3.5 right-3`,
         sidebarFlexClass,
-        'aspect-square w-5',
+        `${sidebarSquareClass} w-5`,
         sidebarItemsCenterClass,
-        `justify-center ${sidebarCornerMediumClass} p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
+        `${sidebarJustifyClass} ${sidebarCornerMediumClass} ${sidebarPaddingZeroClass} outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'group-data-[collapsible=icon]:hidden',
@@ -535,7 +543,7 @@ const sidebarMenuButtonVariants = cva(
       variant: {
         default: 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
         outline:
-          'bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-hover))]',
+          `${sidebarPageFillClass} shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-hover))]`,
       },
       size: {
         default: `${sidebarHeightEightClass} text-sm`,
@@ -616,11 +624,11 @@ function SidebarMenuAction({
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
       className={cn(
-        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground peer-hover/menu-button:text-sidebar-hover-foreground absolute top-1.5 right-1',
+        `${sidebarInkClass} ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground peer-hover/menu-button:text-sidebar-hover-foreground absolute top-1.5 right-1`,
         sidebarFlexClass,
-        'aspect-square w-5',
+        `${sidebarSquareClass} w-5`,
         sidebarItemsCenterClass,
-        `justify-center ${sidebarCornerMediumClass} p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
+        `${sidebarJustifyClass} ${sidebarCornerMediumClass} ${sidebarPaddingZeroClass} outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0`,
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'peer-data-[size=sm]/menu-button:top-1',
@@ -642,11 +650,11 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) 
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
       className={cn(
-        'text-sidebar-foreground pointer-events-none absolute right-1',
+        `${sidebarInkClass} ${sidebarPointerNoneClass} absolute right-1`,
         sidebarFlexClass,
         `${sidebarHeightFiveClass} min-w-5`,
         sidebarItemsCenterClass,
-        `justify-center ${sidebarCornerMediumClass} px-1 text-xs font-medium tabular-nums select-none`,
+        `${sidebarJustifyClass} ${sidebarCornerMediumClass} px-1 text-xs font-medium tabular-nums select-none`,
         'peer-hover/menu-button:text-sidebar-hover-foreground peer-data-[active=true]/menu-button:text-sidebar-selection-foreground',
         'peer-data-[size=sm]/menu-button:top-1',
         'peer-data-[size=default]/menu-button:top-1.5',
@@ -744,7 +752,7 @@ function SidebarMenuSubButton({
       data-size={size}
       data-active={isActive}
       className={cn(
-        'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground',
+        `${sidebarInkClass} ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground`,
         sidebarFlexClass,
         sidebarHeightSevenClass,
         sidebarMinWidthClass,

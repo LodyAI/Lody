@@ -1,3 +1,10 @@
+import {
+  projectInputLeadClass,
+  projectInputTailClass,
+  projectRowLayoutClass,
+  projectItemsStartClass,
+  projectItemsCenterClass,
+} from '@/style/legacy-defaults.stylex';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -866,7 +873,7 @@ export function UnifiedProjectSelectorView({
             value={query}
             onValueChange={setQuery}
             placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-            className="mb-1 h-8 rounded-md border border-border/50 bg-input-field py-0"
+            className={cn(projectInputLeadClass, 'border border-border/50', projectInputTailClass)}
           />
           <div
             className={['scrollbar-pro', stylex.props(styles.list).className]
@@ -906,8 +913,8 @@ export function UnifiedProjectSelectorView({
                       indicator="check"
                       indicatorSide="end"
                       className={cn(
-                        'gap-2 py-1.5',
-                        inlineDescription ? 'items-start' : 'items-center'
+                        projectRowLayoutClass,
+                        inlineDescription ? projectItemsStartClass : projectItemsCenterClass
                       )}
                     >
                       <span

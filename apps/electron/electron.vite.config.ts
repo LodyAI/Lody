@@ -67,6 +67,8 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   return define
 }
 
+const tailwindOptions = {}
+
 export default defineConfig(({ mode }) => {
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
@@ -183,8 +185,8 @@ export default defineConfig(({ mode }) => {
       },
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        tailwindcss(),
-        ...legacyDeclarationBridge(),
+        tailwindcss(tailwindOptions),
+        ...legacyDeclarationBridge({ tailwindOptions }),
         stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),

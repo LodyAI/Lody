@@ -8,6 +8,7 @@ import { normalizePath, type Plugin } from 'vite';
 import { legacyBindings, legacyDeclarations } from './src/style/legacy-declaration-profile';
 
 const require = createRequire(import.meta.url);
+const { optimize } = require('@tailwindcss/node') as typeof import('@tailwindcss/node');
 // Babel's opaque AST is validated against the closed source grammar below.
 // oxlint-disable-next-line typescript-eslint/no-explicit-any -- Only this Babel AST boundary is opaque; every accepted source node is checked below.
 type Ast = any;
@@ -270,19 +271,49 @@ function comparable(property: string, value: string): string | number {
   return value;
 }
 
+type NativeOptimization = false | { minify: boolean };
+type TailwindOptions = { optimize?: boolean | { minify?: boolean } };
+export type LegacyPostcssOptions = { optimize: boolean | { minify?: boolean } };
+
+function alignedDeclaration(declaration: Declaration, optimization: NativeOptimization) {
+  if (optimization === false) return declaration;
+  const selector = '.lody-legacy-native';
+  const rule = postcss.rule({ selector });
+  rule.append(declaration.clone());
+  const parsed = postcss.parse(optimize(rule.toString(), optimization).code);
+  assert.equal(parsed.nodes.length, 1);
+  const result = parsed.first;
+  assert(result?.type === 'rule' && result.selector === selector);
+  assert.equal(result.nodes.length, 1);
+  const value = result.first;
+  assert(value?.type === 'decl' && !value.important);
+  assert.equal(value.prop, declaration.prop);
+  return value;
+}
+
 /** Replace real metadata nodes only after every original slot passes its oracle. */
 export function replaceLegacyDeclarations(
   code: string,
   filename: string,
   compiled: CompiledLegacyDeclarations,
-  previousMap?: SourceMapOptions['prev']
+  previousMap?: SourceMapOptions['prev'],
+  optimization: NativeOptimization = false
 ) {
   const ast = postcss.parse(code, { from: filename });
+  const claimed = new Set<Declaration>();
   const replacements = compiled.declarations.flatMap(({ alias, declaration, author }) => {
+    const aligned = alignedDeclaration(declaration, optimization);
     const selector = '.' + alias.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
     const found: postcss.Rule[] = [];
     ast.walkRules((rule) => {
-      if (rule.selector === selector) found.push(rule);
+      const members = postcss.list.comma(rule.selector);
+      if (!members.includes(selector)) return;
+      assert(
+        members.every((selectorMember) => /^\.(?:[\w-]|\\[^\s])+$/.test(selectorMember)),
+        'Only flat class selector lists are supported'
+      );
+      assert.equal(new Set(members).size, members.length, 'Duplicate selector member');
+      found.push(rule);
     });
     // The locked v3 container plugin and Tailwind v4 each emit this same slot
     // in development; production optimization merges it. Replace both in place.
@@ -300,13 +331,15 @@ export function replaceLegacyDeclarations(
       assert.equal(rule.nodes.length, 1);
       const old = rule.first;
       assert(old?.type === 'decl' && !old.important);
-      assert.equal(old.prop, declaration.prop);
+      assert(!claimed.has(old), 'Ambiguous shared compatibility declaration');
+      claimed.add(old);
+      assert.equal(old.prop, aligned.prop);
       assert.equal(
         comparable(old.prop, old.value),
-        comparable(declaration.prop, declaration.value),
+        comparable(aligned.prop, aligned.value),
         'Unequal compatibility declaration: ' + alias
       );
-      const replacement = declaration.clone();
+      const replacement = aligned.clone();
       replacement.raws = { ...old.raws };
       replacement.source = {
         input: new Input(compiled.raw, { from: compiled.filename }),
@@ -338,8 +371,30 @@ export function replaceLegacyDeclarations(
 }
 
 /** Ordinary StyleX collection stays outside this closed legacy declaration path. */
-export function legacyDeclarationBridge(options: { testOnlyBindings?: boolean } = {}): Plugin[] {
-  assert(Object.keys(options).every((k) => k === 'testOnlyBindings'));
+export function legacyDeclarationBridge(
+  options: {
+    testOnlyBindings?: boolean;
+    tailwindOptions?: TailwindOptions;
+    postcssOptions?: LegacyPostcssOptions;
+  } = {}
+): Plugin[] {
+  assert(
+    Object.keys(options).every(
+      (k) => k === 'testOnlyBindings' || k === 'tailwindOptions' || k === 'postcssOptions'
+    )
+  );
+  const tailwind = options.tailwindOptions;
+  const postcssProducer = options.postcssOptions;
+  assert(!(tailwind && postcssProducer), 'Choose one stylesheet producer');
+  for (const producer of [tailwind, postcssProducer]) {
+    if (!producer) continue;
+    assert(Object.keys(producer).every((key) => key === 'optimize'));
+    if (typeof producer.optimize === 'object')
+      assert(Object.keys(producer.optimize).every((key) => key === 'minify'));
+  }
+  if (postcssProducer)
+    assert(postcssProducer.optimize !== undefined, 'PostCSS phase must be explicit');
+  let optimization: NativeOptimization = false;
   let development = false,
     bindingSeen = false,
     cssSeen = false;
@@ -378,6 +433,23 @@ export function legacyDeclarationBridge(options: { testOnlyBindings?: boolean } 
       name: 'components-legacy-declarations',
       configResolved(config) {
         development = config.command === 'serve';
+        optimization = postcssProducer
+          ? postcssProducer.optimize === false
+            ? false
+            : {
+                minify:
+                  typeof postcssProducer.optimize === 'object'
+                    ? (postcssProducer.optimize.minify ?? false)
+                    : true,
+              }
+          : !development && tailwind && tailwind.optimize !== false
+            ? {
+                minify:
+                  typeof tailwind.optimize === 'object'
+                    ? tailwind.optimize.minify !== false
+                    : config.build.cssMinify !== false,
+              }
+            : false;
       },
       transform(code, id) {
         if (normalizePath(id.split('?')[0]) !== cssKey) return undefined;
@@ -390,7 +462,8 @@ export function legacyDeclarationBridge(options: { testOnlyBindings?: boolean } 
           code,
           cssFile,
           compileLegacyDeclarations(fs.readFileSync(sourceFile, 'utf8'), sourceFile),
-          this.getCombinedSourcemap()
+          this.getCombinedSourcemap(),
+          optimization
         );
         cssSeen = true;
         const rawMap = result.map!.toJSON();
