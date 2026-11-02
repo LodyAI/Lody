@@ -205,6 +205,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { openExternalUrl } from '@/lib/native-browser';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
+import { useAwaitedPrStatus } from '@/hooks/use-awaited-pr-status';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import SessionChatStream, {
   type AssistantMessageAction,
@@ -5599,6 +5600,18 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
+    // Summaries (status mark, CI tone, action gating) read only session
+    // metadata, the same view the sidebar renders, so the two never disagree.
+    // Live PR details feed the PR tab and the CI run list, never the summary.
+    const effectivePrStatus = latestPr?.status ?? null;
+    // A successful merge/ready stays pending until that shared status agrees.
+    const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
+      latestPr?.url ?? null,
+      effectivePrStatus
+    );
+    const isMergeSettling = isActivePrMerging || !!awaitedPrStatus?.includes('merged');
+    const isReadySettling = isActivePrMarkingReady || !!awaitedPrStatus?.includes('open');
+
     const handleMergePullRequest = useCallback(
       async (method: GitHubMergeMethod) => {
         captureSessionEvent('session/quick_action_selected', {
@@ -5609,13 +5622,14 @@ export const SessionChatInterface = memo(
         });
         try {
           await mergeActivePullRequest(method);
+          awaitPrStatus(['merged']);
         } catch (error) {
           toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
             description: getErrorMessage(error),
           });
         }
       },
-      [captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
+      [awaitPrStatus, captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
     );
 
     const handleMarkReadyForReview = useCallback(async () => {
@@ -5626,6 +5640,7 @@ export const SessionChatInterface = memo(
       });
       try {
         await markActivePrReadyForReview();
+        awaitPrStatus(['open']);
       } catch (error) {
         const description =
           error instanceof ReadyForReviewStillDraftError
@@ -5638,12 +5653,7 @@ export const SessionChatInterface = memo(
           description,
         });
       }
-    }, [captureSessionEvent, markActivePrReadyForReview, t, workspaceDirty]);
-
-    // Summaries (status mark, CI tone, action gating) read only session
-    // metadata, the same view the sidebar renders, so the two never disagree.
-    // Live PR details feed the PR tab and the CI run list, never the summary.
-    const effectivePrStatus = latestPr?.status ?? null;
+    }, [awaitPrStatus, captureSessionEvent, markActivePrReadyForReview, t, workspaceDirty]);
 
     const infoBarPrCiRuns = useMemo(
       () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToPrCiRun),
@@ -6019,18 +6029,18 @@ export const SessionChatInterface = memo(
           case 'ready-for-review':
             return {
               id: actionId,
-              label: isActivePrMarkingReady
+              label: isReadySettling
                 ? t('sessions.prTab.markingReadyForReview', 'Marking ready…')
                 : t('sessions.prTab.readyForReview', 'Ready for review'),
               onClick: () => void handleMarkReadyForReview(),
-              disabled: activePrState !== 'ready' || isActivePrMarkingReady,
+              disabled: activePrState !== 'ready' || isReadySettling,
             };
           case 'merge':
             return {
               kind: 'merge' as const,
               id: 'merge' as const,
               method: preferredMergeMethod,
-              isMerging: isActivePrMerging,
+              isMerging: isMergeSettling,
               disabled: activePrState !== 'ready',
               onMerge: handleMergePullRequest,
               onSelectMethod: setPreferredPrMergeMethod,
@@ -6058,9 +6068,9 @@ export const SessionChatInterface = memo(
       isResolvingConflicts,
       latestPrState,
       activePrState,
-      isActivePrMarkingReady,
+      isReadySettling,
       preferredMergeMethod,
-      isActivePrMerging,
+      isMergeSettling,
       sessionDocReady,
       t,
       workspaceDirty,
