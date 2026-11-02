@@ -533,12 +533,10 @@ paths. Workspaces A cannot sign for stay pending for another approver.
   person.
 - Ledger details move to an advanced diagnostics view.
 
-### Member approvers deliver history instead of a snapshot (pending increment)
+### Member approvers deliver history instead of a snapshot (approved increment)
 
-**Increment status: draft, implementation proposed in
-[#2240](https://github.com/LodyAI/Lody/pull/2240) at the coordinator's direction (option A);
-it takes effect only when the owner approves that PR.** Until then, an approver whose role
-is Member admits the device but reports that workspace as awaiting delivery.
+**Increment status: approved by the owner by merging [#2203](https://github.com/LodyAI/Lody/pull/2203) (2026-11-02,
+`f2e3fbae`).** It is implemented in [#2240](https://github.com/LodyAI/Lody/pull/2240).
 
 **Problem.** Any active personal device of the user may approve, whatever the user's
 role. A Member can append the personal `AdmitDevice` for its own new device, but it
@@ -547,7 +545,7 @@ this section requires. Without this increment, a user who is only a Member of a
 workspace cannot use account-wide pairing to add a second device there. They have to
 fall back to the per-workspace pairing exchange.
 
-**Decision proposed.**
+**Decision.**
 
 - **Rows without an invitation.** An approval row may name the workspace's genesis and
   admission record without a snapshot invitation. The approval HMAC still binds the

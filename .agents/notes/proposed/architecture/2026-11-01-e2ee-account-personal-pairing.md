@@ -143,7 +143,7 @@ credential hash)` row.
 - **Scope.** One approval covers all the account's encrypted workspaces, with
   deselection.
 - **Member approvers.** A Member cannot sign snapshot invitations. Under the
-  [history increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-pending-increment)
+  [history increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-approved-increment)
   its row carries no invitation and the new device verifies the full history instead.
 
 ## Rejected alternatives
