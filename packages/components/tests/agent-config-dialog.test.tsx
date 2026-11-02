@@ -35,6 +35,8 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
@@ -260,6 +262,127 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  it.each([false, true])(
+    'explains unsupported encrypted remote provider forms before any write or probe (signed RPC: %s)',
+    async (protectedRpcAvailable) => {
+      store.set(workspaceContentModeAtom, {
+        accountId: 'fixture-owner',
+        workspaceSlug: 'encrypted-fixture',
+        workspaceId: 'encrypted-fixture',
+        descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+      } as never);
+      store.set(runtimeAtom, {
+        contentMode: 'e2ee',
+        protectedRpcAvailable,
+        accountId: 'fixture-owner',
+        workspaceId: 'encrypted-fixture',
+        workspaceSlug: 'encrypted-fixture',
+      } as unknown as WorkspaceRuntime);
+      store.set(localProbeResultAtom, { ok: true, machineId: 'fixture-local' });
+      const effects: string[] = [];
+      await renderDialog(
+        {
+          kind: 'create',
+          initialForm: {
+            name: 'Synthetic agent',
+            cliType: 'custom',
+            agentType: 'custom',
+            customCommandLine: 'fixture-agent --acp',
+          },
+        },
+        createMachine('Remote fixture'),
+        async () => {
+          effects.push('write');
+        },
+        async () => {
+          effects.push('binary probe');
+          return { status: 'installed' as const };
+        },
+        async () => {
+          effects.push('capability probe');
+          throw new Error('unexpected probe');
+        }
+      );
+      expect(document.body.textContent).toContain(
+        'Encrypted workspaces do not yet support remote machine operations.'
+      );
+      expect(document.querySelector('#custom-acp-command')).toBeNull();
+      expect(
+        Array.from(document.querySelectorAll('button')).some(
+          (button) => button.textContent?.trim() === 'Create'
+        )
+      ).toBe(false);
+      expect(effects).toEqual([]);
+    }
+  );
+
+  it('keeps the encrypted same-machine provider form usable through its existing local callbacks', async () => {
+    store.set(workspaceContentModeAtom, {
+      accountId: 'fixture-owner',
+      workspaceSlug: 'encrypted-fixture',
+      workspaceId: 'encrypted-fixture',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    store.set(localProbeResultAtom, { ok: true, machineId });
+    const saved: AgentConfigSubmitPayload[] = [];
+    const transitions: boolean[] = [];
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig() },
+      createTitleConfigMachine(),
+      async (payload) => {
+        saved.push(payload);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (open: boolean) => {
+        transitions.push(open);
+      }
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.map((payload) => payload.id)).toEqual([kimiConfigId]);
+    expect(transitions).toEqual([false]);
+    expect(document.body.textContent).not.toContain('Encrypted workspaces do not yet support');
+  });
+
+  it('keeps a rejected save open and displays its failure', async () => {
+    const transitions: boolean[] = [];
+    const saved: AgentConfigSubmitPayload[] = [];
+    let failWrite = true;
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig() },
+      createTitleConfigMachine(),
+      async (payload) => {
+        if (failWrite) throw new Error('Synthetic durable write failed');
+        saved.push(payload);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (open: boolean) => {
+        transitions.push(open);
+      }
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(document.body.textContent).toContain('Failed to update configuration');
+    expect(document.querySelector('[data-testid="agent-config-dialog"]')).not.toBeNull();
+    expect(transitions).toEqual([]);
+    expect(saved).toEqual([]);
+    failWrite = false;
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.map((payload) => payload.id)).toEqual([kimiConfigId]);
+    expect(transitions).toEqual([false]);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
 
   it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
@@ -1108,7 +1231,9 @@ describe('AgentConfigDialog', () => {
     const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
-    const displayedConfigId = document.querySelector('[data-testid="agent-config-dialog"]')?.getAttribute('data-agent-config-id');
+    const displayedConfigId = document
+      .querySelector('[data-testid="agent-config-dialog"]')
+      ?.getAttribute('data-agent-config-id');
     expect(displayedConfigId).toMatch(/^[0-9a-f-]{36}$/u);
 
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
