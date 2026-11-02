@@ -104,6 +104,34 @@ describe('ContextChip actions', () => {
     expect(onOpenPr).toHaveBeenCalledTimes(1);
   });
 
+  it('summarizes CI from session metadata even when live runs disagree', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+          prCiState: 's',
+          prCiRuns: [{ name: 'test', status: 'failure' }],
+        })
+      );
+    });
+
+    expect(
+      container.querySelector('[data-pr-ci-verdict]')?.getAttribute('data-pr-ci-verdict')
+    ).toBe('success');
+    expect(
+      container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
+    ).toBe('CI checks · CI passed');
+  });
+
   it('renders the highest-priority action directly and folds the rest into a menu', async () => {
     const onCreatePr = vi.fn();
     const onCommitAndPush = vi.fn();

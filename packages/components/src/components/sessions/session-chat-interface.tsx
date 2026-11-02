@@ -205,7 +205,6 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { openExternalUrl } from '@/lib/native-browser';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
-import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import SessionChatStream, {
   type AssistantMessageAction,
@@ -5641,19 +5640,10 @@ export const SessionChatInterface = memo(
       }
     }, [captureSessionEvent, markActivePrReadyForReview, t, workspaceDirty]);
 
-    const effectivePrStatus = activePrData
-      ? derivePrStatusFromDetails(activePrData.pullRequest)
-      : (latestPr?.status ?? null);
-
-    // The compact `SessionMeta.pullRequests` status (`latestPr.status`) is only
-    // written by the CLI PR poller / webhook fan-out, so it can lag behind
-    // ready-for-review and merge transitions. Once live PR details load, they
-    // are the action bar's complete status truth so the action and status marker
-    // switch together without waiting for background reconciliation.
-    const effectiveLatestPr = useMemo(
-      () => (latestPr ? { ...latestPr, status: effectivePrStatus ?? latestPr.status } : latestPr),
-      [latestPr, effectivePrStatus]
-    );
+    // Summaries (status mark, CI tone, action gating) read only session
+    // metadata, the same view the sidebar renders, so the two never disagree.
+    // Live PR details feed the PR tab and the CI run list, never the summary.
+    const effectivePrStatus = latestPr?.status ?? null;
 
     const infoBarPrCiRuns = useMemo(
       () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToPrCiRun),
@@ -5973,11 +5963,6 @@ export const SessionChatInterface = memo(
       : changesDiffStat;
 
     const infoBarContextActions = useMemo<ContextChipAction[]>(() => {
-      // The CI pill renders from live check runs, so the action gating must
-      // honor them too: whenever the pill shows "CI failed", the Fix CI Errors
-      // action has to be available even if the compact meta `s` hasn't caught
-      // up (e.g. the machine-side reconciler isn't running).
-      const liveCiFailed = infoBarPrCiRuns?.some((run) => run.status === 'failure') ?? false;
       return resolveSessionInfoBarGitHubActionIds({
         canShowGitHubActions,
         canMutatePr: hasHostedGitHub,
@@ -5986,7 +5971,7 @@ export const SessionChatInterface = memo(
         workspaceUnpushed,
         hasChanges,
         isAgentBusy,
-        prCiState: liveCiFailed ? 'f' : latestPrState?.s,
+        prCiState: latestPrState?.s,
         prMergeState: latestPrState?.m,
         prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
@@ -6068,7 +6053,6 @@ export const SessionChatInterface = memo(
       handleResolveConflicts,
       hasExistingPr,
       effectivePrStatus,
-      infoBarPrCiRuns,
       isAgentBusy,
       isPrActionPending,
       isResolvingConflicts,
@@ -7648,7 +7632,7 @@ export const SessionChatInterface = memo(
                         projectName={infoBarProjectName}
                         branch={isMobile ? null : infoBarBranch}
                         workspaceLocation={infoBarWorkspaceLocation}
-                        pr={canShowGitHubActions ? effectiveLatestPr : null}
+                        pr={canShowGitHubActions ? latestPr : null}
                         onOpenPr={prLinkHandler}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
