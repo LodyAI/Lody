@@ -35,13 +35,15 @@ Streams 补丁只在启用 payload protection 时生效，解释不了 plaintext
 
 1. **健康状态以 meta room 为准。** meta room 处于 joined 时，聚合 `disconnected` 报告为
    `rooms-degraded`，在恢复逻辑中视为健康：只清扫失败的 room，失败后约 1 s 开始，持续失败时退避到 30 s，
-   因此当前 Machine 自己的 room 恢复速度与之前相同；不触发 transport 级重连、恢复边沿或 O(rooms) 重扫。控制云端副作用的
+   因此当前 Machine 自己的 room 恢复速度与之前相同。之后聚合状态变成 `connected` 也不会取消这次清扫，
+   因为 loro-repo 在任何 join 开始或同步成功时都会报 `connected`，并不重新汇总；只有失败停止 60 s 后才重置退避；不触发 transport 级重连、恢复边沿或 O(rooms) 重扫。控制云端副作用的
    `isTransportConnected()` 在 meta room joined 时返回 true。即使其他 room 让聚合状态变成
    disconnected，`waitUntilMetaSynced` 也照常等待 meta room。adapter 关闭和真实断网都会让
    meta room 一起下线，因此仍走完整的恢复路径。
 2. **Catalog 租约改为临时。** metadata 和工作区 Flock 保持 joined。其他 catalog reader 在最后一次
    `hold`/`ready` 调用后 `TRANSIENT_CATALOG_IDLE_MS`（5 分钟）释放。闲置的 reader 不再等待
-   baseline，也不再重试。释放出现 defect 时会在关闭时报告，
+   baseline，也不再重试。闲置 reader 仍在释放时到来的读取会启动新的 reader，而不是续租正在退出的那个；
+   关闭时仍会等待正在退出的释放完成。释放出现 defect 时会在关闭时报告，
    但不会被缓存：下一次读取会启动新的 reader。
 3. **读取其他 Machine 的会话改为临时读。** `readSessionDocTransiently` 对已缓存或正在初始化的
    doc 直接读取；否则在该 doc 的本地所有权链下，于 `sessions` 之外打开一个临时

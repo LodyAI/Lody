@@ -292,7 +292,49 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     await vi.advanceTimersByTimeAsync(29_000);
     expect(metaSynced).not.toHaveBeenCalled();
     expect(streamsOnline).not.toHaveBeenCalled();
-    expect(reconnect).not.toHaveBeenCalled();
+    // At most one per-room sweep, never a transport reconnect.
+    expect(reconnect.mock.calls).toEqual([[{ resetBackoff: false, timeout: 10_000 }]]);
+  });
+
+  it('keeps the room sweep when an unrelated room reports connected', async () => {
+    // loro-repo sets the aggregate to 'connected' on any join start or
+    // successful sync without re-aggregating, while the failed room stays failed.
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+
+    instance.setTransportStatus('disconnected');
+    instance.setTransportStatus('connected');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
+  });
+
+  it('backs off room sweeps while failures repeat and resets after they stop', async () => {
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+    const sweepAfter = async (failure: () => void) => {
+      const before = reconnect.mock.calls.length;
+      failure();
+      let waited = 0;
+      while (reconnect.mock.calls.length === before) {
+        await vi.advanceTimersByTimeAsync(100);
+        waited += 100;
+      }
+      return waited;
+    };
+    const fail = () => {
+      instance.setTransportStatus('disconnected');
+      instance.setTransportStatus('connected');
+    };
+
+    const delays = [];
+    for (let round = 0; round < 4; round++) delays.push(await sweepAfter(fail));
+    expect(delays).toEqual([1_000, 2_000, 4_000, 8_000]);
+
+    // A failure after a quiet minute is a new episode and is swept quickly again.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await sweepAfter(fail)).toBe(1_000);
   });
 
   it('does not throttle a fan-out after the meta room actually degraded', async () => {

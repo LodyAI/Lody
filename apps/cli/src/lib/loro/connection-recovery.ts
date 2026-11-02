@@ -155,6 +155,7 @@ export class LoroConnectionRecoveryController {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private roomSweepTimer: NodeJS.Timeout | null = null;
   private roomSweepAttempt = 0;
+  private lastRoomSweepScheduledMs: number | null = null;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private activeOperation: Promise<void> | null = null;
   private streamsRecoveryGeneration = 0;
@@ -253,8 +254,10 @@ export class LoroConnectionRecoveryController {
         this.offerStreamsReady(this.metaSub, 'transport-connected');
       }
       this.resetReconnectBackoff('transport-connected');
+      // A later 'connected' does not cancel it: loro-repo reports 'connected'
+      // for any join start or successful sync without re-aggregating, so it
+      // does not prove the failed room recovered.
       if (status === 'disconnected') this.scheduleRoomSweep();
-      else if (status === 'connected') this.cancelRoomSweep();
       return;
     }
     if (status === 'disconnected') {
@@ -682,20 +685,29 @@ export class LoroConnectionRecoveryController {
    * failed rooms soon, backing off while they keep failing, so this Machine's
    * own room recovers as quickly as a transport reconnect would. The sweep never
    * reconnects the transport or emits recovery signals, so a stuck room cannot
-   * start workspace rescans. A connected aggregate cancels it and resets the
-   * backoff.
+   * start workspace rescans. The backoff resets only after failures stop for
+   * twice the maximum delay, so a room that fails again on every sweep backs
+   * off to the maximum instead of being retried every second.
    */
   private scheduleRoomSweep(): void {
     if (this.isCleanedUp || this.roomSweepTimer) return;
+    const maxDelayMs = readTimeoutEnv(
+      'LODY_LORO_AUTO_RECONNECT_MAX_DELAY_MS',
+      DEFAULT_RECONNECT_MAX_DELAY_MS
+    );
+    const now = Date.now();
+    if (
+      this.lastRoomSweepScheduledMs !== null &&
+      now - this.lastRoomSweepScheduledMs >= 2 * maxDelayMs
+    )
+      this.roomSweepAttempt = 0;
+    this.lastRoomSweepScheduledMs = now;
     const delayMs = computeLoroReconnectDelayMs(this.roomSweepAttempt, {
       baseDelayMs: readTimeoutEnv(
         'LODY_LORO_AUTO_RECONNECT_DELAY_MS',
         DEFAULT_RECONNECT_BASE_DELAY_MS
       ),
-      maxDelayMs: readTimeoutEnv(
-        'LODY_LORO_AUTO_RECONNECT_MAX_DELAY_MS',
-        DEFAULT_RECONNECT_MAX_DELAY_MS
-      ),
+      maxDelayMs,
     });
     this.roomSweepAttempt = Math.min(this.roomSweepAttempt + 1, MAX_RECONNECT_ATTEMPT);
     this.roomSweepTimer = setTimeout(() => {
@@ -710,7 +722,6 @@ export class LoroConnectionRecoveryController {
   }
 
   private cancelRoomSweep(): void {
-    this.roomSweepAttempt = 0;
     if (this.roomSweepTimer) {
       clearTimeout(this.roomSweepTimer);
       this.roomSweepTimer = null;

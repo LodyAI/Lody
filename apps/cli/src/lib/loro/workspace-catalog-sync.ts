@@ -133,22 +133,30 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
     ready: Deferred.Deferred<boolean>;
     fiber?: Fiber.Fiber<void, unknown>;
     lastUsedMs: number;
+    /** Set once idle; its room may still be releasing, so reads start a new reader. */
+    retiring?: boolean;
   };
   const held = new Map<string | undefined, Entry>();
   /** Latest released transient reader per id whose release failed; reported at shutdown. */
   const releaseFailures = new Map<string | undefined, Entry>();
+  /** Replaced retiring readers whose release is still running; shutdown awaits them. */
+  const retiringReaders = new Set<Entry>();
   const permanent = new Set<string | undefined>([undefined, getWorkspaceFlockDocId(workspaceId)]);
   const idleExpired = (entry: Entry) =>
-    Effect.map(
-      Clock.currentTimeMillis,
-      (now) => now - entry.lastUsedMs >= TRANSIENT_CATALOG_IDLE_MS
-    );
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      if (now - entry.lastUsedMs < TRANSIENT_CATALOG_IDLE_MS) return false;
+      entry.retiring = true;
+      return true;
+    });
   /** Completes once no hold or ready call has touched the entry for the idle window. */
   const untilIdle = Effect.fnUntraced(function* (entry: Entry) {
     while (true) {
       const now = yield* Clock.currentTimeMillis;
       const remaining = entry.lastUsedMs + TRANSIENT_CATALOG_IDLE_MS - now;
-      if (remaining <= 0) return;
+      if (remaining <= 0) {
+        entry.retiring = true;
+        return;
+      }
       yield* Effect.sleep(remaining);
     }
   });
@@ -157,7 +165,7 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       const exits = yield* Effect.forEach(
-        [...held.values(), ...releaseFailures.values()],
+        [...held.values(), ...retiringReaders, ...releaseFailures.values()],
         (entry) => (entry.fiber ? Fiber.await(entry.fiber) : Effect.succeed(Exit.void))
       );
       const reasons = exits.flatMap((exit) =>
@@ -177,10 +185,11 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
   const ensure = Effect.fnUntraced(function* (id: string | undefined) {
     const now = yield* Clock.currentTimeMillis;
     const prior = held.get(id);
-    if (prior) {
+    if (prior && !prior.retiring) {
       prior.lastUsedMs = now;
       return prior;
     }
+    if (prior) retiringReaders.add(prior);
     const transient = !permanent.has(id);
     const entry: Entry = {
       baseline: false,
@@ -226,6 +235,7 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
               // Shutdown still reports a release defect, but it is never a cached
               // result: the next read starts a fresh reader with its own leases.
               if (Exit.isFailure(exit) && Cause.hasDies(exit.cause)) releaseFailures.set(id, entry);
+              retiringReaders.delete(entry);
               if (held.get(id) === entry) held.delete(id);
             })
           )

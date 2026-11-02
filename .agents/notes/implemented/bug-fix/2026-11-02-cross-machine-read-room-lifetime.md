@@ -41,7 +41,10 @@ protection, so it does not explain the plaintext reports.
    `disconnected` is reported as `rooms-degraded`. It is healthy for recovery
    purposes: only the failed rooms are swept, starting about 1 s after the failure
    and backing off to 30 s while they keep failing, so this Machine's own room
-   recovers as fast as before. No
+   recovers as fast as before. A later aggregate `connected` does not cancel the
+   sweep, because loro-repo reports `connected` for any join start or successful
+   sync without re-aggregating; the backoff resets only after failures stop for
+   60 s. No
    transport-wide reconnect, recovery edge or O(rooms) rescan starts.
    `isTransportConnected()`, which gates cloud side effects, is true while the meta
    room is joined. `waitUntilMetaSynced` waits for the meta room even when another
@@ -50,7 +53,9 @@ protection, so it does not explain the plaintext reports.
 2. **Catalog leases are transient.** Metadata and the workspace Flock stay joined.
    Any other catalog reader is released `TRANSIENT_CATALOG_IDLE_MS` (5 min) after
    the last `hold`/`ready` call. An idle reader stops waiting for its baseline and
-   stops retrying. A release defect is reported at
+   stops retrying. Reads that arrive while an idle reader is still releasing
+   start a fresh reader instead of renewing the retiring one, and shutdown still
+   awaits the retiring release. A release defect is reported at
    shutdown but is not cached: the next read starts a fresh reader.
 3. **Session reads of another Machine are transient.**
    `readSessionDocTransiently` reads a cached or initializing doc in place.

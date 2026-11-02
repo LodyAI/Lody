@@ -566,6 +566,49 @@ describe('daemon Promise Repo catalog ownership', () => {
     )
   );
 
+  it.effect('starts a fresh reader for reads that arrive while an idle reader is releasing', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repo = yield* createRepo();
+        const acquire = repo.acquireFlockDoc.bind(repo);
+        const releasing = signal();
+        const releaseGate = signal();
+        let machineLeases = 0;
+        vi.spyOn(repo, 'acquireFlockDoc').mockImplementation(async (id) => {
+          const lease = await acquire(id);
+          if (id !== machine) return lease;
+          machineLeases += 1;
+          const first = machineLeases === 1;
+          return {
+            ...lease,
+            release: async () => {
+              if (first) {
+                releasing.resolve();
+                await releaseGate.promise;
+              }
+              await lease.release();
+            },
+          };
+        });
+        const owner = yield* Scope.make();
+        const sync = yield* Scope.provide(
+          makeWorkspaceCatalogSync(repo, workspaceId, logger, false),
+          owner
+        );
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        yield* TestClock.adjust(TRANSIENT_CATALOG_IDLE_MS);
+        yield* Effect.promise(() => releasing.promise);
+
+        // The retiring reader neither answers nor absorbs this read's lease.
+        expect(yield* sync.ready(machine, 1_000)).toBe(true);
+        expect(machineLeases).toBe(2);
+        releaseGate.resolve();
+        yield* Scope.close(owner, Exit.void);
+        for (const id of [workspace, machine]) yield* Effect.promise(() => repo.unloadFlockDoc(id));
+      })
+    )
+  );
+
   it.effect('reports an idle release defect at shutdown without blocking the next read', () =>
     Effect.scoped(
       Effect.gen(function* () {
