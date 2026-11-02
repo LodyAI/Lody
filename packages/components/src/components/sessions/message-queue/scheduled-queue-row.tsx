@@ -70,11 +70,7 @@ export function ScheduledQueueRow({
       <div
         className={cn(
           'min-w-0 flex-1 overflow-hidden',
-          stylex.props(
-            queueSurface.text,
-            roomy && queueSurface.roomyText,
-            roomy && queueSurface.roomyBody
-          ).className
+          stylex.props(queueSurface.text, roomy && queueSurface.roomyBody).className
         )}
         style={{
           display: '-webkit-box',
