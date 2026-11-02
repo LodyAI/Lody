@@ -11,6 +11,9 @@ Translation: current
 桌面引导继续使用受平台 telemetry capability 控制的 flow、step、operation 契约；
 OSS local 不发送任何遥测。
 
+[边界决策](../.agents/notes/implemented/bug-fix/2026-10-09-onboarding-analytics-boundaries.zh.md)
+说明了日常聊天状态恢复为何不属于引导进度。
+
 ## 完成阶段
 
 | 事件                              | 含义                                                             |

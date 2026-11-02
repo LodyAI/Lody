@@ -11,26 +11,23 @@ and branch; each consumer still receives the result or failure.
 
 ## Failure and retry
 
-A shared tree-fetch attempt with a mention observer emits at most one
-`mention/file/fetch_error` event through the existing telemetry client, after
-existing token retry handling finishes. Unmounting a consumer does not cancel
-that request or its failure accounting. The duration covers the shared attempt,
-not each consumer's cache read. Repository identifiers remain hashed when
-visibility is unknown; raw error messages are not analytics properties. OSS local
-telemetry remains hard-disabled under the platform contract.
+GitHub and local file discovery failures remain visible to consumers, but do not
+emit `mention/file/fetch_error` or `mention/file/local_fetch_error`. Unmounting a
+consumer does not cancel a shared request. OSS local telemetry remains
+hard-disabled under the platform contract.
 
-Failures are not cached or sampled away. A subsequent fetch starts a new attempt
-and can emit another failure, even for the same error value. There is no new
-automatic retry timer; a mounted failed hook retries on remount or repository /
-workspace change. Changing the analytics client alone must not fetch again.
+Failures are not cached. A subsequent fetch starts a new attempt, even for the
+same error value. There is no automatic retry timer; a mounted failed hook retries
+on remount or repository / workspace change. The analytics client is not a fetch
+dependency.
 Reopening the menu alone does not retry discovery (Worker search has its own
 retry lifetime).
 
 Keep successful cache freshness and stale refresh behavior. A failed refresh can
 retain paths from the same repository; a failed switch must not retain paths
 from the previous repository. Background discovery for draft hydration remains.
-This contract counts logical attempts, not individual HTTP calls, and does not
-establish the cause or frequency of production service failures.
+Removing analytics must not change cache ownership, retry behavior or visible
+error state.
 
 ## Evidence
 

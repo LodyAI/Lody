@@ -1,6 +1,7 @@
 # 在共享请求层统计文件 mention 失败
 
 Status: implemented
+Archived: 2026-11-02
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/1359
 
@@ -15,7 +16,7 @@ PR: https://github.com/LodyAI/Lody/pull/1359
 
 ## 证据与决策
 
-[此前缓存决策](2026-09-23-portal-full-restyle.md#follow-up-reductions)引入内存、
+[此前缓存决策](../../implemented/bug-fix/2026-09-23-portal-full-restyle.md#follow-up-reductions)引入内存、
 IndexedDB 与 in-flight 合并；各 hook 的 catch 仍单独上报，PostHog 对象也在获取
 副作用依赖中。菜单关闭时，草稿 hydration 仍获取文件树。GitHub 获取包含元数据、
 ref 和递归树读取，现有 token 管理器遇到类型化 401 会重试一次，所以逻辑尝试不等于

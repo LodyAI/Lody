@@ -1,10 +1,8 @@
 import * as React from 'react';
-import i18next from 'i18next';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
 import type { LocalProjectId, MachineId, SessionId, WorkspaceId } from '@lody/shared';
 
-import { currentWorkspaceIdAtom, runtimeAtom, userAtom } from '@/atoms';
+import { runtimeAtom, userAtom } from '@/atoms';
 import { buildPathSuggestions, useRepoFilePaths } from '@/components/mentions/file-at-mention';
 import type {
   FileWorkspaceProvider,
@@ -15,10 +13,6 @@ import {
   createLocalProjectRpcFileTransport,
 } from '@/lib/local-project-rpc-file-provider';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import {
-  captureMentionFileLocalFetchError,
-  type MentionLocalFetchErrorCode,
-} from '@/components/mentions/mention-analytics';
 import {
   useLocalProjectFilePaths,
   type LocalProjectFilePathsSource,
@@ -184,26 +178,7 @@ function providerFileDataErrorState(
   };
 }
 
-// The local file-paths hook localizes its error before exposing it, so the raw
-// `cli_not_running` / `api_unavailable` code is gone by the time we see it. Map
-// the message back by comparing against the same i18n keys the hook uses; fall
-// back to substring detection (raw code passthrough) so we still classify.
-// Rejected: changing the hook to expose a code — it lives outside this area.
-function classifyLocalFetchError(message: string | undefined): MentionLocalFetchErrorCode {
-  if (!message) return 'unknown';
-  if (message === i18next.t('sessions.localProject.files.cliNotRunning')) return 'cli_not_running';
-  if (message === i18next.t('sessions.localProject.files.apiUnavailable')) return 'api_unavailable';
-  const lower = message.toLowerCase();
-  if (lower.includes('cli_not_running') || lower.includes('cli not running')) {
-    return 'cli_not_running';
-  }
-  if (lower.includes('api_unavailable') || lower.includes('unavailable')) return 'api_unavailable';
-  return 'unknown';
-}
-
 export function useMentionProjectFiles(source?: MentionProjectSource) {
-  const postHog = usePostHog();
-  const analyticsWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const runtime = useAtomValue(runtimeAtom);
   const requestedByUserId = useAtomValue(userAtom)?.id ?? null;
   const localDaemonMachineId = useAtomValue(localMachineIdAtom);
@@ -349,39 +324,6 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     },
     [provider, sourceKind]
   );
-
-  // `mention/file/local_fetch_error` (tier A). Fire once per distinct error
-  // message so a sticky error state does not re-emit on every re-render.
-  const usesLocalSource = sourceKind === 'local' || useLocalWorktreeSource;
-  const localErrorTrackedRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!usesLocalSource) {
-      localErrorTrackedRef.current = null;
-      return;
-    }
-    if (localFileData.status !== 'error') {
-      localErrorTrackedRef.current = null;
-      return;
-    }
-    const message = localFileData.error ?? '';
-    if (localErrorTrackedRef.current === message) return;
-    localErrorTrackedRef.current = message;
-    captureMentionFileLocalFetchError(
-      postHog,
-      { workspaceId: analyticsWorkspaceId },
-      {
-        errorCode: classifyLocalFetchError(localFileData.error),
-        sourceKind: useLocalWorktreeSource ? 'worktree' : 'local',
-      }
-    );
-  }, [
-    analyticsWorkspaceId,
-    localFileData.error,
-    localFileData.status,
-    postHog,
-    useLocalWorktreeSource,
-    usesLocalSource,
-  ]);
 
   const fileData = React.useMemo<MentionFileDataState>(() => {
     if (sourceKind === 'provider') {
