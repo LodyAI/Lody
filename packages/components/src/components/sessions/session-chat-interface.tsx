@@ -5600,11 +5600,7 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
-    // Summaries (status mark, CI tone, action gating) read only session
-    // metadata, the same view the sidebar renders, so the two never disagree.
-    // Live PR details feed the PR tab and the CI run list, never the summary.
     const effectivePrStatus = latestPr?.status ?? null;
-    // A successful merge/ready stays pending until that shared status agrees.
     const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
       latestPr?.url ?? null,
       effectivePrStatus
@@ -5621,8 +5617,7 @@ export const SessionChatInterface = memo(
           workspace_dirty: workspaceDirty,
         });
         try {
-          await mergeActivePullRequest(method);
-          awaitPrStatus(['merged']);
+          if (await mergeActivePullRequest(method)) awaitPrStatus(['merged']);
         } catch (error) {
           toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
             description: getErrorMessage(error),
@@ -5639,8 +5634,7 @@ export const SessionChatInterface = memo(
         workspace_dirty: workspaceDirty,
       });
       try {
-        await markActivePrReadyForReview();
-        awaitPrStatus(['open']);
+        if (await markActivePrReadyForReview()) awaitPrStatus(['open']);
       } catch (error) {
         const description =
           error instanceof ReadyForReviewStillDraftError

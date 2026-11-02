@@ -319,12 +319,13 @@ Public details do not hydrate or write authenticated caches; review caches and
 in-flight detail reads use a separate public key. Public CI polling runs every
 five minutes without the fast mergeability loop; manual refresh remains available.
 
-Detail reads on open and after a server version bump bypass the browser HTTP cache,
-because GitHub's `max-age=60` would otherwise satisfy them with the stale response.
+Every detail slice read bypasses the browser HTTP cache, because GitHub's
+`max-age=60` would otherwise satisfy it with a stale response recorded as fresh.
 These details feed only the PR tab and the CI run list. PR summaries come from session
 metadata ([read model](../../../../.agents/notes/implemented/architecture/2026-11-02-session-pr-read-model.md)).
-`use-awaited-pr-status.ts` keeps a successful merge or ready-for-review pending until
-that metadata status agrees, for at most 15 seconds.
+Merge and ready-for-review resolve `true` only when they landed; then
+`use-awaited-pr-status.ts` keeps the action pending until that metadata status agrees,
+for at most 15 seconds.
 
 ## Schedule Registry recovery
 
