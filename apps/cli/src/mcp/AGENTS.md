@@ -112,7 +112,9 @@ Parent instructions apply. Background: [README.md](README.md).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
-  Machine RPC snapshot, and do not start Streams sync. Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
+  Machine RPC snapshot. Other Machines' Sessions use [transient reads](../lib/loro/AGENTS.md#opening-a-doc-pulls-its-stream);
+  an unreadable Session degrades only its own item.
+  Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a

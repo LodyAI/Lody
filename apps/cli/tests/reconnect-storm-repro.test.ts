@@ -11,11 +11,15 @@
  * base delay). They are now regression guards for the fix, and each one logs
  * its pre-fix number so the delta stays visible:
  *
- *   scenario A: fan-outs/min   59 -> 2      reconnect gaps 1050 constant -> climbing
- *   scenario D: reconciles/min 6667 -> 226
+ *   scenario A: fan-outs/min   59 -> 2 -> 0   reconnects/min 59 -> backed-off room sweeps
+ *   scenario D: reconciles/min 6667 -> 226 -> 0
+ *
+ * The second step (#2194): while the meta room stays joined, a failed doc or
+ * Flock room is no longer a transport outage at all. Only backed-off per-room
+ * sweeps retry it.
  *
  * Scenario B is the control that must NOT change: a genuine sustained outage
- * was always cheap, and its exponential backoff still works.
+ * takes the meta room down, stays cheap, and its exponential backoff still works.
  *
  * What is deliberately NOT modelled: loro-repo internals. The aggregate
  * `TransportConnectionStatus` is driven by hand here, so these tests prove
@@ -122,16 +126,17 @@ describe('reconnect storm repro', () => {
     return controller;
   };
 
-  it('SCENARIO A: a flapping aggregate is throttled and backs off', async () => {
+  it('SCENARIO A: a flapping aggregate with a joined meta room is not an outage', async () => {
     // Model: one session room is permanently broken, so the all-rooms aggregate
     // reads 'disconnected'. `repo.reconnect()` transiently moves it (rejoin ->
-    // 'connecting'), which is enough to make isStreamsHealthy() true, and then it
-    // fails again ROOM_REFAIL_MS later. The meta room NEVER leaves 'joined':
-    // nothing was actually missed on any of these cycles.
+    // 'connecting'), and then it fails again ROOM_REFAIL_MS later. The meta
+    // room NEVER leaves 'joined': nothing was actually missed on any cycle.
     let instance!: LoroConnectionRecoveryController;
     let stormActive = true;
+    const reconnectCalls: unknown[] = [];
     const reconnectAtMs: number[] = [];
-    const reconnect = vi.fn(async () => {
+    const reconnect = vi.fn(async (options?: unknown) => {
+      reconnectCalls.push(options);
       reconnectAtMs.push(Date.now());
       if (!stormActive) return;
       instance.setTransportStatus('connecting');
@@ -158,29 +163,25 @@ describe('reconnect storm repro', () => {
       `[SCENARIO A] fan-outs/min=${fanOuts} online-signals/min=${streamsOnline.mock.calls.length} reconnects/min=${reconnect.mock.calls.length} (pre-fix: 59 / 59 / 59)`
     );
 
-    // The expensive fan-out is bounded by the 30s floor: at most ~2 per minute
-    // no matter how fast the aggregate flaps.
-    expect(fanOuts).toBeLessThanOrEqual(3);
-    // ...but parked work is NOT starved: the cheap online signal still fires on
-    // every recovery edge, so a dirty Machine Flock doc and the automation
-    // queues are released each time (they arm no timer of their own).
-    expect(streamsOnline.mock.calls.length).toBeGreaterThan(fanOuts);
-
-    // Backoff now engages: gaps climb from the 1s base delay toward the 30s cap
-    // instead of being reset by every transient healthy blip.
+    // No recovery episode: no O(rooms) fan-out and no workspace offline edge.
+    expect(fanOuts).toBe(0);
+    expect(streamsOnline).not.toHaveBeenCalled();
+    expect(instance.isRecovering()).toBe(false);
+    // The broken room is retried only by per-room sweeps, which back off while
+    // it keeps failing instead of running at the 1s base delay.
+    expect(reconnectCalls.length).toBeLessThanOrEqual(10);
+    expect(
+      reconnectCalls.every(
+        (call) => JSON.stringify(call) === JSON.stringify({ resetBackoff: false, timeout: 10_000 })
+      )
+    ).toBe(true);
     const gaps = reconnectAtMs.slice(1).map((at, index) => at - (reconnectAtMs[index] ?? 0));
-    const maxGap = Math.max(...gaps);
-    // eslint-disable-next-line no-console
-    console.log(
-      `[SCENARIO A] reconnect gaps (ms): ${gaps.join(', ')} max=${maxGap} (pre-fix: constant 1050)`
-    );
-    expect(maxGap).toBeGreaterThanOrEqual(8_000);
+    expect(Math.max(...gaps)).toBeGreaterThanOrEqual(8_000);
   });
 
   it('SCENARIO B (control): a sustained outage backs off and never fans out', async () => {
-    // Same broken transport, but WITHOUT the transient healthy blip: the aggregate
-    // stays 'disconnected' the whole time. This isolates the flap as the cause —
-    // an outage on its own is cheap.
+    // A real outage takes the meta room down and the aggregate stays
+    // 'disconnected' the whole time. An outage on its own is cheap.
     const reconnectAtMs: number[] = [];
     const reconnect = vi.fn(async () => {
       reconnectAtMs.push(Date.now());
@@ -191,6 +192,7 @@ describe('reconnect storm repro', () => {
     const metaSynced = vi.fn();
     instance.onMetaRoomSynced(metaSynced);
 
+    metaSub.emitStatus('reconnecting');
     instance.setTransportStatus('disconnected');
     await vi.advanceTimersByTimeAsync(ONE_MINUTE_MS);
 
@@ -343,9 +345,9 @@ describe('reconnect storm repro', () => {
       `[SCENARIO D] one stuck room -> scans/min=${scans} reconciles/min=${reconciles} (pre-fix: 59 / 6667; meta room stayed 'joined' throughout)`
     );
 
-    // The whole point: a transport-only flap can no longer buy more than the
-    // 30s floor allows, however many rooms the workspace has.
-    expect(scans).toBeLessThanOrEqual(3);
-    expect(reconciles).toBeLessThanOrEqual(3 * SESSION_ROOM_COUNT);
+    // The whole point: a transport-only flap buys no workspace rescan at all,
+    // however many rooms the workspace has.
+    expect(scans).toBe(0);
+    expect(reconciles).toBe(0);
   });
 });

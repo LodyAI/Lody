@@ -45,7 +45,7 @@ import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
-import { LoroDocumentManager } from '@/lib/loro/doc';
+import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import {
   createLocalSessionCommandEnvironment,
@@ -767,6 +767,195 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
       items: [{ sessionId, ok: true }],
     });
+  });
+
+  async function createRemoteSession() {
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    await manager.registerMachine(otherMachineId, {
+      id: otherMachineId,
+      name: 'Other',
+      ownerUserId,
+    });
+    const remoteSessionId = await manager.createSession(otherMachineId, 'custom', 'claude');
+    await manager.repo.flush();
+    return remoteSessionId;
+  }
+
+  /** A joined Streams room whose first sync completes only when the test says so. */
+  function stubRemoteRoom(remoteSessionId: SessionId) {
+    const remoteRoomId = getSessionRoomId(remoteSessionId);
+    const joinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
+    const rooms: Array<{ released: boolean; firstSync: ReturnType<typeof testSignal> }> = [];
+    vi.spyOn(manager.repo, 'joinDocRoom').mockImplementation(async (roomId, ...rest) => {
+      if (roomId !== remoteRoomId) return await joinDocRoom(roomId, ...rest);
+      const tracked = { released: false, firstSync: testSignal() };
+      rooms.push(tracked);
+      const binding = {
+        status: 'joined' as const,
+        firstSyncedWithRemote: tracked.firstSync.promise,
+        onStatusChange: () => () => {},
+        waitUntilSynced: async () => {},
+      };
+      return {
+        subscription: () => binding,
+        unsubscribe: () => {
+          tracked.released = true;
+        },
+      } as unknown as Awaited<ReturnType<typeof joinDocRoom>>;
+    });
+    return rooms;
+  }
+
+  const callTool = (name: string, args: Record<string, unknown>) =>
+    runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+
+  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
+    // #2194: these reads joined other Machines' Session rooms for the life of
+    // the daemon, so a room that never synced kept retrying forever.
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const cachedBefore = manager.getConnectedRoomCount();
+
+    // Status does not wait for the room, but keeps it while its first sync runs.
+    const status = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+    rooms[0]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+
+    // History waits briefly for a synced room and releases it after the read.
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[1]!.released).toBe(true));
+
+    const listed = await callTool('lody_session_list', {});
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
+    });
+    rooms[2]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[2]!.released).toBe(true));
+    // Only this Machine's own listed Session joined the shared cache.
+    expect(manager.getConnectedRoomCount()).toBe(cachedBefore + 1);
+  });
+
+  it('answers history from the replica when a remote first sync stalls, then releases the room', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(8_000);
+    const history = await historyCall;
+    // A stalled first sync is not a failed read.
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(rooms[0]!.released).toBe(false);
+
+    // While that room is still retained, later reads answer without waiting again.
+    let settled = false;
+    const retained = callTool('lody_session_history', { sessionId: remoteSessionId }).then(
+      (result) => {
+        settled = true;
+        return result;
+      }
+    );
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect((await retained).isError).not.toBe(true);
+
+    await vi.advanceTimersByTimeAsync(TRANSIENT_DOC_ROOM_RETAIN_MS);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The next read joins again, so a recovered room can still reach the replica.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(3));
+    rooms[2]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('keeps a completed remote history read when its temporary wrapper cleanup fails', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const destroy = SessionDocument.prototype.destroy;
+    vi.spyOn(SessionDocument.prototype, 'destroy').mockImplementationOnce(
+      async function (this: SessionDocument, options) {
+        await destroy.call(this, options);
+        throw new Error('Synthetic wrapper cleanup failure');
+      }
+    );
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    rooms[0]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The failure is not cached: the next read succeeds normally.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('isolates one unreadable Session from list and status siblings', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const original = new Error('Synthetic Session doc read failure');
+    const readTransiently = manager.readSessionDocTransiently.bind(manager);
+    let failing = true;
+    vi.spyOn(manager, 'readSessionDocTransiently').mockImplementation(async (id, read, options) => {
+      if (failing && id === remoteSessionId) throw original;
+      return await readTransiently(id, read, options);
+    });
+
+    const listed = await callTool('lody_session_list', {});
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: sessionId }),
+        expect.objectContaining({ id: remoteSessionId, executionState: 'idle' }),
+      ]),
+    });
+    const status = await callTool('lody_session_status_many', {
+      sessionIds: [sessionId, remoteSessionId],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        { sessionId, ok: true },
+        {
+          sessionId: remoteSessionId,
+          ok: false,
+          error: { code: 'INTERNAL_ERROR', message: expect.stringContaining(original.message) },
+        },
+      ],
+    });
+
+    // The failure is not cached once the doc is readable again.
+    failing = false;
+    const recovered = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+  });
+
+  it('releases a retained remote room when this Machine adopts the Session doc', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+
+    // A live owner takes the doc over; the transient room must not linger.
+    await manager.getOrCreateSessionDoc(remoteSessionId);
+    expect(rooms[0]!.released).toBe(true);
   });
 
   it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
