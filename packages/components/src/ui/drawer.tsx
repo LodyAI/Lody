@@ -284,8 +284,14 @@ function DrawerTitle({
 function DrawerDescription({
   className,
   visuallyHidden = false,
+  fontSize,
+  style,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Description> & { visuallyHidden?: boolean }) {
+}: React.ComponentProps<typeof DrawerPrimitive.Description> & {
+  visuallyHidden?: boolean;
+  /** Explicit description size; caller styles and slotted-child styles retain priority. */
+  fontSize?: React.CSSProperties['fontSize'];
+}) {
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
@@ -294,6 +300,7 @@ function DrawerDescription({
         className
       )}
       {...props}
+      style={fontSize == null ? style : { fontSize, ...style }}
     />
   );
 }

@@ -386,3 +386,50 @@ describe('drawer floating controls', () => {
     }
   );
 });
+
+describe('legacy drawer description size', () => {
+  it('applies an explicit physical size while retaining caller style priority and accessible description', async () => {
+    await act(async () =>
+      root.render(
+        <Drawer open repositionInputs={false}>
+          <DrawerContent>
+            <DrawerTitle>Size control</DrawerTitle>
+            <DrawerDescription fontSize="0.78rem" style={{ fontSize: '19px', lineHeight: '1.75' }}>
+              Details
+            </DrawerDescription>
+          </DrawerContent>
+        </Drawer>
+      )
+    );
+    const description = document.querySelector<HTMLElement>('[data-slot="drawer-description"]')!;
+    expect(description.style.fontSize).toBe('19px');
+    expect(description.style.lineHeight).toBe('1.75');
+    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-describedby')).toBe(
+      description.id
+    );
+  });
+
+  it('keeps slotted child style and ref, then clears an omitted explicit size on update', async () => {
+    const ref = { current: null as HTMLParagraphElement | null };
+    const render = (fontSize?: React.CSSProperties['fontSize']) => (
+      <Drawer open repositionInputs={false}>
+        <DrawerContent>
+          <DrawerTitle>Size control</DrawerTitle>
+          <DrawerDescription ref={ref} asChild fontSize={fontSize}>
+            <p style={{ fontSize: '21px' }}>Child details</p>
+          </DrawerDescription>
+          <DrawerDescription data-size-update="" fontSize={fontSize}>
+            Updated details
+          </DrawerDescription>
+        </DrawerContent>
+      </Drawer>
+    );
+    await act(async () => root.render(render(0)));
+    expect(ref.current?.style.fontSize).toBe('21px');
+    const updated = document.querySelector<HTMLElement>('[data-size-update]')!;
+    expect(updated.style.fontSize).toBe('0px');
+    await act(async () => root.render(render()));
+    expect(ref.current?.style.fontSize).toBe('21px');
+    expect(updated.style.fontSize).toBe('');
+  });
+});

@@ -72,6 +72,14 @@ Decisions:
 [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
 and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
 
+## Workspace sheets
+
+Mobile workspace creation and deletion use the Vaul-backed
+[`DrawerDescription`](../ui/drawer.tsx)'s optional physical `fontSize` to keep their
+0.78rem copy. Omitting it retains the description's original default; caller and
+slotted-child styles keep precedence. The sheet still owns validation, pending
+state and keyboard handling.
+
 ## Entry points and layout
 
 - Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,

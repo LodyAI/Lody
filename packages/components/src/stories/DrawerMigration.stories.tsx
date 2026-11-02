@@ -154,3 +154,100 @@ export const FullscreenRight: Story = {
   render: () => <DrawerFixture direction="right" fullscreen />,
 };
 export const InlineHeight: Story = { render: () => <DrawerFixture inlineHeight /> };
+
+// Isolated acceptance controls for the existing legacy description contract.
+function DescriptionOwnershipFixture({ mode }: { mode: 'default' | 'style' | 'child' | 'hidden' }) {
+  return (
+    <div {...stylex.props(styles.canvas)}>
+      <Drawer open repositionInputs={false}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Legacy description contract</DrawerTitle>
+            <DrawerDescription
+              data-description-contract={mode}
+              visuallyHidden={mode === 'hidden'}
+              asChild={mode === 'child'}
+              style={mode === 'style' ? { fontSize: '19px', lineHeight: '1.75' } : undefined}
+            >
+              {mode === 'child' ? (
+                <p style={{ fontSize: '21px' }} data-description-slot-child="">
+                  The slotted child keeps its own size.
+                </p>
+              ) : (
+                'The original description keeps its accessible relationship and line height.'
+              )}
+            </DrawerDescription>
+          </DrawerHeader>
+          <div {...stylex.props(styles.body)}>
+            <input aria-label="Description control draft" />
+          </div>
+        </DrawerContent>
+      </Drawer>
+    </div>
+  );
+}
+export const DescriptionDefault: Story = {
+  render: () => <DescriptionOwnershipFixture mode="default" />,
+};
+export const DescriptionCallerStyle: Story = {
+  render: () => <DescriptionOwnershipFixture mode="style" />,
+};
+export const DescriptionAsChild: Story = {
+  render: () => <DescriptionOwnershipFixture mode="child" />,
+};
+export const DescriptionHidden: Story = {
+  render: () => <DescriptionOwnershipFixture mode="hidden" />,
+};
+
+function DescriptionFontSizeApiFixture() {
+  const [size, setSize] = useState<React.CSSProperties['fontSize']>('0.78rem');
+  const [caller, setCaller] = useState(false);
+  return (
+    <div {...stylex.props(styles.canvas)}>
+      <Drawer open repositionInputs={false}>
+        <DrawerContent style={{ fontSize: '23px' }}>
+          <DrawerHeader>
+            <DrawerTitle>Explicit description size</DrawerTitle>
+            <DrawerDescription
+              fontSize={size}
+              style={
+                {
+                  '--legacy-description-size': '18px',
+                  ...(caller ? { fontSize: '19px' } : {}),
+                } as React.CSSProperties
+              }
+            >
+              The physical size follows the selected value while caller styles retain priority.
+            </DrawerDescription>
+          </DrawerHeader>
+          <div {...stylex.props(styles.body)}>
+            {(['0.78rem', 'initial', 'inherit', 'var(--legacy-description-size)', 0] as const).map(
+              (value) => (
+                <button
+                  type="button"
+                  key={String(value)}
+                  onClick={() => {
+                    setCaller(false);
+                    setSize(value);
+                  }}
+                >
+                  {String(value)}
+                </button>
+              )
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setSize('0.78rem');
+                setCaller(true);
+              }}
+            >
+              Caller style
+            </button>
+          </div>
+        </DrawerContent>
+      </Drawer>
+    </div>
+  );
+}
+export const DescriptionFontSizeApi: Story = { render: () => <DescriptionFontSizeApiFixture /> };

@@ -258,6 +258,13 @@ a nested token fallback fixes that default but changes an explicit invalid
 optional `fontWeight` and `letterSpacing` props preserve the original expressions
 as physical fields while omission keeps its live default reader. Keep the legacy
 private writers local and test invalid, missing and inherited variables too.
+The Vaul-backed `ui/drawer` Description has its own optional physical `fontSize`.
+Omission keeps the original style object and default small-text line-height
+reader. Explicit values set only font size; caller styles and Radix slotted-child
+styles keep priority. Workspace sheets use it for0.78rem rather than duplicating
+an ineffective StyleX declaration beneath a surviving utility. This is separate
+from `@lody/ui`'s Base UI Drawer contract.
+
 A literal invalid CSS assignment and a valid `var()` that becomes invalid at
 computed-value time are different contracts. Real Chrome rejects a literal
 weight0 update and retains an existing550, whereas a var() resolving to0

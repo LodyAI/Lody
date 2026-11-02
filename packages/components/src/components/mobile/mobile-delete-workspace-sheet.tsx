@@ -43,7 +43,6 @@ const styles = stylex.create({
   description: {
     paddingInline: themeSpace[4],
     paddingBottom: themeSpace[3],
-    fontSize: '0.78rem',
     lineHeight: 1.625,
     color: themeColors.mutedForeground,
   },
@@ -188,10 +187,7 @@ export function MobileDeleteWorkspaceSheet({
               </button>
             </DrawerClose>
           </header>
-          {/* The drawer's own description carries a body size; the
-              description's own size stays a Tailwind class so it keeps
-              winning over it. */}
-          <DrawerDescription {...withClassName(stylex.props(styles.description), 'text-[0.78rem]')}>
+          <DrawerDescription {...stylex.props(styles.description)} fontSize="0.78rem">
             {t('workspace.danger.deleteWorkspace.confirmDescription', {
               workspace: workspaceName,
               defaultValue: 'Permanently delete "{{workspace}}". This action cannot be undone.',

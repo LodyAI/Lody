@@ -933,6 +933,9 @@ independent through129 cut is392/8/21 from30 sources matched to its successful
 | `modal-title212-acceptance.html` | Four consumer utilities via optional Dialog/Drawer Title fontWeight;54 formal PNG/RGBA exact,270 records/1112 geometry,88 exact carriers,106 CSS byte-identical;16 Gallery After-only | No Title.asChild promise; post-capture cleanup qualified separately,not54 new PNGs. Caret mutation,Gallery readiness failures and absent original terminal DOM retained |
 | `leaves214-acceptance.html` | Six native focus utilities;11 pairs/nine PNG/RGBA exact,519 target/473 nav/5759 geometry;physical shadows exact | Two OPENs1968raw/1632threshold in header corners/title text;30 named ring comma-space raw differences qualified by locked grammar/consumers. Whole at-rule183→181 differs;older OPENs stay open |
 
+| `drawer-description216-acceptance.html` | Two workspace-description utilities via legacy DrawerDescription fontSize;22 formal/21 PNG-RGBA exact,66 records/464 geometry/36 exact carriers;12 API states After-only | Original focused-input719raw/0threshold OPEN,max9,outside target description;input complete computed not captured and cause unknown. Real create fixture rejects,no creation success claim;single removed CSS rule/pure helper edge qualified;all readiness/float/module-oracle failures retained |
+| `next-native-share-card-counter-acceptance.html` | Zero migration;one real public descendant shadow-none counterexample rejects three utilities;49 full descendants per endpoint | Unlayered private writer restores large shadow,95906raw/12307threshold pixels;original highlight gate/preparation failure and report-layout failure preserved |
+
 The unchanged workspace-inset browser spec passes16 after-only cases in the
 healthy190 build. The prior32 failures remain recorded as a different environment;
 this adds durable behavior coverage and does not replace the original185 visual

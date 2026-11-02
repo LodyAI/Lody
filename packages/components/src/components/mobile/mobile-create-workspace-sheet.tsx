@@ -12,7 +12,6 @@ import { Field as UiField } from '@lody/ui/field';
 import { field } from '@lody/ui/field/field.tokens.stylex';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
-import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
 import { sheetSurface } from './sheet-surface';
@@ -43,7 +42,6 @@ const styles = stylex.create({
     whiteSpace: 'pre-line',
     paddingInline: themeSpace[4],
     paddingBottom: themeSpace[3],
-    fontSize: '0.78rem',
     color: themeColors.mutedForeground,
   },
   /** The sheet's body. */
@@ -205,10 +203,7 @@ export function MobileCreateWorkspaceSheet({
               </button>
             </DrawerClose>
           </header>
-          {/* The drawer's own description carries a body size; the
-              description's own size stays a Tailwind class so it keeps
-              winning over it. */}
-          <DrawerDescription {...withClassName(stylex.props(styles.description), 'text-[0.78rem]')}>
+          <DrawerDescription {...stylex.props(styles.description)} fontSize="0.78rem">
             {creationBlocked
               ? t('organization.mobileWorkspaceLimitReachedDescription')
               : t('organization.createNewWorkspaceDescription')}
