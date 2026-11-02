@@ -13,7 +13,7 @@ import {
   E2eeDeviceRevokedError,
   E2eeMemberRemovedError
 } from '../../services/e2ee-cloud-errors.mjs'
-import { Effect } from 'effect'
+import { Effect, Exit } from 'effect'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
 import { isLocalPlatform } from '../../platform'
@@ -1567,35 +1567,47 @@ export class E2eeIpc extends IpcService {
   ): Promise<never> {
     const { workspaceId, genesisHash, signingPublicKey } = access.status
     if (!signingPublicKey) throw new Error('e2ee_local_cleanup_pending')
-    const drain = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (owner.accountId !== access.accountId)
-            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-          const current = yield* owner.host.status(workspaceId)
-          const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
-          if (
-            current.genesisHash !== genesisHash ||
-            current.signingPublicKey !== signingPublicKey ||
-            credential !== access.credential
-          )
-            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-          if (
-            !(yield* owner.bootstrap.recordRemovedWorkspace({
-              workspaceId,
-              genesisHash,
-              signingPublicKey,
-              credential: access.credential,
-              reason
-            }))
-          )
-            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-          return yield* owner.host.beginCloseWorkspace(workspaceId)
-        }),
-      workspaceId,
-      false
-    )
-    await Effect.runPromise(drain)
+    let cleanup: Effect.Effect<void, unknown> = Effect.void
+    try {
+      await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.gen(function* () {
+            if (owner.accountId !== access.accountId)
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            const current = yield* owner.host.status(workspaceId)
+            const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+            if (
+              current.genesisHash !== genesisHash ||
+              current.signingPublicKey !== signingPublicKey ||
+              credential !== access.credential
+            )
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            if (
+              !(yield* owner.bootstrap.recordRemovedWorkspace({
+                workspaceId,
+                genesisHash,
+                signingPublicKey,
+                credential: access.credential,
+                reason
+              }))
+            )
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            return undefined
+          }).pipe(
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit) || !owner.readers.get(workspaceId)?.size
+                ? Effect.map(owner.host.beginCloseWorkspace(workspaceId), (drain) => {
+                    cleanup = drain
+                  })
+                : Effect.void
+            )
+          ),
+        workspaceId,
+        false
+      )
+    } finally {
+      await Effect.runPromise(cleanup)
+    }
     const deleted = await cleanupRemovedDesktopWorkspace({
       accountId: access.accountId,
       workspaceId,
@@ -1823,27 +1835,51 @@ export class E2eeIpc extends IpcService {
     const id = sender()
     return observeClientLossOperation('prepareDispatch', workspaceId, id, async () => {
       const cloud = await desktopE2eeCloudClient()
-      const access = await withDesktopE2eeAccount(
-        (owner) =>
-          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? Effect.gen(function* () {
-                return {
-                  accountId: owner.accountId,
-                  credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-                  status: yield* owner.host.status(workspaceId),
-                  work: owner.host.prepareDispatch(
-                    workspaceId,
-                    targetMachineId,
-                    input,
-                    cloud.client.machineSharing(),
-                    (request) => cloud.client.history(request)
+      let cleanup: Effect.Effect<void, unknown> = Effect.void
+      const access = await (async () => {
+        try {
+          return await withDesktopE2eeAccount(
+            (owner) =>
+              owner.accountId === cloud.accountId
+                ? Effect.gen(function* () {
+                    const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+                    const status = yield* owner.host.status(workspaceId)
+                    // A renderer may already have closed after learning ledger loss.
+                    // Keep dispatch denied, but let its retained credential confirm why.
+                    const work = owner.readers.get(workspaceId)?.has(id)
+                      ? owner.host.prepareDispatch(
+                          workspaceId,
+                          targetMachineId,
+                          input,
+                          cloud.client.machineSharing(),
+                          (request) => cloud.client.history(request)
+                        )
+                      : Effect.fail(new Error('e2ee_not_open'))
+                    return {
+                      accountId: owner.accountId,
+                      credential,
+                      status,
+                      work
+                    }
+                  }).pipe(
+                    // Status can open a host even if a later read fails. Capture its
+                    // exact drain under the lock; always await it outside the lock.
+                    Effect.onExit(() =>
+                      owner.readers.get(workspaceId)?.size
+                        ? Effect.void
+                        : Effect.map(owner.host.beginCloseWorkspace(workspaceId), (drain) => {
+                            cleanup = drain
+                          })
+                    )
                   )
-                }
-              })
-            : Effect.fail(new Error('e2ee_not_open')),
-        workspaceId,
-        false
-      )
+                : Effect.fail(new Error('e2ee_not_open')),
+            workspaceId,
+            false
+          )
+        } finally {
+          await Effect.runPromise(cleanup)
+        }
+      })()
       return runDesktopE2eeOperation(access.accountId, access.work).catch(async (error) => {
         if (accessLoss(error)) return this.removeLocalWorkspace(access, accessLoss(error)!)
         // Preparation is local, so it cannot see a removal by itself. Like management,
