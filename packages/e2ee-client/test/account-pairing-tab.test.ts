@@ -1,4 +1,4 @@
-import { Effect, Exit } from 'effect';
+import { Effect, Exit, Fiber } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   makeAccountPairingTabOwnership,
@@ -131,6 +131,57 @@ describe('releasing while a claim or another release is in flight', () => {
     await Promise.all([first, second]);
     const tabB = withAccountPairingTabOwnership({ op: () => Effect.succeed('b') }, b);
     expect(await Effect.runPromise(tabB.op())).toBe('b');
+    await Effect.runPromise(b.release());
+  });
+});
+
+describe('an interrupted claim', () => {
+  it('keeps the running count balanced when its caller is interrupted before the lock callback runs', async () => {
+    const name = `lody-e2ee-account-pairing:test-${crypto.randomUUID()}`;
+    let deliver!: () => void;
+    const callbackGate = new Promise<void>((resolve) => (deliver = resolve));
+    let requested!: () => void;
+    let callbackDone!: () => void;
+    const callbackFinished = new Promise<void>((resolve) => (callbackDone = resolve));
+    const lockRequested = new Promise<void>((resolve) => (requested = resolve));
+    const delayed = {
+      request: (
+        lockName: string,
+        options: LockOptions,
+        callback: (lock: Lock | null) => unknown
+      ) => {
+        const result = navigator.locks.request(lockName, options, async (lock) => {
+          await callbackGate;
+          const held = callback(lock);
+          callbackDone();
+          return held;
+        });
+        requested();
+        return result;
+      },
+    } as unknown as LockManager;
+    const a = makeAccountPairingTabOwnership({ name, locks: delayed });
+    const b = makeAccountPairingTabOwnership({ name });
+    let ran = false;
+    const tabA = withAccountPairingTabOwnership(
+      { op: () => Effect.sync(() => void (ran = true)) },
+      a
+    );
+    // The caller gives up while its claim still waits for the lock callback.
+    const fiber = Effect.runFork(tabA.op());
+    await lockRequested;
+    const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
+    deliver();
+    await interrupted;
+    // The lock callback has completed and every queued continuation has run
+    // (a macrotask boundary), before any release starts.
+    await callbackFinished;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // A later release completes, and another tab can pair.
+    await Effect.runPromise(a.release());
+    const tabB = withAccountPairingTabOwnership({ op: () => Effect.succeed('b') }, b);
+    expect(await Effect.runPromise(tabB.op())).toBe('b');
+    expect(ran).toBe(false);
     await Effect.runPromise(b.release());
   });
 });

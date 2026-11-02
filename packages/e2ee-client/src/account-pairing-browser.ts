@@ -331,7 +331,10 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
     run: <A, E>(
       work: Effect.Effect<A, E>
     ): Effect.Effect<{ owned: true; value: A } | { owned: false }, E> =>
-      Effect.flatMap<boolean, never, never, { owned: true; value: A } | { owned: false }, E, never>(
+      // Claiming and counting is one uninterruptible acquire: an interrupted caller
+      // still waits for its claim to settle, and the matching release always runs,
+      // so a claim can never leave the running count raised.
+      Effect.acquireUseRelease(
         Effect.promise(async () => {
           const owned = await claim();
           // A handover that started while claiming wins: take nothing new.
@@ -339,19 +342,16 @@ export function makeAccountPairingTabOwnership(options: { name: string; locks?: 
           running++;
           return true;
         }),
-        (owned) =>
+        (owned): Effect.Effect<{ owned: true; value: A } | { owned: false }, E> =>
           owned
-            ? Effect.map(
-                Effect.ensuring(
-                  work,
-                  Effect.sync(() => {
-                    running--;
-                    if (running === 0) for (const wake of idle.splice(0)) wake();
-                  })
-                ),
-                (value) => ({ owned: true as const, value })
-              )
-            : Effect.succeed({ owned: false as const })
+            ? Effect.map(work, (value) => ({ owned: true as const, value }))
+            : Effect.succeed({ owned: false as const }),
+        (owned) =>
+          Effect.sync(() => {
+            if (!owned) return;
+            running--;
+            if (running === 0) for (const wake of idle.splice(0)) wake();
+          })
       ),
     /** Gives the pairing up so another tab can take it: refuses new work, settles a
      * claim still waiting for its lock, drains running work, then gives the lock
