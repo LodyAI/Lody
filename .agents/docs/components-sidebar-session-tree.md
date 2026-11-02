@@ -84,6 +84,7 @@ repo or PR metadata, while the hover card retains the branch and time details. C
 rows and nested children also stay one line. `Show Branch` starts off when no choice has been
 saved; a persisted user choice remains in effect. In Workspace mode it controls the combined
 branch/time line. See the [default decision](../notes/implemented/feature/2026-10-19-sidebar-branch-details-off-by-default.md).
+Rows with an associated pull request display the PR state alongside the branch name and relative timestamp on the second line; see the [PR status indicator decision](../notes/implemented/feature/2026-10-11-session-pr-status-indicators.md).
 The loading skeleton keeps its single-line anatomy; the optional meta line appears when the
 rows load and the branch preference is on. Two-line local worktree rows use
 `sidebarSurface.tall`; the leading and end slots sit in a box one title line high so they stay
