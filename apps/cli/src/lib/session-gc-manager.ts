@@ -331,6 +331,7 @@ export function evaluateMemoryPressure(
 
 export class SessionGCManager {
   private sweepInterval: NodeJS.Timeout | null = null;
+  private memoryReclamation: Promise<MemoryPressureEvictionResult | null> | null = null;
 
   constructor(
     private config: SessionGCConfig,
@@ -422,6 +423,67 @@ export class SessionGCManager {
    * @param excludeSessionId - Session to exclude from eviction (e.g. the session being started)
    */
   async evictForMemoryPressure(
+    excludeSessionId?: SessionId
+  ): Promise<MemoryPressureEvictionResult> {
+    const ongoing = this.memoryReclamation;
+    if (!ongoing) {
+      const reclamation = this.collectForMemoryPressure(excludeSessionId).catch(() => {
+        this.deps.logger.warn('[GC] Reclamation failed; continuing with current memory pressure');
+        return null;
+      });
+      this.memoryReclamation = reclamation;
+      void reclamation
+        .finally(() => {
+          if (this.memoryReclamation === reclamation) this.memoryReclamation = null;
+        })
+        .catch(() => {});
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = ongoing
+      ? null
+      : await Promise.race([
+          this.memoryReclamation,
+          new Promise<null>((resolve) => {
+            timeout = setTimeout(() => {
+              this.deps.logger.warn('[GC] Reclamation exceeded 10s; continuing in background');
+              resolve(null);
+            }, 10_000);
+          }),
+        ]).finally(() => clearTimeout(timeout));
+    if (result) return result;
+
+    // Cleanup completion never decides refusal; retain the existing live-probe and recheck rules.
+    const thresholdBytes = this.config.memoryThresholdBytes;
+    const commitThresholdBytes = getWindowsCommitThresholdBytes(thresholdBytes);
+    const thresholds: MemoryPressureThresholds = {
+      platform: this.platform,
+      thresholdBytes,
+      commitThresholdBytes,
+      psiStallAvg10: DEFAULT_PSI_STALL_AVG10,
+      cgroupHardFloorBytes: DEFAULT_CGROUP_HARD_FLOOR_BYTES,
+    };
+    let snapshot = await this.deps.memoryPressure.refresh();
+    let verdict = evaluateMemoryPressure(snapshot, thresholds);
+    for (
+      let attempt = 0;
+      verdict.block && attempt < this.config.pressureRecheckAttempts;
+      attempt++
+    ) {
+      await this.sleep(this.config.pressureRecheckDelayMs);
+      snapshot = await this.deps.memoryPressure.refresh();
+      verdict = evaluateMemoryPressure(snapshot, thresholds);
+    }
+    return this.buildEvictionResult({
+      snapshot,
+      thresholdBytes,
+      commitThresholdBytes,
+      hadMemoryPressure: verdict.evict,
+      verdict: this.config.enabled ? verdict : { evict: false, block: false, reason: null },
+      evictedSessionIds: [],
+    });
+  }
+
+  private async collectForMemoryPressure(
     excludeSessionId?: SessionId
   ): Promise<MemoryPressureEvictionResult> {
     const thresholdBytes = this.config.memoryThresholdBytes;
@@ -689,6 +751,19 @@ export class SessionGCManager {
     purpose: CleanupPurpose,
     idleMs: number
   ): Promise<boolean> {
+    try {
+      return await this.checkCleanupEligibility(sessionId, purpose, idleMs);
+    } catch {
+      this.deps.logger.warn(`[GC] Eligibility check failed for ${sessionId}; retaining session`);
+      return false;
+    }
+  }
+
+  private async checkCleanupEligibility(
+    sessionId: SessionId,
+    purpose: CleanupPurpose,
+    idleMs: number
+  ): Promise<boolean> {
     if (this.deps.hasActiveTurn(sessionId)) {
       return false;
     }
@@ -721,7 +796,7 @@ export class SessionGCManager {
       return false;
     }
 
-    return true;
+    return !this.deps.hasActiveTurn(sessionId) && this.deps.getNativeWork(sessionId) !== 'running';
   }
 
   /**

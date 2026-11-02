@@ -335,6 +335,7 @@ type WorkspaceHomePlaygroundProps = {
   pageTitle: string;
   promptDraft: string;
   weekScenario: HomeWeekFixtureKind;
+  agentsRunning: boolean;
   showActivityOverview: boolean;
   showPlanUsage: boolean;
   showCodexForecast: boolean;
@@ -355,6 +356,7 @@ function WorkspaceLandingHarness({
   pageTitle,
   promptDraft,
   weekScenario,
+  agentsRunning,
   showActivityOverview,
   showPlanUsage,
   showCodexForecast,
@@ -537,7 +539,7 @@ function WorkspaceLandingHarness({
     <HomeDashboard
       board={homeBoard}
       onBoardChange={setHomeBoard}
-      now={homeNowFixture(weekScenario === 'busy' ? 'busy' : 'quiet')}
+      now={homeNowFixture(weekScenario === 'busy' ? (agentsRunning ? 'busy' : 'idle') : 'quiet')}
       week={homeWeekFixture(weekScenario)}
       agentLabel={homeWeekAgentLabel}
       agentIcon={homeWeekAgentIcon}
@@ -647,6 +649,7 @@ const meta = {
       options: ['busy', 'quiet', 'new'],
     },
     showActivityOverview: { name: 'Show weekly overview', control: 'boolean' },
+    agentsRunning: { name: 'Agents running', control: 'boolean' },
     showPlanUsage: { name: 'Show subscription usage', control: 'boolean' },
     showCodexForecast: { name: 'Show Codex reset tile', control: 'boolean' },
   },
@@ -657,6 +660,7 @@ const meta = {
     pageTitle: "Let's ship something",
     promptDraft: 'Review the local script runner on this machine.',
     weekScenario: 'busy',
+    agentsRunning: true,
     showActivityOverview: true,
     showPlanUsage: true,
     showCodexForecast: true,

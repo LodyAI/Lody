@@ -61,7 +61,7 @@ export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetc
         makeEphemeralStream({
           streamUrl: toLodyPresenceStreamUrl(
             createLoroStreamUrl({
-              bucketId: LORO_STREAMS_BUCKET_ID,
+              bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
               streamId: getLoroMetaStreamId(workspaceId),
               baseUrl: getLoroStreamsPresenceBaseUrl(
                 options.streamsBaseUrl,

@@ -1,4 +1,10 @@
-import type { TextRewrite } from '@lody/shared';
+import {
+  formatMessageQuote,
+  readMessageQuote,
+  sanitizeMessageTextSpans,
+  type MessageTextSpan,
+  type TextRewrite,
+} from '@lody/shared';
 import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
 
 export interface PastedTextDraft {
@@ -7,6 +13,8 @@ export interface PastedTextDraft {
   displayText: string;
   start: number;
   end: number;
+  /** Shares atomic range editing, but has a read-only snapshot and its own wire span. */
+  kind?: 'message_quote';
 }
 
 export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
@@ -85,6 +93,7 @@ export const sanitizePastedTextDrafts = (drafts: unknown): PastedTextDraft[] => 
       displayText: draft.displayText,
       start: draft.start,
       end: draft.end,
+      ...(draft.kind === 'message_quote' ? { kind: 'message_quote' as const } : {}),
     }))
     .filter((draft) => draft.displayText.length > 0 && draft.end >= draft.start)
     .sort((a, b) => a.start - b.start);
@@ -97,6 +106,7 @@ export const insertPastedTextDraft = ({
   id = createPastedTextDraftId(),
   selectionStart,
   selectionEnd,
+  kind,
 }: {
   currentValue: string;
   pastedText: string;
@@ -104,9 +114,13 @@ export const insertPastedTextDraft = ({
   id?: string;
   selectionStart: number | null;
   selectionEnd: number | null;
+  kind?: 'message_quote';
 }): { nextValue: string; draft: PastedTextDraft } | null => {
-  const normalizedText = normalizePastedTextDraft(pastedText).trim();
-  if (!normalizedText) {
+  const normalizedText =
+    kind === 'message_quote'
+      ? normalizePastedTextDraft(pastedText)
+      : normalizePastedTextDraft(pastedText).trim();
+  if (!normalizedText.trim()) {
     return null;
   }
 
@@ -125,6 +139,7 @@ export const insertPastedTextDraft = ({
       displayText,
       start: safeStart,
       end: safeStart + displayText.length,
+      ...(kind ? { kind } : {}),
     },
   };
 };
@@ -234,27 +249,39 @@ export const updatePastedTextDraftContent = ({
 /**
  * The placeholder -> full-blob rewrites these drafts imply.
  *
- * Takes no text: a draft already carries its own absolute range, and
- * `applyTextRewrites` is what validates those ranges against the string.
+ * The optional current value rejects stale placeholders; applyTextRewrites
+ * validates the resulting ranges against the string.
  *
  * The span is what makes the blob survivable in a transcript: the agent still
  * receives all four thousand characters, and the bubble collapses them back to
  * the same `Pasted N chars` label the composer showed.
  */
-export const buildPastedTextRewrites = (drafts: readonly PastedTextDraft[]): TextRewrite[] =>
+export const buildPastedTextRewrites = (
+  drafts: readonly PastedTextDraft[],
+  value?: string
+): TextRewrite[] =>
   [...drafts]
+    .filter(
+      (draft) => value === undefined || value.slice(draft.start, draft.end) === draft.displayText
+    )
     .sort((a, b) => a.start - b.start)
     .map((draft) => ({
       start: draft.start,
       end: draft.end,
       replacement: normalizePastedTextDraft(draft.text),
       span: {
-        kind: 'pasted_text' as const,
+        kind: draft.kind ?? 'pasted_text',
         // Trimmed: the composer pads the label with figure spaces so its inline
         // chip has an icon gutter, and a message chip has real padding instead.
         label: draft.displayText.trim(),
         target: draft.id,
+        ...(draft.kind === 'message_quote' ? { quoteVersion: 1 as const } : {}),
       },
+      ...(draft.kind === 'message_quote'
+        ? {
+            replacement: formatMessageQuote(draft.text),
+          }
+        : {}),
     }));
 
 export const getPastedTextClipboardTextForSelection = ({
@@ -272,7 +299,7 @@ export const getPastedTextClipboardTextForSelection = ({
     value,
     selectionStart,
     selectionEnd,
-    rewrites: buildPastedTextRewrites(sanitizePastedTextDrafts(drafts)),
+    rewrites: buildPastedTextRewrites(sanitizePastedTextDrafts(drafts), value),
   });
 
 export const arePastedTextDraftsEqual = (
@@ -293,7 +320,8 @@ export const arePastedTextDraftsEqual = (
       currentDraft.text !== nextDraft.text ||
       currentDraft.displayText !== nextDraft.displayText ||
       currentDraft.start !== nextDraft.start ||
-      currentDraft.end !== nextDraft.end
+      currentDraft.end !== nextDraft.end ||
+      currentDraft.kind !== nextDraft.kind
     ) {
       return false;
     }
@@ -301,3 +329,61 @@ export const arePastedTextDraftsEqual = (
 
   return true;
 };
+
+export function removePastedTextDraft(
+  value: string,
+  drafts: readonly PastedTextDraft[],
+  id: string
+): { nextValue: string; nextDrafts: PastedTextDraft[] } | null {
+  const removed = drafts.find((draft) => draft.id === id);
+  if (!removed || value.slice(removed.start, removed.end) !== removed.displayText) return null;
+  const length = removed.end - removed.start;
+  return {
+    nextValue: value.slice(0, removed.start) + value.slice(removed.end),
+    nextDrafts: drafts
+      .filter((draft) => draft.id !== id)
+      .map((draft) =>
+        draft.start >= removed.end
+          ? { ...draft, start: draft.start - length, end: draft.end - length }
+          : draft
+      ),
+  };
+}
+
+/** Restore only explicitly marked quotes; ordinary user Markdown is never guessed. */
+export function restoreMessageQuoteDrafts(
+  text: string,
+  spans: readonly MessageTextSpan[] | undefined,
+  includePastedText = false
+): { text: string; drafts: PastedTextDraft[] } {
+  let result = '';
+  let cursor = 0;
+  const drafts: PastedTextDraft[] = [];
+  const ids = new Set<string>();
+  for (const span of sanitizeMessageTextSpans(text, spans) ?? []) {
+    if (span.kind !== 'message_quote' && !(includePastedText && span.kind === 'pasted_text'))
+      continue;
+    const snapshot =
+      span.kind === 'message_quote'
+        ? readMessageQuote(text.slice(span.start, span.end), span.quoteVersion)
+        : text.slice(span.start, span.end);
+    if (snapshot === undefined) continue;
+    result += text.slice(cursor, span.start);
+    const start = result.length;
+    const label = `\u2007${span.label}\u2007`;
+    result += label;
+    let id = span.target || createPastedTextDraftId();
+    while (ids.has(id)) id += `:quote:${span.start}`;
+    ids.add(id);
+    drafts.push({
+      id,
+      text: snapshot,
+      displayText: label,
+      start,
+      end: result.length,
+      ...(span.kind === 'message_quote' ? { kind: 'message_quote' as const } : {}),
+    });
+    cursor = span.end;
+  }
+  return { text: result + text.slice(cursor), drafts };
+}

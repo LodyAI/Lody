@@ -29,11 +29,20 @@ Onboarding Page Objects wait for the final Configure Lody action, which remains
 available after the intro finishes. Local CLI readiness can arrive after the
 transient Skip intro button disappears, so that button is not a setup prerequisite.
 
+The onboarding smoke also cold-restarts the local profile without a cloud account with a valid
+cleanup receipt and IndexedDB content belonging to another encrypted identity. It
+checks the ordinary workspace cache, editable composer and unchanged foreign data;
+no cloud credentials or keys are installed.
+
 Each run uses fresh durable directories and a kernel-assigned loopback port.
 The test-only port override is accepted only when `LODY_E2E=1`, so Electron and
 its bundled CLI cannot attach to the normal local daemon. Teardown first asks
 Electron to quit through its production shutdown barrier, then verifies the
 port can be rebound before deleting temporary state.
+
+Fresh test profiles use English. On macOS the process-local `AppleLanguages`
+preference supplies the application's native language list. Saved language choices
+take precedence, including across a profile restart.
 
 The harness keeps E2E windows hidden and disables Chromium background throttling,
 so regression and CI runs do not activate or focus Lody while preserving renderer
@@ -78,6 +87,11 @@ Optional before/after JSON and a retained-path summary are copied into the
 round, then covered by its checksummed manifest.
 Scout operation, classification, and triage are specified in
 [the Scout contract](./SCOUT.md).
+
+The [message schema memory decision](../.agents/notes/implemented/architecture/2026-10-30-desktop-schema-initialization.md)
+records isolated startup/conversation measurements and the bounded sharing of
+message string rules. The broader temporary experiments are separate from the
+production change and do not establish regression thresholds.
 
 The load lane first creates synthetic persisted Sessions through the real
 Electron/CLI/ACP path, then closes and relaunches the same isolated profile.

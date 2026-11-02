@@ -14,6 +14,7 @@ import {
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
   readSessionFileBlobBackfillMarker,
+  readSessionFileBlobBackfillReceipt,
   removeSessionFileBlob,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
@@ -194,6 +195,30 @@ describe('session file blob store', () => {
     // Finalizing the backfill clears the marker.
     await markSessionFileBlobBackfilled(args);
     expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
+  });
+
+  it('retains the exact encrypted backfill receipt for restart adoption', async () => {
+    const source = await makeSource('private.txt', 'hello');
+    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'encrypted-local', homeDir };
+    const encryption = {
+      v: 1 as const,
+      key: '12'.repeat(32),
+      resourceId: '34'.repeat(16),
+      kind: 'file' as const,
+      sizeBytes: 5,
+      fileName: 'private.txt',
+      mimeType: 'text/plain',
+      parts: ['relay-1'],
+    };
+    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
+    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1', encryption });
+    expect(await readSessionFileBlobBackfillReceipt(args)).toEqual({
+      relayFileId: 'relay-1',
+      encryption,
+    });
+    expect(await sessionFileBlobExists(args)).toBe(true);
+    await markSessionFileBlobBackfilled(args);
+    expect(await readSessionFileBlobBackfillReceipt(args)).toBeNull();
   });
 
   it('removeSessionFileBlob also clears the backfill marker', async () => {

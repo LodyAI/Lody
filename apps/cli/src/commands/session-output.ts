@@ -309,3 +309,18 @@ export async function waitForTurnCompletion(options: {
     refresh();
   });
 }
+
+/** Summary activity time; creation timestamps remain untouched for ordering/duration. */
+export function sessionHistoryActivityAt(
+  entry: Pick<SessionHistoryInput, 'role' | 'timestamp' | 'finished' | 'endedAt'> | undefined
+): string | undefined {
+  if (
+    entry?.role === 'assistant' &&
+    entry.finished === true &&
+    typeof entry.endedAt === 'number' &&
+    Number.isFinite(entry.endedAt) &&
+    Math.abs(entry.endedAt) <= 8_640_000_000_000_000
+  )
+    return new Date(entry.endedAt).toISOString();
+  return entry?.timestamp;
+}

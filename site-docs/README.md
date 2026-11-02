@@ -64,6 +64,9 @@ Chromium. There is no second legacy site tree.
 
 ## Local development
 
+The shared head in `src/routes/__root.tsx` loads Microsoft Clarity project
+`z359h8fnzs` asynchronously on all public-site pages, alongside Google Analytics.
+
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
 

@@ -57,8 +57,14 @@ export class SessionRelationLifecyclePage {
   async archiveRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {
     await this.openRowMenu(this.activeRowById(resources.rootSessionId));
     await this.page.getByRole('menuitem', { name: /^(Archive Session|归档会话)$/u }).click();
-    // Archive follows containment and precise opened-by links, so the whole
-    // relation tree leaves the active sidebar together.
+    const confirmation = this.page.getByRole('alertdialog', {
+      name: /^(Archive sub-conversations too\?|同时归档子对话？)$/u,
+    });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole('button', { name: /^(Archive all|全部归档)$/u }).click();
+    await expect(confirmation).toBeHidden();
+    // Explicitly include opened sub-conversations so the whole relation tree
+    // leaves the active sidebar together.
     for (const sessionId of [
       resources.rootSessionId,
       resources.openedSessionId,

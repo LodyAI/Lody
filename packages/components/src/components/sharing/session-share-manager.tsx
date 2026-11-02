@@ -21,6 +21,7 @@ import { Skeleton } from '@lody/ui/skeleton';
 import { AlertDialog } from '@/ui/dialog';
 import { shareSurface } from './surface';
 import { ShareCard } from './share-card';
+import { SessionSharePlaintextConfirmation } from './session-share-plaintext-confirmation';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 
@@ -149,7 +150,7 @@ export type SessionShareManagerProps = ReturnType<typeof useSessionShareManageme
 };
 
 /** Which panel the dialog shows. One screen at a time, one primary action each. */
-type ShareStep = 'loading' | 'setup' | 'publishing' | 'published' | 'confirm';
+type ShareStep = 'loading' | 'setup' | 'publishing' | 'published' | 'confirm' | 'confirm-plaintext';
 
 /**
  * Animates the dialog's height between steps so the panel grows into the next
@@ -264,6 +265,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const canPublish = entry === null || !!entry?.canManage || entry?.status === 'revoked';
   const publishing = phase === 'capturing' || phase === 'uploading' || phase === 'publishing';
   const step: ShareStep = (() => {
+    if (props.plaintextConfirmation) return 'confirm-plaintext';
     if (embedded && confirming) return 'confirm';
     if (entry === undefined) return 'loading';
     if (publishing) return 'publishing';
@@ -294,6 +296,8 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const retrying = !!props.error && hasPending;
 
   const body = (() => {
+    if (step === 'confirm-plaintext')
+      return <SessionSharePlaintextConfirmation management={props} />;
     if (step === 'confirm')
       return (
         <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
@@ -499,6 +503,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   })();
 
   const footer = (() => {
+    if (step === 'confirm-plaintext') return null;
     if (step === 'confirm')
       return (
         <>

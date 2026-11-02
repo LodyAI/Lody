@@ -173,6 +173,7 @@ describe('genuine ledger Lab gateway policy (HTTP authentication not implemented
                 membershipId: f.membership,
                 encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(enc))),
                 kind,
+                ...(kind === 'machine' ? { machineId: 'synthetic-machine' } : {}),
                 signer,
               });
               const result = yield* actor.execute(consent);
@@ -338,6 +339,35 @@ describe('genuine ledger Lab gateway policy (HTTP authentication not implemented
                 authorizeLabStream({ ...guestInput, stream: 'loro', method: 'POST' })
               )
             ).toBe(true);
+            const replacement = syntheticSigner(150);
+            const machineConsent = yield* prepareDeviceAdmission({
+              genesis: f.anchor,
+              membershipId: f.membership,
+              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(151))),
+              kind: 'machine',
+              machineId: 'synthetic-machine',
+              signer: replacement,
+            });
+            expect((yield* actor.current()).view.inspectState().epoch.rotationRequired).toBe(false);
+            const replaced = yield* actor.execute({
+              ...machineConsent,
+              replaces: machine.publicKey,
+            });
+            expect(replaced.outcome).toBe('Committed');
+            yield* actor.acknowledge(replaced);
+            const replacementView = (yield* actor.current()).view;
+            expect(
+              replacementView
+                .inspectState()
+                .devices.has(Buffer.from(machine.publicKey.toBytes()).toString('hex'))
+            ).toBe(false);
+            expect(
+              replacementView
+                .inspectState()
+                .devices.get(Buffer.from(replacement.publicKey.toBytes()).toString('hex'))
+                ?.machineId
+            ).toBe('synthetic-machine');
+            expect(replacementView.inspectState().epoch.rotationRequired).toBe(true);
             const revoked = yield* actor.execute({
               _tag: 'RevokeDevice',
               target: recovery.publicKey,

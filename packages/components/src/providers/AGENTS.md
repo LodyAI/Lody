@@ -1,12 +1,16 @@
 # Workspace provider guidelines
 
-`CLAUDE.md` is a symlink to this file. Parent `AGENTS.md` files also apply.
+`CLAUDE.md` links here; ancestor rules apply.
+
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Keep organization queries and E2EE email inbox hosts in its optional
+authenticated child; absence of that context must still render login. The shared
+router supplies the context and retains workspace actions and owner/admin inboxes.
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Synced-doc Mirrors must set `ignoreUnknownProperties: true`: newer peers' unknown
-root keys otherwise reject the whole state and block writes. Test:
-`packages/shared/tests/session-doc-forward-compat.test.ts`.
+Synced Mirrors require `ignoreUnknownProperties: true` or new peers block writes.
+Test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
@@ -14,12 +18,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 ## Streams connection cardinality
 
 - Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
-  subscription per config/request. Connections stay bounded by workspace/machine
-  topology; more configs add serialized RPCs only. Release unowned one-shot handles
-  and subscriptions.
+  subscription per request. Connections follow workspace/machine topology; more configs
+  add serialized RPCs only. Release unowned handles and subscriptions.
 - Discover startup capabilities once per config/runtime, tracked in `refreshedConfigKeys`.
-  Re-arm passes aborted when presence leaves `synced`; reconnect must not re-probe answered
-  configs or use a pass-level gate. Probes launch real agents. Refresh defaults to machine
+  Re-arm aborted passes after presence recovers; never re-probe answered configs. Probes launch real agents. Refresh defaults to machine
   cache; only user or setup/authentication actions set `force`.
   Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
@@ -27,8 +29,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 - Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
   must retire the published instance immediately, before asynchronous durable close.
-  Returning to the same account/workspace must never reuse a retired instance;
-  render-time fencing also covers platform, cloud capability, and retry generation.
+  Never reuse retired instances; fence platform, cloud capability and retry generation.
+  Cloud discovery, store opening, tokens and writes require the shared legacy
+  admission verdict; unknown waits and encrypted disables. Preserve the local store path.
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by
@@ -79,11 +82,20 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
-- Required Streams protection rejects missing providers or plaintext rooms
-  ([contract](../../../../specs/workspace-streams-content.md)).
-- Transport state is selected per room, never merged. Runtime stores use
-  `getReadinessTransportForRoom`; hooks without the router use the structural binding in
-  `src/lib/room-readiness.ts`. Keep those selection rules aligned.
+- Unknown workspace mode permits local Repo access, never ordinary body egress.
+  Preserve drafts until authenticated classification; retire and cancel provisional
+  transports before recording an encrypted or contradictory verdict.
+- Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
+  leases. No plaintext bypass. Keep already sealed old-epoch sends and historical reads;
+  hosts prefer installed current keys; genuine absence permits retained published keys within
+  the durable fifteen-minute grace, then fails for retry. Cached hints never select write keys. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
+  Drain before deleting that instance; retain exact receipts.
+  [Sealing](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md),
+  [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+  [transport](../../../../specs/workspace-streams-content.md).
+- Missing-key notices start thirty seconds after explicit post-grace seal failure and clear on successful saves; they never retry, gate, or discard edits.
+- Select transport per room, never merge. Use `getReadinessTransportForRoom`;
+  hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
   and uses the CLI catalog's persistent `local:*` id. Do not substitute a constant or
   temporary user.
@@ -99,17 +111,18 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   phase, including one prompted by a rotated token.
 - Workspace-level rooms without a machine owner use the platform fallback.
   Returning no transport silently disables synchronization for those rooms.
-- Resource monitoring follows target ownership: local machines use the local monitor
-  transport, remote machines use the optional remote transport, and unknown ownership
-  remains pending.
-- Presence is merged by origin. For an origin represented by the local plane, the local
-  snapshot is authoritative, including absence; do not resurrect cleared presence from a
-  lagging replica.
+- Resource monitoring follows machine ownership: local or optional remote transport;
+  unknown ownership remains pending.
+- Presence: local origin/absence wins over cloud; UI uses display state, recovery raw state.
+  Encrypted presence uses its authorized bucket and shared minimal plaintext allowlist
+  on publish/cloud/local read; unimplemented protected side channels stay disabled.
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.
 
 ## Attachment transfer ownership
+
+The Loro pending queue admits new protected images/files and validates their manifests before writing history. Queue records remain bound to their originating workspace; Roost remains unavailable in protected mode.
 
 `sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
 close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
@@ -119,3 +132,9 @@ the sender uses its receipt without history readback or a second dispatch RPC.
 Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
 snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
+
+- Protected leases retain captured account/reader until confirmed close. Preallocated
+  leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
+  incomplete owners; only overlapping custody bindings or Repo namespaces wait.
+  Independent workspaces remain usable. Device replacement shares its
+  account/workspace/genesis writer. Usable retained epochs wake existing admission.

@@ -1,3 +1,5 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
@@ -33,8 +35,7 @@ export type MobileCreateWorkspaceSheetProps = {
  * `mobile-filter-drawer`):
  *   - vaul `Drawer` with `rounded-t-2xl border-border/60`
  *   - Centered title + close button on the right
- *   - `bottom-[var(--native-keyboard-height,0px)]!` so the sheet
- *     rises with the soft keyboard on iOS Capacitor
+ *   - The shared keyboard-aware sheet contract lifts and scrolls the form
  *   - Safe-area aware footer
  *   - Single shared validation hook (`useWorkspaceSlugField`) so
  *     the slug rules / availability check match the desktop dialog
@@ -45,6 +46,8 @@ export function MobileCreateWorkspaceSheet({
   onCreated,
 }: MobileCreateWorkspaceSheetProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
   const { createOrganization } = useOrganization();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -114,15 +117,11 @@ export function MobileCreateWorkspaceSheet({
       <DrawerContent
         className={cn(
           'mobile-create-workspace-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
+          'h-auto! rounded-t-2xl border-border/60',
+          keyboard.contentClassName
         )}
         style={{
-          /* Match the new-chat sheet's keyboard-rise easing so the
-             two bottom-sheets feel like the same family when the user
-             toggles between them. */
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div className="flex max-h-full min-h-0 flex-col">
@@ -152,7 +151,11 @@ export function MobileCreateWorkspaceSheet({
           </DrawerDescription>
 
           {creationAvailable ? (
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <div
+              ref={keyboard.scrollRef}
+              style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+              className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+            >
               <div className="flex flex-col gap-4">
                 <div className="space-y-1.5">
                   <UiField.Label

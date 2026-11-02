@@ -118,6 +118,8 @@ export type DraftSessionSendPayload = {
    * here, never carried or reconstructed separately.
    */
   inputConfig: SessionTurnInputConfig;
+  /** Runs after durable acceptance, before promoting the child composer. */
+  onAccepted?: () => void;
 };
 
 export interface DraftSessionChatInterfaceProps {
@@ -190,6 +192,7 @@ export const DraftSessionChatInterface = memo(
         scopeKey: draft.id,
         defaultsTarget: { project: parentSession.project, machineId: parentSession.machineId },
       });
+      const acceptMcpSend = mcpSelection.acceptSend;
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
@@ -582,9 +585,10 @@ export const DraftSessionChatInterface = memo(
           return await onSendDraft({
             ...buildSendPayload(inputBlocks, undefined, options?.mcpServerIds),
             attachments: options?.attachments,
+            onAccepted: () => acceptMcpSend(draft.sessionId, options?.skipMcpOnce),
           });
         },
-        [buildSendPayload, onSendDraft]
+        [buildSendPayload, draft.sessionId, acceptMcpSend, onSendDraft]
       );
 
       const handleAgentConfigChange = useCallback(
@@ -674,6 +678,8 @@ export const DraftSessionChatInterface = memo(
             onConfigOptionChange={selectConfigOption}
             mcp={mcpSelection.menu}
             mcpSelectionReady={mcpSelection.ready}
+            mcpDefaultsFailed={mcpSelection.defaultsFailed}
+            onRetryMcpDefaults={mcpSelection.retryDefaults}
             onSendMessage={handleSendMessage}
             onStop={() => {}}
             onRemoveQueueItem={async () => {}}

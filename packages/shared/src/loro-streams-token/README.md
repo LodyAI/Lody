@@ -55,6 +55,9 @@ the provider and complete Cause. Call `retryCleanup` to join retained work befor
 retrying handoff/close. Concurrent close shares one Deferred receipt; failed close
 keeps that failure until explicit successful recovery. Parent Scope close reports
 the same failure and does not silently release the retained child Scope.
+The Promise facade's repeated `invalidate()` after close begins is a no-op,
+including after a failed close. It cannot resurrect admission or erase a failure;
+callers still await `retryCleanup` and the close receipt before replacing the owner.
 
 The optional cache stays encrypted and partitioned by endpoint/workspace, with
 credential and rejected-token publication fences. Its storage/crypto failures remain

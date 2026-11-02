@@ -15,6 +15,8 @@ import {
 } from '../src/lib/legacy-session-send-migration';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 import { dispatchUserTurn, writeUserTurn } from '../src/lib/session-send-delivery';
+import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
+import { SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
 
 const SESSION = 'session' as SessionId;
 const BROKEN = 'broken' as SessionId;
@@ -125,6 +127,7 @@ function fixture() {
   const factory = new IDBFactory();
   return {
     runtime,
+    sessionDocs,
     snapshot: () => sessionDocs.get(SESSION)!.export({ mode: 'snapshot' }),
     factory,
     metas,
@@ -211,6 +214,197 @@ it.each(['rpc-lost', 'oversized'] as const)(
     }
   }
 );
+
+it.each(['accepted', 'transport-failed', 'prepare-failed'] as const)(
+  'retains encrypted RPC originals and durable activation when acceleration is %s',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('encrypted-human');
+    f.runtime.contentMode = 'e2ee';
+    f.runtime.requestSessionDispatchTurn = async () => {
+      throw new Error('plaintext RPC must not run');
+    };
+    const original = {
+      requestId: '01'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '02'.repeat(300),
+      requesterDevice: '03'.repeat(32),
+      expiresAt: 1234,
+    };
+    let sawDurableOriginal = false;
+    f.runtime.prepareEncryptedDispatch = async () => {
+      if (mode === 'prepare-failed') throw new Error('synthetic host failure');
+      return {
+        original,
+        send: async () => {
+          sawDurableOriginal =
+            f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id) ===
+            original.frameHex;
+          if (mode === 'transport-failed') throw new Error('synthetic transport failure');
+          return {
+            type: 'session/dispatch-turn_response',
+            sessionId: SESSION,
+            userTurnId: input.id,
+            accepted: true,
+            disposition: 'accepted',
+          };
+        },
+      };
+    };
+    await writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'history' },
+    });
+    await dispatchUserTurn(f.runtime, SESSION, input.id);
+    expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+    expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+      mode === 'prepare-failed' ? undefined : original.frameHex
+    );
+    expect(sawDurableOriginal).toBe(mode !== 'prepare-failed');
+    const restored = new LoroDoc();
+    try {
+      const source = f.sessionDocs.get(SESSION);
+      if (!source) throw new Error('missing fixture doc');
+      restored.import(source.export({ mode: 'snapshot' }));
+      expect(restored.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+        mode === 'prepare-failed' ? undefined : original.frameHex
+      );
+    } finally {
+      restored.free();
+    }
+  }
+);
+
+it.each(['history', 'dispatch'] as const)(
+  'never writes executable %s input after the host reports a known machine withdrawal',
+  async (kind) => {
+    const f = fixture();
+    const input = entry('withdrawn-human');
+    f.runtime.contentMode = 'e2ee';
+    const prepared: string[] = [];
+    // The real renderer boundary over a host that already verified the withdrawn policy.
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async (machineId) => {
+        prepared.push(machineId);
+        throw new Error(
+          "Error invoking remote method 'e2ee:prepareDispatch': Error: e2ee_machine_not_shared"
+        );
+      },
+      accept: async () => {
+        throw new Error('no dispatch may be accepted');
+      },
+      client: async () => {
+        throw new Error('no transport may open');
+      },
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+    await expect(
+      writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind } })
+    ).rejects.toBeInstanceOf(SessionInputNotSentError);
+    expect(prepared).toEqual([MACHINE]);
+    // Nothing a machine could discover through history or activation exists.
+    expect(f.turns().some((turn) => turn.id === input.id)).toBe(false);
+    expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+    expect(f.sessionDocs.get(SESSION)?.getMap('humanInputReceipts').get(input.id)).toBeUndefined();
+  }
+);
+
+/** The real renderer boundary over a scripted host: each prepare takes the next reply. */
+function encryptedHost(f: ReturnType<typeof fixture>) {
+  f.runtime.contentMode = 'e2ee';
+  const replies: Array<() => Promise<never>> = [];
+  const pending: Array<(error: Error) => void> = [];
+  let entered: () => void = () => {};
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: () => (replies.shift() ?? (() => new Promise<never>(() => {})))(),
+    accept: async () => {
+      throw new Error('no dispatch may be accepted');
+    },
+    client: async () => {
+      throw new Error('no transport may open');
+    },
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+  const ipc = (code: string) =>
+    new Error(`Error invoking remote method 'e2ee:prepareDispatch': Error: ${code}`);
+  return {
+    reject: (code: string) => replies.push(() => Promise.reject(ipc(code))),
+    // A slow host whose answer the test releases explicitly; resolves once it is asked.
+    hold: () =>
+      new Promise<void>((resolve) => {
+        entered = resolve;
+        replies.push(
+          () =>
+            new Promise<never>((_resolve, reject) => {
+              pending.push(reject);
+              entered();
+            })
+        );
+      }),
+    release: (code: string) => pending.shift()?.(ipc(code)),
+  };
+}
+const send = (f: ReturnType<typeof fixture>, input: SessionHistory) =>
+  writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind: 'dispatch' } });
+const turnStatus = (f: ReturnType<typeof fixture>, id: string) =>
+  f.turns().find((turn) => turn.id === id)?.status;
+
+it('keeps a verified withdrawal after a later unverifiable prepare', async () => {
+  const f = fixture();
+  const host = encryptedHost(f);
+  host.reject('e2ee_machine_not_shared');
+  await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  // The host's policy refresh then fails; that unknown cannot release the withdrawal.
+  host.reject('e2ee_host_operation_failed');
+  await expect(send(f, entry('retry'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  expect(f.turns()).toEqual([]);
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+});
+
+it('keeps a verified withdrawal when a later prepare outlasts its deadline', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    host.reject('e2ee_machine_not_shared');
+    await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+    const asked = host.hold();
+    const retry = send(f, entry('retry'));
+    const refused = expect(retry).rejects.toBeInstanceOf(SessionInputNotSentError);
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    await refused;
+    expect(f.turns()).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('settles timed-out input that a late verified withdrawal reaches before any machine claims it', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    const asked = host.hold();
+    const written = send(f, entry('late'));
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    // No withdrawal was known: the unknown outcome keeps the durable write.
+    await written;
+    expect(turnStatus(f, 'late')).toBe('pending');
+    vi.useRealTimers();
+    host.release('e2ee_machine_not_shared');
+    await vi.waitFor(() => expect(turnStatus(f, 'late')).toBe('canceled'));
+    expect(f.turns().find((turn) => turn.id === 'late')?.items).toEqual(entry('late').items);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it('does not create the database when it is absent', async () => {
   const f = fixture();

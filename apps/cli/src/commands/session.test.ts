@@ -17,7 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo, RepoSyncError, RepoTransportError } from 'loro-repo';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
@@ -77,6 +77,9 @@ import {
   readDelegatedMachineAccess,
   resolveSessionRequester,
   sendSessionChatResult,
+  ensureTargetMachineNotOffline,
+  MachineOfflineError,
+  readSessionLiveStatusesMany,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
   resolveRenameArgs,
@@ -95,6 +98,7 @@ import {
   selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
+  readSessionTranscript,
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
   validateTurnConfigOptionValues,
@@ -2455,6 +2459,91 @@ describe('MCP selection at turn authoring', () => {
   });
 });
 
+describe('target Machine availability from presence', () => {
+  const target = {
+    auth: {
+      machineId: 'caller-machine' as MachineId,
+      userId: 'user-1',
+      token: '',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineName: 'Caller',
+    },
+    workspaceId: 'workspace-1' as WorkspaceId,
+    machineId: 'target-machine' as MachineId,
+  };
+  const presence = (online: MachineId[] | null) => ({
+    getOnlineMachineIds: async () => (online === null ? null : new Set(online)),
+  });
+  // A Streams path slow enough that every one-shot Machine RPC times out.
+  const rpcTimesOut = () =>
+    vi
+      .spyOn(commandRuntime, 'withMachineRpcClient')
+      .mockRejectedValue(new Error('timeout: Machine status request timed out'));
+  const sessionId = 'session-1' as SessionId;
+  const sessions = [{ id: sessionId, machineId: target.machineId }];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('admits online or unknown presence even while Machine RPC times out', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence([target.machineId]) })
+    ).resolves.toBe('online');
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence(null) })
+    ).resolves.toBe('unknown');
+  });
+
+  it('rejects only definite presence offline, as retryable MACHINE_OFFLINE', async () => {
+    const error = await ensureTargetMachineNotOffline({ ...target, manager: presence([]) }).catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(MachineOfflineError);
+    expect((error as MachineOfflineError).toLodyError()).toEqual({
+      code: 'MACHINE_OFFLINE',
+      message: 'Target Machine is offline: target-machine',
+      retryable: true,
+    });
+  });
+
+  it('reports a presence-online Machine as online but stale when live status RPC times out', async () => {
+    rpcTimesOut();
+    const online = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([target.machineId]),
+    });
+    expect(online.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: true,
+      fresh: false,
+      reason: 'timeout: Machine status request timed out',
+    });
+
+    const unknown = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence(null),
+    });
+    expect(unknown.get(sessionId)?.machineOnline).toBe(false);
+
+    const offline = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([]),
+    });
+    expect(offline.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: false,
+      fresh: false,
+      reason: 'Target Machine is offline: target-machine',
+    });
+  });
+});
+
 describe('prepared command attachment inputs', () => {
   const auth = {
     machineId: 'machine-1' as MachineId,
@@ -2595,6 +2684,14 @@ describe('prepared command attachment inputs', () => {
       appendUserPromptHistory({ ...args, inputBlocks: [{ ...file, fileId: 'other-file' }] })
     ).rejects.toThrow('already used');
     expect(writer.readStored()).toHaveLength(1);
+    doc
+      .getList('history')
+      .push({ ...first, items: [{ type: 'text', text: 'later duplicate' }] } as never);
+    doc.commit();
+    expect(await appendUserPromptHistory(args)).toEqual({ ...first, existingStatus: 'pending' });
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    expect(writer.readStored()[1]?.items).toEqual([{ type: 'text', text: 'later duplicate' }]);
+    expect(writer.readStored()).toHaveLength(2);
   });
 
   it('prepares an attachment-only first turn and rejects an empty message before publication', async () => {
@@ -3041,4 +3138,135 @@ describe('session command output boundary', () => {
       vi.unstubAllGlobals();
     }
   });
+});
+
+describe('paired machine billing entitlement while offline', () => {
+  it('waits once, fails open without asking again for 30 seconds, then retries and caches', async () => {
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    const { getWorkspaceBillingEntitlementBestEffort } = await import('./session');
+    const { evaluateSessionCreateQuota } = await import('@lody/shared');
+    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let online = false;
+    let subscriptions = 0;
+    const client: Client = {
+      onUpdate: ((_ref: unknown, _args: unknown, listener: (value: unknown) => void) => {
+        subscriptions += 1;
+        // Offline: the subscription never answers. Online: it answers at once.
+        if (online) listener({ valid: true, effectivePlanTier: 'free', checkoutPending: false });
+        return () => {};
+      }) as unknown as Client['onUpdate'],
+      query: (() => new Promise(() => {})) as Client['query'],
+      close: async () => {},
+    };
+    const workspaceId = 'offline-billing-workspace';
+    const port = createCloudE2eeMachinePort({
+      accountId: 'synthetic-machine-owner',
+      workspaceId,
+      genesisHash: 'ab'.repeat(32),
+      machineId: 'machine',
+      credential: 'a4'.repeat(32),
+      authBaseUrl: 'https://synthetic.convex.cloud',
+      serverBaseUrl: 'https://relay.synthetic.test',
+      logger: getLogger('session'),
+      client,
+    });
+    const manager = { cloudBilling: port.billing } as unknown as Parameters<
+      typeof getWorkspaceBillingEntitlementBestEffort
+    >[0];
+    const workspace = { id: workspaceId, name: 'Offline', slug: null, role: 'member' };
+    const read = () => getWorkspaceBillingEntitlementBestEffort(manager, workspace);
+    try {
+      // The first command waits for the read deadline, then fails open.
+      const first = read();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(first).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // Within 30 seconds the next command fails open at once, with no new read.
+      await vi.advanceTimersByTimeAsync(29_000);
+      await expect(read()).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // After 30 seconds the plan is read again; the connection is back.
+      online = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const free = await read();
+      expect(subscriptions).toBe(2);
+      expect(free).toEqual({ effectivePlanTier: 'free', checkoutPending: false });
+      if (!free) throw new Error('expected a Free plan');
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 199 }).allowed).toBe(true);
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 200 }).allowed).toBe(false);
+      // A successful read is cached normally again.
+      await expect(read()).resolves.toEqual(free);
+      expect(subscriptions).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+it('limits history by visible entries while retaining exact totals, positions and order', async () => {
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ doc, sessionId: 'limited-transcript' as SessionId });
+  const rows: SessionHistoryInput[] = [
+    createHistoryEntry({ id: 'hidden', items: [{ type: 'thought', text: 'hidden' }] }),
+    createHistoryEntry({
+      id: 'user',
+      role: 'user',
+      items: [{ type: 'text', text: '  question  ' }],
+    }),
+    createHistoryEntry({ id: 'blank', items: [{ type: 'text', text: '\ufeff \u3000' }] }),
+    createHistoryEntry({
+      id: 'image',
+      items: [
+        {
+          type: 'image',
+          fileName: 'picture',
+          imageId: 'synthetic-image',
+          sizeBytes: 32,
+          mimeType: 'image/png',
+        } as never,
+      ],
+    }),
+    createHistoryEntry({
+      id: 'notice',
+      role: 'system',
+      items: [{ type: 'system_notice', name: 'agent_warning', text: 'hidden notice' }],
+    }),
+    createHistoryEntry({
+      id: 'answer',
+      items: [
+        { type: 'text', text: 'old answer' },
+        { type: 'text', text: 'latest answer' },
+      ],
+    }),
+  ];
+  for (const row of rows) data.writer.append(row);
+  const history = data.history.readAll();
+  const transcript = toSessionTranscriptEntries(history);
+  const full = vi.spyOn(data.history, 'readAll').mockImplementation(() => {
+    throw new Error('whole history forbidden');
+  });
+  try {
+    const backend = {
+      readHistory: async () => {
+        throw new Error('whole history forbidden');
+      },
+      readHistorySelection: async (
+        select: Parameters<typeof data.writer.readSelected>[0],
+        options?: { transcriptVisibility?: boolean }
+      ) => data.writer.readSelected(select, options),
+    };
+    for (const limit of [1, 2, 50])
+      for (const reverse of [false, true]) {
+        expect(await readSessionTranscript(backend, { limit, reverse })).toEqual({
+          total: transcript.length,
+          entries: selectSessionTranscriptEntries(transcript, { limit, reverse }),
+        });
+      }
+  } finally {
+    full.mockRestore();
+    data.dispose();
+  }
 });

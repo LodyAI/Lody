@@ -1,3 +1,4 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -179,14 +180,15 @@ export function MobileRunConfigSheet({
      provider can fill with dozens of entries). Tapping one puts the caret at the
      bottom of the screen, exactly where the soft keyboard lands. */
   const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(85, true);
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
+        className={cn('h-auto! rounded-t-2xl border-border/60', keyboard.contentClassName)}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
         <DrawerTitle className="sr-only">{title}</DrawerTitle>

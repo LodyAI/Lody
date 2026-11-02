@@ -299,6 +299,12 @@ export const encodeCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
     return bytes;
   });
 
+/** Independent business-policy budget; it never widens ledger record limits. */
+export const decodeMachineSharingCbor = (input: unknown): Result<CborValue> =>
+  decodeBounded(input, 256 * 1024, 4096, 256);
+export const encodeMachineSharingCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
+  encodeBounded(value, 256 * 1024, 4096, 256);
+
 /** Separate fixed snapshot budget; ordinary record limits remain unchanged. Its state is a few arrays of byte-string tables. */
 export const decodeSnapshotCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_SNAPSHOT_BYTES, MAX_ARRAY_LENGTH, MAX_SNAPSHOT_BYTES);

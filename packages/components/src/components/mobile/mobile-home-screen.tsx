@@ -2,6 +2,7 @@ import { SchedulesWorkspace } from '../schedules/schedules-workspace';
 import {
   forwardRef,
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -51,6 +52,7 @@ import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
 import {
   MobileChatList,
+  groupChats,
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
@@ -64,6 +66,7 @@ import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
 import { MobileWorkspaceTabBar, type MobileBottomTabBarTabSpec } from './mobile-workspace-tabbar';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
 
 function MobileReactIcon({
   icon: Icon,
@@ -1341,6 +1344,18 @@ export function MobileHomeScreen({
      `MobileWorkspaceTabBar` so the dock can collapse while the user
      scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [archiveUpper, setArchiveUpper] = useState<HTMLDivElement | null>(null);
+  const [archiveLower, setArchiveLower] = useState<HTMLDivElement | null>(null);
+  const setListScroll = useCallback((node: HTMLDivElement | null) => {
+    listScrollRef.current = node;
+    setArchiveLower(node);
+  }, []);
+  const [homeBody, setHomeBody] = useState<HTMLDivElement | null>(null);
+  const homeFold = useHorizontalFoldLayout(
+    homeBody,
+    selectedTab === 'chat' || selectedTab === 'projects'
+  );
+
   /* Pull-to-refresh: when the list is at the top and the user
      pulls down past threshold, fire `onPullToRefresh`. The hook
      reports `isRefreshing` while the promise is in flight (fed into
@@ -1359,6 +1374,21 @@ export function MobileHomeScreen({
   });
   const pullPastThreshold = pullDistance >= pullThreshold;
   const normalizedQuery = normalizeForSearch(searchQuery.trim());
+  // Split whole existing buckets, so openers and opened sessions stay in the
+  // same list and a conversation is never repeated on the two panels.
+  const foldGroups = useMemo(() => {
+    if (selectedTab !== 'chat' || showArchived || !homeFold || normalizedQuery) return null;
+    const groups = groupChats(chats, chatGroupBy);
+    if (groups.length < 2) return null;
+    return { upper: groups[0]!.items, lower: groups.slice(1).flatMap((group) => group.items) };
+  }, [selectedTab, showArchived, homeFold, normalizedQuery, chats, chatGroupBy]);
+  const splitArchive = Boolean(
+    selectedTab === 'chat' &&
+    showArchived &&
+    homeFold &&
+    !normalizedQuery &&
+    groupChats(chats, chatGroupBy).length >= 2
+  );
 
   /* First-run onboarding: the user opened the mobile app before ever
      launching the desktop client, so the workspace has no machines and
@@ -1405,6 +1435,9 @@ export function MobileHomeScreen({
   const recentProjectsMerged = useMemo(
     () => mergeRecentProjects(recentLocalProjects, recentGitHubRepos),
     [recentLocalProjects, recentGitHubRepos]
+  );
+  const splitProjects = Boolean(
+    selectedTab === 'projects' && homeFold && !normalizedQuery && recentProjectsMerged.length > 0
   );
   const searchAriaLabel = labels.searchAriaLabel ?? searchPlaceholder;
   const clearSearchAriaLabel = labels.clearSearchAriaLabel ?? 'Clear search';
@@ -1611,7 +1644,73 @@ export function MobileHomeScreen({
            `translate3d` so they move as a single compositor layer.
            The header stays put: search does a fast top→bottom exit,
            then the centered status pill mounts. */}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          ref={setHomeBody}
+          data-horizontal-fold-home-body
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+          {homeFold && splitArchive ? (
+            <>
+              <div
+                ref={setArchiveUpper}
+                data-horizontal-fold-archive-upper
+                className="min-h-0 overflow-y-auto"
+                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
+              />
+              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
+            </>
+          ) : null}
+          {homeFold && foldGroups && !showChatOnboarding ? (
+            <>
+              <div
+                data-horizontal-fold-upper-list
+                className="min-h-0 overflow-y-auto"
+                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
+              >
+                <ChatsFlatView
+                  chats={foldGroups.upper}
+                  groupBy={chatGroupBy}
+                  labels={labels}
+                  query=""
+                  onSelect={onChatSelect}
+                  onTogglePin={onChatTogglePin}
+                  onArchive={onChatArchive}
+                  onRestore={onChatRestore}
+                  hasActiveFilters={hasActiveChatFilters}
+                  onClearFilters={onClearChatFilters}
+                  onPrivateHelp={() => setPrivateHelpOpen(true)}
+                />
+              </div>
+              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
+            </>
+          ) : null}
+          {homeFold && splitProjects ? (
+            <>
+              <div
+                data-horizontal-fold-projects-upper
+                className="min-h-0 overflow-y-auto"
+                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
+              >
+                <ProjectsTabView
+                  localProjects={localProjects}
+                  githubRepositories={githubRepositories}
+                  recentProjectsMerged={recentProjectsMerged}
+                  selectedSubTab={selectedProjectsSubTab}
+                  onSubTabSelect={(sub) => onProjectsSubTabSelect?.(sub)}
+                  machineLookup={machineLookup}
+                  hasMachines={machines.length > 0}
+                  labels={labels}
+                  query={normalizedQuery}
+                  onLocalProjectSelect={onLocalProjectSelect}
+                  onGitHubRepositorySelect={onGitHubRepositorySelect}
+                  onPrivateHelp={() => setPrivateHelpOpen(true)}
+                  iosTheme={resolvedTheme === 'ios'}
+                  foldPart="upper"
+                />
+              </div>
+              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
+            </>
+          ) : null}
           <div
             className={cn('flex min-h-0 flex-1 flex-col', scheduleTabActive && 'hidden')}
             style={
@@ -1645,7 +1744,7 @@ export function MobileHomeScreen({
             </AnimatePresence>
 
             <div
-              ref={listScrollRef}
+              ref={setListScroll}
               data-mobile-session-list-scroll-region=""
               className={cn(
                 /* `z-0` makes the scroller a stacking context. WebKit can
@@ -1686,6 +1785,7 @@ export function MobileHomeScreen({
                   onGitHubRepositorySelect={onGitHubRepositorySelect}
                   onPrivateHelp={() => setPrivateHelpOpen(true)}
                   iosTheme={resolvedTheme === 'ios'}
+                  foldPart={splitProjects ? 'lower' : undefined}
                 />
               ) : null}
 
@@ -1697,7 +1797,7 @@ export function MobileHomeScreen({
                   />
                 ) : (
                   <ChatsFlatView
-                    chats={chats}
+                    chats={foldGroups?.lower ?? chats}
                     groupBy={chatGroupBy}
                     labels={labels}
                     query={normalizedQuery}
@@ -1706,6 +1806,11 @@ export function MobileHomeScreen({
                     onArchive={onChatArchive}
                     onRestore={onChatRestore}
                     archived={showArchived}
+                    splitTargets={
+                      splitArchive && archiveUpper && archiveLower
+                        ? { upper: archiveUpper, lower: archiveLower }
+                        : undefined
+                    }
                     onPermanentDelete={showArchived ? onChatPermanentDelete : undefined}
                     hasActiveFilters={hasActiveChatFilters}
                     onClearFilters={onClearChatFilters}
@@ -1881,6 +1986,7 @@ function ProjectsTabView({
   onGitHubRepositorySelect,
   onPrivateHelp,
   iosTheme,
+  foldPart,
 }: {
   localProjects: MobileHomeLocalProject[];
   githubRepositories: MobileHomeGitHubRepository[];
@@ -1895,6 +2001,7 @@ function ProjectsTabView({
   onGitHubRepositorySelect?: (fullName: string) => void;
   onPrivateHelp: () => void;
   iosTheme: boolean;
+  foldPart?: 'upper' | 'lower';
 }) {
   const localLabel = labels.localTab ?? '本地';
   const githubLabel = labels.githubTab ?? 'GitHub';
@@ -1952,15 +2059,17 @@ function ProjectsTabView({
 
   return (
     <section aria-label={labels.projectsTab ?? '项目'} className="flex flex-col">
-      {recentStrip}
-      <ProjectsSubTabSelector
-        active={selectedSubTab}
-        localLabel={localLabel}
-        githubLabel={githubLabel}
-        onSelect={onSubTabSelect}
-        iosTheme={iosTheme}
-      />
-      {selectedSubTab === 'local' ? (
+      {foldPart !== 'lower' ? recentStrip : null}
+      {foldPart !== 'lower' ? (
+        <ProjectsSubTabSelector
+          active={selectedSubTab}
+          localLabel={localLabel}
+          githubLabel={githubLabel}
+          onSelect={onSubTabSelect}
+          iosTheme={iosTheme}
+        />
+      ) : null}
+      {foldPart === 'upper' ? null : selectedSubTab === 'local' ? (
         <LocalProjectsList
           projects={localProjects}
           machineLookup={machineLookup}
@@ -2238,6 +2347,7 @@ function ChatsFlatView({
   onClearFilters,
   firstGroupTrailing,
   onPrivateHelp,
+  splitTargets,
 }: {
   chats: MobileConversationItem[];
   groupBy: MobileChatGroupBy;
@@ -2257,6 +2367,7 @@ function ChatsFlatView({
      row when the list is empty / flat with no heading). */
   firstGroupTrailing?: ReactNode;
   onPrivateHelp: () => void;
+  splitTargets?: { upper: HTMLElement; lower: HTMLElement };
 }) {
   const visible = useMemo(() => {
     if (!query) return chats;
@@ -2341,6 +2452,7 @@ function ChatsFlatView({
         privateLabel={labels.privateLabel}
         privateHelpAriaLabel={labels.privateHelpAriaLabel}
         onPrivateHelp={onPrivateHelp}
+        splitTargets={splitTargets}
       />
     </section>
   );

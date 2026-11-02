@@ -23,6 +23,7 @@ import {
   mergeSessionLaunchConfig,
   parseMachineFlockDocId,
   parseMachineFlockKey,
+  parseMachineFlockRow,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   writeAgentConfigToFlock,
@@ -282,6 +283,24 @@ describe('machine Flock helpers', () => {
     expect(next).not.toBe(previous);
   });
 
+  it('round-trips standalone visibility while retaining the registration', () => {
+    const key = machineFlockKeys.localProject('folder-1' as LocalProjectId);
+    const value = {
+      id: 'folder-1',
+      name: 'api',
+      rootPath: '/workspace/api',
+      createdAtMs: 1,
+      standaloneVisible: false,
+    };
+    const row = parseMachineFlockRow(key, value);
+    expect(row?.value).toEqual(value);
+    expect(getMachineFlockLocalProjects(row ? [row] : [])['folder-1']).toEqual(value);
+    expect(parseMachineFlockRow(key, { ...value, standaloneVisible: true })?.value).toEqual({
+      ...value,
+      standaloneVisible: true,
+    });
+  });
+
   it('extracts local project rows', () => {
     const localProjectId = 'project-1' as LocalProjectId;
     const row = {
@@ -301,6 +320,23 @@ describe('machine Flock helpers', () => {
     ).toEqual({
       [localProjectId]: row.value,
     });
+  });
+
+  it('keeps a well-formed GitHub remote on a local project and drops a malformed one', () => {
+    const flock = new FakeMachineFlock();
+    const value = (id: string, githubRepoFullName: unknown) => ({
+      id,
+      name: id,
+      rootPath: `/Users/developer/Code/${id}`,
+      createdAtMs: 1,
+      githubRepoFullName,
+    });
+    flock.set(machineFlockKeys.localProject('a' as LocalProjectId), value('a', 'acme/api'));
+    flock.set(machineFlockKeys.localProject('b' as LocalProjectId), value('b', '/Users/x/api'));
+    const projects = getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(flock));
+    expect(projects['a' as LocalProjectId]?.githubRepoFullName).toBe('acme/api');
+    expect(projects['b' as LocalProjectId]).toBeDefined();
+    expect(projects['b' as LocalProjectId]?.githubRepoFullName).toBeUndefined();
   });
 
   it('extracts pending local project delete commands', () => {

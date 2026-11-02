@@ -26,6 +26,7 @@ import {
   MobileInlinePickerRowSlot,
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import {
   getOneSignalPermissionState,
@@ -572,192 +573,210 @@ export function MobileGeneralSettings() {
 
   return (
     <>
-      <MobileInlinePickerCoordinator>
-        {/* Notifications surface above the keyboard-action row because
+      <MobileSettingsFoldPanels
+        upper={
+          <>
+            <MobileInlinePickerCoordinator>
+              {/* Notifications surface above the keyboard-action row because
             users come here far more often to fix "I'm not getting
             notifications" than to flip the return-key behavior. */}
-        <MobileSettingsSection>
-          <MobileSettingsRow
-            label={
-              isElectron
-                ? t('settings.notifications.enableToggleDesktop')
-                : t('settings.notifications.enableToggle')
-            }
-            helper={
-              <div className="flex flex-col gap-0.5">
-                <span>{permissionLabel}</span>
-                {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
-                {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
-                {!notificationSupported ? (
-                  <span className="text-destructive">
-                    {isElectron
-                      ? t('settings.notifications.unsupportedDesktop')
-                      : t('settings.notifications.unsupported')}
-                  </span>
-                ) : null}
-              </div>
-            }
-          >
-            {isProcessing ? (
-              <span className="flex h-5 w-9 items-center justify-center">
-                <Spinner size="small" label={t('common.loading', 'Loading...')} />
-              </span>
-            ) : (
-              <Switch
-                id="notification-toggle"
-                checked={notificationsEnabled}
-                disabled={isSwitchDisabled}
-                onCheckedChange={(checked) => {
-                  void handleToggleNotifications(checked);
-                }}
-              />
-            )}
-          </MobileSettingsRow>
-        </MobileSettingsSection>
+              <MobileSettingsSection>
+                <MobileSettingsRow
+                  label={
+                    isElectron
+                      ? t('settings.notifications.enableToggleDesktop')
+                      : t('settings.notifications.enableToggle')
+                  }
+                  helper={
+                    <div className="flex flex-col gap-0.5">
+                      <span>{permissionLabel}</span>
+                      {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
+                      {isElectron && permissionStatus !== 'granted' ? (
+                        <span>{desktopHint}</span>
+                      ) : null}
+                      {!notificationSupported ? (
+                        <span className="text-destructive">
+                          {isElectron
+                            ? t('settings.notifications.unsupportedDesktop')
+                            : t('settings.notifications.unsupported')}
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  {isProcessing ? (
+                    <span className="flex h-5 w-9 items-center justify-center">
+                      <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                    </span>
+                  ) : (
+                    <Switch
+                      id="notification-toggle"
+                      checked={notificationsEnabled}
+                      disabled={isSwitchDisabled}
+                      onCheckedChange={(checked) => {
+                        void handleToggleNotifications(checked);
+                      }}
+                    />
+                  )}
+                </MobileSettingsRow>
+              </MobileSettingsSection>
 
-        {isNativeIOS ? (
-          <MobileSettingsSection title={t('settings.liveActivities.title', 'Dynamic Island')}>
-            <MobileSettingsRow
-              label={t('settings.liveActivities.enableToggle', 'Enable Dynamic Island')}
-              helper={t(
-                'settings.liveActivities.description',
-                'Show running conversations and permission requests in Live Activities.'
-              )}
-            >
-              <Switch
-                id="ios-live-activities-toggle"
-                checked={iosLiveActivitiesEnabled}
-                onCheckedChange={setIosLiveActivitiesEnabled}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsSection>
-        ) : null}
+              {isNativeIOS ? (
+                <MobileSettingsSection title={t('settings.liveActivities.title', 'Dynamic Island')}>
+                  <MobileSettingsRow
+                    label={t('settings.liveActivities.enableToggle', 'Enable Dynamic Island')}
+                    helper={t(
+                      'settings.liveActivities.description',
+                      'Show running conversations and permission requests in Live Activities.'
+                    )}
+                  >
+                    <Switch
+                      id="ios-live-activities-toggle"
+                      checked={iosLiveActivitiesEnabled}
+                      onCheckedChange={setIosLiveActivitiesEnabled}
+                    />
+                  </MobileSettingsRow>
+                </MobileSettingsSection>
+              ) : null}
 
-        {showMobileInputSettings ? (
-          <MobileSettingsSection title={t('settings.input.title')}>
-            <MobileInlinePickerRowSlot>
-              <MobileSettingsRow label={t('settings.input.mobileKeyboardAction.label')}>
-                <MobileSettingsPickerTrigger
-                  id="settings-keyboard-action"
-                  ariaLabel={String(t('settings.input.mobileKeyboardAction.label'))}
-                  value={selectedMobileKeyboardAction}
-                  options={keyboardActionOptions}
-                  onChange={(value) => {
-                    if (isMobileKeyboardAction(value)) {
-                      setMobileKeyboardAction(value);
-                    }
-                  }}
-                  triggerLabel={selectedKeyboardActionLabel}
+              {showMobileInputSettings ? (
+                <MobileSettingsSection title={t('settings.input.title')}>
+                  <MobileInlinePickerRowSlot>
+                    <MobileSettingsRow label={t('settings.input.mobileKeyboardAction.label')}>
+                      <MobileSettingsPickerTrigger
+                        id="settings-keyboard-action"
+                        ariaLabel={String(t('settings.input.mobileKeyboardAction.label'))}
+                        value={selectedMobileKeyboardAction}
+                        options={keyboardActionOptions}
+                        onChange={(value) => {
+                          if (isMobileKeyboardAction(value)) {
+                            setMobileKeyboardAction(value);
+                          }
+                        }}
+                        triggerLabel={selectedKeyboardActionLabel}
+                      />
+                    </MobileSettingsRow>
+                  </MobileInlinePickerRowSlot>
+                </MobileSettingsSection>
+              ) : null}
+            </MobileInlinePickerCoordinator>
+          </>
+        }
+        lower={
+          <>
+            <MobileSettingsSection title={t('settings.general.sessions.title', 'Sessions')}>
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={t(
+                    'settings.general.sessions.queuedMessageBehavior.label',
+                    'Queued message behavior'
+                  )}
+                  helper={t(
+                    'settings.general.sessions.queuedMessageBehavior.helper',
+                    'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
+                  )}
+                  stack
+                >
+                  <QueuedMessageBehaviorControl
+                    value={queuedMessageBehavior}
+                    onChange={setQueuedMessageBehavior}
+                    className="w-full"
+                  />
+                </MobileSettingsRow>
+                <MobileSettingsRow
+                  label={t(
+                    'settings.general.sessions.codeOnlyLineChanges.label',
+                    'Show code-only line changes'
+                  )}
+                >
+                  <Switch
+                    id="session-sidebar-code-changes-only-toggle"
+                    checked={sessionSidebarCodeChangesOnly}
+                    onCheckedChange={setSessionSidebarCodeChangesOnly}
+                  />
+                </MobileSettingsRow>
+                <MobileSettingsRow
+                  label={
+                    <p className="text-[0.95rem] font-medium leading-tight">
+                      {t('settings.cache.clearCache.label')}
+                    </p>
+                  }
+                  helper={t('settings.cache.clearCache.description')}
+                  onClick={() => clearCache.setDialogOpen(true)}
                 />
-              </MobileSettingsRow>
-            </MobileInlinePickerRowSlot>
-          </MobileSettingsSection>
-        ) : null}
-      </MobileInlinePickerCoordinator>
+              </MobileSettingsRowGroup>
+            </MobileSettingsSection>
 
-      <MobileSettingsSection title={t('settings.general.sessions.title', 'Sessions')}>
-        <MobileSettingsRowGroup>
-          <MobileSettingsRow
-            label={t(
-              'settings.general.sessions.queuedMessageBehavior.label',
-              'Queued message behavior'
+            {isElectron && (
+              <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
+                <MobileSettingsRowGroup>
+                  <MobileSettingsRow
+                    label={t('settings.general.autoLaunch.label', 'Launch at startup')}
+                  >
+                    {autoLaunch.enabledLoading ? (
+                      <span className="flex h-5 w-9 items-center justify-center">
+                        <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                      </span>
+                    ) : (
+                      <Switch
+                        id="auto-launch-toggle"
+                        checked={autoLaunch.enabled}
+                        disabled={!autoLaunch.supported || autoLaunch.loading}
+                        onCheckedChange={(checked) => {
+                          void autoLaunch.updateEnabled(checked);
+                        }}
+                      />
+                    )}
+                  </MobileSettingsRow>
+                  <MobileSettingsRow
+                    label={t(
+                      'settings.general.autoLaunch.hideWindowLabel',
+                      'Hide window on auto-launch'
+                    )}
+                    helper={t(
+                      'settings.general.autoLaunch.hideWindowHelper',
+                      'Keep the main window hidden when Lody starts automatically after sign-in'
+                    )}
+                  >
+                    {autoLaunch.hideWindowLoading ? (
+                      <span className="flex h-5 w-9 items-center justify-center">
+                        <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                      </span>
+                    ) : (
+                      <Switch
+                        id="auto-launch-hide-window-toggle"
+                        checked={autoLaunch.hideWindowOnAutoLaunch}
+                        disabled={!autoLaunch.enabled || autoLaunch.loading}
+                        onCheckedChange={(checked) => {
+                          void autoLaunch.updateHideWindow(checked);
+                        }}
+                      />
+                    )}
+                  </MobileSettingsRow>
+                  <MobileSettingsRow
+                    label={t('settings.general.preventSleep.label', 'Prevent sleep')}
+                  >
+                    <Switch
+                      id="prevent-sleep-toggle"
+                      checked={preventSleepEnabled}
+                      onCheckedChange={(checked) => {
+                        void (async () => {
+                          setPreventSleepEnabled(checked);
+                          const result =
+                            await getIpcServices()?.app.setPreventSleepEnabled(checked);
+                          if (typeof result?.enabled === 'boolean') {
+                            setPreventSleepEnabled(result.enabled);
+                          }
+                        })();
+                      }}
+                    />
+                  </MobileSettingsRow>
+                </MobileSettingsRowGroup>
+              </MobileSettingsSection>
             )}
-            helper={t(
-              'settings.general.sessions.queuedMessageBehavior.helper',
-              'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
-            )}
-            stack
-          >
-            <QueuedMessageBehaviorControl
-              value={queuedMessageBehavior}
-              onChange={setQueuedMessageBehavior}
-              className="w-full"
-            />
-          </MobileSettingsRow>
-          <MobileSettingsRow
-            label={t(
-              'settings.general.sessions.codeOnlyLineChanges.label',
-              'Show code-only line changes'
-            )}
-          >
-            <Switch
-              id="session-sidebar-code-changes-only-toggle"
-              checked={sessionSidebarCodeChangesOnly}
-              onCheckedChange={setSessionSidebarCodeChangesOnly}
-            />
-          </MobileSettingsRow>
-          <MobileSettingsRow
-            label={
-              <p className="text-[0.95rem] font-medium leading-tight">
-                {t('settings.cache.clearCache.label')}
-              </p>
-            }
-            helper={t('settings.cache.clearCache.description')}
-            onClick={() => clearCache.setDialogOpen(true)}
-          />
-        </MobileSettingsRowGroup>
-      </MobileSettingsSection>
-
-      {isElectron && (
-        <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
-          <MobileSettingsRowGroup>
-            <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
-              {autoLaunch.enabledLoading ? (
-                <span className="flex h-5 w-9 items-center justify-center">
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-toggle"
-                  checked={autoLaunch.enabled}
-                  disabled={!autoLaunch.supported || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateEnabled(checked);
-                  }}
-                />
-              )}
-            </MobileSettingsRow>
-            <MobileSettingsRow
-              label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
-              helper={t(
-                'settings.general.autoLaunch.hideWindowHelper',
-                'Keep the main window hidden when Lody starts automatically after sign-in'
-              )}
-            >
-              {autoLaunch.hideWindowLoading ? (
-                <span className="flex h-5 w-9 items-center justify-center">
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-hide-window-toggle"
-                  checked={autoLaunch.hideWindowOnAutoLaunch}
-                  disabled={!autoLaunch.enabled || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateHideWindow(checked);
-                  }}
-                />
-              )}
-            </MobileSettingsRow>
-            <MobileSettingsRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
-              <Switch
-                id="prevent-sleep-toggle"
-                checked={preventSleepEnabled}
-                onCheckedChange={(checked) => {
-                  void (async () => {
-                    setPreventSleepEnabled(checked);
-                    const result = await getIpcServices()?.app.setPreventSleepEnabled(checked);
-                    if (typeof result?.enabled === 'boolean') {
-                      setPreventSleepEnabled(result.enabled);
-                    }
-                  })();
-                }}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsRowGroup>
-        </MobileSettingsSection>
-      )}
-
+          </>
+        }
+      />
       <ClearCacheConfirmDialog
         open={clearCache.dialogOpen}
         onOpenChange={clearCache.setDialogOpen}

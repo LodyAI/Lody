@@ -1,3 +1,8 @@
+import {
+  normalizeWorkspaceProject,
+  type WorkspaceProject,
+  type ProjectId,
+} from './workspace-project';
 import { normalizeAgentRole, serializeAgentRoleRow, type AgentRole } from './agent-role';
 import type { AgentRoleId, McpServerId, WorkspaceId } from './ids';
 import {
@@ -7,6 +12,7 @@ import {
   type ProjectMcpDefault,
   type WorkspaceMcpServerMeta,
 } from './workspace-mcp';
+import { assertPublicMcpServer, publicMcpServer } from './mcp-authentication';
 
 export const WORKSPACE_FLOCK_DOC_STREAM_SEGMENT = 'wf';
 const WORKSPACE_FLOCK_DOC_NAME = 'workspace';
@@ -16,8 +22,10 @@ export const getWorkspaceFlockDocId = (workspaceId: WorkspaceId): string =>
 
 export type WorkspaceFlockMcpServerKey = ['mcpServer', McpServerId];
 export type WorkspaceFlockAgentRoleKey = ['agentRole', AgentRoleId];
+export type WorkspaceFlockProjectKey = ['project', ProjectId];
 export type WorkspaceFlockProjectMcpDefaultKey = ['projectMcpDefault', string];
 export type WorkspaceFlockKey =
+  | WorkspaceFlockProjectKey
   | WorkspaceFlockMcpServerKey
   | WorkspaceFlockAgentRoleKey
   | WorkspaceFlockProjectMcpDefaultKey;
@@ -34,10 +42,12 @@ export type WorkspaceFlockKey =
 export const WORKSPACE_FLOCK_ROW_FAMILIES = [
   'mcpServer',
   'agentRole',
+  'project',
   'projectMcpDefault',
 ] as const;
 
 export const workspaceFlockKeys = {
+  project: (id: ProjectId): WorkspaceFlockProjectKey => ['project', id],
   projectMcpDefault: (projectKey: string): WorkspaceFlockProjectMcpDefaultKey => [
     'projectMcpDefault',
     projectKey,
@@ -47,6 +57,7 @@ export const workspaceFlockKeys = {
 } as const;
 
 export type ParsedWorkspaceFlockKey =
+  | { kind: 'project'; key: WorkspaceFlockProjectKey; projectId: ProjectId }
   | { kind: 'projectMcpDefault'; key: WorkspaceFlockProjectMcpDefaultKey; projectKey: string }
   | {
       kind: 'mcpServer';
@@ -68,6 +79,10 @@ export const parseWorkspaceFlockKey = (
   const id = key[1].trim();
   if (!id) {
     return undefined;
+  }
+  if (key[0] === 'project') {
+    const projectId = id as ProjectId;
+    return { kind: 'project', key: workspaceFlockKeys.project(projectId), projectId };
   }
   if (key[0] === 'projectMcpDefault' && isProjectMcpKey(id)) {
     return {
@@ -95,11 +110,13 @@ export type WorkspaceFlockAgentRoleRow = {
   key: WorkspaceFlockAgentRoleKey;
   value: AgentRole;
 };
+export type WorkspaceFlockProjectRow = { key: WorkspaceFlockProjectKey; value: WorkspaceProject };
 export type WorkspaceFlockProjectMcpDefaultRow = {
   key: WorkspaceFlockProjectMcpDefaultKey;
   value: ProjectMcpDefault;
 };
 export type WorkspaceFlockRow =
+  | WorkspaceFlockProjectRow
   | WorkspaceFlockMcpServerRow
   | WorkspaceFlockAgentRoleRow
   | WorkspaceFlockProjectMcpDefaultRow;
@@ -132,6 +149,10 @@ export const parseWorkspaceFlockRow = (
   if (!parsedKey) {
     return undefined;
   }
+  if (parsedKey.kind === 'project') {
+    const project = normalizeWorkspaceProject(value);
+    return project?.id === parsedKey.projectId ? { key: parsedKey.key, value: project } : undefined;
+  }
   if (parsedKey.kind === 'projectMcpDefault') {
     const preference = normalizeProjectMcpDefault(value);
     return preference ? { key: parsedKey.key, value: preference } : undefined;
@@ -140,7 +161,7 @@ export const parseWorkspaceFlockRow = (
     if (!isWorkspaceMcpServerMeta(value) || value.id !== parsedKey.mcpServerId) {
       return undefined;
     }
-    return { key: parsedKey.key, value };
+    return { key: parsedKey.key, value: publicMcpServer(value) };
   }
   // Normalized rather than merely validated: an option key an older client
   // should never have written must not survive into a Session config just
@@ -209,7 +230,10 @@ const workspaceFlockRowsEqual = (
 export const writeWorkspaceMcpServerToFlock = (
   flock: WorkspaceFlockWritableFlock,
   entry: WorkspaceMcpServerMeta
-): boolean => writeWorkspaceFlockRow(flock, workspaceFlockKeys.mcpServer(entry.id), entry);
+): boolean => {
+  assertPublicMcpServer(entry);
+  return writeWorkspaceFlockRow(flock, workspaceFlockKeys.mcpServer(entry.id), entry);
+};
 
 export const deleteWorkspaceMcpServerFromFlock = (
   flock: WorkspaceFlockWritableFlock,
@@ -304,6 +328,20 @@ const readSingleRow = (
   }
   return rows;
 };
+
+export const listWorkspaceProjects = (rows: WorkspaceFlockRowMap): WorkspaceProject[] =>
+  Object.values(rows)
+    .filter((row): row is WorkspaceFlockProjectRow => row.key[0] === 'project')
+    .map((row) => row.value)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+export const writeWorkspaceProjectToFlock = (
+  flock: WorkspaceFlockWritableFlock,
+  project: WorkspaceProject
+): boolean => writeWorkspaceFlockRow(flock, workspaceFlockKeys.project(project.id), project);
+export const deleteWorkspaceProjectFromFlock = (
+  flock: WorkspaceFlockWritableFlock,
+  id: ProjectId
+): boolean => deleteWorkspaceFlockRow(flock, workspaceFlockKeys.project(id));
 
 export const getProjectMcpDefaults = (
   rows: WorkspaceFlockRowMap

@@ -47,6 +47,18 @@ The local daemon must advertise `magpieImport` v1 and `providerSetup`; Pi additi
 requires `builtinPi`. Successful partial writes survive failure; retry skips providers
 already bound to the same gateway and runtime. No existing provider is overwritten.
 
+## Headless CLI import
+
+Explicit `lody agent-config import-magpie` execution authorizes the same fixed
+provider mappings on the invoking server, without desktop confirmation. It never
+selects a remote machine, including through environment defaults. `--gateway`
+accepts a loopback origin; `--link` uses the existing bounded public envelope.
+An optional target subset can only narrow the offered set. All selected runtime
+capabilities are checked before writing. Existing providers and pending setup IDs
+are reused; failed setups may be explicitly retried by rerunning the command.
+Local durability and publication are reported separately; queued setup is not a
+successful model request. Desktop link handling retains its confirmation boundary.
+
 ## Runtime ownership
 
 The renderer generates only known environment mappings and persists through the
@@ -64,8 +76,10 @@ in capability-cache identity; normal refresh starts a new live probe. Running ag
 are not hot-reloaded when Magpie's model catalog changes.
 
 - Claude receives its Anthropic endpoint/token and `CLAUDE_MODEL_CONFIG` catalog.
-- Codex receives a Responses provider plus a generated native model catalog in a
-  Lody-owned, gateway-scoped Codex home. It does not reuse a ChatGPT account binding.
+- Codex receives a Responses provider in a Lody-owned, gateway-scoped Codex home whose
+  `model_catalog_url` points at Magpie's Codex-shaped catalog
+  (`<gateway>/v1/codex/models`), so the capability projection is Magpie's and is not
+  regenerated locally. It does not reuse a ChatGPT account binding.
 - Pi receives a generated `models.json` in an isolated Lody-owned Pi profile, using
   OpenAI Chat Completions. Native global profile extensions/settings are not imported.
 - Kimi Code receives an isolated `KIMI_CODE_HOME/config.toml` with a provider and model catalog.

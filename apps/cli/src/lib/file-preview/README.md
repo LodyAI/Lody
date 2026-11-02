@@ -108,3 +108,22 @@ same-repository Git worktrees contained in it, via the shared
 `@lody/shared/node/file-link-resolution`. If Git discovery is unavailable the link
 resolves against the session root alone, as before. See the
 [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md).
+
+## Paid remote file downloads
+
+The Download action previously reused `file/preview`, so a file above its text
+or binary budget could not be downloaded even though chat attachments allow
+100 MiB. `file/download-chunk`, negotiated through `fileDownload: 1`, returns
+original bytes in 512 KiB ranges up to 100 MiB for a positively entitled paid
+workspace. It uses the existing owner-scoped content envelope and path policy.
+Each request rechecks workspace ownership and paid entitlement; file identity,
+size and high-resolution modification/change timestamps bind all ranges.
+A changed file fails instead of producing a mixed download.
+
+The browser assembles one bounded byte array outside the preview/editor cache,
+then uses the existing browser download or native sharing implementation.
+Cancellation stops additional requests and suppresses export. A pending range
+may finish on the machine but carries at most 512 KiB. Older machines and free
+workspaces retain the existing preview-sized downloads. Same-machine local file
+opening remains on the local IPC path; this capability adds no local-to-cloud
+fallback. See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-paid-file-download.md).

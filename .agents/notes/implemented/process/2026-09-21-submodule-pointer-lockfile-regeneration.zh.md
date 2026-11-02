@@ -2,18 +2,16 @@
 
 Status: implemented
 Translation: current
+PR: [#2191](https://github.com/LodyAI/Lody/pull/2191)
 
 [English](2026-09-21-submodule-pointer-lockfile-regeneration.md)
 
 ## 摘要
 
-CI 会递归检出所有子模块并执行 `pnpm install --frozen-lockfile`,而
-`packages/acp-extension-claude` 处于根 pnpm workspace 内(`packages/*`,且
-`apps/cli` 通过 `workspace:*` 依赖它),因此它的 `package.json` 属于 lockfile
-必须匹配的依赖图。提交 `ac8b2c3a` 把该指针推到上游更新的提交,其依赖版本已被
-提升,却没有重新生成 `pnpm-lock.yaml`。自此以后 `main` 一直在安装这一步失败,
-根本走不到 Typecheck、Lint 或测试。修复方式是重新生成 lockfile,并对仍处于
-`minimumReleaseAge` 窗口内的版本做一次精确豁免——这正是该列表里既有条目的用途。
+CI 在冻结安装前会递归检出子模块，因此 workspace 内适配器的 manifest 也属于
+根 lockfile 的依赖图。只更新指针而没有匹配的解析结果，会让无关检查也在测试前
+被阻断。lockfile 保持与这些 manifest 一致，只为仍在七天隔离期内的已选定版本
+提供精确例外。各平台包的依赖图保持完整，后续版本仍受隔离策略约束。
 
 ## 决策
 
@@ -25,6 +23,9 @@ CI 会递归检出所有子模块并执行 `pnpm install --frozen-lockfile`,而
   `name@version` 条目加入 `minimumReleaseAgeExclude` 做一次性豁免——该列表本就
   为此存在。回退子模块指针、或把该子模块移出 workspace,均已否决:指针更新承载
   着上游产品改动,而 `apps/cli` 的 `workspace:*` 依赖要求它必须在图内可解析。
+- pnpm 10.20 对每个包采用第一条匹配的例外规则。因此扩展已有的精确版本规则，
+  并覆盖所有可选平台包，而不是增加会被忽略的后续规则。
+  [Codex 修复记录](../bug-fix/2026-10-27-codex-root-lockfile.zh.md)解释了同一约束。
 
 ## 证据
 
@@ -47,8 +48,8 @@ pnpm-lock.yaml is not up to date with packages/acp-extension-claude/package.json
 ```
 
 时间线:`a870b1b1`(2026-09-17)最后一次重新生成 lockfile;`ac8b2c3a`
-(2026-09-20)把 `packages/acp-extension-claude` 指到 `56b94c6c`;该指针在 `main`
-上完全相同,因此没有任何分支引入这个不匹配。
+(2026-09-20)把 `packages/acp-extension-claude` 指到 `56b94c6c`；该指针
+在当时的 `main` 上完全相同，因此该不匹配先于受影响的分支存在。
 
 十个版本中有七个发布已超过七天。三个根包及 `@vitest/*` 同一发布序列尚未满足,
 它们也是 `minimumReleaseAgeExclude` 唯一的新增项:
@@ -60,11 +61,13 @@ pnpm-lock.yaml is not up to date with packages/acp-extension-claude/package.json
 `@agentclientprotocol/sdk@1.4.0` 最初被加入,核对发布日期后又移除——它已远超该
 窗口,必须继续走正常策略解析。
 
+[11 月 1 日的 PR 合并检查](https://github.com/LodyAI/Lody/actions/runs/41306898438/job/124849039169)
+再次暴露同一边界：合并后的 Claude 子模块要求 Agent SDK `0.3.316`，根 importer
+却仍选择 `0.3.293`，所有测试组都在安装依赖时中止。修复保留其他已锁定解析结果，
+并复制已选 SDK 完整的八个平台依赖图。
+
 ## 验证
 
-`pnpm install --frozen-lockfile` 现已通过。使用重新生成的 lockfile:
-`pnpm format:check`、`pnpm typecheck`、`pnpm check:quick` 均通过;
-`@lody/components` 报告 478 个文件、3761 个用例通过。lockfile 的改动仅限这些
-开发工具链及其传递边(eslint 10.10.0、globals 17.12.0、prettier 3.9.7、
-vitest 4.1.11/5.0.1 以及新的 `cacheable`/`file-entry-cache`/`flat-cache` 依赖树),
-运行期依赖没有变化。
+冻结安装验证递归固定的子模块 manifest 与根 lockfile 一致。先审查依赖图差异及
+可选平台条目，再做格式、类型、静态和行为检查。仍持有旧子模块源码的本地检出，
+无法证明合并后的版本能够安装；推送后的合并检查仍是集成边界。

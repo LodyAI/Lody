@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 
 import { conversationFontSizeAtom, inlineMathEnabledAtom } from '../src/atoms/settings';
+import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appearance-settings';
 import type { AppIconBridge } from '../src/components/mobile/mobile-app-icon-settings';
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
@@ -345,6 +346,27 @@ describe('AppearanceSettingsView', () => {
     expect(
       container?.querySelector('button[aria-label="Font ligatures"]')?.getAttribute('aria-checked')
     ).toBe('false');
+  });
+
+  it('keeps appearance controls on their intended panels when the device unfolds', async () => {
+    const render = (
+      fold: { messageHeight: number; lowerTop: number; gapHeight: number } | null
+    ) => (
+      <MobileSettingsFoldContext.Provider value={fold}>
+        <MobileAppearanceSettings />
+      </MobileSettingsFoldContext.Provider>
+    );
+    await act(async () =>
+      root?.render(render({ messageHeight: 250, lowerTop: 290, gapHeight: 40 }))
+    );
+    const upper = container!.querySelector<HTMLElement>('[data-settings-fold-upper]')!;
+    const lower = container!.querySelector<HTMLElement>('[data-settings-fold-lower]')!;
+    expect(upper.textContent).toContain('Font size');
+    expect(lower.textContent).toContain('Render inline math');
+    const trigger = upper.querySelector('button[aria-label="Font size"]');
+    await act(async () => root?.render(render(null)));
+    expect(container!.querySelector('button[aria-label="Font size"]')).toBe(trigger);
+    expect(lower.classList.contains('overflow-y-auto')).toBe(false);
   });
 
   it('persists the mobile inline math preference across remounts', async () => {

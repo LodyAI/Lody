@@ -6,6 +6,7 @@ import {
   createPreviewVisualCommentDoc,
   createSessionMirror,
   type SessionHistory,
+  type SessionMeta,
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
@@ -45,6 +46,69 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
+  it('publishes the control version after enqueue, edit, reorder and removal', async () => {
+    const doc = new LoroDoc();
+    const mirror = createSessionMirror({
+      doc,
+      initialState: { session: { id: 'session-1' as never }, history: [] },
+    });
+    let meta: Partial<SessionMeta> = {};
+    const writer = createDirectWorkspaceWriter({
+      repo: {
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+      } as never,
+      acquireSessionStore: async () => ({ doc, setState: mirror.setState }) as never,
+      releaseSessionStoreRef: () => {},
+      acquirePreviewVisualCommentStore: async () => {
+        throw new Error('not used');
+      },
+      releasePreviewVisualCommentStoreRef: () => {},
+    });
+    const mutate = async (action: () => Promise<void>) => {
+      const receiver = doc.fork();
+      await action();
+      const receipt = meta.messageQueueUpdateVersion;
+      if (!receipt) throw new Error('Queue update is missing its causal receipt');
+      expect(receipt.updatedAt).toBe(meta.messageQueueUpdatedAt);
+      const observed = () =>
+        receipt.frontiers.every(
+          ({ peer, counter }) => (receiver.version().get(peer) ?? 0) > counter
+        );
+      expect(observed()).toBe(false);
+      receiver.import(doc.export({ mode: 'update', from: receiver.version() }));
+      expect(observed()).toBe(true);
+      expect(receiver.toJSON().mq).toEqual(doc.toJSON().mq);
+    };
+    try {
+      await mutate(() =>
+        writer.enqueueSessionMessage('session-1', {
+          task: 'one',
+          userTurnId: 'one',
+          timestamp: '2026-10-27T00:00:00.000Z',
+        })
+      );
+      await mutate(() =>
+        writer.enqueueSessionMessage('session-1', {
+          task: 'two',
+          userTurnId: 'two',
+          timestamp: '2026-10-27T00:00:00.000Z',
+        })
+      );
+      const [first, second] = mirror.getState().mq ?? [];
+      if (!first || !second) throw new Error('Missing queued messages');
+      await mutate(() => writer.updateSessionMessage('session-1', first.$cid, { task: 'edited' }));
+      await mutate(() => writer.reorderSessionMessages('session-1', [second.$cid, first.$cid]));
+      expect(mirror.getState().mq?.map((row) => row.task)).toEqual(['two', 'edited']);
+      await mutate(() => writer.removeSessionMessage('session-1', first.$cid));
+      await mutate(() => writer.removeSessionMessage('session-1', second.$cid));
+      expect(mirror.getState().mq).toEqual([]);
+    } finally {
+      mirror.dispose();
+    }
+  });
+
   it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
     'reconciles the durable role without overwriting intervening changes: %s',
     async (scenario) => {

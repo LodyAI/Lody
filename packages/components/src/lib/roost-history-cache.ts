@@ -327,6 +327,27 @@ export function createRoostHistoryCache(scope: string) {
     getHead,
     readPage,
     readRows,
+    readCompleteDirectory: (expected: RoostCachedHead) =>
+      transact<SessionDirectoryRow[] | undefined>('readonly', (tx, done) => {
+        const request = tx.objectStore(HEADS).get(key('head'));
+        request.onsuccess = () => {
+          const head = request.result as RoostCachedHead | undefined;
+          if (!head || head.start !== 0 || !sameHead(head, expected)) return done(undefined);
+          if (head.count === 0) return done([]);
+          const rows: SessionDirectoryRow[] = [];
+          const cursor = tx.objectStore(ROWS).openCursor(positions(head.slot, 0, head.count - 1));
+          cursor.onsuccess = () => {
+            const current = cursor.result;
+            if (!current) return done(rows.length === head.count ? rows : undefined);
+            const stored = current.value as CachedRow;
+            if (stored.position !== rows.length) return done(undefined);
+            // Older directory rows omit metadata that their cached bodies retain.
+            // Project one body at a time within this single cache observation.
+            rows.push(createRoostDirectoryRow(stored.position, stored.turn as SessionEntry));
+            current.continue();
+          };
+        };
+      }),
     acceptPage,
     readAffected: (ids: readonly string[]) =>
       transact<CachedRow[]>('readonly', (tx, done) => {

@@ -1,3 +1,11 @@
+import {
+  createRouter,
+  createRootRoute,
+  createRoute,
+  createMemoryHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
 // @vitest-environment jsdom
 
 import React, { act } from 'react';
@@ -64,7 +72,12 @@ import {
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
 import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
-import { TestCloudPlatformProvider } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
+import { PlatformContext } from '@lody/platform/react';
+import { createStaticStore, type CloudApi } from '@lody/platform';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { userAtom } from '../src/atoms';
+import { ErrorBoundary } from '../src/components/error-boundary';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
 const machineId = 'machine-1' as MachineId;
@@ -123,6 +136,13 @@ describe('desktop onboarding flow', () => {
     store = createStore();
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, 'workspace-1');
+    store.set(userAtom, { id: 'account' } as never);
+    store.set(workspaceContentModeAtom, {
+      accountId: 'account',
+      workspaceId,
+      workspaceSlug: 'workspace-1',
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
     store.set(runtimeAtom, {
       workspaceId,
       workspaceSlug: 'workspace-1',
@@ -248,6 +268,147 @@ describe('desktop onboarding flow', () => {
       localProjectId: selectedProject,
       name: 'selected',
     });
+  });
+
+  it.each(['unknown', 'provisional'] as const)(
+    'restores projects with %s mode without querying refused GitHub catalogs',
+    async (state) => {
+      store.set(userAtom, { id: 'account' } as never);
+      store.set(
+        workspaceContentModeAtom,
+        state === 'unknown'
+          ? null
+          : { accountId: 'account', workspaceId, workspaceSlug: 'workspace-1', descriptor: null }
+      );
+      const platform = {
+        ...TEST_CLOUD_PLATFORM,
+        workspaces: {
+          ...TEST_CLOUD_PLATFORM.workspaces,
+          state: createStaticStore({
+            status: 'ready',
+            workspaces: [
+              { id: workspaceId, slug: 'workspace-1', name: 'Unmarked workspace', role: 'owner' },
+            ],
+          } as never),
+        },
+        cloudApi: {
+          ...TEST_CLOUD_PLATFORM.cloudApi!,
+          useMutation: () => async () => {
+            throw new Error('unexpected cloud mutation');
+          },
+          useAction: () => async () => {
+            throw new Error('unexpected cloud action');
+          },
+          useQuery: ((_operation, args) => {
+            if (args !== 'skip') throw new Error('e2ee_control_only');
+            return undefined;
+          }) as CloudApi['useQuery'],
+        },
+      };
+      await act(async () =>
+        root?.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>
+              <ErrorBoundary
+                fallbackRender={({ error }) => <output role="alert">{String(error)}</output>}
+              >
+                <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
+              </ErrorBoundary>
+            </Provider>
+          </PlatformContext.Provider>
+        )
+      );
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(container.textContent).toContain('Loading your repositories');
+      expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
+    }
+  );
+
+  it('keeps local projects and Back available when restored encrypted projects offer control/pairing', async () => {
+    store.set(workspaceContentModeAtom, {
+      accountId: 'account',
+      workspaceId,
+      workspaceSlug: 'workspace-1',
+      descriptor: {
+        workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        activation: 'control-only',
+        genesisHash: 'ab'.repeat(32),
+        cryptoOrgId: 'ab'.repeat(32),
+      },
+    });
+    store.set(localProbeResultAtom, { ok: true, machineId } as never);
+    mocks.useVisibleLocalProjects.mockReturnValue({
+      projects: new Map([
+        [
+          'machine-1:local',
+          {
+            key: 'machine-1:local',
+            machineId,
+            project: { id: 'local', name: 'Kept local project', rootPath: '/synthetic/local' },
+            machine: { name: 'Local' },
+          },
+        ],
+      ]),
+    });
+    const back = vi.fn();
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useMutation: () => async () => {
+          throw new Error('unexpected mutation');
+        },
+        useAction: () => async () => {
+          throw new Error('unexpected action');
+        },
+        useQuery: ((_operation, args) => {
+          if (args !== 'skip') throw new Error('e2ee_control_only');
+          return undefined;
+        }) as CloudApi['useQuery'],
+      },
+    };
+    const base = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
+      routeTree: base.addChildren([
+        createRoute({
+          getParentRoute: () => base,
+          path: '/onboarding',
+          component: () => <ProjectsScreen onBack={back} onSkip={vi.fn()} onComplete={vi.fn()} />,
+        }),
+        createRoute({
+          getParentRoute: () => base,
+          path: '/workspace/e2ee/$workspaceId',
+          component: () => <p>Control and pairing</p>,
+        }),
+      ]),
+    });
+    await act(async () => {
+      await router.load();
+      root?.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <RouterProvider router={router} />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+    expect(container.textContent).toContain('Kept local project');
+    expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
+    await act(async () => findButton(container, 'Back').click());
+    expect(back).toHaveBeenCalledOnce();
+    const control = container.querySelector<HTMLAnchorElement>('a[href*="/workspace/e2ee/"]');
+    expect(control).not.toBeNull();
+    const pathname = window.location.pathname;
+    await act(async () => {
+      control!.click();
+      await router.load();
+    });
+    expect(router.state.location.pathname).toBe('/workspace/e2ee/workspace-1');
+    expect(window.location.pathname).toBe(pathname);
+    expect(container.textContent).toContain('Control and pairing');
   });
 
   it('keeps GitHub available while the local agent is not ready', async () => {

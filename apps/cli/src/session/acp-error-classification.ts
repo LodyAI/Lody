@@ -1,3 +1,7 @@
+import {
+  isAcpStartupProcessFailure,
+  isAcpTransportDisconnectMessage,
+} from '@/agent/acp-startup-monitor';
 import type { ChatFailedReason } from '@lody/shared';
 import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
 
@@ -112,14 +116,10 @@ export const isAcpSessionStorageIncompatibleError = (error: unknown): boolean =>
 };
 
 export const isAgentDisconnectedError = (error: unknown): boolean => {
-  const errorMessage = getACPDiagnosticText(error).toLowerCase();
-  return (
-    errorMessage.includes('connection is disposed') ||
-    errorMessage.includes('acp connection closed') ||
-    errorMessage.includes('not ready for writing') ||
-    errorMessage.includes('processtransport') ||
-    (errorMessage.includes('process') && errorMessage.includes('not ready'))
-  );
+  // Startup diagnostics can quote transport text in stderr or their cause.
+  // They must reach the pre-prompt failure notice instead of generic disconnect copy.
+  if (isAcpStartupProcessFailure(error)) return false;
+  return isAcpTransportDisconnectMessage(getACPDiagnosticText(error));
 };
 
 export const isAcpSessionNotFoundError = (error: unknown): boolean => {
@@ -257,3 +257,19 @@ export const shouldRecoverStaleACPConnectionPrompt = (args: {
   !args.alreadyAttempted &&
   !args.hasPromptOutput &&
   (isAgentDisconnectedError(args.error) || isAcpSessionNotFoundError(args.error));
+
+/** Structured provider evidence only; neither generic 429 nor billing failure authorizes recovery. */
+export function classifyCapacityFailure(
+  error: unknown
+): 'rate_limited' | 'quota_exhausted' | 'provider_overloaded' | undefined {
+  const parsed = parseACPError(error);
+  if (!parsed) return undefined;
+  const codex = getStringField(parsed.data, 'codexErrorInfo');
+  if (codex === 'serverOverloaded') return 'provider_overloaded';
+  if (codex === 'usageLimitExceeded' || codex === 'usage_limit_exceeded') return 'quota_exhausted';
+  if (getStringField(parsed.data, 'errorKind') === 'rate_limit') return 'rate_limited';
+  // Claude's explicit session-limit failure may omit errorKind.
+  if (/You've hit your session limit\s*·\s*resets\b/i.test(parsed.message))
+    return 'quota_exhausted';
+  return undefined;
+}

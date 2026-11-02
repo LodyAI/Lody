@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
 import zh from '../../../locales/zh_CN.json';
 import { ScheduleForm, ScheduleListView } from '../src/components/schedules/schedule-view';
+import { ScheduledQueueRow } from '../src/components/sessions/message-queue/scheduled-queue-row';
 import {
   describeTrigger,
   formatInstant,
   formatTimeOfDay,
   formatUpcoming,
+  scheduleRowTimeZone,
   weekdayNames,
 } from '../src/components/schedules/schedule-format';
 import type { ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
@@ -89,6 +91,40 @@ describe('Chinese is a product language, not an Intl locale', () => {
     }
   });
 
+  it('shows a scheduled message on the viewer clock and other schedules on the machine clock', () => {
+    const once = { kind: 'once' as const, at: '2026-09-07T09:00:00.000Z' };
+    expect(
+      scheduleRowTimeZone({ ...row, scheduledMessage: true, trigger: once }, 'UTC', 'Asia/Shanghai')
+    ).toBe('Asia/Shanghai');
+    expect(scheduleRowTimeZone({ ...row, trigger: once }, 'UTC')).toBe('UTC');
+    expect(scheduleRowTimeZone(row, 'UTC')).toBe('Asia/Shanghai');
+  });
+
+  it('renders a persisted scheduled queue row under zh_CN', () => {
+    // A reservation re-renders on every load, so a throw here took down the app.
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    try {
+      const at = NOW + 86_400_000;
+      render(
+        <ScheduledQueueRow
+          item={{
+            scheduleId: 's',
+            content: '每天回顾',
+            at,
+            timeZone: 'Asia/Shanghai',
+            state: 'pending',
+          }}
+        />
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    const time = container.querySelector('[data-scheduled-row] button');
+    expect(time?.textContent).toBe(formatUpcoming(NOW + 86_400_000, 'Asia/Shanghai', NOW, 'zh-CN'));
+    expect(time?.textContent).toContain('明天');
+    expect(container.textContent).toContain('每天回顾');
+  });
+
   it('renders the schedule list in Chinese', () => {
     const runtimes: ScheduleRuntimeRow[] = [
       {
@@ -125,10 +161,68 @@ describe('Chinese is a product language, not an Intl locale', () => {
       />
     );
     expect(container.textContent).toContain('每天回顾');
-    // The frequency column is a real localized sentence, not a cron expression.
-    expect(container.textContent).toContain(zh['schedules.column.frequency']);
+    // The frequency is a real localized sentence, not a cron expression.
+    expect(container.textContent).toContain(zh['schedules.column.status']);
     expect(container.textContent).not.toContain('* * MON-FRI');
   });
+
+  it.each(['en', 'zh_CN'])(
+    'explains that protected-message changes need an owner save in %s',
+    async (language) => {
+      await act(async () => {
+        await instance.changeLanguage(language);
+      });
+      const message = {
+        ...row,
+        scheduledMessage: true,
+        trigger: { kind: 'once' as const, at: new Date(NOW + 60000).toISOString() },
+      };
+      try {
+        const view = (enabled: boolean) => (
+          <ScheduleListView
+            rows={[{ ...message, enabled }]}
+            runtimes={[
+              {
+                scheduleId: row.scheduleId,
+                machineId: row.machineId,
+                activationId: row.activationId,
+                observedDefinitionFingerprint: row.definitionFingerprint,
+                updatedAt: NOW,
+                queueState: 'blocked',
+                blockedCode: 'E2EE_SCHEDULE_NOT_AUTHORIZED',
+                messageState: 'pending',
+              },
+            ]}
+            ready
+            now={NOW}
+            onOpen={() => {}}
+            onNew={() => {}}
+            contextForRow={() => ({
+              machine: 'Remote machine',
+              agent: 'Agent',
+              project: null,
+              presence: 'online',
+              canToggle: true,
+            })}
+          />
+        );
+        render(view(true));
+        const recovery =
+          language === 'en'
+            ? 'Its owner must review and save it again before it can run.'
+            : '需要由计划所有者检查并重新保存，才能执行。';
+        expect(container.textContent).toContain(recovery);
+        expect(container.textContent).not.toContain('E2EE_SCHEDULE_NOT_AUTHORIZED');
+        render(view(false));
+        expect(container.textContent).not.toContain(recovery);
+        expect(container.textContent).toContain(instance.t('schedules.status.cancelling'));
+      } finally {
+        await act(async () => {
+          await instance.changeLanguage('zh_CN');
+        });
+      }
+    }
+  );
 
   it('renders the editor and its weekday pickers in Chinese', () => {
     render(

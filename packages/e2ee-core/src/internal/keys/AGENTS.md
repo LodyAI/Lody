@@ -21,7 +21,11 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   commitment checks, including after reopen; a disk phase or old report never
   stands in. Queued reports retry their original bytes without re-signing. Copy
   and validate a whole fetched page before any write; a failed install returns no
-  `next`. `MailboxInstallError` diagnoses the exact frame; it never rejects it.
+  `next`. Skip routing/hint mismatches for this fetch, without saving/rejecting them.
+  Skip non-current senders: only genuine historical retirement plus exact signed
+  routing may return `retiredDigests` for repair; unknown senders request ledger
+  refresh and retain their digest for retry. Continue later rows and the cursor.
+  `MailboxInstallError` diagnoses the exact frame; it never rejects it.
 - Discovery/repair revisions and mailbox statuses are hints, never authority. Only
   a genuine current ledger ends a task as Obsolete/Revoked. Finite pages let blocked
   work be skipped without starving later tasks; no hidden loop.
@@ -38,8 +42,12 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
 - `EpochPublisher` candidates use `CandidateProtector`, never installed-key
   protection, and authenticate purpose/context/original record/envelope digest.
   Persist and open the candidate, stage the complete post-transition group and
-  compare exact readback before submission. Retry exact records; install only
-  genuinely committed epochs; Conflict discards the candidate key. Delete staged
+  compare exact readback before the first submission. A matching pending submission
+  resumes without repeating staging/readback. Retry exact records; install only
+  genuinely committed epochs; Conflict discards the candidate key. Retained submission
+  recovery requires genuine checkpoint/key proof before ACK; damaged candidate keys
+  require independent committed-key receipt. Never bypass CandidateProtector for
+  unpublished keys or re-sign an uncertain record. Delete staged
   groups only for a genuine different commitment at the same epoch, by the group's
   signing device. Storage never supplies ledger authority.
 - `InstalledEpochHistory` recovers from the installed latest key only, verifies the

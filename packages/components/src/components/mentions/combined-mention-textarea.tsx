@@ -114,6 +114,7 @@ function TwoLevelMentionMenu({
   menuSide,
   menuAnchor,
   menuMobileDocked,
+  mobilePanelPlacement,
 }: {
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
@@ -137,6 +138,7 @@ function TwoLevelMentionMenu({
   enableAgentRoleMentions: boolean;
   agentRoleItems: readonly AgentRoleMentionItem[];
   surface: MentionSurface;
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
   menuSide?: 'top' | 'bottom';
@@ -455,6 +457,7 @@ function TwoLevelMentionMenu({
       menuSide={menuSide}
       anchor={menuAnchor}
       mobileDocked={menuMobileDocked}
+      mobilePanelPlacement={mobilePanelPlacement}
     />
   );
 }
@@ -602,6 +605,8 @@ function AgentRoleMentionHydrator({
  * re-slugging every visible session on every session-list tick.
  */
 export type CombinedMentionTextareaHandle = {
+  /** Insert an externally owned atom through the same splice as menu/drop edits. */
+  insertExternalMention: (request: { text: string; id: string; at: number }) => boolean;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -640,6 +645,11 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
+      insertExternalMention: ({ text, id, at }) => {
+        if (context.disabled || context.readonly || !text) return false;
+        onMentionInsert({ text, value: id, kind: 'pasted_text', at });
+        return true;
+      },
       insertSessionMention: (sessionId, options) => {
         // Session mentions being disabled IS an empty list, so the lookup is
         // also the enablement check — there is nothing to mention.
@@ -669,7 +679,7 @@ function MentionActionsBridge({
         return true;
       },
     }),
-    [items, mentions, onMentionInsert]
+    [context.disabled, context.readonly, items, mentions, onMentionInsert]
   );
 
   return null;
@@ -711,11 +721,17 @@ export interface CombinedMentionTextareaProps extends Omit<
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
+  /** Let the input fill a flex-column parent (the full-height chat sheet). */
+  fillHeight?: boolean;
+  /** Full-height composers dock the mobile mention panel above their footer. */
+  mentionPanelPlacement?: 'above-composer' | 'bottom';
   mentionValues?: string[];
   onMentionValuesChange?: (values: string[]) => void;
   label?: string;
   resetOnEmpty?: boolean;
   externalMentions?: MentionRange[];
+  atomicUndoHistory?: boolean;
+  onAtomicHistoryRetainValues?: (values: ReadonlySet<string>) => void;
   onExternalMentionsChange?: (mentions: MentionRange[]) => void;
   onMentionClick?: (mention: MentionRange) => void;
   /** Renders matching ranges as icon chips instead of plain highlights. */
@@ -782,6 +798,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       label = 'Message',
       resetOnEmpty = true,
       externalMentions = [],
+      atomicUndoHistory = false,
+      onAtomicHistoryRetainValues,
       onExternalMentionsChange,
       onMentionClick,
       getMentionChip,
@@ -790,6 +808,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey,
       mentionActionsRef,
       className,
+      fillHeight = false,
+      mentionPanelPlacement,
       ...props
     },
     ref
@@ -1055,7 +1075,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           onChange={(event) => {
             onValueChange(event.target.value);
           }}
-          className={cn('resize-none', className)}
+          className={cn('resize-none', fillHeight && 'min-h-0 flex-1', className)}
           aria-label={props['aria-label'] ?? label}
           {...props}
         />
@@ -1069,6 +1089,8 @@ export const CombinedMentionTextarea = React.forwardRef<
         key={draftKey}
         disabled={props.disabled}
         readonly={props.readOnly}
+        undoHistory={atomicUndoHistory}
+        onHistoryRetainValues={onAtomicHistoryRetainValues}
         open={value !== '' && menuOpen}
         onOpenChange={setMenuOpen}
         triggers={triggers}
@@ -1086,7 +1108,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className="w-full"
+        className={cn('w-full', fillHeight && 'min-h-0 flex-1')}
       >
         <React.Fragment key={hydrationKey}>
           <FileMentionHydrator
@@ -1140,8 +1162,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
-          containerClassName={containerClassName}
-          className={cn('resize-none', className)}
+          containerClassName={cn(containerClassName, fillHeight && 'h-full')}
+          className={cn('resize-none', fillHeight && 'h-full', className)}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1171,6 +1193,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           menuSide={menuSide}
           menuAnchor={menuAnchor}
           menuMobileDocked={menuMobileDocked}
+          mobilePanelPlacement={mentionPanelPlacement}
         />
       </Mention>
     );

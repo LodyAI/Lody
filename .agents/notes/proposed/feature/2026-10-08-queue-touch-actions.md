@@ -8,8 +8,9 @@ Translation: current
 ## Abstract
 
 Compact queue buttons are difficult touch targets. This change gives row actions
-real 44 px boxes and a separate action line on narrow or coarse-pointer surfaces,
-while retaining compact desktop layout. Browser and device acceptance remain pending.
+real 44 px boxes on narrow or coarse-pointer surfaces, while retaining compact
+desktop layout. Actions stay on the message line: a separate action line looked
+detached and wasted a full row per item, so rows center on the 44 px boxes instead. Browser and device acceptance remain pending.
 
 ## Decision and evidence
 

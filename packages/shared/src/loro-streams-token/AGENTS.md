@@ -14,6 +14,8 @@
   replacement and close abort and await actual producer I/O. Bounded failed release
   retains the provider/raw owners and complete Cause; require `retryCleanup` before
   handoff. Never overwrite unresolved work with a new credential generation.
+- Track reader completion with a fiber observer registered after admission; a
+  pre-start interruption never enters the reader Effect's finalizer.
 - Injected native ports must preserve cancellation and bounded real cleanup.
   Raw port cleanup bounds must not exceed the provider cleanup base; producer/read
   observers allow 2×/3× that base to preserve inner release Causes.
@@ -29,3 +31,6 @@
   Diagnostic health/Cause summaries must contain only finite categories, state/counts
   and auth status, never credentials, tokens, URLs, raw errors, Causes or owners.
   Timeout, interruption and release failure remain observable. [Contract](README.md).
+
+- Legacy invalidation after close begins is idempotent. Failed close/cleanup still
+  retains its owner and Cause; invalidation never confirms release or reopens admission.

@@ -17,6 +17,22 @@ const {
 };
 
 describe('local session control node validators', () => {
+  it('transports local DSH Provider discovery without workspace or launch inputs', () => {
+    const request = { type: 'machine/dsh-providers', machineId: 'machine-1' };
+    const response = {
+      type: 'machine/dsh-providers_response',
+      providers: [{ id: 'provider-1', name: 'DSH' }],
+    };
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      expect(validate(request)).toBe(true);
+      expect(validate({ ...request, command: 'arbitrary' })).toBe(false);
+    }
+    for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+      expect(validate(response)).toBe(true);
+      expect(validate({ ...response, providers: [{ id: 1 }] })).toBe(false);
+    }
+  });
+
   it.each(SessionHistoryWriteOperationSchema.options)(
     'transports the declared history operation %s',
     (operation) => {

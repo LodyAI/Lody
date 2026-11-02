@@ -55,6 +55,28 @@ async function fixture() {
 }
 
 describe('Codex profile ownership and generation publication', () => {
+  it('skips a corrupt sibling, keeps target validation strict, and rediscovers repaired metadata', async () => {
+    const { root, store, config, resolved } = await fixture();
+    const file = path.join(root, resolved.profile.profileId, 'profile.json');
+    const saved = await readFile(file, 'utf8');
+    const other = {
+      ...config,
+      id: randomUUID(),
+      codexAuth: { ...config.codexAuth, profileId: randomUUID() },
+    } as AgentConfigMeta;
+    const sibling = await store.resolve('workspace-fixture', other, true);
+    await writeFile(file, '{broken');
+    expect((await store.list('workspace-fixture')).map((item) => item.profile.profileId)).toEqual([
+      sibling?.profile.profileId,
+    ]);
+    await expect(store.resolve('workspace-fixture', config)).rejects.toThrow(
+      'metadata could not be read'
+    );
+    await writeFile(file, saved);
+    expect(await store.list('workspace-fixture')).toHaveLength(2);
+    expect(await store.resolve('workspace-fixture', config, true)).toEqual(resolved);
+  });
+
   it('uses isolated Codex default storage for new and unfinished ChatGPT profiles', async () => {
     const { root, store, config } = await fixture();
     const chatgpt = {

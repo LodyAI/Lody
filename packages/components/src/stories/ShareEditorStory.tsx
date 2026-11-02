@@ -61,6 +61,9 @@ export function ShareEditorStory({ onClose, onBusyChange }: SessionShareEditorCo
         { sessionId: 'main', title: 'Designing static sharing' },
         { sessionId: 'child', title: 'Deployment design' },
       ]}
+      plaintextConfirmation={false}
+      onConfirmPlaintextPublish={publish}
+      onCancelPlaintextPublish={() => {}}
       hasPending={false}
       conflict={false}
       progress={progress}

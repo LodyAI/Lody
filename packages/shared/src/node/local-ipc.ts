@@ -1,10 +1,30 @@
 import {
+  LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  LocalE2eeResetResponseSchema,
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest,
+  type LocalE2eeResetResponse,
+  LocalE2eePrepareReplySchema,
+  LocalE2eeActivateResponseSchema,
+  type LocalE2eePrepareRequest,
+  type LocalE2eeActivateRequest,
+  type LocalE2eePrepareReply,
+  type LocalE2eeActivateResponse,
+} from '../e2ee-local-pairing';
+import {
   LOCAL_SCHEDULE_CONTROL_PATH,
   ScheduleControlResponseSchema,
   type ScheduleControlRequest,
   type ScheduleControlResponse,
 } from '../schedule-control';
 import crypto from 'node:crypto';
+import {
+  AUTOMATION_CONTROL_PATH,
+  automationControlResponseSchema,
+  type AutomationControlRequest,
+  type AutomationControlResponse,
+} from '../automations/control';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -172,6 +192,22 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  automationControl: (
+    message: AutomationControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<AutomationControlResponse, IpcError>;
+  e2eeReset: (
+    message: LocalE2eeResetRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeResetResponse, IpcError>;
+  e2eePrepare: (
+    message: LocalE2eePrepareRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eePrepareReply, IpcError>;
+  e2eeActivate: (
+    message: LocalE2eeActivateRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeActivateResponse, IpcError>;
   scheduleControl: (
     message: ScheduleControlRequest,
     options?: LocalIpcRequestOptions
@@ -933,6 +969,45 @@ function makeControlClient(
   postSessionControl?: PostSessionControlFn
 ): LocalControlClientService {
   return {
+    e2eeReset: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_RESET_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeResetResponse>(
+            LocalE2eeResetResponseSchema,
+            () => 'e2ee_reset_unavailable'
+          )(response, payload)
+      ),
+    e2eePrepare: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eePrepareReply>(LocalE2eePrepareReplySchema, () => {
+            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
+      ),
+    e2eeActivate: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeActivateResponse>(LocalE2eeActivateResponseSchema, () => {
+            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
+      ),
     sessionControl: (message, requestOptions) =>
       postSessionControl
         ? postSessionControl(message, requestOptions ?? {})
@@ -955,6 +1030,19 @@ function makeControlClient(
           parseJsonBody<ScheduleControlResponse>(
             ScheduleControlResponseSchema,
             (status) => `Invalid Schedule response (HTTP ${status})`
+          )(response, payload)
+      ),
+    automationControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          AUTOMATION_CONTROL_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<AutomationControlResponse>(
+            automationControlResponseSchema,
+            (status) => `Invalid Automation response (HTTP ${status})`
           )(response, payload)
       ),
     projectControl: (message, requestOptions) =>

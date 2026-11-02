@@ -1,6 +1,8 @@
 import http, { type AddressInfo } from 'node:http';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { previewTestLookup } from './preview-test-lookup';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   DEFAULT_PREVIEW_RESOURCE_LIMITS,
@@ -10,6 +12,14 @@ import {
 } from '@lody/shared';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
 import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
+
+const previousDispatcher = getGlobalDispatcher();
+const viewerDispatcher = new Agent({ connect: { lookup: previewTestLookup } });
+beforeAll(() => setGlobalDispatcher(viewerDispatcher));
+afterAll(async () => {
+  setGlobalDispatcher(previousDispatcher);
+  await viewerDispatcher.close();
+});
 
 const createLogger = () => ({
   debug: () => {},
@@ -22,6 +32,30 @@ const createLogger = () => ({
   child: () => createLogger(),
   close: () => {},
 });
+
+const listenTestLoopback = (
+  server: http.Server,
+  host: '127.0.0.1' | '::1',
+  port: number
+): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(new Error('Missing test port'));
+      resolve(address.port);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen({ port, host, ...(host === '::1' ? { ipv6Only: true } : {}) });
+  });
+
+const listenTestIPv4 = (server: http.Server, port: number): Promise<number> =>
+  listenTestLoopback(server, '127.0.0.1', port);
 
 const listenHtmlServer = async (
   checkFetchMetadata = false
@@ -144,7 +178,7 @@ const openBrowserSocket = async (viewerUrl: string, protocols?: string[]): Promi
   const socketUrl = new URL(viewerUrl);
   socketUrl.protocol = 'ws:';
   socketUrl.pathname = '/socket';
-  const socket = new WebSocket(socketUrl, protocols);
+  const socket = new WebSocket(socketUrl, protocols, { lookup: previewTestLookup });
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
@@ -341,6 +375,7 @@ describe('LocalPreviewProxyManager', () => {
             .get(
               url,
               {
+                lookup: previewTestLookup,
                 headers: {
                   'Sec-Fetch-Site': 'cross-site',
                   'Sec-Fetch-Mode': mode,
@@ -418,7 +453,7 @@ describe('LocalPreviewProxyManager', () => {
       });
       const url = new URL(endpoint.viewerUrl);
       url.protocol = 'ws:';
-      const socket = new WebSocket(url, { headers });
+      const socket = new WebSocket(url, { headers, lookup: previewTestLookup });
       const opened = await new Promise<boolean>((resolve) => {
         socket.once('open', () => resolve(true));
         socket.once('error', () => resolve(false));
@@ -604,6 +639,375 @@ describe('LocalPreviewProxyManager', () => {
     await expect(fetch(second.viewerUrl)).rejects.toThrow();
   });
 
+  it('isolates application cookies across endpoints and forwards them over HTTP and WebSocket', async () => {
+    const observed: string[] = [];
+    const server = http.createServer((request, response) => {
+      const cookie = request.headers.cookie ?? '';
+      observed.push(cookie);
+      if (request.url?.startsWith('/login')) {
+        response.writeHead(200, {
+          'content-type': 'text/html',
+          'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
+          'set-cookie': [
+            `session=${request.url?.includes('two') ? 'two' : 'one'}; Domain=localhost; Path=/; HttpOnly; SameSite=Strict`,
+            'other=value; Path=/; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
+          ],
+        });
+        response.end('<html><body>login</body></html>');
+      } else if (
+        request.method === 'POST' &&
+        request.headers.origin !== `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      ) {
+        response.writeHead(403).end('foreign origin');
+      } else {
+        response.writeHead(cookie.includes('session=') ? 200 : 403).end(cookie);
+      }
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      observed.push(request.headers.cookie ?? '');
+      if (!/^session=(one|two); other=value$/.test(request.headers.cookie ?? '')) {
+        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return;
+      }
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    servers.push(server);
+    const target: PreviewTarget = {
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: (server.address() as AddressInfo).port,
+    };
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoints = await Promise.all(
+      ['one', 'two'].map((id) =>
+        manager.acquire({
+          sessionId: id as SessionId,
+          target: { ...target, path: `/login?${id}` },
+          visualAnnotation: false,
+        })
+      )
+    );
+    const jars: string[][] = [];
+    for (const endpoint of endpoints) {
+      const response = await fetch(endpoint.viewerUrl);
+      expect(response.headers.get('content-security-policy')).toBe("default-src 'self'");
+      const cookies = response.headers.getSetCookie();
+      expect(cookies).toHaveLength(3);
+      expect(cookies[0]).toContain('HttpOnly');
+      expect(cookies[0]).not.toMatch(/domain=/i);
+      expect(cookies[0]).toContain('Secure; SameSite=None; Partitioned');
+      expect(cookies[0]).not.toContain('SameSite=Strict');
+      expect(cookies[1]).toContain('Expires=Wed, 21 Oct 2037 07:28:00 GMT');
+      jars.push(cookies.map((cookie) => cookie.split(';')[0] ?? ''));
+      await response.text();
+    }
+    expect(new URL(endpoints[0]?.viewerUrl ?? '').hostname).not.toBe(
+      new URL(endpoints[1]?.viewerUrl ?? '').hostname
+    );
+    expect(jars[0]?.[0]).not.toEqual(jars[1]?.[0]);
+    const allCookies = jars.flat().join('; ');
+    for (const [index, endpoint] of endpoints.entries()) {
+      const url = new URL('/asset.js', endpoint.viewerUrl);
+      const response = await fetch(url, { headers: { cookie: allCookies } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(`session=${index === 0 ? 'one' : 'two'}; other=value`);
+      const foreign = await fetch(url, {
+        method: 'POST',
+        headers: { cookie: allCookies, origin: 'https://foreign.example' },
+      });
+      expect(foreign.status).toBe(403);
+      await foreign.text();
+      const socketUrl = new URL('/ws', endpoint.viewerUrl);
+      socketUrl.protocol = 'ws:';
+      const socket = new WebSocket(socketUrl, {
+        lookup: previewTestLookup,
+        headers: { cookie: allCookies },
+      });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve);
+        socket.once('error', reject);
+      });
+      socket.terminate();
+    }
+    expect(
+      observed.every((cookie) => !cookie.includes('lody_preview') && !cookie.includes('lody_app_'))
+    ).toBe(true);
+    wsServer.close();
+  });
+
+  it('reuses local cookie names when a session reopens the same target', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    server.prependListener('request', (_request, response) => {
+      response.setHeader('set-cookie', 'session=app-value; Path=/; Max-Age=3600');
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'reopened-preview' as SessionId;
+    const first = await manager.acquire({ sessionId, target });
+    const firstPage = await fetch(first.viewerUrl);
+    const firstCookies = firstPage.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await firstPage.text();
+    await manager.release(sessionId, first.endpointId);
+    const second = await manager.acquire({ sessionId, target });
+    expect(second.endpointId).not.toBe(first.endpointId);
+    expect(new URL(second.viewerUrl).hostname).toBe(new URL(first.viewerUrl).hostname);
+    const oldTokenRequest = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: firstCookies.join('; ') },
+    });
+    expect(oldTokenRequest.status).toBe(403);
+    await oldTokenRequest.text();
+    const secondPage = await fetch(second.viewerUrl);
+    const secondCookies = secondPage.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0] ?? '');
+    await secondPage.text();
+    expect(secondCookies.map((pair) => pair.split('=')[0])).toEqual(
+      firstCookies.map((pair) => pair.split('=')[0])
+    );
+    expect(secondCookies[1]).not.toEqual(firstCookies[1]);
+    const forwarded: Array<string | undefined> = [];
+    server.prependListener('request', (request) => forwarded.push(request.headers.cookie));
+    const response = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: `${firstCookies[0]}; ${secondCookies[1]}` },
+    });
+    expect(response.status).toBe(200);
+    const refreshedCookies = response.headers.getSetCookie();
+    expect(refreshedCookies).toHaveLength(2);
+    expect(refreshedCookies[0]).toContain('session=app-value');
+    expect(refreshedCookies[1]?.split(';')[0]).toBe(secondCookies[1]);
+    await response.text();
+    expect(forwarded).toEqual(['session=app-value']);
+    const other = await listenHtmlServer();
+    servers.push(other.server);
+    other.server.prependListener('request', (_request, otherResponse) => {
+      otherResponse.setHeader('set-cookie', 'session=other; Path=/');
+    });
+    const otherEndpoint = await manager.acquire({ sessionId, target: other.target });
+    const otherPage = await fetch(otherEndpoint.viewerUrl);
+    expect(otherPage.headers.getSetCookie()[0]?.split('=')[0]).not.toEqual(
+      firstCookies[0]?.split('=')[0]
+    );
+    await otherPage.text();
+  });
+
+  it('accepts a large browser cookie jar while forwarding only the current application cookies', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    const received: Array<string | undefined> = [];
+    server.prependListener('request', (request, response) => {
+      received.push(request.headers.cookie);
+      response.setHeader('set-cookie', 'session=active; Path=/');
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      received.push(request.headers.cookie);
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({ sessionId: 'large-cookie-jar' as SessionId, target });
+    const page = await fetch(endpoint.viewerUrl);
+    const cookies = page.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await page.text();
+    const staleCookies = Array.from(
+      { length: 180 },
+      (_, index) => `lody_app_old${index}_session=${'x'.repeat(3500)}`
+    ).join('; ');
+    const response = await fetch(new URL('/asset', endpoint.viewerUrl), {
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+    const socketUrl = new URL('/ws', endpoint.viewerUrl);
+    socketUrl.protocol = 'ws:';
+    const socket = new WebSocket(socketUrl, {
+      lookup: previewTestLookup,
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    socket.terminate();
+    expect(received).toEqual([undefined, 'session=active', 'session=active']);
+    wsServer.close();
+    const tooLarge = await fetch(endpoint.viewerUrl, {
+      headers: { cookie: `oversized=${'x'.repeat(1024 * 1024)}` },
+    });
+    expect(tooLarge.status).toBe(431);
+    await tooLarge.text();
+  });
+
+  it('owns both loopback families for HTTP and WebSocket until release', async () => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const ipv6Probe = http.createServer();
+    const ipv6Available = await new Promise<boolean>((resolve, reject) => {
+      ipv6Probe.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      ipv6Probe.listen(0, '::1', () => ipv6Probe.close(() => resolve(true)));
+    });
+    if (!ipv6Available) return;
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'dual-loopback' as SessionId;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    const port = Number(new URL(endpoint.viewerUrl).port);
+    const intruder = http.createServer();
+    const bound = await new Promise<string>((resolve) => {
+      intruder.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'unknown'));
+      intruder.listen(port, '::1', () => intruder.close(() => resolve('bound')));
+    });
+    expect(bound).toBe('EADDRINUSE');
+    const ipv6 = new URL(endpoint.viewerUrl);
+    ipv6.hostname = '[::1]';
+    const response = await fetch(ipv6);
+    expect(response.status).toBe(200);
+    await response.text();
+    const denied = new URL(ipv6);
+    denied.search = '';
+    expect((await fetch(denied)).status).toBe(403);
+    const socketUrl = new URL(ipv6);
+    socketUrl.protocol = 'ws:';
+    socketUrl.pathname = '/socket';
+    const socket = new WebSocket(socketUrl);
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    const closed = observeClose(socket);
+    await manager.release(sessionId, endpoint.endpointId);
+    await closed;
+    await expect(fetch(ipv6)).rejects.toThrow();
+    const ipv4 = new URL(ipv6);
+    ipv4.hostname = '127.0.0.1';
+    await expect(fetch(ipv4)).rejects.toThrow();
+  });
+
+  it('retries on an occupied IPv6 port before publishing the local viewer', async () => {
+    const occupied = http.createServer((_request, response) => response.end('unrelated'));
+    const available = await new Promise<boolean>((resolve, reject) => {
+      occupied.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      occupied.listen(0, '::1', () => resolve(true));
+    });
+    if (!available) return;
+    servers.push(occupied);
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw new Error('Missing IPv6 port');
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const boundIPv4Ports: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      initialLocalPort: address.port,
+      listen: async (server, host, port) => {
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1') boundIPv4Ports.push(bound);
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: 'ipv6-conflict' as SessionId,
+      target: upstream.target,
+    });
+    expect(boundIPv4Ports[0]).toBe(address.port);
+    expect(boundIPv4Ports.at(-1)).toBe(Number(new URL(endpoint.viewerUrl).port));
+    expect(Number(new URL(endpoint.viewerUrl).port)).not.toBe(address.port);
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+    const original = await fetch(`http://[::1]:${address.port}/`);
+    expect(await original.text()).toBe('unrelated');
+  });
+
+  it.each(['EADDRNOTAVAIL', 'EAFNOSUPPORT'])(
+    'keeps IPv4 available when IPv6 is unavailable with %s',
+    async (code) => {
+      const upstream = await listenHtmlServer();
+      servers.push(upstream.server);
+      const manager = new LocalPreviewProxyManager({
+        logger: createLogger(),
+        listen: (server, host, port) => {
+          if (host === '::1')
+            return Promise.reject(Object.assign(new Error('IPv6 unavailable'), { code }));
+          return listenTestIPv4(server, port);
+        },
+      });
+      managers.push(manager);
+      const sessionId = 'without-ipv6' as SessionId;
+      const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+      const ipv4 = new URL(endpoint.viewerUrl);
+      ipv4.hostname = '127.0.0.1';
+      expect((await fetch(ipv4)).status).toBe(200);
+      await manager.release(sessionId, endpoint.endpointId);
+      await expect(fetch(ipv4)).rejects.toThrow();
+    }
+  );
+
+  it('cleans up the IPv4 listener on a non-retryable IPv6 failure and allows a later acquire', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const originalError = Object.assign(new Error('IPv6 bind denied'), { code: 'EACCES' });
+    let failedPort = 0;
+    let failIPv6 = true;
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1' && failIPv6) throw originalError;
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1' && failIPv6) failedPort = bound;
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const sessionId = 'ipv6-failure' as SessionId;
+    await expect(manager.acquire({ sessionId, target: upstream.target })).rejects.toBe(
+      originalError
+    );
+    expect(failedPort).toBeGreaterThan(0);
+    const probe = http.createServer();
+    expect(await listenTestIPv4(probe, failedPort)).toBe(failedPort);
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    failIPv6 = false;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+  });
+
+  it('bounds repeated IPv6 port conflicts and releases each IPv4 reservation', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const conflict = Object.assign(new Error('IPv6 occupied'), { code: 'EADDRINUSE' });
+    const reserved: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1') throw conflict;
+        const selected = await listenTestIPv4(server, port);
+        reserved.push(selected);
+        return selected;
+      },
+    });
+    managers.push(manager);
+    await expect(
+      manager.acquire({ sessionId: 'all-conflict' as SessionId, target: upstream.target })
+    ).rejects.toBe(conflict);
+    expect(reserved.length).toBeGreaterThan(1);
+    expect(reserved.length).toBeLessThanOrEqual(8);
+    for (const port of new Set(reserved)) {
+      const probe = http.createServer();
+      expect(await listenTestIPv4(probe, port)).toBe(port);
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    }
+  });
+
   it('rejects redirects that leave the bound target origin', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);
@@ -641,8 +1045,10 @@ describe('LocalPreviewProxyManager', () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(response.headers.get('set-cookie')).toContain('Secure; SameSite=None; Partitioned');
-    expect(response.headers.getSetCookie()).toHaveLength(1);
-    expect(response.headers.get('set-cookie')).not.toContain('private');
+    expect(response.headers.getSetCookie()).toHaveLength(3);
+    expect(
+      response.headers.getSetCookie().filter((value) => value.includes('private'))
+    ).toHaveLength(2);
     expect(response.headers.get('x-preview-values')).toBe('first, second');
     expect(response.headers.get('cache-control')).toBe('no-store');
     const bare = new URL('/', remoteEndpoint.viewerUrl);
@@ -810,12 +1216,14 @@ describe('LocalPreviewProxyManager WebSocket close forwarding', () => {
     address.search = '';
     address.protocol = 'ws:';
     const denied = new WebSocket(address, {
+      lookup: previewTestLookup,
       headers: { origin: new URL(endpoint.viewerUrl).origin },
     });
     sockets.push(denied);
     const error = await new Promise<Error>((resolve) => denied.once('error', resolve));
     expect(error.message).toContain('403');
     const authorized = new WebSocket(address, {
+      lookup: previewTestLookup,
       headers: { cookie: page.headers.get('set-cookie')?.split(';')[0] ?? '' },
     });
     sockets.push(authorized);

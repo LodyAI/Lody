@@ -86,6 +86,70 @@ describe('AgentClient Kimi authentication and resume', () => {
     connectionMocks.request.mockResolvedValue({});
   });
 
+  it.each(['new', 'load', 'resume'] as const)(
+    'publishes %s commands and applies only current-session changes',
+    async (mode) => {
+      const client = new AgentClient({
+        sessionId: 'commands' as SessionId,
+        logger: createSilentLogger(),
+        terminalManager: {} as never,
+        agentConfig: { cliType: 'builtin', agentType: mode === 'resume' ? 'pi' : 'opencode' },
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      });
+      const availableCommands = [{ name: 'review-a', description: 'Review A' }];
+      connectionMocks.newSession.mockResolvedValue({ sessionId: 'commands-a', availableCommands });
+      connectionMocks.loadSession.mockResolvedValue({ availableCommands });
+      connectionMocks.resumeSession.mockResolvedValue({ availableCommands });
+      await client.startSession(
+        {} as never,
+        '/project-a',
+        mode === 'new' ? undefined : ('commands-a' as ACPSessionId)
+      );
+      expect(client.getAvailableCommands()).toEqual(availableCommands);
+      await client.sessionUpdate({
+        sessionId: 'commands-a',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [],
+        },
+      });
+      expect(client.getAvailableCommands()).toEqual([]);
+      await client.sessionUpdate({
+        sessionId: 'detached',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands,
+        },
+      });
+      expect(client.getAvailableCommands()).toEqual([]);
+      client.adoptPreparedSession({ sessionId: 'replacement' });
+      expect(client.getAvailableCommands()).toBeUndefined();
+    }
+  );
+
+  it('retains notification-only startup commands when the session response omits them', async () => {
+    const client = new AgentClient({
+      sessionId: 'commands' as SessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    connectionMocks.newSession.mockImplementation(async () => {
+      await client.sessionUpdate({
+        sessionId: 'commands-a',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'review-a', description: 'Review A' }],
+        },
+      });
+      return { sessionId: 'commands-a' };
+    });
+    await client.startSession({} as never, '/project-a');
+    expect(client.getAvailableCommands()).toEqual([{ name: 'review-a', description: 'Review A' }]);
+  });
+
   it('marks live child observations unknown on transport loss and refuses orphan permissions', async () => {
     const notifications: AcpSessionNotification[] = [];
     const client = new AgentClient({
@@ -258,13 +322,13 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(connectionMocks.initialize).toHaveBeenCalledWith(
       expect.objectContaining({
         clientCapabilities: expect.objectContaining({
-          _meta: {
+          _meta: expect.objectContaining({
             'cognition.ai/subagentSupport': true,
-            lody: {
+            lody: expect.objectContaining({
               elicitation: { version: 1, answerNotes: true },
               subagentEvents: { version: 1 },
-            },
-          },
+            }),
+          }),
         }),
       })
     );

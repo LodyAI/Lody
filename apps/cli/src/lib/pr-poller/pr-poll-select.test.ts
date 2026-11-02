@@ -32,6 +32,27 @@ function target(overrides: Partial<SchedulableTarget> = {}): SchedulableTarget {
   };
 }
 
+it('keeps native and managed queries for the same repository in separate batches', () => {
+  const batches = planDueBatches(
+    [
+      target({
+        discovery: { repoFullName: 'owner/repo', branch: 'local', nativeCredentials: true },
+      }),
+      target({
+        ownerSessionId: sid('managed'),
+        discovery: { repoFullName: 'owner/repo', branch: 'managed' },
+      }),
+    ],
+    T0
+  );
+  expect(
+    batches.map((batch) => [batch.nativeCredentials, batch.targets.map((t) => t.discovery?.branch)])
+  ).toEqual([
+    [true, ['local']],
+    [false, ['managed']],
+  ]);
+});
+
 describe('computeTargetDueAtMs', () => {
   it('a never-refreshed target is due immediately', () => {
     expect(computeTargetDueAtMs(target())).toBe(0);

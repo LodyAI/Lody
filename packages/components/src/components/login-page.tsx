@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Github, Mail } from 'lucide-react';
+import { MajesticonsExternalLinkLine } from '@lody/ui';
 import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -1709,7 +1710,7 @@ export function LoginPage({
         disabled={isButtonsDisabled}
       >
         <SocialLoginButtonContent
-          icon={<ExternalLink />}
+          icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
           label={
             isOpeningElectronBrowser
               ? t('login.openingBrowser', 'Opening browser...')
@@ -1772,7 +1773,7 @@ export function LoginPage({
           {/* A real link: the automatic navigation may be refused, and this is
               then the user's way to open the desktop app. */}
           <SocialLoginButtonContent
-            icon={<ExternalLink />}
+            icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
             label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
             width={null}
           />
@@ -2141,6 +2142,8 @@ const styles = stylex.create({
   methodLabel: {
     flexGrow: 1,
     minWidth: 0,
+    // Ellipsis clips vertically too; the button's 1em line box cuts off descenders.
+    lineHeight: text.subheadlineLeading,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     textAlign: 'start',

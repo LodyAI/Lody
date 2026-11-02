@@ -169,6 +169,7 @@ export function applyAuthorizedOrdinary(
         signingPublicKey: op.signingPublicKey,
         encryptionPublicKey: op.encryptionPublicKey,
         kind: op.kind,
+        machineId: op.machineId,
       });
       yield* Result.mapError(
         verifySignature(op.signingPublicKey.toBytes(), message, op.possessionSignature.toBytes()),
@@ -350,7 +351,7 @@ export function restoreVerifiedState(input: {
 export interface ContentPermissions {
   /** Host admission: active personal/machine device of a non-Guest member. */
   readonly mayWriteDocument: boolean;
-  /** Honest seal gate additionally waits for any required epoch rotation. */
+  /** Current seal permission; a pending manual rotation is advisory. */
   readonly maySealNewContent: boolean;
 }
 /** Current permissions at this caller-selected verified endpoint, not freshness proof. */
@@ -375,7 +376,7 @@ export function contentPermissions(
     );
     return Object.freeze({
       mayWriteDocument,
-      maySealNewContent: mayWriteDocument && !state.epoch.rotationRequired,
+      maySealNewContent: mayWriteDocument,
     });
   });
 }
@@ -550,6 +551,14 @@ export function historicalContentIdentity(
       memberInstance: record.membershipId,
     });
   });
+}
+
+/** Internal admission-kind lookup over genuine retained history; this grants no current or historical permission. */
+export function historicalDeviceKind(view: LedgerView, device: SigningPublicKey) {
+  return Result.map(
+    historicalContentIdentity(view, device),
+    (author) => stateGet(states.get(view)!.deviceHistory, keyId(author.device.toBytes()))!.kind
+  );
 }
 
 /** Only actually retained verified hashes, never an inspection object or invented pre-snapshot entry. */

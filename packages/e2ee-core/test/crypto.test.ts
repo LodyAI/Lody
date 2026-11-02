@@ -1,7 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { VerifiedLedger, InstalledKeyError } from '@lody/e2ee-core';
+import { LedgerViewSource, WorkspaceScope } from '@lody/e2ee-core/services';
+import { sqliteLedgerPinStore } from '@lody/e2ee-core/adapters/node-sqlite';
 import { hkdfSync, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Cause, Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Clock, Context, Layer, Cause, Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
 import * as Documents from '@lody/e2ee-core/protocol';
 import {
   admitStreamsUpdateBatch,
@@ -602,15 +608,15 @@ describe('ledger-bound signed document workflows', () => {
       purpose: 'doc-update',
     };
     const key = read(Documents.deriveDocumentKey(scope, read(Bytes.epochKey(source))));
-    const publishEpoch = (secret: Uint8Array) => {
-      const previousKey = read(Bytes.epochKey(source));
+    const publishEpoch = (secret: Uint8Array, epoch = 1, previous = source) => {
+      const previousKey = read(Bytes.epochKey(previous));
       const currentKey = read(Bytes.epochKey(secret));
       try {
         append([
           7,
-          1,
-          read(EpochKeys.commitEpochKey(anchor, 1, currentKey)).toBytes(),
-          read(EpochKeys.sealHistoryPacket({ genesis: anchor, epoch: 1, currentKey, previousKey })),
+          epoch,
+          read(EpochKeys.commitEpochKey(anchor, epoch, currentKey)).toBytes(),
+          read(EpochKeys.sealHistoryPacket({ genesis: anchor, epoch, currentKey, previousKey })),
         ]);
       } finally {
         disposeEpochKey(previousKey);
@@ -725,7 +731,7 @@ describe('ledger-bound signed document workflows', () => {
     expect(code(admitStreamsUpdateBatch({ ...options, view: f.view() }))).toBe('unauthorized');
   });
   it.each(['tag7', 'tag8', 'rotation-required'] as const)(
-    'admits original sealed updates and snapshots after %s while retaining the new-seal gate',
+    'admits original sealed updates and snapshots after %s while retaining active writer access',
     async (transition) => {
       const f = ledgerFixture(true);
       f.addPhone();
@@ -851,21 +857,22 @@ describe('ledger-bound signed document workflows', () => {
             const next = yield* Effect.result(
               binding.seal({ ...updateInput, additionalData: () => aadFor(false) })
             );
-            if (transition === 'rotation-required') expect(code(next)).toBe('unauthorized');
-            else {
+            expect(Result.isSuccess(next)).toBe(true);
+            if (Result.isSuccess(next)) {
               const mixed = { ...input, body: batch([old.sealed, read(next).sealed]) };
               expect(read(admitStreamsUpdateBatch(mixed))).toEqual(mixed.body);
               expect(yield* admitStreamsUpdateBatchEffect(mixed)).toEqual(mixed.body);
-              // The same genuinely signed epoch1 bytes were unknown to the old endpoint.
-              expect(
-                code(
-                  admitStreamsUpdateBatch({
-                    ...input,
-                    view: oldView,
-                    body: batch([read(next).sealed]),
-                  })
-                )
-              ).toBe('unauthorized');
+              // Only an actual epoch advance is unknown to the old endpoint.
+              if (transition !== 'rotation-required')
+                expect(
+                  code(
+                    admitStreamsUpdateBatch({
+                      ...input,
+                      view: oldView,
+                      body: batch([read(next).sealed]),
+                    })
+                  )
+                ).toBe('unauthorized');
             }
             // A real signature cannot manufacture an unpublished/future epoch.
             const futureScope = { ...f.scope, epoch: 9 };
@@ -1105,13 +1112,18 @@ describe('ledger-bound signed document workflows', () => {
             f.addPhone();
             f.append([5, f.phone.raw]);
             expect(read(admitStreamsSnapshot({ ...input, view: f.view() }))).toEqual(body);
+            const pendingSeal = yield* binding.seal({
+              ...updateInput,
+              context,
+              additionalData: aadFor,
+            });
             expect(
-              code(
-                yield* Effect.result(
-                  binding.seal({ ...updateInput, context, additionalData: aadFor })
-                )
-              )
-            ).toBe('unauthorized');
+              yield* binding.open({
+                ...pendingSeal,
+                context,
+                additionalData: aadFor(pendingSeal.header),
+              })
+            ).toEqual(updateInput.plaintext);
             expect(yield* authenticateStreamsSnapshotEffect({ ...input, view: f.view() })).toEqual(
               body
             );
@@ -1173,7 +1185,14 @@ describe('ledger-bound signed document workflows', () => {
                 additionalData: new Uint8Array([1, 2]),
               })
             ).toEqual(updateInput.plaintext);
-          expect(code(yield* Effect.result(pinned.seal(updateInput)))).toBe('unauthorized');
+          const retained = yield* pinned.seal(updateInput);
+          expect(
+            yield* pinned.open({
+              ...retained,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
           const missing = yield* makeStreamsUpdateBinding({
             ...bindingOptions(f),
             writeEpoch: 'current',
@@ -1196,7 +1215,7 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('blocks current-epoch seals during required rotation and after writer revocation without losing old reads', async () => {
+  it('keeps active seals available during manual rotation while refusing revoked writers', async () => {
     const f = ledgerFixture(true);
     f.addPhone();
     const nextSecret = new Uint8Array(32).fill(8);
@@ -1213,7 +1232,15 @@ describe('ledger-bound signed document workflows', () => {
           const phone = yield* makeStreamsUpdateBinding({ ...options, signer: f.phone.signer });
           const old = yield* phone.seal(updateInput);
           f.append([5, f.phone.raw]);
-          expect(code(yield* Effect.result(owner.seal(updateInput)))).toBe('unauthorized');
+          const pending = yield* owner.seal(updateInput);
+          expect(
+            yield* owner.open({
+              ...pending,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
+          expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
           f.publishEpoch(nextSecret);
           yield* owner.seal(updateInput);
           expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
@@ -1228,63 +1255,416 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('refuses an epoch change during native signing and clears the operation-owned key before retry', async () => {
+  it.each(['before-open', 'during-key-read'] as const)(
+    'accepts a historically admitted snapshot signer revoked %s and retains incremental reads',
+    async (revocation) => {
+      const f = ledgerFixture(true);
+      f.addPhone();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let revokeDuringRead = false;
+            const reader = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              readEpochKey: () =>
+                Effect.sync(() => {
+                  if (revokeDuringRead) {
+                    f.append([5, f.phone.raw]);
+                    revokeDuringRead = false;
+                  }
+                  return read(Bytes.epochKey(source));
+                }),
+            });
+            const writer = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              signer: f.phone.signer,
+            });
+            const context = {
+              ...updateContext,
+              kind: 'snapshot' as const,
+              continuationOffset: '0_123',
+            };
+            const snapshot = yield* writer.seal({ ...updateInput, context });
+            const update = yield* writer.seal(updateInput);
+            const request = { ...snapshot, context, additionalData: new Uint8Array([1, 2]) };
+            expect(yield* reader.open(request)).toEqual(updateInput.plaintext);
+            if (revocation === 'before-open') f.append([5, f.phone.raw]);
+            else revokeDuringRead = true;
+            expect(yield* reader.open(request)).toEqual(updateInput.plaintext);
+            expect(
+              yield* reader.open({
+                ...update,
+                context: updateContext,
+                additionalData: new Uint8Array([1, 2]),
+              })
+            ).toEqual(updateInput.plaintext);
+          })
+        )
+      );
+    }
+  );
+  it('rejects a never-admitted snapshot signer and cross-workspace/document replay', async () => {
     const f = ledgerFixture(true);
-    const nextSecret = new Uint8Array(32).fill(8);
-    const owned: Bytes.EpochKey[] = [];
-    let hold = true;
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const entered = yield* Deferred.make<void>();
-          const release = yield* Deferred.make<void>();
-          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
-          const binding = yield* makeStreamsUpdateBinding({
-            ...bindingOptions(f),
-            writeEpoch: 'current',
-            readEpochKey: (epoch) =>
-              Effect.sync(() => {
-                const key = read(Bytes.epochKey(epoch === 0 ? source : nextSecret));
-                owned.push(key);
-                return key;
-              }),
-            signer: {
-              publicKey: f.owner.publicKey,
-              sign: (message) =>
-                Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    if (hold) {
-                      yield* Deferred.succeed(entered, undefined);
-                      yield* Deferred.await(release);
-                    }
-                    return read(Bytes.signature(f.owner.signBytes(message)));
-                  })
-                ),
-            },
-          });
-          const sealing = yield* Effect.forkChild(Effect.result(binding.seal(updateInput)));
-          yield* Deferred.await(entered);
-          f.publishEpoch(nextSecret);
-          yield* Deferred.succeed(release, undefined);
-          expect(code(yield* Fiber.join(sealing))).toBe('unauthorized');
-          expect(code(deriveContentKey(owned[0]!, header))).toBe('invalid-content-key');
-          hold = false;
-          const sealed = yield* binding.seal(updateInput);
+          const binding = yield* makeStreamsUpdateBinding(bindingOptions(f));
+          const context = {
+            ...updateContext,
+            kind: 'snapshot' as const,
+            continuationOffset: '0_123',
+          };
+          const sealed = yield* binding.seal({ ...updateInput, context });
+          const scope = { ...f.scope, purpose: 'doc-snapshot' as const };
+          const rogueHeader: ContentHeader = {
+            ...scope,
+            docEpoch: 0,
+            device: hex(f.attacker.raw),
+            continuationOffset: context.continuationOffset,
+          };
+          const leaf = keyFor(scope);
+          const encrypted = read(
+            sealContentAead(leaf, rogueHeader, updateInput.plaintext, new Uint8Array([1, 2]))
+          );
+          disposeContentKey(leaf);
+          const unsigned = new Uint8Array(
+            Buffer.concat([
+              read(encodeContentHeader(rogueHeader)),
+              encrypted.nonce,
+              encrypted.ciphertext,
+            ])
+          );
+          const changed = new Uint8Array(
+            Buffer.concat([
+              unsigned,
+              f.attacker.signBytes(
+                read(contentSigningBytes(scope, unsigned, new Uint8Array([1, 2])))
+              ),
+            ])
+          );
           expect(
-            read(
-              verifyContentSignature(
-                sealed.sealed,
-                { ...f.scope, epoch: 1 },
-                f.owner.publicKey,
-                new Uint8Array([1, 2])
+            code(
+              yield* Effect.result(
+                binding.open({
+                  ...sealed,
+                  sealed: changed,
+                  context,
+                  additionalData: new Uint8Array([1, 2]),
+                })
               )
-            ).epoch
-          ).toBe(1);
-          expect(code(deriveContentKey(owned[1]!, header))).toBe('invalid-content-key');
+            )
+          ).toBe('unauthorized');
+          for (const changedScope of [
+            { resource: 'different-document' },
+            { genesis: read(Bytes.genesisHash(new Uint8Array(32).fill(123))) },
+          ]) {
+            const other = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              ...changedScope,
+            });
+            expect(
+              Result.isFailure(
+                yield* Effect.result(
+                  other.open({ ...sealed, context, additionalData: new Uint8Array([1, 2]) })
+                )
+              )
+            ).toBe(true);
+          }
         })
       )
     );
   });
+  it.each(['restart', 'rollback', 'new-clock', 'missing-journal', 'consecutive'] as const)(
+    'never renews retained-key grace across %s',
+    async (scenario) => {
+      const directory = mkdtempSync(join(tmpdir(), 'e2ee-grace-reopen-'));
+      const f = ledgerFixture(true);
+      let wall = 1_000_000,
+        monotonic = 0;
+      const real = Effect.runSync(Clock.Clock);
+      const makeClock = (): Clock.Clock =>
+        Object.assign(Object.create(real), {
+          currentTimeMillisUnsafe: () => wall,
+          monotonicTimeNanosUnsafe: () => BigInt(monotonic) * 1_000_000n,
+        });
+      let clock = makeClock();
+      const visit = (initial: boolean, succeeds: boolean) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(
+              VerifiedLedger.layer.pipe(
+                Layer.provide(
+                  Layer.mergeAll(
+                    sqliteLedgerPinStore({
+                      path: join(directory, 'pin.sqlite'),
+                      mode: 'create-or-open',
+                    }),
+                    Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(f.view()) })
+                  )
+                ),
+                Layer.provide(Layer.succeed(WorkspaceScope, { genesis: f.view().genesis }))
+              )
+            );
+            const ledger = Context.get(context, VerifiedLedger);
+            yield* ledger.current();
+            if (initial) {
+              f.publishEpoch(new Uint8Array(32).fill(8));
+              yield* ledger.current();
+            }
+            const binding = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              writeEpoch: 'current',
+              ledger: () => ledger.current(),
+              readEpochKey: (epoch) =>
+                epoch > 0
+                  ? Effect.fail(new InstalledKeyError({ reason: 'missing-key' }))
+                  : Effect.fromResult(Bytes.epochKey(source)),
+            }).pipe(Effect.provideService(VerifiedLedger, ledger));
+            const outcome = yield* Effect.result(binding.seal(updateInput));
+            if (succeeds) {
+              expect(
+                read(inspectContentFrame(Result.getOrThrow(outcome).sealed, 'doc-update')).epoch
+              ).toBe(0);
+            } else
+              expect(outcome).toMatchObject({
+                _tag: 'Failure',
+                failure: { code: 'key-update-required' },
+              });
+          })
+        ).pipe(Effect.provideService(Clock.Clock, clock));
+      try {
+        await Effect.runPromise(visit(true, true));
+        wall += 300_000;
+        monotonic += 300_000;
+        await Effect.runPromise(visit(false, true)); // A host reopen preserves its original budget.
+        if (scenario === 'consecutive')
+          f.publishEpoch(new Uint8Array(32).fill(9), 2, new Uint8Array(32).fill(8));
+        if (scenario === 'rollback') wall -= 1;
+        if (scenario === 'new-clock') clock = makeClock();
+        if (scenario === 'missing-journal') {
+          const { DatabaseSync } = await import('node:sqlite');
+          const db = new DatabaseSync(join(directory, 'pin.sqlite'));
+          try {
+            db.exec('DELETE FROM epoch_write_observations');
+          } finally {
+            db.close();
+          }
+        }
+        if (scenario === 'restart' || scenario === 'consecutive') {
+          wall += 599_999;
+          monotonic += 599_999;
+          await Effect.runPromise(visit(false, true));
+          wall++;
+          monotonic++;
+        }
+        await Effect.runPromise(visit(false, false));
+        // Neither restarting again nor restoring the wall clock grants another window.
+        wall += 100;
+        monotonic += 100;
+        await Effect.runPromise(visit(false, false));
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['update_batch', 'snapshot'] as const)(
+    'uses a retained published key for %s only inside the durable 15 minute grace',
+    async (kind) => {
+      const directory = mkdtempSync(join(tmpdir(), 'e2ee-write-grace-'));
+      const f = ledgerFixture(true);
+      let wall = 1_000_000,
+        monotonic = 0,
+        installed = false,
+        keyFailure = false,
+        crossesDeadline = false;
+      const realClock = Effect.runSync(Clock.Clock);
+      const clock: Clock.Clock = Object.assign(Object.create(realClock), {
+        currentTimeMillisUnsafe: () => wall,
+        monotonicTimeNanosUnsafe: () => BigInt(monotonic) * 1_000_000n,
+        currentTimeMillis: Effect.sync(() => wall),
+        monotonicTimeNanos: Effect.sync(() => BigInt(monotonic) * 1_000_000n),
+      });
+      const request = {
+        ...updateInput,
+        context:
+          kind === 'snapshot'
+            ? { ...updateContext, kind, continuationOffset: 'next' }
+            : updateContext,
+      };
+      const purpose = kind === 'snapshot' ? 'doc-snapshot' : 'doc-update';
+      const program = Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(
+            VerifiedLedger.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  sqliteLedgerPinStore({
+                    path: join(directory, 'pin.sqlite'),
+                    mode: 'create-or-open',
+                  }),
+                  Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(f.view()) })
+                )
+              ),
+              Layer.provide(Layer.succeed(WorkspaceScope, { genesis: f.view().genesis }))
+            )
+          );
+          const ledger = Context.get(services, VerifiedLedger);
+          yield* ledger.current();
+          f.publishEpoch(new Uint8Array(32).fill(8));
+          yield* ledger.current(); // Observation precedes the first new seal.
+          const binding = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            writeEpoch: 'current',
+            signer: {
+              publicKey: f.owner.publicKey,
+              sign: (message) =>
+                Effect.gen(function* () {
+                  if (crossesDeadline) {
+                    wall++;
+                    monotonic++;
+                  }
+                  return yield* f.owner.signer.sign(message);
+                }),
+            },
+            ledger: () => ledger.current(),
+            readEpochKey: (epoch) =>
+              epoch === 1 && !installed
+                ? Effect.fail(
+                    new InstalledKeyError({ reason: keyFailure ? 'native-failed' : 'missing-key' })
+                  )
+                : Effect.fromResult(
+                    Bytes.epochKey(epoch === 0 ? source : new Uint8Array(32).fill(8))
+                  ),
+          }).pipe(Effect.provideService(VerifiedLedger, ledger));
+          monotonic = 899_999;
+          wall += monotonic;
+          const retained = yield* binding.seal(request);
+          expect(read(inspectContentFrame(retained.sealed, purpose)).epoch).toBe(0);
+          keyFailure = true;
+          expect(code(yield* Effect.result(binding.seal(request)))).toBe('missing-read-key');
+          keyFailure = false;
+          f.addPhone();
+          const phone = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            writeEpoch: 'current',
+            signer: f.phone.signer,
+            ledger: () => ledger.current(),
+            readEpochKey: (epoch) =>
+              epoch === 0
+                ? Effect.fromResult(Bytes.epochKey(source))
+                : Effect.fail(new InstalledKeyError({ reason: 'missing-key' })),
+          }).pipe(Effect.provideService(VerifiedLedger, ledger));
+          f.append([5, f.phone.raw]);
+          expect(code(yield* Effect.result(phone.seal(request)))).toBe('unauthorized');
+          crossesDeadline = true;
+          expect(code(yield* Effect.result(binding.seal(request)))).toBe('key-update-required');
+          crossesDeadline = false;
+          expect(monotonic).toBe(900_000);
+          expect(Result.isFailure(yield* Effect.result(binding.seal(request)))).toBe(true);
+          installed = true;
+          const current = yield* binding.seal(request);
+          expect(read(inspectContentFrame(current.sealed, purpose)).epoch).toBe(1);
+        })
+      ).pipe(Effect.provideService(Clock.Clock, clock));
+      try {
+        await Effect.runPromise(program);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['update_batch', 'snapshot'] as const)(
+    'finishes the selected published epoch during %s signing and clears its operation-owned key',
+    async (kind) => {
+      const f = ledgerFixture(true);
+      const sealInput = {
+        ...updateInput,
+        context:
+          kind === 'snapshot'
+            ? { ...updateContext, kind, continuationOffset: '0_123' }
+            : updateContext,
+      };
+      const verifiedScope: ContentScope = {
+        ...f.scope,
+        purpose: kind === 'snapshot' ? 'doc-snapshot' : 'doc-update',
+      };
+      const nextSecret = new Uint8Array(32).fill(8);
+      const owned: Bytes.EpochKey[] = [];
+      let hold = true;
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const entered = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+            const binding = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              writeEpoch: 'current',
+              readEpochKey: (epoch) =>
+                Effect.sync(() => {
+                  const key = read(Bytes.epochKey(epoch === 0 ? source : nextSecret));
+                  owned.push(key);
+                  return key;
+                }),
+              signer: {
+                publicKey: f.owner.publicKey,
+                sign: (message) =>
+                  Effect.uninterruptible(
+                    Effect.gen(function* () {
+                      if (hold) {
+                        yield* Deferred.succeed(entered, undefined);
+                        yield* Deferred.await(release);
+                      }
+                      return read(Bytes.signature(f.owner.signBytes(message)));
+                    })
+                  ),
+              },
+            });
+            const sealing = yield* Effect.forkChild(Effect.result(binding.seal(sealInput)));
+            yield* Deferred.await(entered);
+            f.publishEpoch(nextSecret);
+            yield* Deferred.succeed(release, undefined);
+            const retained = read(yield* Fiber.join(sealing));
+            expect(
+              read(
+                verifyContentSignature(
+                  retained.sealed,
+                  verifiedScope,
+                  f.owner.publicKey,
+                  new Uint8Array([1, 2])
+                )
+              ).epoch
+            ).toBe(0);
+            const fixed = yield* makeStreamsUpdateBinding({ ...bindingOptions(f), writeEpoch: 0 });
+            const offline = yield* fixed.seal(sealInput);
+            expect(
+              yield* fixed.open({
+                ...offline,
+                context: sealInput.context,
+                additionalData: new Uint8Array([1, 2]),
+              })
+            ).toEqual(updateInput.plaintext);
+            expect(code(deriveContentKey(owned[0]!, header))).toBe('invalid-content-key');
+            hold = false;
+            const sealed = yield* binding.seal(sealInput);
+            expect(
+              read(
+                verifyContentSignature(
+                  sealed.sealed,
+                  { ...verifiedScope, epoch: 1 },
+                  f.owner.publicKey,
+                  new Uint8Array([1, 2])
+                )
+              ).epoch
+            ).toBe(1);
+            expect(code(deriveContentKey(owned[1]!, header))).toBe('invalid-content-key');
+          })
+        )
+      );
+    }
+  );
   it('waits for an owned in-flight key read before releasing its caller scope, rejects late output and clears the key', async () => {
     const f = ledgerFixture(true);
     let owned: Bytes.EpochKey | undefined;

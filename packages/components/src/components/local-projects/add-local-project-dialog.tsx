@@ -397,7 +397,9 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
   const headerTitle =
     c.phase === 'machine'
       ? t('localProjects.add.pickMachine', 'Choose a machine')
-      : t('localProjects.add.title', 'Add a folder');
+      : props.selectionOnly
+        ? t('settings.projectGroups.selectFolders')
+        : t('localProjects.add.title', 'Add a folder');
 
   return (
     <div {...stylex.props(styles.picker)}>
@@ -437,6 +439,7 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
         />
       ) : (
         <BrowseStep
+          selectionOnly={props.selectionOnly}
           roots={c.roots}
           current={c.current}
           status={c.status}
@@ -593,6 +596,7 @@ function MachineOwnerNotice({ machine }: { machine: RemoteDirectoryPickerMachine
 }
 
 function BrowseStep({
+  selectionOnly,
   roots,
   current,
   status,
@@ -619,6 +623,7 @@ function BrowseStep({
   onPathDraftChange,
   onPathSubmit,
 }: {
+  selectionOnly?: boolean;
   roots: LocalProjectBrowseRootsResult | null;
   current: LocalProjectBrowseDirectoryResult | null;
   status: RemoteDirectoryBrowseStatus;
@@ -876,7 +881,9 @@ function BrowseStep({
               ) : (
                 <FolderPlus {...stylex.props(styles.icon16)} />
               )}
-              {t('localProjects.add.useThisFolder', 'Add')}
+              {selectionOnly
+                ? t('settings.projectGroups.selectFolder')
+                : t('localProjects.add.useThisFolder', 'Add')}
             </Button>
           </div>
         </div>
@@ -968,6 +975,7 @@ function StatusPanel({
 }
 
 export interface AddLocalProjectDialogProps {
+  selectionOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
@@ -984,6 +992,7 @@ export interface AddLocalProjectDialogProps {
  * full-height mobile flow inside a bottom Drawer on mobile.
  */
 export function AddLocalProjectDialog({
+  selectionOnly,
   open,
   onOpenChange,
   isMobile,
@@ -996,7 +1005,9 @@ export function AddLocalProjectDialog({
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
-  const a11yTitle = t('localProjects.add.title', 'Add a folder');
+  const a11yTitle = selectionOnly
+    ? t('settings.projectGroups.selectFolders')
+    : t('localProjects.add.title', 'Add a folder');
   const a11yDescription = t(
     'localProjects.add.dialogDescription',
     'Browse the machine and choose a folder to add as a local project.'
@@ -1035,6 +1046,7 @@ export function AddLocalProjectDialog({
         <Dialog.Title {...stylex.props(styles.srOnly)}>{a11yTitle}</Dialog.Title>
         <Dialog.Description {...stylex.props(styles.srOnly)}>{a11yDescription}</Dialog.Description>
         <RemoteDirectoryPicker
+          selectionOnly={selectionOnly}
           machines={machines}
           machinesLoading={machinesLoading}
           initialMachineId={initialMachineId}

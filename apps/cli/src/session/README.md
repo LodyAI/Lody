@@ -15,6 +15,30 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Automation ownership
+
+[Session authority](session-automation-authority.ts) admits actions requested by
+[Automations](../automations/README.md). Execution stages typed outcomes before
+Inbox release; the durable source reconciles release without replaying requests.
+Native recovery preserves the exact conversation and launch binding. Archive uses
+existing admission/rewrite barriers, including parent admission held by child
+executions; it never treats an idle metadata label as release proof.
+## ACP command exit
+
+`terminal-manager.ts` records the direct process's `exit` status immediately.
+`terminal/wait_for_exit` drains stdout/stderr until `close` or 100 ms after exit,
+then runs the existing resource-limit inspection before completing waiters.
+`terminal/output` can expose the status during drain; new waiters still join the
+same drain. Output remains readable, with the existing byte cap, until release.
+A background descendant holding inherited pipes cannot extend the drain budget.
+
+Release settles pending waiters, clears the timer and detaches subscriptions.
+Kill/release do not terminate a tree once its direct command has exited. Active
+commands retain sandbox termination semantics; session sandbox shutdown still owns
+its processes. Resource inspection and its callback retain their existing async
+contract and can delay completion independently of stdio. See the
+[exit/drain decision](../../../../.agents/notes/proposed/bug-fix/2026-10-26-acp-terminal-exit-drain.md).
+
 ## Terminal notification facts
 
 Execution publishes typed terminal facts using the frozen invocation requester and
@@ -37,6 +61,10 @@ A notification failure cannot replay Agent execution.
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-content-patches.ts` preserves an existing text node through a verified
+  tail-item split; `roost-message-state.ts` preserves an unchanged large patch
+  when its array position changes. Both stage and compare the exact final JSON
+  before using cheaper existing ContentOps, otherwise retaining the ordinary diff.
 - `roost-writer-identity.ts` — persists the replica's signing identity in private
   application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and
@@ -103,6 +131,8 @@ A notification failure cannot replay Agent execution.
   worktree tree against Session state: archived or deleted root Sessions lose their
   directory (after a backup commit, branch kept); contract in
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
+  It also cleans `<data>/chats/<rootSessionId>`: deleted roots remove recursively,
+  archived roots remove only empty directories, with no scripts or Git operations.
 
 ## Background
 
@@ -198,13 +228,25 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
+Workspace-reading diff/gap-fill, Git flags, branch/PR statistics and Code Collab scans finish before release under one 20-second budget shared by normal, error, cancellation and yielded finalization; Stop cannot restart it. Generated-image waits use this deadline and shutdown signal too; uploads continue as owned work and write only to their captured turn. Shutdown also skips error-path diff/usage. After six seconds, shutdown alone directly writes failed Inbox receipts for remaining owners and clears live IDs, without waiting for finalization or replaying input. Timeout or shutdown cancels the attempt and skips remaining steps; late results cannot publish into a successor.
+Presentation, batch-history projection, completion analytics and owned image uploads may follow release; yielded bookkeeping retains its 30-second upper wait. Failed release detaches the old Agent and admits fresh input without replay.
+The [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md) owns the current policy; the [original release fix](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md) explains unconditional release after failure classification.
+
+Stop reports a rejected provider cancellation, expiration of that five-second drain, and
+failed process termination through durable `agent_warning` notices. The execution runtime
+deduplicates each phase for its assistant turn and ignores a cancellation rejection from
+an already-released runtime. MessageHandler assigns a turn/phase notice identity rather
+than deduplicating by error text across the whole conversation. Notice persistence never
+delays escalation or raw-request release; the warning does not finalize history or change
+dispatch ownership. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-stop-failure-notices.md).
+
 Cancellation separately selects the pre-prompt process lifetime. Stop and access revocation
 discard it; Edit & Resend keeps it because preparation has already created the replacement
 inside that same ACP process. Creation/restoration retain their cancellation fences until
 initialization completes; those fences must not override a later `keep` during configuration.
 Binding a ready session alone does not authorize termination.
 
-An ordinary user turn can retry a stale ACP prompt once before observing output; Inbox
+An ordinary user turn can retry a stale ACP prompt once before observing any ACP event; Inbox
 submissions never retry. Exact-instance retirement detaches lifecycle listeners before
 termination, preserving the assistant entry and output owner through resume. Until retirement
 succeeds, the disconnected-execution release path retains the old Session for cleanup,
@@ -222,9 +264,20 @@ that signal before the next mutation, so an old turn whose first configuration c
 late cannot overwrite the configuration of the turn that started after Stop.
 
 Completion notifications use the exact completed invocation's input author, including
-steer handoffs. An Agent-authored input suppresses the user-facing completion notice;
-an earlier Agent input does not suppress a later human turn. Finalization, Operation
-results and Inbox scheduling still run. Cancellation is rechecked after the author read.
+steer handoffs. Agent input suppresses notices but not unread publication. Execution
+finishes history, releases presence and settles Inbox ownership before handing a
+frozen activity time to `turn-completion.ts`. Its Effect program persists the actual
+history backend and confirms remote history/control sync when attached, retrying
+only confirmation within 30 seconds. Local-only completion needs no remote receipt.
+Unconfirmed success is withheld and logged; failures still notify independently.
+The host drain owns publication through `publishTurnCompletionLegacy`; shutdown
+cancels confirmation before draining begun writes. Notification sends remain one-shot,
+with no outbox or reconnect replay. A receipt is not proof of client rendering.
+
+`session show` summarizes a finished assistant entry using `endedAt`, falling back
+to creation `timestamp` for active/legacy entries. Stored timestamps and ordering
+are unchanged. Activity metadata advances monotonically even when an older
+completion confirms after a newer turn; parent activity uses the same write queue.
 
 ### Why resume reopens the assistant entry
 
@@ -237,12 +290,43 @@ renderer folds the still-streaming turn into a `Worked for …` summary and shar
 assistant entry" logic (`@lody/shared` `schema.ts` terminal predicate) treats it as done.
 Renderer side: [packages/components/src/components/ai-gui/AGENTS.md](../../../../packages/components/src/components/ai-gui/AGENTS.md).
 
+### Dead turns
+
+Whether the last assistant entry is finished is what clients use to choose Stop and
+queue-versus-send, so an entry that no execution will ever finish keeps a session busy
+forever. Only the owning daemon executes a session; with no live runtime there
+(`SessionExecutionService.closeDeadAssistantTurn` checks the active, current and runtime
+turn under the rewrite lease), the entry is dead:
+
+- Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
+  the entry. Stop still does not run the queue.
+- A dispatch that settles its input before the prompt (interrupted Inbox input already ended)
+  closes the entry a crashed run left open, at that failure point. A `processing` input is
+  never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
+  checks do not sweep for dead turns; that would read history on every trigger.
+- Queue acknowledgement requires an empty local queue **and** observation of the control
+  frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
+  capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first
+  therefore keeps the session watched until content arrives. Unversioned signals from older
+  renderers remain unacknowledged; their watch is released by a versioned queue update,
+  archive/deletion/reassignment or watcher shutdown. No polling or extra retry owner is added.
+  See the [causal acknowledgement decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-queue-signal-before-content.md).
+
+Observed cause: a restart's recovery dispatch was rejected by Inbox admission before its
+prompt, failing the user input while the entry stayed open. See the
+[decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-dead-turns-and-orphaned-queue.md).
+
 ### Why a resolved prompt is not proof of success
 
 Nothing reads `PromptResponse.stopReason`, and an adapter may swallow an upstream failure and
 resolve normally — observed: an over-context request answered with HTTP 400, kept only in the
 agent's own session file — so `handleTurnError` never sees it. The no-output guard is the
-backstop.
+backstop. It awaits the existing image upload owner before reading the current
+turn's content observation, while that epoch still owns finalization:
+metadata and checklist/status updates cannot make a silent turn successful.
+Any ACP event still prevents replay. Unobservable state refuses replay and lets
+content settlement fail open; the [ACP contract](../lib/acp/AGENTS.md) owns the
+classification.
 
 ### Why output capture is mandatory for result-bearing spawns
 
@@ -349,6 +433,11 @@ is bound. A failure is recorded as `<step> failed: <message>`, using
 `session-start-stage.ts`, so the user sees where start-up stopped. Authentication failures
 keep their own message. The error itself is never wrapped: the restore and create paths
 classify it by identity to choose sign-in, the history-replay fallback or a generic failure.
+During ACP startup, a plain transport-close error retains the monitor's observed
+process failure, or its already buffered stderr when stdout closes before the exit
+event. Typed startup failures bypass generic disconnect classification, so the
+start-step notice carries their diagnostics. Protocol errors and cancellation keep
+their original identity; no extra wait or retry is introduced.
 When a start fails, cleanup terminates the partial Session and releases its credentials.
 Each cleanup failure is logged, and the original error is rethrown. These are rules:
 never wrap the start error, and never let cleanup replace it. Failure text uses
@@ -422,6 +511,20 @@ settled cursor into the next chunk. Publication still polls for later events and
 reloads foreign work. A retained goal value is reusable only for the same host
 and freshly observed cursor. See the
 [append CPU investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-append-cpu-structure.md).
+
+GC inspects goals through synchronous Loro fields or Roost's certified projection
+and reverse logical pages. See the
+[goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
+
+Owners advertising `sessionHistoryInspection` v2 serve metadata, goals, limited
+transcripts and replay in one owner task. General selection validates a digest of
+query fields rather than requiring unrelated body revisions to remain unchanged.
+Older owners retain the single-`readAll` compatibility path; v2 failures propagate
+without that fallback. Certified goals and recovery replay avoid preparing unrelated
+query fields; replay formats ordered members individually on the owner. Transcript
+queries reuse visibility flags for unchanged records. Sparse membership edits
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
@@ -801,14 +904,9 @@ payload. The watcher waits for matching control data and checks control arrivals
 its separate cancellation chain. RPC uses the same ID, so a late fallback cannot
 pause fresh input again; a second click gets a new ID even for the same target turn.
 
-The Session sandbox persists incomplete identity before spawn and continuously adds
-ACP/terminal process roots. Execution retains every attached Session owner until release,
-including replacements within one turn. Restart probes require explicit completeness and
-absence of every root/group; an initial snapshot alone is insufficient.
-A child error with no PID proves that spawn created no process: it still rejects
-the command, but does not make resource identity permanently incomplete. This
-exception matches the actual child error; journal, setup and cleanup failures
-remain uncertain, as do other acquisitions already marked uncertain.
+Execution retains a terminate handle for every attached Session owner, including
+replacements within one turn, so bounded background cleanup can reach the old process
+trees. Process identities are not journaled; cleanup never gates the next input.
 
 Native commit observation has one acknowledged callback in flight per pooled client;
 stream identities and changed index keys coalesce with bounded memory. The owner watches
@@ -818,3 +916,58 @@ Observers wait outside the serial Native request lane and never retain a SQLite 
 Unsubscribe does not stop writers. These wakes cover the shared Store owner, not independent
 processes opening the same file. The command RPC reader and renderer resume from their
 persisted scoped checkpoints through the existing `watchChanges` transport.
+
+### Project worktree preparation
+
+`WorktreeManagerConfig.projectMember` places a root Member under the frozen Project
+root while retaining the source repository's storage and lock. Placement-aware managers
+are not cached by repo ID alone. `worktree/project-submodules.ts` provides native Git
+validation, gitlink checkout and persistent backup/restore primitives.
+`project-worktrees.ts` materializes the frozen group in parent-first order and publishes
+each successful member branch before continuing. `WorkspaceGitService` shares one queue
+per document manager and owner Session for materialization receipts and observations;
+`projectRun` is one atomic metadata value, never a nested merge. Client writes stop at
+the creation snapshot. `project-worktree-archive.ts` backs up children before parents, persists submodule refs,
+then deinitializes submodules and removes root worktrees. Unresolvable members retain
+the directory for GC retry. See the
+[single-writer decision](../../../../.agents/notes/proposed/architecture/2026-10-16-multi-repo-projects.md#runtime-storage-finding-and-worktree-primitives).
+
+Non-Git Project group members are registry-backed extra roots. Member probing treats Git
+exit 128 with either parent-directory or mount-boundary discovery exhaustion as non-Git;
+other failures remain errors. `project-member-access.ts`
+resolves authority, reconciles links and prevents archive traversal into original directories.
+ACP startup negotiates access after initialize; per-root file state shares the session owner
+and physical-file save queues. See the multi-root integration section of the Project group Note.
+
+Repository Members (`github` with `preferLocal`) resolve against the executing
+machine's local-project catalog and re-observe each candidate's remote. The owner
+persists `repositoryCheckout` before creating branches, pinning credentials and
+archive/restore storage. Local copies use native auth, including in mixed managed
+groups; PR polling keeps native and managed targets in separate batches. Missing
+copies fail with `project_repository_not_on_machine` when managed cloning is absent.
+
+Project preparation reports the existing `git-clone` presence stage during repository
+resolution, member checkout, submodule initialization and setup. These are actual
+milestones, not periodic keepalives. Up to four independent checkouts run together;
+selected submodules wait for their parent, and siblings sharing parent Git config
+are serialized. Branch receipts publish serially, and failures drain started work
+before releasing the Project owner. Selected members initialize non-recursively
+with their own credentials. Remaining submodules borrow objects from the corresponding
+checkout inside a local parent's original tree when its remote identity matches and
+its object store is complete. References are per repository and use `--dissociate`;
+parent and child clones never share one reference argument. Unsupported or absent
+sources use ordinary recursive initialization with four Git fetch jobs per command.
+Partial clones, shallow copies and linked worktrees cannot lend objects; unselected
+sources with alternates or symlinked paths are also skipped. Preparation never
+hydrates or changes the source. Existing checkouts keep their HEAD and local edits;
+missing descendants are revisited after an interrupted preparation. Selected Members
+are excluded from their parent's traversal and initialize under their own owner.
+Remaining initialization follows current index gitlinks, ignoring residual
+`.gitmodules` entries. Archive skips unmaterialized empty selected
+submodules and verifies that populated members are independent checkouts before backup;
+unknown local content is retained. Setup retains the prior serial traversal order,
+including parents before children.
+The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
+records the source-layout and incomplete-startup recovery boundaries.
+
+Failed release detaches the old Agent and returns its slot; see the [Inbox availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).

@@ -86,3 +86,42 @@ src/
 ## 决策依据
 
 本结构的决策见归属记录：[2026-10-16 e2ee-core 服务架构](../../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.zh.md)。更早的协议与持久化决策：[当前决策](../../../.agents/notes/implemented/architecture/2026-10-15-e2ee-current-decisions.zh.md)。
+
+## 浏览器曲线与所有权
+
+可选浏览器适配提供独立的 JS Ed25519/X25519 能力，不改账本 v1 或 epoch HPKE
+算法、域与 AAD。Ed25519 复用已固定的 noble 后端，HPKE 使用上游固定版本的 JS
+X25519 KEM。seal 无需原生 X25519；原生收件人句柄继续走原路径。WASM 不可用时，
+仅明确的原生 Ed25519 不支持或缺少 SubtleCrypto 才转入固定的严格 JS 验签；签名
+不匹配或其他后端故障不会选择另一套接受规则。
+
+上游 JS key 对象的私钥字段不能通过 `CryptoKeyPair` 形状暴露。core 用私有 WeakMap
+保留它，只返回冻结的元数据句柄。HPKE 借用保留私钥到实际加密工作结束，即使调用
+被中断也一样。close 先禁止新借用和签名，等待已准入操作，再清理两份私钥。
+克隆、混合和已关闭句柄不能继续使用；原生 key 仍走原生路径。这些句柄不具备原生
+不可导出保障，也不隔离可信应用代码。平台仍负责持久 KEK 保护和设备准入。
+
+`@hpke/common@1.10.1` 补丁仅移除两种分发格式中对 Node <=18 的动态 builtin 加载。
+支持的 Node 版本均提供全局 WebCrypto；浏览器缺少它时失败，不导入 Node。算法不变。
+`test:browser-crypto` 面向 Safari 16.4 打包，要求无外部导入，并在禁用原生曲线和
+WASM 的 Chromium/WebKit 执行。独立 CI 任务安装两个引擎，普通单测无需浏览器。
+这是桌面浏览器引擎兼容证据，不是最低 OS 真机或持久保管验收。
+
+## IndexedDB 所有权
+
+可选 IDB 适配器持有 Scope 内的一条连接和短原生事务，不另建验证缓存。
+账号/工作区/genesis 数据库在身份替换后保留；配对位置额外绑定设备/安装。
+retained 起点由既有账本流程限定后才能使用。请求 strict durability，
+以事务 complete 作为可观察提交边界。关闭先拒绝新调用，再等待真实事务 Promise，
+延迟 open 回调不能复活旧 owner；任何事务都不等待 crypto/network。
+[服务说明](services.zh.md#浏览器账本与原件存储)解释路由、CAS 与原件保留，
+归属架构 note 说明为何拒绝换设备就重建数据库。
+
+## 浏览器持久保护
+
+可选 browser-custody Layer 提供作用域内有限写者、持久不可导出 AES-GCM 保护和只读
+身份原件。宿主先互斥再分配身份，网络等待前释放；关闭等待已准入调用及取消后仍在
+执行的原生工作。短 IDB 回调在密码调用前保存意图/nonce，之后保存精确密文。
+两套稳定布局将账本/原件与安装、KEK 元数据、密钥/快照 journal 分开，替换身份不删除
+任何一套。这些只是本地并发和恢复证据，不是第二份账本或审批缓存。
+见[保管与安装](services.zh.md#浏览器保管与安装)。

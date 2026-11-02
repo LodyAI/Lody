@@ -26,8 +26,8 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
-- Local projects and their worktrees use native Git/GitHub auth, even with GitHub
-  remotes. Skip managed credential preparation and never enroll them on refresh.
+- Local projects/worktrees and locally resolved Members use native Git/GitHub
+  auth. Never enroll them on refresh; pin `repositoryCheckout` through archive/restore.
 
 - Host clone/fetch must receive the prepared session's managed Git PATH/GIT_EXEC_PATH/config in
   `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before
@@ -79,8 +79,8 @@ and file responsibilities: [../README.md](../README.md).
   refresh them via `syncWorkspaceGitState`: the one in `finalizeTurn` (Stop raced finalization)
   and `finalizeCancelledTurn` (Stop during the prompt — the common one). That helper owns
   the GitHub-capability gate itself because those callers carry no `ProjectRef`; do not
-  re-test it per call site. The flags are NOT written for a session with no GitHub
-  repository — nothing can act on them there.
+  re-test it per call site. Single-project flags need a GitHub
+  repository; Project groups publish the OR across members.
 - Resume a Session on a local project with the workspace's current branch as-is, worktree mode
   included: a persisted `acpSessionId` proves prior execution, so the stored `project.branch` is
   historical state, not a checkout request. A legacy direct local Session may re-enter
@@ -91,6 +91,7 @@ and file responsibilities: [../README.md](../README.md).
 - A fresh local/GitHub worktree always owns a newly allocated branch from its selected base
   ref; suffix collisions instead of attaching to an existing ref. Reattaching an existing
   branch is reserved for an explicit `restoreBranchName` from the same Session.
+- Script history callbacks wait at most 1s and warn on failure; only script execution determines success.
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
@@ -102,8 +103,16 @@ and file responsibilities: [../README.md](../README.md).
   non-durable, inactive Sessions under the shared per-session lock, re-checking liveness.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
-- Archive and delete never delete a Session branch; only the worktree directory goes
-  away, after a backup commit. Worktree removal for archived or deleted Sessions is
-  reconciled from Session state by `worktree-gc.ts` (no command, no acknowledgement);
-  it acts only on `archived` or `deleted` owners, never on `unknown`, and only once
-  workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.
+- Worktree archive/delete keeps branches and requires a backup commit. `worktree-gc.ts`
+  reconciles Session state (no command/acknowledgement): only archived/deleted root owners
+  after complete metadata; unknown stays intact.
+  Chat workdirs: delete recursively for deleted roots; archive uses empty-only `rmdir`.
+  Contract: specs/session-worktree-lifecycle.md.
+
+- Project roots use registrations. Repair links, never removing a correct one (tabs share
+  it); archive unlinks without following targets.
+  Submodule init uses actual gitlinks; backup requires its own checkout. Only complete,
+  standalone, non-shallow repositories may lend objects. Unselected references must
+  match the effective submodule URL, stay inside the local source tree without
+  symlinks, and have no alternates. Always dissociate borrowed objects before
+  descending; selected Members retain their own initialization owner.

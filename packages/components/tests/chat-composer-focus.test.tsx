@@ -130,6 +130,56 @@ describe('ChatComposer focusOnContainerClick', () => {
   });
 });
 
+describe('ChatComposer promptAutoFocus', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('focuses the prompt on mount when promptAutoFocus is true', async () => {
+    const promptRef = createRef<HTMLTextAreaElement>();
+    await act(async () => {
+      root.render(
+        createElement(ChatComposer, {
+          promptRef,
+          promptValue: '',
+          onPromptChange: () => undefined,
+          promptAutoFocus: true,
+        })
+      );
+    });
+
+    expect(document.activeElement).toBe(promptRef.current);
+  });
+
+  it('does not focus the prompt on mount by default', async () => {
+    const promptRef = createRef<HTMLTextAreaElement>();
+    await act(async () => {
+      root.render(
+        createElement(ChatComposer, {
+          promptRef,
+          promptValue: '',
+          onPromptChange: () => undefined,
+        })
+      );
+    });
+
+    expect(document.activeElement).not.toBe(promptRef.current);
+  });
+});
+
 describe('ChatComposer image attachment peek', () => {
   let root: Root;
   let container: HTMLDivElement;

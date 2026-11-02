@@ -9,5 +9,6 @@ export {
   CREATE_PR_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withProjectGroupPrScope,
   withQuickActionOrigin,
 } from '@lody/shared';

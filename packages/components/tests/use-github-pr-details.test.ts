@@ -108,10 +108,11 @@ vi.mock('@/lib/github-pr-cache', () => prCacheMockModule);
 
 vi.mock('../src/lib/github-pr-cache', () => prCacheMockModule);
 
-vi.mock('@lody/shared', () => {
+vi.mock('@lody/shared', async (importOriginal) => {
   class GitHubPermissionError extends Error {}
 
   return {
+    ...(await importOriginal<typeof import('@lody/shared')>()),
     getServerNow: () => Date.now(),
     GitHubPermissionError,
     githubBranchExists: githubMocks.githubBranchExists,
@@ -136,7 +137,8 @@ import type {
 
 const { getAuthRecoveryBackoffMs, useGitHubPrDetails } =
   await import('../src/hooks/use-github-pr-details');
-const { TestCloudPlatformProvider } = await import('./test-platform');
+const { TestCloudPlatformProvider, TestOrdinaryWorkspaceProvider } =
+  await import('./test-platform');
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -196,6 +198,20 @@ function createDeferred<T>(): {
 }
 
 function Probe({
+  input,
+  onResult,
+}: {
+  input: UseGitHubPrDetailsInput;
+  onResult: (result: UseGitHubPrDetailsResult) => void;
+}) {
+  return createElement(
+    TestOrdinaryWorkspaceProvider,
+    { workspaceId: input.workspaceId! },
+    createElement(AdmittedProbe, { input, onResult })
+  );
+}
+
+function AdmittedProbe({
   input,
   onResult,
 }: {

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PostHog } from 'posthog-node'
 import { isLocalPlatform } from './platform'
+import { redactedTelemetryException } from '@lody/platform/telemetry'
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 2000
 const INSTALL_ID_FILE_NAME = 'posthog-main-install-id'
@@ -98,11 +99,6 @@ function getClient(): PostHog | null {
   return client
 }
 
-function normalizeError(error: unknown): Error {
-  if (error instanceof Error) return error
-  return new Error(typeof error === 'string' ? error : String(error))
-}
-
 function baseProperties(): Record<string, unknown> {
   return {
     $lib: 'lody-electron-main',
@@ -132,25 +128,27 @@ export async function flushElectronMainErrorReporting(
 }
 
 export async function captureElectronMainException(
-  error: unknown,
+  _error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> {
   const posthog = getClient()
   if (!posthog) return
 
   try {
-    posthog.captureException(normalizeError(error), resolveDistinctId(), {
-      ...baseProperties(),
-      ...(context?.component !== undefined && context.component.length > 0
-        ? { component: context.component }
-        : {}),
-      ...(context?.extra ?? {})
+    // Main serves multiple workspaces/windows. It cannot authorize plaintext
+    // diagnostics using one renderer's mode, so keep only fixed diagnostics.
+    const pending = posthog.captureImmediate({
+      event: '$exception',
+      distinctId: resolveDistinctId(),
+      properties: { ...baseProperties(), ...redactedTelemetryException(context?.extra) }
     })
+    await Promise.race([
+      pending.catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, DEFAULT_FLUSH_TIMEOUT_MS))
+    ])
   } catch {
     return
   }
-
-  await flushElectronMainErrorReporting()
 }
 
 function exitAfterFatalException(): void {

@@ -85,7 +85,7 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
             ? [
                 {
                   type: 'thought' as const,
-                  text: 'Inspect the filter and the row props before choosing where to memoize.',
+                  text: 'Inspect the `filter` and the row props before choosing where to memoize.',
                 },
                 {
                   type: 'tool_call' as const,

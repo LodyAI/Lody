@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
 
+import {
+  createRouter,
+  createRootRoute,
+  createRoute,
+  createHashHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -449,6 +457,66 @@ describe('WorkspaceScreen write recovery', () => {
     );
     expect(onNext).toHaveBeenCalledOnce();
     expect(errorToast).not.toHaveBeenCalled();
+  });
+
+  it('opens encrypted workspace control with hash routing without leaving the desktop document', async () => {
+    vi.restoreAllMocks();
+    const platform = encryptionAwarePlatform(
+      { id: 'workspace-e', name: 'Vault', slug: 'vault', contentMode: 'e2ee' },
+      async () => ({
+        workspaceId: 'workspace-e',
+        contentMode: 'e2ee',
+        activation: 'control-only',
+        contentModeVersion: 1,
+        cryptoOrgId: 'ab'.repeat(32),
+        genesisHash: 'ab'.repeat(32),
+      })
+    );
+    platform.identity = {
+      ...platform.identity,
+      session: createStaticStore({ status: 'authenticated', user: { id: 'account', name: 'Ada' } }),
+    };
+    const onNext = vi.fn();
+    const pathname = window.location.pathname;
+    window.location.hash = '#/onboarding';
+    const rootRoute = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createHashHistory(),
+      routeTree: rootRoute.addChildren([
+        createRoute({
+          getParentRoute: () => rootRoute,
+          path: '/onboarding',
+          component: () => <WorkspaceScreen onBack={vi.fn()} onNext={onNext} />,
+        }),
+        createRoute({
+          getParentRoute: () => rootRoute,
+          path: '/workspace/e2ee/$workspaceId',
+          component: () => <div>Encrypted workspace control</div>,
+        }),
+      ]),
+    });
+    await act(async () => {
+      await router.load();
+      root?.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={createStore()}>
+            <RouterProvider router={router} />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+    await act(async () => findButton(container, 'Vault').click());
+    await act(async () => {
+      findButton(container, 'Next').click();
+      await Promise.resolve();
+      await router.load();
+    });
+    expect(window.location.pathname).toBe(pathname);
+    expect(window.location.hash).toBe('#/workspace/e2ee/workspace-e');
+    expect(container.textContent).toContain('Encrypted workspace control');
+    expect(onNext).not.toHaveBeenCalled();
+    router.history.destroy();
+    window.location.hash = '';
   });
 
   it('reports a failed mode check of an encrypted-listed workspace with the generic switch copy', async () => {

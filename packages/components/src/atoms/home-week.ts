@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '@lody/shared';
 import { atom } from 'jotai';
 import {
   homeWeekDayKey,
@@ -57,7 +58,7 @@ export const homeWeekInputAtom = atom((get) => {
       lastAt,
       add: change?.add ?? 0,
       del: change?.del ?? 0,
-      mergedPrs: session.pullRequests?.filter((pr) => pr.status === 'merged').length ?? 0,
+      mergedPrs: resolveSessionPullRequests(session).filter((pr) => pr.status === 'merged').length,
       cliType: session.cliType,
       agentType: session.agentType,
       repo:

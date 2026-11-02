@@ -3,7 +3,7 @@
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   GitHubCheckRunsSummary,
   GitHubPullRequestDetails,
@@ -24,6 +24,13 @@ vi.mock('react-i18next', () => ({
       (fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(opts?.[name])),
   }),
 }));
+
+// Markdown mounts start browser-only lazy imports (including KaTeX copy-tex).
+// Keep this suite's document alive until those imports finish, even when a
+// synchronous layout assertion immediately unmounts the rendered PR view.
+afterAll(async () => {
+  await vi.dynamicImportSettled();
+});
 
 const pullRequest: GitHubPullRequestDetails = {
   number: 42,
@@ -110,6 +117,41 @@ describe('PrTabView refresh button', () => {
     }
     return { button, onRefresh };
   };
+
+  it('shows GitHub stack layers in order with their statuses and links', () => {
+    renderView({
+      state: 'ready',
+      data: {
+        ...data,
+        pullRequest: {
+          ...pullRequest,
+          stack: {
+            number: 7,
+            position: 2,
+            size: 2,
+            baseRef: 'main',
+            pullRequests: [
+              { number: 41, title: 'Foundation', state: 'closed', draft: false, merged: true },
+              { number: 42, title: 'Feature', state: 'open', draft: false, merged: false },
+            ],
+          },
+        },
+      },
+    });
+    const stack = container?.querySelector('section[aria-label="Pull request stack"]');
+    expect(stack?.textContent).toContain('2 / 2');
+    expect(stack?.querySelector('a[aria-label="Merged: Foundation #41"] svg')).not.toBeNull();
+    expect(
+      stack?.querySelector('a[aria-label="Open: Feature #42"][aria-current="page"] svg')
+    ).not.toBeNull();
+    expect(
+      Array.from(stack?.querySelectorAll('li a') ?? []).map((a) => a.getAttribute('href'))
+    ).toEqual([
+      'https://github.com/loro-dev/lody/pull/42',
+      'https://github.com/loro-dev/lody/pull/41',
+    ]);
+    expect(stack?.textContent).toContain('Merge this stack on GitHub.');
+  });
 
   it('keeps the top refresh button clickable while the initial load is spinning', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });

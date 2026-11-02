@@ -61,7 +61,8 @@ export const projectRefToUnifiedSelection = (
 export const unifiedSelectionToProjectRef = (
   selection: UnifiedProjectSelection
 ): ProjectRef | null => {
-  if (selection.kind === 'none') {
+  // Task surfaces offer no Project groups, and a group is not one ProjectRef.
+  if (selection.kind === 'none' || selection.kind === 'group') {
     return null;
   }
   if (selection.kind === 'github') {

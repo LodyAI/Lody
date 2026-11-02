@@ -238,7 +238,7 @@ describe('session usage', () => {
   });
   it('keeps builtin account overrides isolated while trusting custom capability declarations', () => {
     const capability = { version: 1, query: true } as const;
-    const config = { env: { API_KEY: 'synthetic' } };
+    const config = { env: { ANTHROPIC_API_KEY: 'synthetic' } };
     expect(
       canShowSubscriptionRateLimits({ cliType: 'builtin', agentType: 'claude', config, capability })
     ).toBe(false);

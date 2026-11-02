@@ -98,6 +98,59 @@ describe('ProviderRow reauthentication', () => {
     expect(container.textContent).toContain('70%');
   });
 
+  it.each([
+    ['codex', 'OPENAI_API_KEY'],
+    ['claude', 'ANTHROPIC_BASE_URL'],
+    ['grok', 'XAI_API_KEY'],
+  ])(
+    'shows only the owning %s quota with tool env, and hides account overrides',
+    async (agentType, accountKey) => {
+      const config = {
+        ...makeConfig({ cliType: 'builtin', agentType }),
+        env: { OP_TOKEN: 'synthetic' },
+      };
+      const quotaMachine: MachineViewMeta = {
+        ...machine,
+        acpCapabilities: {
+          [config.id]: {
+            cliType: 'builtin',
+            agentType,
+            modes: [],
+            models: [],
+            fetchedAt: 1,
+            rateLimits: { version: 1 },
+          },
+        },
+        raceLimits: Object.fromEntries(
+          [
+            [config.id, 30],
+            ['another-provider', 90],
+          ].map(([id, usedPercent]) => [
+            getRateLimitEntryKey(agentType, agentType, id as AgentConfigId),
+            {
+              limitId: agentType,
+              scope: { providerId: agentType },
+              windows: [{ usedPercent, windowDurationSeconds: 18000, resetsAtEpochSeconds: null }],
+            },
+          ])
+        ),
+      };
+      const render = async (env: Record<string, string>) =>
+        act(async () => {
+          root.render(
+            <ProviderRow config={{ ...config, env }} machine={quotaMachine} onEdit={() => {}} />
+          );
+        });
+      await render(config.env);
+      expect(container.textContent).toContain('70%');
+      expect(container.textContent).not.toContain('10%');
+      await render({ ...config.env, [accountKey]: 'synthetic' });
+      expect(container.textContent).not.toContain('70%');
+      await render(config.env);
+      expect(container.textContent).toContain('70%');
+    }
+  );
+
   // Asserts on rendered text rather than a mocked panel: the row must not grow a
   // sign-in affordance again, whichever component would provide it.
   const hasSignInAction = () =>
@@ -131,6 +184,9 @@ describe('ProviderRow reauthentication', () => {
       root.render(<DetailHarness />);
     });
 
+    expect(container.querySelector('[data-testid="agent-provider"]')?.getAttribute('data-agent-config-id')).toBe(config.id);
+    expect(container.querySelector('[data-testid="agent-provider"]')?.getAttribute('data-machine-id')).toBe(machineId);
+    expect(container.querySelector('[data-testid="agent-provider-name"]')?.textContent).toBe(config.name);
     const row = container.querySelector<HTMLButtonElement>('button[aria-label="Edit Config"]');
     await act(async () => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

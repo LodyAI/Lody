@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
+import { LoroDoc } from 'loro-crdt';
+import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
+import { userAtom } from '../src/atoms';
 
 import {
   act,
+  Fragment,
   cloneElement,
   createElement,
   createRef,
@@ -31,6 +35,11 @@ import type {
   SessionInputBlock,
   WorkspaceMcpServerMeta,
 } from '@lody/shared';
+
+const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
+vi.mock('../src/hooks/use-resolved-machine-meta', () => ({
+  useResolvedMachineMeta: () => ({ machine: scheduleMachine.value, machineFlockRows: {} }),
+}));
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -143,6 +152,8 @@ import {
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
+import { formatMessageQuote } from '@lody/shared';
+import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -180,6 +191,7 @@ describe('SessionChatInputArea submission feedback', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
+    scheduleMachine.value = null;
     resources = createSessionSendResources({
       acquire: async () => {
         throw new Error('Unexpected store borrow');
@@ -479,40 +491,44 @@ describe('SessionChatInputArea submission feedback', () => {
     }
     await act(async () => {
       root!.render(
-        createElement(ScopeSwitchOnCommit, {
-          retire: retireOnCommit,
-          child: createElement(SessionChatInputArea, {
-            ref: composerRef,
-            isVisible,
-            claimNavigationFocus,
-            session: {
-              id: sessionId,
-              userId: 'user-1',
-              machineId: 'machine-1',
-              cliType: 'builtin',
-              agentType: 'codex',
-              status: { type: 'idle' },
-              isArchived,
-              createdAt: '2026-09-05T00:00:00.000Z',
-            } as SessionMeta,
-            sessionLocalProjectRootPath: null,
-            isMachineRemoved: false,
-            isAgentBusy: false,
-            isDark: false,
-            isEmptyConversation: false,
-            selectedModeId: null,
-            selectedModelId: null,
-            modeOptions: [],
-            modelOptions: [],
-            onModeChange: () => undefined,
-            onModelChange: () => undefined,
-            onSendMessage,
-            onStop: () => undefined,
-            onRemoveQueueItem: async () => undefined,
-            initialInputText: 'focus regression draft',
-            ...overrides,
-          }),
-        })
+        createElement(
+          Fragment,
+          null,
+          createElement(ScopeSwitchOnCommit, {
+            retire: retireOnCommit,
+            child: createElement(SessionChatInputArea, {
+              ref: composerRef,
+              isVisible,
+              claimNavigationFocus,
+              session: {
+                id: sessionId,
+                userId: 'user-1',
+                machineId: 'machine-1',
+                cliType: 'builtin',
+                agentType: 'codex',
+                status: { type: 'idle' },
+                isArchived,
+                createdAt: '2026-09-05T00:00:00.000Z',
+              } as SessionMeta,
+              sessionLocalProjectRootPath: null,
+              isMachineRemoved: false,
+              isAgentBusy: false,
+              isDark: false,
+              isEmptyConversation: false,
+              selectedModeId: null,
+              selectedModelId: null,
+              modeOptions: [],
+              modelOptions: [],
+              onModeChange: () => undefined,
+              onModelChange: () => undefined,
+              onSendMessage,
+              onStop: () => undefined,
+              onRemoveQueueItem: async () => undefined,
+              initialInputText: 'focus regression draft',
+              ...overrides,
+            }),
+          })
+        )
       );
     });
     return container!.querySelector('textarea')!;
@@ -531,6 +547,483 @@ describe('SessionChatInputArea submission feedback', () => {
       }
     });
   }
+
+  it('inserts a quote at the caret, preserves it after rejection, and restores deletion with undo/redo', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return false;
+      },
+    });
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('原文\n\n```ts\nconst n = 1;\n```')).toBe(true);
+    });
+    const quotedDraft = textarea.value;
+    expect(quotedDraft).toContain('focus regression draft');
+    const quoteEnd = quotedDraft.indexOf('focus regression draft');
+    textarea.setSelectionRange(0, 0);
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })
+      )
+    );
+    expect(textarea.value).toBe('focus regression draft');
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      )
+    );
+    expect(textarea.value).toBe(quotedDraft);
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    );
+    expect(textarea.value).toBe('focus regression draft');
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      )
+    );
+    textarea.setSelectionRange(quoteEnd, quoteEnd);
+    await submit('button');
+    expect(textarea.value).toBe(quotedDraft);
+    const block = submitted[0]![0]!;
+    expect(block).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('> 原文\n> \n> ```ts'),
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+    });
+    await submit('button');
+    expect(submitted[1]).toEqual(submitted[0]);
+  });
+
+  it('preserves a quote draft when the target machine loses support', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const sessionId = `quote-capability-${++nextSession}`;
+    const props = {
+      sessionId,
+      composerRef,
+      onSendMessage: async (blocks: SessionInputBlock[]) => {
+        submitted.push(blocks);
+        return true;
+      },
+    };
+    const textarea = await renderComposer(props);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Keep this snapshot')).toBe(true);
+    });
+    const draft = textarea.value;
+    scheduleMachine.value = null;
+    await renderComposer(props);
+    vi.spyOn(toast, 'error').mockImplementation(() => 'toast');
+    await submit('button');
+    expect(submitted).toEqual([]);
+    expect(textarea.value).toBe(draft);
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Unsupported')).toBe(false);
+    });
+    expect(textarea.value).toBe(draft);
+  });
+
+  it('restores a persisted quote snapshot on mount and retires it only after acceptance', async () => {
+    const workspace = 'quote-restart-workspace';
+    const sessionId = `quote-restart-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const quote = formatMessageQuote('Snapshot after restart\n  keep indentation');
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text: quote + '\n\nWhy?',
+        spans: [
+          {
+            start: 0,
+            end: quote.length,
+            kind: 'message_quote',
+            quoteVersion: 1,
+            label: '[Quote]',
+            target: 'restored-quote',
+          },
+        ],
+      })
+    );
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      sessionId,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    expect(textarea.value).toContain('[Quote]');
+    expect(textarea.value).toContain('Why?');
+    expect(textarea.value).not.toContain('keep indentation');
+    await submit('button');
+    expect(submitted[0]).toMatchObject([
+      {
+        type: 'text',
+        text: quote + '\n\nWhy?',
+        spans: [{ kind: 'message_quote', target: 'restored-quote', quoteVersion: 1 }],
+      },
+    ]);
+    expect(textarea.value).toBe('');
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  it('restores every snapshot after bulk-deleting more than 200 quote atoms', async () => {
+    const workspace = 'quote-bulk-workspace';
+    const sessionId = `quote-bulk-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    let text = '';
+    const spans = Array.from({ length: 210 }, (_, index) => {
+      if (text) text += '\n\n';
+      const start = text.length;
+      text += formatMessageQuote(`Snapshot ${index}`);
+      return {
+        start,
+        end: text.length,
+        kind: 'message_quote',
+        quoteVersion: 1,
+        label: `[Quote ${index}]`,
+        target: `quote-${index}`,
+      };
+    });
+    text += '\n\nWhy?';
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(key, JSON.stringify({ text, spans }));
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      sessionId,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return false;
+      },
+    });
+    const original = textarea.value;
+    await act(async () => {
+      textarea.focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        textarea,
+        ''
+      );
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(textarea.value).toBe('');
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      )
+    );
+    expect(textarea.value).toBe(original);
+    await submit('button');
+    expect(submitted[0]).toMatchObject([{ type: 'text', text, spans: expect.any(Array) }]);
+    const block = submitted[0]![0]!;
+    expect(block.type === 'text' ? block.spans : []).toHaveLength(210);
+    localStorage.removeItem(key);
+  });
+
+  it('restores inline spacing and committed role identity beside a quote', async () => {
+    const workspace = 'quote-mention-workspace';
+    const sessionId = `quote-mention-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const quote = formatMessageQuote('Original source');
+    const text = `Before ${quote} after @original-role`;
+    const roleStart = text.indexOf('@original-role');
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text,
+        spans: [
+          {
+            start: 7,
+            end: 7 + quote.length,
+            kind: 'message_quote',
+            quoteVersion: 1,
+            label: '[Quote]',
+            target: 'inline-quote',
+          },
+        ],
+        mentions: [
+          { start: roleStart, end: text.length, value: 'stable-role-id', kind: 'agent_role' },
+        ],
+      })
+    );
+    const textarea = await renderComposer({ sessionId, onSendMessage: async () => false });
+    expect(textarea.value).toBe('Before \u2007[Quote]\u2007 after @original-role');
+    expect(
+      container!.querySelector(
+        '[data-mention-kind="agent_role"][data-mention-value="stable-role-id"]'
+      )
+    ).not.toBeNull();
+    await submit('button');
+    expect(textarea.value).toBe('Before \u2007[Quote]\u2007 after @original-role');
+    expect(
+      container!.querySelector(
+        '[data-mention-kind="agent_role"][data-mention-value="stable-role-id"]'
+      )
+    ).not.toBeNull();
+    localStorage.removeItem(key);
+  });
+
+  it('expands the current quote range when typing and Enter occur before the next render', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return false;
+      },
+    });
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Current snapshot')).toBe(true);
+    });
+    const original = textarea.value;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        textarea,
+        'Prefix ' + original
+      );
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(submitted[0]).toMatchObject([
+      {
+        type: 'text',
+        text: expect.stringContaining('> Current snapshot'),
+        spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+      },
+    ]);
+    expect(textarea.value).toBe('Prefix ' + original);
+  });
+
+  async function scheduledComposer(fail: boolean) {
+    const store = getDefaultStore();
+    store.set(userAtom, { id: 'user-1' } as never);
+    store.set(currentWorkspaceIdAtom, 'workspace-upload' as never);
+    scheduleMachine.value = {
+      id: 'machine-1',
+      ownerUserId: 'user-1',
+      timeZone: 'Asia/Shanghai',
+      protocolCapabilities: { schedules: 3 },
+    } as MachineMeta;
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {
+        if (fail) throw new Error('Synthetic durable write failure');
+      },
+    };
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-upload',
+      repo: port,
+      sendResources: resources,
+      withScheduleStore: async (_id: string, write: () => Promise<unknown>) => write(),
+    } as never);
+    const sessionId = `scheduled-${++nextSession}`;
+    localStorage.setItem(
+      `lody:scheduledMessageDraft:user-1:workspace-upload:${sessionId}`,
+      JSON.stringify({
+        at: '2099-01-01T00:00:00.000Z',
+        scheduleId: 'scheduled-test',
+        activationId: 'activation',
+        activityId: 'create',
+      })
+    );
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const ordinary: SessionInputBlock[][] = [];
+    await renderComposer({
+      sessionId,
+      composerRef,
+      onSendMessage: async (blocks) => {
+        ordinary.push(blocks);
+        return true;
+      },
+      overrides: {
+        session: {
+          id: sessionId,
+          userId: 'user-1',
+          machineId: 'machine-1',
+          agentConfigId: 'agent-1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          createdAt: '2026-01-01T00:00:00Z',
+        } as SessionMeta,
+      },
+    });
+    return {
+      composerRef,
+      ordinary,
+      repository: new ScheduleRepository(port, 'workspace-upload' as never),
+    };
+  }
+
+  const scheduledActionButton = () =>
+    [...container!.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.startsWith('Scheduled')
+    );
+  const openScheduleEdit = async () => {
+    await act(async () => scheduledActionButton()!.click());
+  };
+
+  it('schedules complete content without sending now and clears only after durable acceptance', async () => {
+    const h = await scheduledComposer(false);
+    await act(async () => {
+      h.composerRef.current!.addCommentReference({
+        source: 'lody',
+        path: 'notes.ts',
+        lineNumber: 1,
+        side: 'additions',
+        commentBody: 'Review this',
+        authorName: 'Reviewer',
+      });
+    });
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
+    });
+    const saved = await h.repository.read('scheduled-test');
+    expect(
+      saved?.message?.inputBlocks.some(
+        (block) => block.type === 'text' && block.text === 'focus regression draft'
+      )
+    ).toBe(true);
+    expect(saved?.message?.inputBlocks.some((block) => block.type === 'comment_reference')).toBe(
+      true
+    );
+    expect(h.ordinary).toEqual([]);
+    expect((await h.repository.list())[0]?.destination).toEqual({
+      kind: 'existing_session',
+      sessionId:
+        saved?.definition.destination.kind === 'existing_session'
+          ? saved.definition.destination.sessionId
+          : '',
+    });
+    expect(container!.querySelector('textarea')?.value).toBe('');
+    expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
+  });
+
+  it('persists prepared image references in the reservation before releasing the original draft', async () => {
+    const h = await scheduledComposer(false);
+    getDefaultStore().set(authTokenAtom, 'synthetic-token');
+    vi.mocked(uploadSessionImage).mockImplementation(async () => ({
+      imageId: 'scheduled-image',
+      mimeType: 'image/png',
+      fileName: 'sample.png',
+      sizeBytes: 15,
+      width: 1,
+      height: 1,
+    }));
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:scheduled-image',
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+    await act(async () => {
+      h.composerRef.current!.handleImageDrop([
+        new File(['synthetic-image'], 'sample.png', { type: 'image/png' }),
+      ]);
+    });
+    expect(container!.querySelector('img[alt="sample.png"]')).not.toBeNull();
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
+    });
+    const saved = await h.repository.read('scheduled-test');
+    expect(saved?.message?.inputBlocks).toContainEqual(
+      expect.objectContaining({ type: 'image', imageId: 'scheduled-image' })
+    );
+    expect(h.ordinary).toEqual([]);
+    expect(container!.querySelector('img[alt="sample.png"]')).toBeNull();
+  });
+
+  it('keeps the original text and time after a schedule write fails', async () => {
+    const h = await scheduledComposer(true);
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
+    });
+    expect(h.ordinary).toEqual([]);
+    expect(await h.repository.list()).toEqual([]);
+    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(scheduledActionButton()).not.toBeNull();
+  });
+
+  const clickText = async (text: string) => {
+    await act(async () => {
+      const button = [...document.querySelectorAll('button')].find(
+        (node) => node.textContent === text
+      )!;
+      button.click();
+    });
+  };
+
+  it('edits the composer schedule and sends using the shared updated time', async () => {
+    const options = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...options,
+      timeZone: 'Asia/Shanghai',
+    });
+    const h = await scheduledComposer(false);
+    expect(scheduledActionButton()).not.toBeNull();
+    await openScheduleEdit();
+    const field = document.querySelector<HTMLInputElement>('input[type=datetime-local]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        field,
+        '2099-01-02T09:30'
+      );
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await clickText('Apply');
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click()
+    );
+    expect((await h.repository.read('scheduled-test'))?.definition.trigger).toEqual({
+      kind: 'once',
+      at: '2099-01-02T01:30:00.000Z',
+    });
+    expect(scheduledActionButton()).toBeUndefined();
+  });
+
+  it('cancels scheduling from the composer while retaining the message draft', async () => {
+    await scheduledComposer(false);
+    await openScheduleEdit();
+    await clickText('Remove time');
+    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
+    expect(scheduledActionButton()).toBeUndefined();
+  });
 
   async function attachDrafts(composerRef: RefObject<SessionChatInputAreaHandle | null>) {
     Object.defineProperty(URL, 'createObjectURL', {
@@ -773,8 +1266,42 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(
         container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled
       ).toBe(true);
+      expect(container!.textContent).toContain('Loading this project’s default MCP servers…');
       await submit('keyboard');
       expect(onSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends an explicit one-turn opt-out without changing the next selection', async () => {
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const onSendMessage: SessionChatInputAreaProps['onSendMessage'] = async (...args) => {
+        submissions.push(args);
+        return false; // Keep the draft to exercise a second independent send.
+      };
+      const sessionId = `mcp-opt-out-${++nextSession}`;
+      const overrides = {
+        mcpSelectionReady: false,
+        mcpDefaultsFailed: true,
+        onRetryMcpDefaults: () => {},
+      };
+      await renderComposer({ sessionId, onSendMessage, overrides });
+      await submit('keyboard');
+      expect(submissions).toEqual([]);
+      const optOut = [...container!.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Send without MCP'
+      )!;
+      await act(async () => optOut.click());
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.mcpServerIds).toEqual([]);
+      expect(submissions[0][2]?.skipMcpOnce).toBe(true);
+      expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+      await renderComposer({
+        sessionId,
+        onSendMessage,
+        overrides: { mcp: mcp(['files']), mcpSelectionReady: true },
+      });
+      await submit('keyboard');
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1][2]?.mcpServerIds).toEqual(['files']);
     });
 
     it('dispatches the selection shown at the click, not one that changed before acceptance', async () => {
@@ -931,12 +1458,21 @@ describe('SessionChatInputArea submission feedback', () => {
       await submit('button');
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe('focus regression draft');
-      expect(document.activeElement === textarea).toBe(!mobile);
+      expect(document.activeElement).toBe(textarea);
     }
   );
 
   for (const mobilePlatform of ['mobile-browser', 'wide-native'] as const) {
     function setMobilePlatform() {
+      let id = 0;
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        frames.set(++id, callback);
+        return id;
+      });
+      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frame) => {
+        frames.delete(frame);
+      });
       if (mobilePlatform === 'wide-native') {
         Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
       } else {
@@ -949,24 +1485,78 @@ describe('SessionChatInputArea submission feedback', () => {
         });
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
       }
+      return async () =>
+        act(async () => {
+          const pending = [...frames.values()];
+          frames.clear();
+          for (const callback of pending) callback(0);
+        });
     }
     it.each(['keyboard', 'button'] as const)(
-      `never refocuses ${mobilePlatform} after %s submission succeeds or fails`,
+      `preserves the focused ${mobilePlatform} input during %s submission`,
       async (source) => {
-        setMobilePlatform();
+        const paint = setMobilePlatform();
         for (const accepted of [false, true]) {
           const acceptance = deferredBoolean();
           const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
           textarea.focus();
           await submit(source);
-          expect(document.activeElement).not.toBe(textarea);
+          expect(textarea.disabled).toBe(false);
+          expect(textarea.value).toBe('');
+          expect(document.activeElement).toBe(textarea);
           await act(async () => acceptance.resolve(accepted));
           expect(textarea.disabled).toBe(false);
           expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-          expect(document.activeElement).not.toBe(textarea);
+          expect(document.activeElement).toBe(textarea);
+          await paint();
+          expect(document.activeElement).toBe(textarea);
+          await paint();
+          expect(document.activeElement === textarea).toBe(!accepted);
         }
       }
     );
+    it(`keeps ${mobilePlatform} open if the user resumes editing before dismissal`, async () => {
+      const paint = setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit('keyboard');
+      await act(async () => acceptance.resolve(true));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+      await paint();
+      await paint();
+      expect(document.activeElement).toBe(textarea);
+    });
+    it(`does not dismiss a new ${mobilePlatform} session from an old accepted send`, async () => {
+      const paint = setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({
+        sessionId: 'dismiss-old',
+        onSendMessage: () => acceptance.promise,
+      });
+      textarea.focus();
+      await submit('keyboard');
+      await act(async () => acceptance.resolve(true));
+      const next = await renderComposer({
+        sessionId: 'dismiss-new',
+        onSendMessage: async () => true,
+      });
+      next.focus();
+      await paint();
+      await paint();
+      expect(document.activeElement).toBe(next);
+    });
+    it(`does not reclaim ${mobilePlatform} focus after an explicit keyboard dismissal`, async () => {
+      setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit('keyboard');
+      textarea.blur();
+      await act(async () => acceptance.resolve(false));
+      expect(textarea.value).toBe('focus regression draft');
+      expect(document.activeElement).not.toBe(textarea);
+    });
     it(`consumes a navigation request without focusing on ${mobilePlatform}`, async () => {
       setMobilePlatform();
       let pending = true;

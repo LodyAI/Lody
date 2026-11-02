@@ -1,3 +1,5 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
@@ -47,6 +49,8 @@ export function MobileDeleteWorkspaceSheet({
   warningText = null,
 }: MobileDeleteWorkspaceSheetProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -79,12 +83,11 @@ export function MobileDeleteWorkspaceSheet({
       <DrawerContent
         className={cn(
           'mobile-delete-workspace-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
+          'h-auto! rounded-t-2xl border-border/60',
+          keyboard.contentClassName
         )}
         style={{
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div className="flex max-h-full min-h-0 flex-col">
@@ -115,7 +118,11 @@ export function MobileDeleteWorkspaceSheet({
             })}
           </DrawerDescription>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+          <div
+            ref={keyboard.scrollRef}
+            style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+            className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+          >
             {warningText ? (
               <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[0.72rem] font-medium leading-relaxed text-amber-950 dark:text-amber-100">
                 {warningText}

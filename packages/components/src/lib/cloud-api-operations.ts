@@ -90,7 +90,14 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 }
 
 function capabilityForOperation(name: string): PlatformCapability {
-  if (name.startsWith('e2eeWorkspaces:')) return 'multiWorkspace';
+  if (
+    name.startsWith('e2eeWorkspaces:') ||
+    name.startsWith('e2eeMembers:') ||
+    // Personal device pairing relays: account-scoped, never on local composition.
+    name.startsWith('e2eeAccountPairing:') ||
+    name.startsWith('e2eeJoinMailbox:')
+  )
+    return 'multiWorkspace';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
@@ -138,7 +145,35 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  /** Account-wide pairing relay for portable hosts. Opaque bytes; hosts verify every tag. */
+  e2eeAccountPairing: {
+    submit: mutation<ConvexApi['e2eeAccountPairing']['submit']>('e2eeAccountPairing:submit'),
+    pending: query<ConvexApi['e2eeAccountPairing']['pending']>('e2eeAccountPairing:pending'),
+    read: query<ConvexApi['e2eeAccountPairing']['read']>('e2eeAccountPairing:read'),
+    decline: mutation<ConvexApi['e2eeAccountPairing']['decline']>('e2eeAccountPairing:decline'),
+    publish: mutation<ConvexApi['e2eeAccountPairing']['publish']>('e2eeAccountPairing:publish'),
+    claim: query<ConvexApi['e2eeAccountPairing']['claim']>('e2eeAccountPairing:claim'),
+  },
+  /** Per-workspace personal join mailbox, for a portable `PersonalHostRemote`. */
+  e2eeJoinMailbox: {
+    begin: mutation<ConvexApi['e2eeJoinMailbox']['begin']>('e2eeJoinMailbox:begin'),
+    status: query<ConvexApi['e2eeJoinMailbox']['status']>('e2eeJoinMailbox:status'),
+    readRequest: query<ConvexApi['e2eeJoinMailbox']['readRequest']>('e2eeJoinMailbox:readRequest'),
+    cancel: mutation<ConvexApi['e2eeJoinMailbox']['cancel']>('e2eeJoinMailbox:cancel'),
+    publish: mutation<ConvexApi['e2eeJoinMailbox']['publish']>('e2eeJoinMailbox:publish'),
+    claim: query<ConvexApi['e2eeJoinMailbox']['claim']>('e2eeJoinMailbox:claim'),
+  },
+  e2eeMembers: {
+    workspaces: query<ConvexApi['e2eeMembers']['workspaces']>('e2eeMembers:workspaces'),
+    preview: definePublicCloudQuery<
+      import('@lody/cloud-api').E2eeMemberRequests['preview'],
+      import('@lody/cloud-api').E2eeMemberReplies['preview']
+    >('teamSharing', 'e2eeMembers:preview'),
+  },
   e2eeWorkspaces: {
+    memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
+      'e2eeWorkspaces:memberProfiles'
+    ),
     create: action<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
     describe: query<ConvexApi['e2eeWorkspaces']['describe']>('e2eeWorkspaces:describe'),
     history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),

@@ -4,6 +4,7 @@ import { fn } from 'storybook/test';
 import { FOCUS_TUNING, tuneFocusMotion } from '@/components/chat/home/focus-motion';
 import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { WebChatLandingScreen } from '@/components/chat/web-chat-landing-screen';
+import { getWebWorkspaceLayoutRootClassName } from '@/components/workspace-layout-utils';
 import {
   HOME_WEEK_NOW,
   HOME_WEEK_USAGE_SOURCES,
@@ -48,6 +49,10 @@ type Story = StoryObj<typeof meta>;
 
 /** What the agents are doing: what needs you, the plan usage, what runs, what finished, what to pick back up. */
 export const Now: Story = {};
+
+export const NoAgentsRunning: Story = {
+  args: { now: homeNowFixture('idle') },
+};
 
 /** The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. */
 export const NowNearReset: Story = {
@@ -100,6 +105,16 @@ function landingAt(height: string, storyArgs: Story['args'] = { defaultBoard: 'n
 
 /** The real landing stage: switching boards keeps the line in place; folding re-centres it. */
 export const Landing: Story = landingAt('100vh', {});
+
+/** The wide native shell applies the keyboard offset once at the workspace root. */
+export const LandingNativeKeyboard: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => (
+    <div className={getWebWorkspaceLayoutRootClassName()}>
+      <WebChatLandingScreen title="New chat" composer={<textarea aria-label="Draft" />} />
+    </div>
+  ),
+};
 
 /** The landing with nothing going on: one quiet card sits beside the usage. */
 export const LandingQuiet: Story = landingAt('100vh', {

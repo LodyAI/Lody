@@ -1,3 +1,4 @@
+import { resolveSessionPullRequests } from '../session-pull-requests';
 import { z } from 'zod';
 import { getSessionPullRequestLegacyFields, type SessionMeta } from '../schema';
 import { parseGitHubPrNumber } from '../github-url';
@@ -18,6 +19,14 @@ export const scheduleRunNotificationSourceSchema = z.object({
   scheduleId: z.string().min(1).max(256),
   turnId: z.string().min(1).max(256),
   title: z.string().max(320),
+  definitionFingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  manualRunKey: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 export type ScheduleRunNotificationSource = z.infer<typeof scheduleRunNotificationSourceSchema>;
 
@@ -72,7 +81,7 @@ export function notificationProjectName(
 function notificationPullRequestNumber(
   meta: Pick<SessionMeta, 'pullRequests'>
 ): number | undefined {
-  const prs = meta.pullRequests ?? [];
+  const prs = resolveSessionPullRequests(meta);
   const active = prs.filter((pr) => pr.status === 'open' || pr.status === 'draft');
   let latest: (typeof prs)[number] | undefined;
   for (const pr of active.length ? active : prs) {

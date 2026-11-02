@@ -7,10 +7,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Build and packaging
 
-- CLI SSR uses native Node 22 TLA, never browser TLA transforms.
-  Validate at `NODE_OPTIONS=--max-old-space-size=2048`, not a raised heap.
-  Use per-package chunks, transitive assignment and CJS helper chunks.
-  Keep maps and no app code in vendor chunks.
+- Node 22 native TLA only; fixed 2048 MiB. Build CLI/workers then ACP in separate
+  Vite processes; ACP preserves dist. Keep maps, flat entries, transitive package
+  and CJS chunks; no app in vendor chunks.
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.
@@ -48,6 +47,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
+- Shared start/probe/load promises share only in-flight attempts or successes; a failure must not be
+  cached until restart. An unprovable local fact degrades its own action instead of blocking unrelated
+  work, and every user-path wait is bounded ([rules](../../.agents/docs/failure-containment.md#rules)).
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).
@@ -112,5 +114,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for the hosted GitHub webhook fan-out. Spec:
+- `src/lib/pr-poller/` owns PR associations and lifecycle reconciliation. Spec:
   `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

@@ -1059,3 +1059,55 @@ describe('native process writer ownership', () => {
       })
   );
 });
+
+describe('prompt suggestion channel', () => {
+  it('replays the latest local suggestion on join and delivers later clears outside presence', async () => {
+    const store = new EphemeralStore(86_400_000);
+    const receivedStore = new EphemeralStore(86_400_000);
+    store.set('machine:session', {
+      machineId: 'machine',
+      sessionId: 'session',
+      result: { type: 'completed', text: 'Continue' },
+    });
+    const { connection, received } = makeConnection('suggestion-peer');
+    const server = new LocalLoroDataPlaneServerLegacy({
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => new MemoryFlock(),
+      promptSuggestionSource: {
+        encodeAll: () => store.encodeAll(),
+        subscribe: (listener) => store.subscribe(listener),
+      },
+    });
+    try {
+      await server.handleMessage(connection, {
+        type: 'join',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: WORKSPACE_ID,
+        peerId: 'viewer',
+        requestId: 'join',
+        room: { scope: 'doc', docId: 'session' },
+      });
+      await settle();
+      const applyLatest = () => {
+        const frames = received.filter((m) => m.type === 'prompt-suggestions');
+        expect(frames.length).toBeGreaterThan(0);
+        for (const frame of frames) receivedStore.apply(base64ToBytes(frame.dataBase64));
+        return receivedStore.getAllStates()['machine:session'];
+      };
+      expect(applyLatest()).toMatchObject({ result: { text: 'Continue' } });
+      store.set('machine:session', {
+        machineId: 'machine',
+        sessionId: 'session',
+        result: { type: 'completed', text: null },
+      });
+      await settle();
+      expect(applyLatest()).toMatchObject({ result: { text: null } });
+      expect(received.some((m) => m.type === 'presence')).toBe(false);
+    } finally {
+      await server.disposeLegacy();
+      store.destroy();
+      receivedStore.destroy();
+    }
+  });
+});

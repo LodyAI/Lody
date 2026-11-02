@@ -12,6 +12,7 @@ import {
   fenceAcpSessionUserEdits,
   filterAcpSessionConfigOptionValues,
   resolveAcpSessionConfigSelection,
+  type AcpSessionConfigSelectionInputs,
   type AcpSessionSelectorOptionsInput,
   type AcpSessionUserConfigEdits,
 } from '../src/lib/acp-session-config-selection';
@@ -592,5 +593,187 @@ describe('ACP session config with declared per-model controls', () => {
 
     expect(resolved.selectedModelId).toBe('model-b');
     expect(resolved.configOptionValues['fast-mode']).toBe(true);
+  });
+});
+
+describe.each(['custom', 'registry'] as const)('%s model-category effort selection', (cliType) => {
+  const configId = 'generic-effort' as AgentConfigId;
+  const target = { cliType, agentType: 'synthetic-agent' };
+  const machine = {
+    acpCapabilities: {
+      [configId]: {
+        ...target,
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime' as const,
+        fetchedAt: 1,
+        modes: [],
+        models: [],
+        configOptions: [
+          {
+            id: 'provider_model',
+            name: 'Model',
+            category: 'model',
+            type: 'select' as const,
+            currentValue: 'a',
+            options: ['a', 'b', 'adaptive'].map((value) => ({ value, name: value })),
+          },
+          {
+            id: 'provider_effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select' as const,
+            currentValue: 'high',
+            options: ['medium', 'high', 'max'].map((value) => ({ value, name: value })),
+          },
+        ],
+        declaredModelControls: {
+          a: { effortValues: ['medium', 'high', 'max'] },
+          b: { effortValues: ['low', 'medium', 'high', 'xhigh', 'max'] },
+          adaptive: { effortValues: [] },
+        },
+      },
+    },
+  };
+  const build = (inputs: AcpSessionConfigSelectionInputs) => {
+    const candidate = buildAcpSessionConfigCandidates(inputs);
+    return buildAcpSelectorOptions({
+      ...target,
+      configId,
+      machine,
+      selectedModelId: candidate.modelId,
+      configOptionValues: candidate.configOptionValues,
+    });
+  };
+  const resolve = (inputs: AcpSessionConfigSelectionInputs) =>
+    resolveAcpSessionConfigSelection(inputs, build(inputs), target);
+  const efforts = (value: {
+    configOptionSelectors: AcpSessionSelectorOptionsInput['configOptionSelectors'];
+  }) =>
+    value.configOptionSelectors
+      .find((selector) => selector.configId === 'provider_effort')
+      ?.options.map((option) => option.value);
+  const inputsFor = (model: string): AcpSessionConfigSelectionInputs => ({
+    edits: { configOptions: { provider_model: model } },
+    preferences: {},
+  });
+
+  it('derives both stages from the real model config id and preserves config-option dispatch', () => {
+    const inputs = {
+      ...inputsFor('b'),
+      runtimePreferences: { configOptionValues: { provider_model: 'a', provider_effort: 'high' } },
+    };
+    expect(efforts(build(inputs))).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    const resolved = resolve(inputs);
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.selectedModelId).toBeNull();
+    expect(resolved.configOptionValues.provider_model).toBe('b');
+    expect(
+      filterAcpSessionConfigOptionValues(
+        resolved.configOptionValues,
+        resolved.configOptionSelectors
+      )
+    ).toEqual({ provider_model: 'b', provider_effort: 'high' });
+  });
+
+  it('hides empty effort declarations and restores the control on switching back', () => {
+    const hidden = resolve(inputsFor('adaptive'));
+    expect(efforts(hidden)).toBeUndefined();
+    expect(hidden.configOptionValues).toEqual({ provider_model: 'adaptive' });
+    const restored = resolve({
+      edits: { configOptions: { provider_model: 'b' } },
+      preferences: { configOptionValues: hidden.configOptionValues },
+    });
+    expect(efforts(restored)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(restored.configOptionValues.provider_effort).toBe('high');
+  });
+
+  it('validates the model before effort and falls back from an invalid edit to the runtime model', () => {
+    const inputs: AcpSessionConfigSelectionInputs = {
+      edits: { configOptions: { provider_model: 'removed', provider_effort: 'xhigh' } },
+      runtimePreferences: {
+        configOptionValues: { provider_model: 'b', provider_effort: 'medium' },
+      },
+      preferences: { configOptionValues: { provider_model: 'a' } },
+    };
+    const resolved = resolve(inputs);
+    expect(resolved.configOptionValues).toEqual({ provider_model: 'b', provider_effort: 'xhigh' });
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('restores controls when an unsupported candidate is removed from the authoritative catalog', () => {
+    const inputs: AcpSessionConfigSelectionInputs = {
+      edits: { configOptions: { provider_model: 'adaptive' } },
+      preferences: { configOptionValues: { provider_model: 'b' } },
+    };
+    const capability = machine.acpCapabilities[configId];
+    const options = buildAcpSelectorOptions({
+      ...target,
+      configId,
+      configOptionValues: { provider_model: 'adaptive' },
+      machine: {
+        acpCapabilities: {
+          [configId]: {
+            ...capability,
+            configOptions: capability.configOptions.map((option) =>
+              option.category === 'model'
+                ? { ...option, options: option.options.filter((item) => item.value !== 'adaptive') }
+                : option
+            ),
+          },
+        },
+      },
+    });
+    expect(efforts(options)).toBeUndefined();
+    const resolved = resolveAcpSessionConfigSelection(inputs, options, target);
+    expect(efforts(resolved)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.configOptionValues.provider_model).toBe('b');
+  });
+
+  it('uses the generic config value even if a stale dedicated model id exists', () => {
+    const options = buildAcpSelectorOptions({
+      ...target,
+      configId,
+      machine,
+      selectedModelId: 'a',
+      configOptionValues: { provider_model: 'b' },
+    });
+    expect(efforts(options)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('keeps runtime snapshots authoritative over missing keys and invalid values', () => {
+    for (const runtimeValues of [{}, { provider_model: 'removed', provider_effort: 'removed' }]) {
+      const resolved = resolve({
+        edits: emptyEdits,
+        runtimePreferences: { configOptionValues: runtimeValues },
+        preferences: { configOptionValues: { provider_model: 'b', provider_effort: 'xhigh' } },
+      });
+      expect(resolved.configOptionValues).toEqual({});
+      expect(efforts(resolved)).toEqual(['medium', 'high', 'max']);
+    }
+  });
+
+  it('uses preference/default fallback without a runtime snapshot and drops invalid effort', () => {
+    const resolved = resolve({
+      edits: { configOptions: { provider_model: 'removed', provider_effort: 'xhigh' } },
+      preferences: { configOptionValues: { provider_model: 'removed', provider_effort: 'low' } },
+    });
+    expect(resolved.configOptionValues).toEqual({ provider_model: 'a', provider_effort: 'high' });
+    expect(efforts(resolved)).toEqual(['medium', 'high', 'max']);
+  });
+
+  it('keeps unvalidated stored values under provisional capabilities', () => {
+    const inputs = {
+      edits: emptyEdits,
+      preferences: { configOptionValues: { provider_model: 'unknown', provider_effort: 'future' } },
+    };
+    const resolved = resolveAcpSessionConfigSelection(
+      inputs,
+      { ...build(inputs), capabilityAuthority: 'provisional' },
+      target
+    );
+    expect(resolved.configOptionValues).toEqual({
+      provider_model: 'unknown',
+      provider_effort: 'future',
+    });
   });
 });

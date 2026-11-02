@@ -13,6 +13,7 @@ import {
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import {
   acquireWorkspaceCatalog,
+  retryWorkspaceCatalog,
   type WorkspaceCatalogSnapshot,
 } from '../src/lib/workspace-catalog-room';
 
@@ -213,4 +214,74 @@ describe('workspace MCP catalog room', () => {
     lease.release();
     error.mockRestore();
   });
+});
+
+it('shares capped retries, recovers every consumer and keeps another workspace usable', async () => {
+  vi.useFakeTimers();
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const failed = createRuntime('failed', [entry('files', 'Files')]);
+  const healthy = createRuntime('healthy', [entry('other', 'Other')]);
+  const open = failed.openFlockDoc.getMockImplementation()!;
+  failed.openFlockDoc.mockRejectedValue(new Error('storage unavailable'));
+  const seen: WorkspaceCatalogSnapshot[] = [];
+  const other: WorkspaceCatalogSnapshot[] = [];
+  const a = acquireWorkspaceCatalog(failed.runtime, (snapshot) => seen.push(snapshot));
+  const b = acquireWorkspaceCatalog(failed.runtime, (snapshot) => other.push(snapshot));
+  const independent = acquireWorkspaceCatalog(healthy.runtime, (snapshot) => {
+    expect(snapshot.loaded).toBe(true);
+  });
+  try {
+    await settle();
+    expect(seen.at(-1)).toMatchObject({ loaded: false, failed: true });
+    expect(healthy.subscriberCount()).toBe(1);
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      const before = failed.openFlockDoc.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(failed.openFlockDoc.mock.calls.length).toBe(before);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failed.openFlockDoc.mock.calls.length).toBe(before + 1);
+    }
+    failed.openFlockDoc.mockImplementation(open);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(seen.at(-1)).toMatchObject({ loaded: true, failed: false });
+    expect(seen.at(-1)?.servers.map(({ id }) => id)).toEqual(['files']);
+    expect(other.at(-1)).toBe(seen.at(-1));
+    expect(failed.subscriberCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    a.release();
+    b.release();
+    independent.release();
+    log.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it('shares an explicit retry and cancels retries when the last consumer leaves', async () => {
+  vi.useFakeTimers();
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const harness = createRuntime('manual', [entry('files', 'Files')]);
+  const open = harness.openFlockDoc.getMockImplementation()!;
+  harness.openFlockDoc.mockRejectedValue(new Error('storage unavailable'));
+  const seen: WorkspaceCatalogSnapshot[] = [];
+  const a = acquireWorkspaceCatalog(harness.runtime, (snapshot) => seen.push(snapshot));
+  try {
+    await settle();
+    retryWorkspaceCatalog(harness.runtime);
+    retryWorkspaceCatalog(harness.runtime);
+    await settle();
+    expect(seen.at(-1)).toMatchObject({ failed: true, loaded: false });
+    expect(harness.openFlockDoc.mock.calls.length).toBe(2);
+    a.release();
+    expect(vi.getTimerCount()).toBe(0);
+    harness.openFlockDoc.mockImplementation(open);
+    const b = acquireWorkspaceCatalog(harness.runtime, (snapshot) => seen.push(snapshot));
+    await settle();
+    expect(seen.at(-1)).toMatchObject({ loaded: true, failed: false });
+    b.release();
+  } finally {
+    a.release();
+    log.mockRestore();
+    vi.useRealTimers();
+  }
 });

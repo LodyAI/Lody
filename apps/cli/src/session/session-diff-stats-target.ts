@@ -1,5 +1,7 @@
 import {
   resolveProjectGitHubRepo,
+  readPullRequestLifecycle,
+  type SessionPullRequestLifecycleFields,
   type LocalProjectId,
   type ProjectRef,
   type SessionMeta,
@@ -57,7 +59,20 @@ export function readDiffStatsMetadata(value: unknown): DiffStatsMetadata | undef
     ...(value.project === undefined ? {} : { project: value.project }),
     ...(typeof value.repoFullName === 'string' ? { repoFullName: value.repoFullName } : {}),
     ...(isSessionDiffStats(value.diffStats) ? { diffStats: value.diffStats } : {}),
-    ...(value.pullRequests === undefined ? {} : { pullRequests: value.pullRequests }),
+    ...(value.pullRequests === undefined
+      ? {}
+      : {
+          pullRequests: Array.isArray(value.pullRequests)
+            ? value.pullRequests.map((pr) => {
+                if (!isObjectRecord(pr) || typeof pr.url !== 'string') return pr;
+                const lifecycle = readPullRequestLifecycle(
+                  value as SessionPullRequestLifecycleFields,
+                  pr.url
+                );
+                return lifecycle ? { ...pr, status: lifecycle.s } : pr;
+              })
+            : value.pullRequests,
+        }),
   };
 }
 

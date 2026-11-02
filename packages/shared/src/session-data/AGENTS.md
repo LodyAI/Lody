@@ -46,7 +46,8 @@
   conflict marker never upgrades the stored cursor by implication.
 - `user-status` writes every stored copy of a duplicated user turn through
   `updateCopies`: the last copy gates guarded writes, settled copies never regress,
-  and any started or settled copy vetoes a requeue.
+  and any started or settled copy vetoes a requeue. `onlyAwaitingStart` settles only
+  while every copy is still pending or seen.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.
@@ -69,7 +70,8 @@
   Derive paths before filtering; preserve omitted vs explicitly cleared lists and
   monotonic status. Keep only displayed switch-mode plans and scheduling raw fields,
   not generic raw or provider metadata copies. Permission enrichment preserves stored
-  content; malformed new retained values reach writer validation. CLI edit evidence
+  content except unanswered switch-mode reviews, whose supplied review content replaces
+  streamed argument previews; malformed new retained values reach writer validation. CLI edit evidence
   consumes enriched notifications with the original owning turn, not stored diff bodies.
 
 - Submissions append on the live doc as local commits; transports upload only

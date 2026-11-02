@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory } from '@lody/shared';
 
-import { canStopAgentEnabled, isSessionContextCompacting } from '../src/lib/session-context-compaction';
+import {
+  canStopAgentEnabled,
+  isSessionContextCompacting,
+} from '../src/lib/session-context-compaction';
 
 const historyWithStatus = (
   status: 'pending' | 'in_progress' | 'completed' | 'failed',
@@ -41,51 +44,16 @@ describe('isSessionContextCompacting', () => {
 
 describe('canStopAgentEnabled', () => {
   const base = {
-    isContextCompacting: false,
-    isSessionActive: false,
     activeAssistantTurnId: null,
     isGoalActive: false,
     canPauseGoal: false,
   };
 
-  it('does not expose Stop during compaction without a cancellable turn', () => {
-    // A pending/in-progress compaction marker remains in history but its
-    // assistant entry is already finished (restart, interrupted notification
-    // stream). Stop must NOT be shown — clicking it would be rejected as
-    // missing_active_turn, leaving a permanently nonfunctional button.
-    expect(
-      canStopAgentEnabled({ ...base, isContextCompacting: true, activeAssistantTurnId: null })
-    ).toBe(false);
-  });
-
-  it('exposes Stop during compaction when a cancellable turn exists', () => {
-    expect(
-      canStopAgentEnabled({
-        ...base,
-        isContextCompacting: true,
-        activeAssistantTurnId: 'turn-1',
-      })
-    ).toBe(true);
-  });
-
-  it('exposes Stop for an active assistant turn regardless of compaction', () => {
-    expect(
-      canStopAgentEnabled({
-        ...base,
-        isSessionActive: true,
-        activeAssistantTurnId: 'turn-2',
-      })
-    ).toBe(true);
-  });
-
-  it('does not expose Stop for an active session without a turn', () => {
-    expect(
-      canStopAgentEnabled({
-        ...base,
-        isSessionActive: true,
-        activeAssistantTurnId: null,
-      })
-    ).toBe(false);
+  it('exposes Stop exactly while an assistant turn is unfinished', () => {
+    // No live-activity input exists: a turn whose agent died is still
+    // unfinished and must stay stoppable.
+    expect(canStopAgentEnabled({ ...base, activeAssistantTurnId: 'turn-1' })).toBe(true);
+    expect(canStopAgentEnabled(base)).toBe(false);
   });
 
   it('exposes Stop for a pausable goal', () => {

@@ -1,7 +1,6 @@
 # Product surfaces (`src/components`)
 
-Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink; edit `AGENTS.md` only.
-Child directories (`sessions/`, `mobile/`, …) own their own rules.
+Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Sidebar and session rows
 
@@ -16,9 +15,8 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md).
-- Every list uses `lib/session-opened-by-tree.ts`: `session-list.tsx` groups, local-project
-  sections, Updated/Pinned in `sidebar-updated-session-list.tsx`, and
-  `sidebar-navigation-model.ts` for matching keyboard navigation.
+- Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
+  `sidebar-navigation-model.ts`.
 - `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
   `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
   `parentSessionId` to root using sidebar `allActiveSessions`, not visible rows.
@@ -39,8 +37,10 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
-- Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
-  or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
+- Never hide a Session through nesting: missing, cross-section, cycling, or
+  deeper-than-one-level openers render top-level. In Workspace mode,
+  `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
+  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
@@ -58,6 +58,7 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
 
 ## Entry points, drafts, and layout
 
+- iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
   window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
@@ -100,13 +101,28 @@ Child directories (`sessions/`, `mobile/`, …) own their own rules.
   `useAddLocalProjectMachines`; the ownership rule (`canAddProjects`) has one home and
   must not be re-derived per surface. Onboarding is the deliberate exception: its
   desktop native picker really is this-machine only.
-- A pending local-project removal is a visible lifecycle state, not an absent project:
-  keep the project and its Sessions discoverable while the owning machine is offline or
-  retrying, but exclude it from new-Session selectors. Once the catalog row is gone,
-  archived Sessions stay readable and deletable; Restore waits until the same local
-  project is added again.
-- Local-project removal may optionally clean Lody-created Session worktrees, but the
-  option defaults off and appears only after the owning machine preflights every
-  worktree. Always state the original project directory is never deleted; list dirty
-  worktrees and keep them by default. A completed cleanup is not pending removal and
-  must be visibly acknowledged even when worktrees were kept or failed.
+- Local directory registration and standalone display are independent. Missing
+  `standaloneVisible` means visible. Standalone lists filter hidden registrations;
+  member resolution, repository-copy selection and session access retain them.
+- Local-project deletion uses the existing action without confirmation or dependency
+  UI. The daemon retains referenced registrations and sessions; unreferenced ones
+  follow normal deletion. Explicit Add restores standalone display and identity.
+- Direct folder selection is draft-only until save. Gate read-only inspection on
+  `projectFolderSelection`; register missing directories before saving the complete
+  Project. Retried saves reuse registrations; source paths stay out of definitions.
+
+E2EE/terminals: read [rules](e2ee/AGENTS.md).
+
+
+## Automation markers
+
+- Key workspace, machine, invitation, membership and composer controls expose
+  stable `data-testid` values independent of translated labels. Repeated rows keep
+  the existing full identity attribute (`data-settings-machine-id`,
+  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
+  `data-agent-config-id`).
+  These are public identifiers, never invitation tokens, credentials or key bytes.
+- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
+  it is not execution permission. Tests must still bind the workspace and observe
+  the required content or control surface. Preserve existing semantic/identity
+  attributes so older harnesses continue to work.

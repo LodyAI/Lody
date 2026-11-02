@@ -1,3 +1,6 @@
+import { statusRefreshInterval } from './pr-poll-priority';
+import { collectStatusTargets } from './pr-poll-targets';
+import { selectWorkflowHead } from './workflow-runs';
 import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -32,7 +35,8 @@ import {
   computeDiscoveryFingerprint,
   computePrPollMetaSignature,
   enumeratePrPollTargets,
-  resolveOwnerRepositoryContext,
+  projectMemberRepositoryContext,
+  discoveryOwnerKey,
   type AliveSessionMeta,
   type PrPollSessionEntry,
 } from './pr-poll-targets';
@@ -127,7 +131,8 @@ export type PrPollSchedulerDeps = {
   config: PrPollerConfig;
   stateStore: PrPollerStateStore;
   logger: Logger;
-  client: Pick<GitHubGraphQlClient, 'executeBatch'>;
+  client: Pick<GitHubGraphQlClient, 'executeBatch'> &
+    Partial<Pick<GitHubGraphQlClient, 'executeWorkflows'>>;
   nowMs?: () => number;
 };
 
@@ -496,20 +501,25 @@ export class PrPollScheduler {
       });
       for (const entry of runtime.entries) {
         const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
-        for (const statusTarget of entry.statusTargets) {
+        const workflowDemand =
+          runtime.handle.wantsWorkflowObservations?.(entry.ownerSessionId) ?? false;
+        const ownerMeta = runtime.sessionMetas.get(entry.ownerSessionId)?.meta;
+        const statusTargets =
+          ownerMeta && workflowDemand ? collectStatusTargets(ownerMeta, true) : entry.statusTargets;
+        for (const statusTarget of statusTargets) {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'status',
               repoFullName: statusTarget.repoFullName,
               lane,
-              desiredIntervalMs:
-                lane === 'high' ? config.highIntervalMs : config.lowStatusIntervalMs,
+              desiredIntervalMs: statusRefreshInterval(lane, workflowDemand, config),
               qualifier: String(statusTarget.prNumber),
               status: statusTarget,
             })
           );
         }
-        if (entry.discoveryTarget) {
+        for (const discoveryTarget of entry.discoveryTargets ??
+          (entry.discoveryTarget ? [entry.discoveryTarget] : [])) {
           // A discovery target with open/draft PRs rides the status cadence
           // (same batch, zero extra requests); a bare discovery target uses
           // the slower discovery cadence.
@@ -520,11 +530,13 @@ export class PrPollScheduler {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'discovery',
-              repoFullName: entry.discoveryTarget.repoFullName,
+              repoFullName: discoveryTarget.repoFullName,
               lane,
               desiredIntervalMs: lane === 'high' ? config.highIntervalMs : lowIntervalMs,
-              qualifier: entry.discoveryTarget.branch,
-              discovery: entry.discoveryTarget,
+              qualifier: discoveryTarget.memberId
+                ? JSON.stringify([discoveryTarget.memberId, discoveryTarget.branch])
+                : discoveryTarget.branch,
+              discovery: discoveryTarget,
             })
           );
         }
@@ -690,6 +702,10 @@ export class PrPollScheduler {
       }
       for (const entry of runtime.entries) {
         validOwners.add(`${runtime.handle.workspaceId}:${entry.ownerSessionId}`);
+        for (const memberId of entry.projectMemberIds ?? [])
+          validOwners.add(
+            `${runtime.handle.workspaceId}:${discoveryOwnerKey(entry.ownerSessionId, memberId)}`
+          );
       }
       for (const owner of runtime.confirmedAssociations.keys()) {
         if (!validOwners.has(`${runtime.handle.workspaceId}:${owner}`)) {
@@ -735,7 +751,10 @@ export class PrPollScheduler {
       return false;
     }
     const nowMs = this.nowMs();
-    const credential = await runtime.handle.resolveCredential(batch.repoFullName);
+    const credential = await runtime.handle.resolveCredential(
+      batch.repoFullName,
+      batch.nativeCredentials
+    );
     if (!credential) {
       if (nowMs - runtime.lastCredentialLogAtMs >= CREDENTIAL_LOG_THROTTLE_MS) {
         runtime.lastCredentialLogAtMs = nowMs;
@@ -780,6 +799,7 @@ export class PrPollScheduler {
     // truncated ones keep their dueness and form the next batch (no silent
     // starvation of the tail).
     this.markAttempt(this.includedTargets(batch, query), nowMs);
+    let activeCredential = credential;
     let outcome = await this.deps.client.executeBatch(query, credential.token);
     this.counters.calls += 1;
     let outcomeScope = gate.scope;
@@ -790,7 +810,10 @@ export class PrPollScheduler {
       // that scope's own freeze/bucket/cooldown gates, and quota must be
       // charged to the scope that actually made the call.
       runtime.handle.invalidateCredential(batch.repoFullName, credential);
-      const retried = await runtime.handle.resolveCredential(batch.repoFullName);
+      const retried = await runtime.handle.resolveCredential(
+        batch.repoFullName,
+        batch.nativeCredentials
+      );
       if (retried) {
         this.rememberRepoScope(batch, retried.credentialScope, this.nowMs());
         const retryGate = this.preflightScope(retried, batch.repoFullName, deferredHints);
@@ -798,6 +821,7 @@ export class PrPollScheduler {
           this.counters.skips += 1;
           return true;
         }
+        activeCredential = retried;
         outcome = await this.deps.client.executeBatch(query, retried.token);
         this.counters.calls += 1;
         outcomeScope = retryGate.scope;
@@ -813,6 +837,73 @@ export class PrPollScheduler {
       outcome,
       deferredHints
     );
+    if (
+      outcome.kind === 'success' &&
+      this.deps.client.executeWorkflows &&
+      runtime.handle.recordWorkflowObservations
+    ) {
+      const observations = [
+        ...outcome.batch.pullRequests.flatMap((item) => (item.ok && item.pr ? [item.pr] : [])),
+        ...outcome.batch.discoveries.flatMap((item) => (item.ok ? item.prs : [])),
+      ];
+      const heads = new Map<string, SessionId[]>();
+      for (const ownerId of new Set(batch.targets.map((target) => target.ownerSessionId))) {
+        if (!runtime.handle.wantsWorkflowObservations?.(ownerId)) continue;
+        const meta = await runtime.handle.readOwnerMeta(ownerId);
+        if (!meta || meta.machineId !== runtime.handle.machineId || meta.isArchived) continue;
+        const head = selectWorkflowHead(meta, batch.repoFullName, observations);
+        if (head) heads.set(head, [...(heads.get(head) ?? []), ownerId]);
+      }
+      for (const [head, owners] of heads) {
+        // Actions denial must not disable ordinary PR observation; credentials still share quota.
+        const workflowsGate = this.preflightScope(
+          activeCredential,
+          `${batch.repoFullName}#actions`,
+          deferredHints
+        );
+        if (!workflowsGate) break;
+        const workflows = await this.deps.client.executeWorkflows(
+          batch.repoFullName,
+          head,
+          activeCredential.token
+        );
+        this.counters.calls += 1;
+        if (workflows.kind === 'token-invalid')
+          runtime.handle.invalidateCredential(batch.repoFullName, activeCredential);
+        await this.handleOutcome(
+          runtime,
+          { ...batch, targets: [] },
+          query,
+          workflowsGate.scope,
+          workflowsGate.cooldownKey,
+          workflows,
+          deferredHints
+        );
+        if (workflows.kind !== 'success') continue;
+        for (const ownerId of owners) {
+          try {
+            const meta = await runtime.handle.readOwnerMeta(ownerId);
+            if (
+              !meta ||
+              meta.machineId !== runtime.handle.machineId ||
+              meta.isArchived ||
+              selectWorkflowHead(meta, batch.repoFullName, observations) !== head
+            )
+              continue;
+            await runtime.handle.recordWorkflowObservations(
+              meta,
+              batch.repoFullName,
+              head,
+              workflows.batch.workflowRuns ?? [],
+              workflows.batch.workflowGap ?? true,
+              this.nowMs()
+            );
+          } catch (cause) {
+            logger.warn('[pr-poller] Workflow observation publication failed', cause);
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -865,8 +956,12 @@ export class PrPollScheduler {
     });
   }
 
-  private repoScopeKey(workspaceId: string, repoFullName: string): string {
-    return `${workspaceId}|${repoFullName}`;
+  private repoScopeKey(
+    workspaceId: string,
+    repoFullName: string,
+    nativeCredentials = false
+  ): string {
+    return `${workspaceId}|${repoFullName}|${nativeCredentials}`;
   }
 
   /**
@@ -881,7 +976,7 @@ export class PrPollScheduler {
     nowMs: number
   ): { scope: string; gate: PrPollScopeGate } | null {
     const known = this.knownRepoScopes.get(
-      this.repoScopeKey(batch.workspaceId, batch.repoFullName)
+      this.repoScopeKey(batch.workspaceId, batch.repoFullName, batch.nativeCredentials)
     );
     if (!known || nowMs - known.observedAtMs >= SCOPE_MAPPING_TTL_MS) {
       return null;
@@ -890,10 +985,13 @@ export class PrPollScheduler {
   }
 
   private rememberRepoScope(batch: PrPollBatchPlan, scope: string, nowMs: number): void {
-    this.knownRepoScopes.set(this.repoScopeKey(batch.workspaceId, batch.repoFullName), {
-      scope,
-      observedAtMs: nowMs,
-    });
+    this.knownRepoScopes.set(
+      this.repoScopeKey(batch.workspaceId, batch.repoFullName, batch.nativeCredentials),
+      {
+        scope,
+        observedAtMs: nowMs,
+      }
+    );
   }
 
   private deferGatedBatch(batch: PrPollBatchPlan, nowMs: number, deferredHints: number[]): boolean {
@@ -1059,8 +1157,12 @@ export class PrPollScheduler {
         if (!entry?.ok || !effects?.discoveryOk) {
           continue;
         }
-        const fingerprintKey = `${target.workspaceId}:${target.ownerSessionId}`;
-        const fingerprint = computeDiscoveryFingerprint(target.repoFullName, branch);
+        const fingerprintKey = `${target.workspaceId}:${discoveryOwnerKey(target.ownerSessionId, target.discovery?.memberId)}`;
+        const fingerprint = computeDiscoveryFingerprint(
+          target.repoFullName,
+          branch,
+          target.discovery.activityAtMs ?? null
+        );
         if (this.state.discoveryFingerprints[fingerprintKey] !== fingerprint) {
           this.state.discoveryFingerprints[fingerprintKey] = fingerprint;
           this.deps.stateStore.upsertDiscoveryFingerprint(fingerprintKey, fingerprint);
@@ -1096,6 +1198,7 @@ export class PrPollScheduler {
       const observations: PrObservation[] = [];
       const discovered: PrObservation[] = [];
       let queriedBranch: string | null = null;
+      let memberId: string | undefined;
       for (const target of targets) {
         if (target.status) {
           const result = results.pullRequests.find(
@@ -1109,6 +1212,7 @@ export class PrPollScheduler {
         const branch = target.discovery?.branch;
         if (branch) {
           queriedBranch = branch;
+          memberId = target.discovery?.memberId;
           const discovery = results.discoveries.find((candidate) => candidate.branch === branch);
           for (const pr of discovery?.prs ?? []) {
             discovered.push(pr);
@@ -1121,6 +1225,7 @@ export class PrPollScheduler {
           observations,
           discovered,
           queriedBranch,
+          memberId,
         })
       );
     }
@@ -1135,6 +1240,7 @@ export class PrPollScheduler {
       observations: PrObservation[];
       discovered: PrObservation[];
       queriedBranch: string | null;
+      memberId?: string;
     }
   ): Promise<OwnerEffectResult> {
     const { logger } = this.deps;
@@ -1153,7 +1259,7 @@ export class PrPollScheduler {
       // queriedBranch)`. A repo/branch switch while the request was in flight
       // invalidates the DISCOVERY results (they belong to the old context);
       // status observations stay valid (URL-keyed, branch-independent).
-      const freshContext = resolveOwnerRepositoryContext(freshMeta);
+      const freshContext = projectMemberRepositoryContext(freshMeta, args.memberId, repoFullName);
       const contextUnchanged =
         args.queriedBranch === null ||
         (freshContext.repoFullName === repoFullName && freshContext.branch === args.queriedBranch);
@@ -1163,6 +1269,7 @@ export class PrPollScheduler {
       const newlyAssociated: PrObservation[] = [];
       const associationPlan = planAssociation({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: args.observations,
         discovered,
         runtimeBranch: freshContext.branch,
@@ -1191,12 +1298,18 @@ export class PrPollScheduler {
           );
         }
         if (associated) {
-          runtime.confirmedAssociations.set(ownerSessionId, new Set([associationPlan.url]));
+          runtime.confirmedAssociations.set(
+            ownerSessionId,
+            new Set([
+              ...(runtime.confirmedAssociations.get(ownerSessionId) ?? []),
+              associationPlan.url,
+            ])
+          );
         } else {
           discoveryOk = false;
           // An earlier empty discovery must not make a newly published terminal
           // PR idle while its webhook association still needs retrying.
-          const key = `${runtime.handle.workspaceId}:${ownerSessionId}`;
+          const key = `${runtime.handle.workspaceId}:${discoveryOwnerKey(ownerSessionId, args.memberId)}`;
           delete this.state.discoveryFingerprints[key];
           this.deps.stateStore.deleteDiscoveryFingerprint(key);
         }
@@ -1216,7 +1329,11 @@ export class PrPollScheduler {
           ) {
             return failed;
           }
-          const publicationContext = resolveOwnerRepositoryContext(freshMeta);
+          const publicationContext = projectMemberRepositoryContext(
+            freshMeta,
+            args.memberId,
+            repoFullName
+          );
           if (
             publicationContext.repoFullName !== repoFullName ||
             publicationContext.branch !== args.queriedBranch
@@ -1226,15 +1343,22 @@ export class PrPollScheduler {
         }
       }
 
+      await runtime.handle.recordObservations?.(
+        freshMeta,
+        repoFullName,
+        [...args.observations, ...discovered],
+        this.nowMs()
+      );
       const plan = planPullRequestMetaWrite({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: [...args.observations, ...discovered],
         newlyAssociated,
         runtimeBranch: freshContext.branch,
         nowSec: Math.floor(this.nowMs() / 1000),
       });
       if (plan) {
-        const patch: PrPollMetaPatch = {};
+        const patch: PrPollMetaPatch = { lifecycle: plan.lifecycle };
         if (plan.pullRequests) {
           patch.pullRequests = plan.pullRequests;
         }

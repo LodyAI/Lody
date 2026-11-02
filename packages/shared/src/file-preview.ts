@@ -1,3 +1,4 @@
+import { SessionFileRootIdSchema } from './project-path';
 import { z } from 'zod';
 
 /**
@@ -101,6 +102,7 @@ export type FilePreviewV3Content = z.infer<typeof FilePreviewV3ContentSchema>;
 
 export const FilePreviewV3RequestSchema = z
   .object({
+    rootId: SessionFileRootIdSchema.optional(),
     v: z.literal(FILE_PREVIEW_PROTOCOL_VERSION),
     sessionId: z.string().trim().min(1),
     /**

@@ -1,6 +1,11 @@
 import { it, expect, vi } from 'vitest';
-import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
-import { createLoroSessionData, type SessionDataChange } from '../src/session-data';
+import { LoroDoc, LoroList, LoroMap, LoroText } from 'loro-crdt';
+import { resolveLatestSessionGoalFromHistory } from '../src/goal';
+import {
+  createLoroSessionData,
+  readSessionHistoryMetadata,
+  type SessionDataChange,
+} from '../src/session-data';
 import { createHistoryWriter } from '../src/history-writer';
 import type { SessionId } from '../src/ids';
 const sessionId = 'review-boundaries' as SessionId;
@@ -10,6 +15,103 @@ const turn = (id: string) => ({
   timestamp: 'synthetic',
   items: [{ type: 'text' as const, text: id }],
   status: 'pending' as const,
+});
+
+it.each(['json', 'containers', 'text'] as const)(
+  'goal inspection matches complete history for %s storage without changing it',
+  (shape) => {
+    const goal = (status = 'active') => ({
+      type: 'goal',
+      threadId: '',
+      objective: 'Keep working',
+      status,
+      extension: { retained: ['opaque'] },
+    });
+    const fixtures = [
+      [],
+      [{ items: [goal()] }, ...Array.from({ length: 85 }, (_, i) => turn(`ordinary-${i}`))],
+      [{ items: [goal()] }, { items: [goal('paused')] }],
+      [{ items: [goal(), goal('cleared')] }],
+      [{ items: [goal('future-status')] }],
+      [{ items: [goal()] }, { items: [{ type: 'goal', threadId: 'bad', status: 'active' }] }],
+      [{ items: [{ ...goal(), objective: 5 }] }],
+      [{ items: [{ ...goal(), status: {} }] }],
+      [null, [], 'invalid', { role: 'system', items: [goal()] }],
+      [{ items: { goal: goal() } }],
+      [{ items: [{ type: 'tool_call', output: goal() }] }],
+      [
+        { timestamp: 'later', items: [goal()] },
+        { timestamp: 'earlier', items: [goal('complete')] },
+      ],
+    ];
+    const fill = (map: LoroMap, value: Record<string, unknown>) => {
+      for (const [key, field] of Object.entries(value)) {
+        if (Array.isArray(field)) {
+          const list = map.setContainer(key, new LoroList());
+          for (const item of field) {
+            if (item && typeof item === 'object' && !Array.isArray(item))
+              fill(list.pushContainer(new LoroMap()), item);
+            else list.push(item as never);
+          }
+        } else if (field && typeof field === 'object') {
+          fill(map.setContainer(key, new LoroMap()), field as Record<string, unknown>);
+        } else if (shape === 'text' && typeof field === 'string') {
+          map.setContainer(key, new LoroText()).insert(0, field);
+        } else map.set(key, field as never);
+      }
+    };
+    for (const fixture of fixtures) {
+      const doc = new LoroDoc();
+      const list = doc.getList('history');
+      for (const entry of fixture) {
+        if (shape !== 'json' && entry && typeof entry === 'object' && !Array.isArray(entry))
+          fill(list.pushContainer(new LoroMap()), entry);
+        else list.push(entry as never);
+      }
+      doc.commit();
+      const data = createLoroSessionData({ doc, sessionId });
+      try {
+        const reference = resolveLatestSessionGoalFromHistory(data.history.readAll());
+        const version = doc.oplogVersion().encode();
+        const actual = data.readLatestGoal();
+        expect(actual).toEqual(reference);
+        if (actual) actual.objective = 'caller mutation';
+        expect(data.readLatestGoal()).toEqual(reference);
+        expect(doc.oplogVersion().encode()).toEqual(version);
+      } finally {
+        data.dispose();
+      }
+    }
+  }
+);
+
+it('goal inspection leaves ordinary bodies and whole history unread', () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  writer.append({
+    ...turn('goal-owner'),
+    items: [{ type: 'goal', threadId: 'g', objective: 'Retain', status: 'active' }],
+  });
+  for (let i = 0; i < 85; i++) writer.append(turn(`ordinary-${i}`));
+  const data = createLoroSessionData({ doc, sessionId, writer });
+  const expected = resolveLatestSessionGoalFromHistory(data.history.readAll());
+  const json = LoroMap.prototype.toJSON;
+  const mapGuard = vi
+    .spyOn(LoroMap.prototype, 'toJSON')
+    .mockImplementation(function (this: LoroMap) {
+      if (this.get('type') !== 'goal') throw new Error('ordinary body materialized');
+      return json.call(this);
+    });
+  const listGuard = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(() => {
+    throw new Error('whole list materialized');
+  });
+  try {
+    expect(data.readLatestGoal()).toEqual(expected);
+  } finally {
+    mapGuard.mockRestore();
+    listGuard.mockRestore();
+    data.dispose();
+  }
 });
 it('inline legacy rows remain writable without changing their opaque data or siblings', async () => {
   const doc = new LoroDoc(),
@@ -96,9 +198,9 @@ it('unknown failure after tail replacement reaches the indeterminate phase', asy
     writer = createHistoryWriter(doc);
   writer.append(turn('u'));
   const error = new Error('commit outcome unknown');
-  const real = writer.updateWithRollback;
-  writer.updateWithRollback = (update) => {
-    real(update);
+  const real = writer.updateSelectedWithRollback;
+  writer.updateSelectedWithRollback = (select, update) => {
+    real(select, update);
     throw error;
   };
   const data = createLoroSessionData({ doc, sessionId, writer });
@@ -312,6 +414,116 @@ it('preserves stored extension keys that overlap Object prototype methods in dis
   try {
     expect(data.history.readTurnForDisplay('owner')).toEqual(data.history.readTurn('owner'));
   } finally {
+    data.dispose();
+  }
+});
+
+it.each(
+  (['writer', 'inline'] as const).flatMap((storage) =>
+    [false, true].map((emptyMcp) => ({ storage, emptyMcp }))
+  )
+)(
+  'preserves every send-config field through $storage metadata (empty MCP: $emptyMcp)',
+  async ({ storage, emptyMcp }) => {
+    const doc = new LoroDoc(),
+      writer = createHistoryWriter(doc);
+    const config = {
+      _lodyDeliveryKind: 'steer' as const,
+      agentRoleId: 'synthetic-role',
+      agentRoleRevision: 7,
+      agentRoleSnapshot: {
+        id: 'synthetic-role',
+        revision: 7,
+        name: 'Synthetic reviewer',
+        emoji: '🔎',
+      },
+      modeId: 'plan',
+      modelId: 'synthetic-model',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      memory: { providerId: 'synthetic-provider', memoryId: 'synthetic-memory' },
+      mcpServerIds: emptyMcp ? [] : ['synthetic-mcp'],
+      configOptionValues: { reasoning_effort: 'high', fast: false },
+    };
+    const entry = {
+      ...turn('config-user'),
+      inputConfig: {
+        ...config,
+        prompt: 'Synthetic stored prompt',
+        inputBlocks: [{ type: 'text' as const, text: 'Synthetic input block' }],
+      },
+    };
+    const list = doc.getList('history');
+    if (storage === 'writer') writer.append(entry);
+    else {
+      list.push(entry);
+      doc.commit();
+    }
+    const data = createLoroSessionData({ doc, sessionId, writer });
+    const row = list.get(0);
+    const forbidden = new Set<string>([list.id]);
+    if (row instanceof LoroMap) {
+      forbidden.add(row.id);
+      for (const field of [row.get('items'), row.get('inputConfig')])
+        if (field instanceof LoroMap || field instanceof LoroList) forbidden.add(field.id);
+    }
+    const mapJson = LoroMap.prototype.toJSON,
+      listJson = LoroList.prototype.toJSON;
+    const mapGuard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+      if (forbidden.has(this.id)) throw new Error('Whole turn or input config materialized');
+      return mapJson.call(this);
+    });
+    const listGuard = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(function () {
+      if (forbidden.has(this.id)) throw new Error('History or transcript body materialized');
+      return listJson.call(this);
+    });
+    const version = doc.oplogVersion().encode();
+    try {
+      const metadata = await readSessionHistoryMetadata(data.history);
+      expect(metadata[0]?.inputConfig).toEqual(config);
+      expect(doc.oplogVersion().encode()).toEqual(version);
+    } finally {
+      mapGuard.mockRestore();
+      listGuard.mockRestore();
+      data.dispose();
+      doc.free();
+    }
+  }
+);
+
+it('reads legacy text-container identities and configuration through metadata only', async () => {
+  const doc = new LoroDoc(),
+    row = doc.getList('history').pushContainer(new LoroMap());
+  const text = (map: LoroMap, key: string, value: string) =>
+    map.setContainer(key, new LoroText()).insert(0, value);
+  text(row, 'id', 'legacy-user');
+  text(row, 'role', 'user');
+  text(row, 'timestamp', 'synthetic');
+  text(row, 'userId', 'legacy-author');
+  const config = row.setContainer('inputConfig', new LoroMap());
+  text(config, 'modelId', 'legacy-model');
+  text(config, 'modeId', 'legacy-mode');
+  row
+    .setContainer('items', new LoroList())
+    .pushContainer(new LoroMap())
+    .setContainer('text', new LoroText())
+    .insert(0, 'old payload'.repeat(10000));
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId });
+  const full = vi.spyOn(data.history, 'readAll').mockImplementation(() => {
+    throw new Error('whole history forbidden');
+  });
+  try {
+    expect(await readSessionHistoryMetadata(data.history)).toMatchObject([
+      {
+        id: 'legacy-user',
+        role: 'user',
+        userId: 'legacy-author',
+        inputConfig: { modelId: 'legacy-model', modeId: 'legacy-mode' },
+      },
+    ]);
+  } finally {
+    full.mockRestore();
     data.dispose();
   }
 });

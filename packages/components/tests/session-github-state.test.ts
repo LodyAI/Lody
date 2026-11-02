@@ -1,3 +1,4 @@
+import { planPullRequestLifecycle } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 import type { SessionMeta, SessionId, SessionPullRequestMeta } from '@lody/shared';
 
@@ -136,5 +137,144 @@ describe('getSessionGitHubState', () => {
 
     expect(getPullRequestNumber(pr)).toBe(123);
     expect(getPullRequestRepoFullName(pr)).toBe('loro-dev/lody');
+  });
+});
+
+describe('multi-repository sessions', () => {
+  const run = {
+    id: '0b9a4a6e-6d2f-4f3a-9a53-0f3d1f0b2c11',
+    name: 'Shop',
+    root: 'project-shop-0b9a4a6e-6d2f-4f3a-9a53-0f3d1f0b2c11',
+    members: {
+      api: {
+        o: 0,
+        src: { kind: 'github', repoFullName: 'acme/api' },
+        placement: { kind: 'root', dir: 'api' },
+        path: 'api',
+        base: 'HEAD',
+      },
+      web: {
+        o: 1,
+        src: { kind: 'github', repoFullName: 'acme/web' },
+        placement: { kind: 'root', dir: 'web' },
+        path: 'web',
+        base: 'HEAD',
+      },
+    },
+  } as unknown as NonNullable<SessionMeta['projectRun']>;
+
+  it("shows the first member's own PR on the context stage, not the last one recorded", () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [
+        { url: 'https://github.com/acme/api/pull/7', status: 'open' },
+        { url: 'https://github.com/acme/web/pull/9', status: 'open' },
+      ],
+    });
+    expect(getSessionGitHubState(session).latestPr?.url).toBe('https://github.com/acme/api/pull/7');
+  });
+
+  it('has no context PR while only another member has one', () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [{ url: 'https://github.com/acme/web/pull/9', status: 'open' }],
+    });
+    expect(getSessionGitHubState(session).latestPr).toBeNull();
+  });
+
+  it("describes the selected member's repository and PR", () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [
+        { url: 'https://github.com/acme/api/pull/7', status: 'open' },
+        { url: 'https://github.com/acme/web/pull/9', status: 'draft' },
+      ],
+      pullRequestState: { 'https://github.com/acme/web/pull/9': { s: 'f', t: 1 } },
+    });
+
+    const state = getSessionGitHubState(session, undefined, 'acme/web');
+
+    expect(state.repoFullName).toBe('acme/web');
+    expect(state.latestPr?.url).toBe('https://github.com/acme/web/pull/9');
+    expect(state.latestPrState?.s).toBe('f');
+    expect(state.canShowGitHubActions).toBe(true);
+    expect(state.hasExistingPr).toBe(true);
+  });
+
+  it('does not borrow another member’s PR for a member with no GitHub remote', () => {
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: run,
+      pullRequests: [{ url: 'https://github.com/acme/api/pull/7', status: 'open' }],
+    });
+
+    const state = getSessionGitHubState(session, undefined, null);
+
+    expect(state.repoFullName).toBe('');
+    expect(state.latestPr).toBeNull();
+    expect(state.canShowGitHubActions).toBe(false);
+    expect(state.hasExistingPr).toBe(false);
+  });
+
+  it('finds committed changes in member rows when a mixed group has no diffStats', () => {
+    const mixedRun = {
+      ...run,
+      members: {
+        api: { ...run.members.api, diff: { add: 4, del: 1 } },
+        docs: {
+          o: 1,
+          access: 'additional',
+          src: { kind: 'local', machineId: 'm1', localProjectId: 'docs' },
+          placement: { kind: 'root', dir: 'docs' },
+          path: 'docs',
+          base: 'HEAD',
+        },
+      },
+    } as unknown as NonNullable<SessionMeta['projectRun']>;
+    const session = createSession({
+      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
+      repoFullName: 'acme/api',
+      projectRun: mixedRun,
+      pullRequests: [],
+    });
+
+    const state = getSessionGitHubState(session);
+
+    // A non-Git Member has no diff, so the daemon cannot publish diffStats;
+    // the per-Member fallback still has to enable Create PR after a commit.
+    expect(state.workspaceDirty).toBe(false);
+    expect(state.hasChanges).toBe(true);
+  });
+});
+
+it('keeps repository-qualified PR selection while a webhook updates another repository', () => {
+  const a = 'https://github.com/acme/api/pull/7';
+  const b = 'https://github.com/acme/web/pull/7';
+  const write = planPullRequestLifecycle(
+    { url: b, status: 'merged', updatedAt: '2026-01-01T00:00:00Z' },
+    undefined,
+    'webhook'
+  )!;
+  const session = createSession({
+    pullRequests: [
+      { url: a, status: 'draft' },
+      { url: b, status: 'open' },
+    ],
+    [write.field]: write.value,
+  });
+  expect(getSessionGitHubState(session, undefined, 'acme/api')).toMatchObject({
+    hasExistingPr: true,
+    latestPr: { url: a, status: 'draft' },
+  });
+  expect(getSessionGitHubState(session, undefined, 'acme/web')).toMatchObject({
+    hasExistingPr: true,
+    latestPr: { url: b, status: 'merged' },
   });
 });

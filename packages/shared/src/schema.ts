@@ -1,3 +1,4 @@
+import type { SessionProjectRun } from './workspace-project';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
 import {
@@ -9,6 +10,7 @@ import {
   AgentRoleId,
   AgentType,
   AcpCapabilityCacheEntry,
+  AcpCommandSummary,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
@@ -595,6 +597,7 @@ const acpSessionConfigSchema = schema
       agentRoleRevision: schema.Number({ required: false }),
       agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
     },
     { required: false }
   )
@@ -697,7 +700,15 @@ export const sessionHistorySchema = schema.LoroMap({
       scheduleId: schema.String(),
       turnId: schema.String(),
       title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
     },
+    { required: false }
+  ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
     { required: false }
   ),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
@@ -1003,7 +1014,13 @@ export type SessionSteerOperationRecord = {
   updatedAt: number;
 };
 
-export type SessionMeta = {
+/** Independent lifecycle register per canonical GitHub PR URL (not association membership). */
+export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
+export type SessionPullRequestLifecycleFields = {
+  [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
+};
+
+export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
@@ -1064,6 +1081,7 @@ export type SessionMeta = {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */
   baseBranch?: string;
@@ -1071,12 +1089,12 @@ export type SessionMeta = {
   branchName?: string;
   /** True if this session runs inside a git worktree (local or GitHub). */
   isWorktree?: boolean;
+  /** Machine-owned association order; status is a compatibility projection. */
   pullRequests?: SessionPullRequestMeta[];
   /**
    * CI rollup + merge/readiness per associated PR URL, written by the CLI PR
-   * poller (compact single-letter codes, ≤50B/entry). Kept outside
-   * `pullRequests` because the webhook fan-out replaces that array wholesale
-   * and strips it to `{url, status}`.
+   * poller (compact single-letter codes, ≤50B/entry). Independent of both
+   * association ordering and provider-versioned lifecycle registers.
    */
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
   contextWindowUsage?: SessionContextWindowUsage;
@@ -1142,13 +1160,19 @@ export type SessionMeta = {
   previewCandidate?: SessionPreviewCandidateMeta;
   /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
   externalHistory?: ExternalAcpHistorySyncMeta;
   /** Monotonic-ish signal used to wake the owning CLI when the CRDT message queue changes. */
   messageQueueUpdatedAt?: number;
-  /** Last queue update signal the owning CLI checked when no dispatchable turn was found. */
+  /** Control-document causal frontier captured after the queue mutation named by updatedAt. */
+  messageQueueUpdateVersion?: {
+    updatedAt: number;
+    frontiers: { peer: `${number}`; counter: number }[];
+  };
+  /** Last queue signal whose control mutation was observed and whose queue was drained. */
   messageQueueCheckedAt?: number;
   /**
    * When the session started waiting on a human answer, cleared when the request
@@ -1264,9 +1288,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project'
+  'project' | 'acpSessionConfig'
 > & {
   project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };
 
 const sessionForkOperationDocSchema = schema.LoroMap(
@@ -1308,6 +1334,8 @@ export type SessionAcpRuntimeConfigSnapshot = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Actual commands for this ACP session; an empty list clears the menu. */
+  availableCommands?: AcpCommandSummary[];
 };
 
 export type SessionAcpRuntimeConfigPatch = Omit<
@@ -1323,6 +1351,14 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),
+    availableCommands: schema.LoroList(
+      schema.LoroMap({
+        name: schema.String(),
+        description: schema.String({ required: false }),
+      }),
+      undefined,
+      { required: false }
+    ),
   },
   { required: false }
 );
@@ -1343,6 +1379,8 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
+  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1447,7 +1485,9 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+  /** Omitted by control-only readers; execution reads the selected original from the document. */
+  rpcDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

@@ -647,8 +647,13 @@ export class LodyOperationStore {
       LIMIT 1`
         )
         .get(workspaceId, requesterSessionId) ||
-      this.inbox.hasRunnableWork(workspaceId, requesterSessionId)
+      this.hasTurnWorkForRequester(workspaceId, requesterSessionId)
     );
+  }
+
+  /** Inbox work that occupies the requester's own Turns; running delegated Operations do not. */
+  hasTurnWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
+    return this.inbox.hasRunnableWork(workspaceId, requesterSessionId);
   }
 
   // Absence of a settlement is the durable obligation, including for Operations

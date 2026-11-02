@@ -481,6 +481,67 @@ for (const backend of ['loro'] as const)
       ).toBe(false);
       expect(await data.history.readAll()).toEqual(after);
     });
+    it.each(['switch_mode', 'execute'] as const)(
+      'merges pending %s review content before the user answers',
+      async (kind) => {
+        const data = create();
+        const preview = [
+          { type: 'content' as const, content: { type: 'text' as const, text: '{}' } },
+        ];
+        const review = [
+          {
+            type: 'content' as const,
+            content: { type: 'text' as const, text: '# Plan\n\nAdd a regression test.' },
+          },
+          {
+            type: 'content' as const,
+            content: { type: 'text' as const, text: 'Requesting approval to implement' },
+          },
+        ];
+        await data.commands.appendTurn({
+          ...row('a'),
+          items: [
+            { type: 'tool_call', toolCallId: 'c', kind, status: 'in_progress', content: preview },
+          ],
+        });
+        const request = {
+          sessionId: 'acp',
+          toolCall: { toolCallId: 'c', content: review },
+          options: [{ optionId: 'approve', name: 'Approve', kind: 'allow_once' as const }],
+        };
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request,
+        });
+        const expected = kind === 'switch_mode' ? review : preview;
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
+          content: expected,
+          permissionRequest: { requestId: 'review', options: request.options },
+        });
+        const item = (await data.history.readAll())[0]?.items?.[0];
+        expect(item?.type === 'tool_call' && item.permissionRequest?.outcome).toBeUndefined();
+
+        // A request without content must not erase the displayed review.
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request: { ...request, toolCall: { toolCallId: 'c' } },
+        });
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({ content: expected });
+        await data.commands.respondPermission('review', { outcome: 'cancelled' });
+        await data.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'review',
+          request: { ...request, toolCall: { toolCallId: 'c', content: preview } },
+        });
+        expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
+          content: expected,
+          permissionRequest: { outcome: { outcome: 'cancelled' } },
+        });
+        data.dispose();
+      }
+    );
     it('preserves permission outcomes when a request is repeated', async () => {
       const data = create();
       await data.commands.appendTurn({
@@ -825,6 +886,29 @@ describe('user status on duplicate turn copies', () => {
       ['pending', null],
       ['pending', null],
     ]);
+  });
+
+  it('settles unclaimed input only while every copy still awaits a start', async () => {
+    const settle = {
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'canceled',
+      onlyAwaitingStart: true,
+    } as const;
+    const unclaimed = await withCopies('pending', 'seen');
+    expect((await unclaimed.data.commands.applyHistoryAction(settle)).matched).toBe(true);
+    expect(await unclaimed.copies()).toEqual([
+      ['canceled', null],
+      ['canceled', null],
+    ]);
+    for (const claimed of ['processing', 'handled', 'pending_apply'] as const) {
+      const { data, copies } = await withCopies(claimed, 'pending');
+      expect((await data.commands.applyHistoryAction(settle)).matched).toBe(false);
+      expect(await copies()).toEqual([
+        [claimed, null],
+        ['pending', null],
+      ]);
+    }
   });
 });
 

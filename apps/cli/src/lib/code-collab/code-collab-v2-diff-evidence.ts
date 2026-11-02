@@ -1,5 +1,6 @@
+import { encodeSessionFilePath, type SessionFileRoot } from '@lody/shared';
+import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
 import fs from 'fs';
-import path from 'path';
 
 import type { AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
 import type { CodeCollabV2DiffStoreEvent } from './code-collab-v2-diff-store';
@@ -25,6 +26,7 @@ export type CodeCollabV2ResolvedEvidencePath = {
 
 export type NormalizeStandardDiffEvidenceInput = {
   readonly workspaceRoot: string;
+  readonly fileRoots?: readonly SessionFileRoot[];
   readonly diff: AcpStandardDiffBlockEvidence;
   readonly readCurrentText?: (absolutePath: string) => Promise<string | null>;
 };
@@ -43,7 +45,11 @@ export function pendingEventFromWriteTextFileEvidence(
 export async function pendingEventFromStandardDiffEvidence(
   input: NormalizeStandardDiffEvidenceInput
 ): Promise<CodeCollabV2PendingDiffStoreEvent | null> {
-  const resolved = resolveCodeCollabV2EvidencePath(input.workspaceRoot, input.diff.path);
+  const resolved = resolveCodeCollabV2EvidencePath(
+    input.workspaceRoot,
+    input.diff.path,
+    input.fileRoots
+  );
   if (!resolved) {
     return null;
   }
@@ -116,11 +122,16 @@ export type AgentEditLatestText =
  */
 export async function pendingEventFromAgentEditEvidence(input: {
   readonly workspaceRoot: string;
+  readonly fileRoots?: readonly SessionFileRoot[];
   readonly edit: AgentEditEvidenceForDiffStore;
   readonly latestText: AgentEditLatestText;
   readonly readCurrentText?: (absolutePath: string) => Promise<string | null>;
 }): Promise<CodeCollabV2PendingDiffStoreEvent | null> {
-  const resolved = resolveCodeCollabV2EvidencePath(input.workspaceRoot, input.edit.path);
+  const resolved = resolveCodeCollabV2EvidencePath(
+    input.workspaceRoot,
+    input.edit.path,
+    input.fileRoots
+  );
   if (!resolved) {
     return null;
   }
@@ -215,30 +226,16 @@ export function mergePendingDiffStoreEvents(
 
 export function resolveCodeCollabV2EvidencePath(
   workspaceRoot: string,
-  evidencePath: string
+  evidencePath: string,
+  fileRoots?: readonly SessionFileRoot[]
 ): CodeCollabV2ResolvedEvidencePath | null {
-  if (!evidencePath || evidencePath.includes('\0')) {
-    return null;
-  }
-
-  const root = path.resolve(workspaceRoot);
-  const realRoot = realpathOrSelf(root);
-  const absolutePath = path.isAbsolute(evidencePath)
-    ? path.resolve(evidencePath)
-    : path.resolve(root, evidencePath);
-  const realAbsolutePath = realpathOrSelf(absolutePath);
-  for (const candidatePath of uniqueStrings([absolutePath, realAbsolutePath])) {
-    for (const candidateRoot of uniqueStrings([root, realRoot])) {
-      const relativePath = normalizeRelativePath(candidateRoot, candidatePath);
-      if (relativePath) {
-        return {
-          absolutePath: candidatePath,
-          relativePath,
-        };
-      }
-    }
-  }
-  return null;
+  const resolved = resolveProjectFileTarget(
+    fileRoots ?? [{ id: 'main', absolutePath: workspaceRoot }],
+    evidencePath
+  );
+  return resolved && resolved.relativePath
+    ? { absolutePath: resolved.absolutePath, relativePath: encodeSessionFilePath(resolved) }
+    : null;
 }
 
 function reconstructOldTextFromSingleReplacement(options: {
@@ -271,33 +268,6 @@ async function readUtf8TextIfExists(absolutePath: string): Promise<string | null
     }
     throw error;
   }
-}
-
-function realpathOrSelf(inputPath: string): string {
-  try {
-    return fs.realpathSync.native(inputPath);
-  } catch {
-    const parent = path.dirname(inputPath);
-    if (parent !== inputPath) {
-      const realParent = realpathOrSelf(parent);
-      if (realParent !== parent) {
-        return path.join(realParent, path.basename(inputPath));
-      }
-    }
-    return inputPath;
-  }
-}
-
-function normalizeRelativePath(root: string, candidatePath: string): string | null {
-  const relative = path.relative(root, candidatePath).replace(/\\/g, '/');
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-    return null;
-  }
-  return path.posix.normalize(relative.normalize('NFC'));
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
 }
 
 function isNodeErrorCode(error: unknown, code: string): boolean {

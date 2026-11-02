@@ -23,7 +23,7 @@ interface DocumentObservation {
 }
 
 it.each(['loro', 'flock'] as const)(
-  'runs a three-role %s snapshot plan, rejects a moved authenticated snapshot without durable advancement, and recovers',
+  'runs a three-role %s snapshot plan, recovers a moved snapshot with trimmed history and reopens the durable result',
   async (document) => {
     const directory = mkdtempSync(join(tmpdir(), `lab-plan-snapshot-${document}-`));
     let passed = false;
@@ -92,23 +92,24 @@ it.each(['loro', 'flock'] as const)(
           mutation: { kind: 'headers', headers: { 'stream-snapshot-offset': movedOffset } },
         },
       });
-      const refused = add({
+      const replayed = add({
         kind: 'call',
         actor: 'reader',
         operation: 'pull',
         document,
-        expect: { ok: false, refusal: { tag: 'LabContentError', code: 'decrypt_failed' } },
+        expect: good,
       });
-      const unchanged = add({
+      const afterReplay = add({
         kind: 'call',
         actor: 'reader',
         operation: 'observe',
         document,
-        expect: { ok: true, unchangedFrom: baseline },
+        expect: { ok: true, text: 'authenticated snapshot prefix;tail after snapshot;' },
       });
-      // The interception is occurrence-specific. Explicit recovery rebuilds the
-      // stopped document and performs a fresh real bootstrap; no cursor/state
-      // or host retention boundary is rewritten by this plan.
+      // The first pull already retries the authentic native snapshot after the
+      // damaged response and trimmed-history fallback. Explicit recovery is an
+      // idempotent fresh bootstrap; it does not rewrite
+      // a host retention boundary or delete the published snapshot.
       add({ kind: 'call', actor: 'reader', operation: 'recover', document, expect: good });
       const recovered = add({
         kind: 'call',
@@ -139,10 +140,8 @@ it.each(['loro', 'flock'] as const)(
           (row) => row.durability === 'violation' || row.durability === 'harness-error'
         )
       ).toEqual([]);
-      expect(observations.filter((row) => !row.reply.ok).map((row) => row.action)).toEqual([
-        actions[refused],
-      ]);
-      expect(observations[refused].checks).toEqual({ ok: 'pass', refusal: 'pass' });
+      expect(observations.filter((row) => !row.reply.ok)).toEqual([]);
+      expect(observations[replayed].checks).toEqual({ ok: 'pass' });
       const value = (index: number) => observations[index].reply.value as DocumentObservation;
       expect(value(baseline)).toMatchObject({
         text: '',
@@ -150,10 +149,12 @@ it.each(['loro', 'flock'] as const)(
         cursor: null,
         persisted: { documentDigest: expect.any(String), cursorDigest: null },
       });
-      expect(value(unchanged).status).toBe('document-stopped');
-      expect(value(unchanged).persisted).toEqual(value(baseline).persisted);
-      expect(value(unchanged).cursor).toEqual(value(baseline).cursor);
-      expect(observations[unchanged].checks.unchangedFrom).toBe('pass');
+      expect(value(afterReplay)).toMatchObject({ status: 'active', text: value(positive).text });
+      expect(value(afterReplay).cursor?.nextOffset).toBe(value(positive).cursor?.nextOffset);
+      expect(value(afterReplay).persisted?.documentDigest).not.toBe(
+        value(baseline).persisted?.documentDigest
+      );
+      expect(value(afterReplay).persisted?.cursorDigest).toEqual(expect.any(String));
       expect(value(recovered)).toMatchObject({ status: 'active', text: value(positive).text });
       expect(value(recovered).persisted?.documentDigest).not.toBe(
         value(baseline).persisted?.documentDigest
@@ -186,6 +187,15 @@ it.each(['loro', 'flock'] as const)(
       expect(value(positive).cursor?.nextOffset).toBe(
         positiveBootstrap!.headers['stream-next-offset']
       );
+      const replay = events.find(
+        (event) =>
+          event.actor === 'reader' &&
+          event.stream === document &&
+          event.method === 'GET' &&
+          event.requestOffset === '-1' &&
+          !event.path.endsWith('/bootstrap')
+      );
+      expect(replay).toMatchObject({ status: 410, source: 'native' });
       const damaged = events.filter((event) => event.mutation === 'headers');
       expect(damaged).toHaveLength(1);
       expect(damaged[0]).toMatchObject({

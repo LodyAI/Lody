@@ -1,3 +1,4 @@
+import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import {
@@ -131,6 +132,39 @@ function makeWorkspaceWatchCoordinator(): {
     releaseCount: () => releases,
   };
 }
+
+it('reads encrypted file content without starting watchers or publishing an index', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await writeFile(path.join(workspaceRoot, 'readonly.txt'), 'synthetic original');
+    const publish = collectPublishedSharedStates();
+    const watch = makeWorkspaceWatchCoordinator();
+    const service = new CodeCollabV2Service({
+      readOnly: true,
+      resolveWorkspace: makeResolver(workspaceRoot),
+      workspaceWatchCoordinator: watch.coordinator,
+      ...publish,
+    });
+    try {
+      const first = await service.openText({ sessionId: SESSION_ID, path: 'readonly.txt' });
+      expect(first.status).toBe('ok');
+      expect(
+        await service.refreshText({
+          sessionId: SESSION_ID,
+          path: 'readonly.txt',
+          digest: first.digest,
+        })
+      ).toMatchObject({ status: 'up_to_date' });
+      expect(activeWorkspaceWatchCount(service)).toBe(0);
+      expect(publish.published).toEqual([]);
+      expect(publish.signals).toEqual([]);
+      expect(await readFile(path.join(workspaceRoot, 'readonly.txt'), 'utf8')).toBe(
+        'synthetic original'
+      );
+    } finally {
+      await service.dispose();
+    }
+  });
+});
 
 describe('CodeCollabV2Service text RPC boundary', () => {
   it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
@@ -2185,6 +2219,98 @@ describe('CodeCollabV2Service openAllChangesDiff', () => {
       if (result.status !== 'ok') return;
       expect(result.entries[0]?.path).toBe('zzz.txt');
     });
+  });
+});
+
+describe('Project group extra-root files', () => {
+  it('opens, saves, indexes and reconstructs turn diffs independently of main', async () => {
+    const base = await mkdtemp(path.join(tmpdir(), 'code-collab-roots-'));
+    const main = path.join(base, 'main');
+    const extra = path.join(base, 'extra');
+    await mkdir(main);
+    await mkdir(extra);
+    await writeFile(path.join(main, 'a.txt'), 'main');
+    await writeFile(path.join(extra, 'a.txt'), 'old');
+    const rootId = 'member:docs';
+    const key = encodeSessionFilePath({ rootId, relativePath: 'a.txt' });
+    const store = new CodeCollabV2DiffStore('roots' as never, {
+      dbPath: path.join(base, 'diff.sqlite3'),
+    });
+    const publications: CodeCollabV2FileIndexState[] = [];
+    const roots = [
+      { id: 'main', absolutePath: main },
+      { id: rootId, absolutePath: extra },
+    ];
+    const watchedRoots = new Map<string, string>();
+    const service = new CodeCollabV2Service({
+      workspaceWatchCoordinator: {
+        subscribe: async ({ ownerSessionId, workspaceRoot }) => {
+          watchedRoots.set(ownerSessionId, workspaceRoot);
+          return {
+            canonicalRoot: workspaceRoot,
+            release: () => {
+              watchedRoots.delete(ownerSessionId);
+            },
+          };
+        },
+      },
+      resolveWorkspace: async (_, options) => {
+        const root = roots.find((candidate) => candidate.id === (options?.rootId ?? 'main'));
+        return root
+          ? {
+              ok: true,
+              ownerSessionId: SESSION_ID,
+              workspaceRoot: root.absolutePath,
+              fileRoots: roots,
+            }
+          : { ok: false, code: 'permission_denied', message: 'unknown root' };
+      },
+      diffStore: store,
+      publishFileIndex: async (state) => {
+        publications.push(state.fileIndex);
+      },
+    });
+    try {
+      const opened = await service.openText({ sessionId: SESSION_ID, rootId, path: 'a.txt' });
+      expect(opened.text).toMatchObject({ text: 'old' });
+      const saved = await service.saveText({
+        sessionId: SESSION_ID,
+        rootId,
+        path: 'a.txt',
+        requestedByUserId: 'u',
+        baseDigest: opened.digest,
+        text: { encoding: 'plain', text: 'new', rawBytes: 3 },
+      });
+      expect(saved.status).toBe('ok');
+      expect(await readFile(path.join(extra, 'a.txt'), 'utf8')).toBe('new');
+      expect(await readFile(path.join(main, 'a.txt'), 'utf8')).toBe('main');
+      await store.recordTurnDiffs({
+        workspaceRoot: main,
+        fileRoots: roots,
+        ownerSessionId: SESSION_ID,
+        turnId: 'turn',
+        events: [{ path: path.join(extra, 'a.txt'), oldText: 'old', newText: 'new' }],
+      });
+      await service.refreshSharedState({ sessionId: SESSION_ID });
+      expect(new Set(watchedRoots.values())).toEqual(new Set([main, extra]));
+      const index = publications.at(-1)!;
+      expect(index).toHaveProperty('a.txt');
+      expect(index[key]).toBeDefined();
+      expect(
+        (await service.getFileIndex({ sessionId: SESSION_ID, rootId })).fileIndex['a.txt']
+      ).toBeDefined();
+      expect(
+        await service.openTurnDiff({ sessionId: SESSION_ID, rootId, path: 'a.txt', turnId: 'turn' })
+      ).toMatchObject({ status: 'ok' });
+      await expect(
+        service.openText({ sessionId: SESSION_ID, rootId: 'member:unknown', path: 'a.txt' })
+      ).rejects.toThrow();
+    } finally {
+      service.dispose();
+      expect(watchedRoots.size).toBe(0);
+      await store.close();
+      await rm(base, { recursive: true, force: true });
+    }
   });
 });
 

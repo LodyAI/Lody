@@ -12,8 +12,9 @@ Checkpoint selection is independent of hostile transport. A failed read or
 SQLite write retains both verified history and its read cursor. Every client
 has its own durable file; replay never silently skips already committed hashes.
 
-Content native state and exact SDK cursor commit atomically per document. Remote
-authentication/decryption/format failures and local corruption stop only that document.
+Content native state and exact SDK cursor commit atomically per document.
+Unrecoverable content/format failures and local corruption stop only that document;
+native snapshot rejection may replay/retry as described in README.
 Network, timeout, 5xx, 409 and permission errors retain active state for retry; failed
 recovery preserves both its prior stopped/active status and the durable pair.
 SDK subscription precedes local edits; abort is not proof of stopped native work.
@@ -99,3 +100,11 @@ management devices cannot delete a publisher's group. Honest clients separately
 qualify same-epoch loss; malicious publishers may still withhold their own key.
 
 Owned SQLite files use the shared current-format helper for exclusive creation, application/version checks, WAL/FULL and opening bindings. Read-only foreign/attack observers use its connection constructor without claiming an application format. Local hostile-process database mutation audits are outside the threat model; verify signed history on open and retain transactions plus target-row readback.
+
+`pure/canary.ts` checks caller-observed synthetic Streams/HTTP bytes; missing
+exit coverage must fail. `canary-cli.ts` reads bounded synthetic manifests, never
+client plaintext caches. `test/canary.test.ts` captures real protected Loro/Flock
+HTTP and Riverrun storage, with deliberate leak controls. The isolated Electron
+IPC/IndexedDB trial in `apps/electron/scripts/e2ee-ipc-benchmark.md` imports exact
+released SDK entrypoints through `platform/ipc-benchmark-dependencies.ts`; its
+measurements are separate from product acceptance and never export main keys.

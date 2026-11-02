@@ -1,3 +1,4 @@
+import { ProjectLocalMemberProbeSchema } from '../workspace-project';
 import type { LocalProjectControlRequest, LocalProjectControlResponse } from '../message';
 
 export const LOCAL_PROJECT_CONTROL_PATH = '/project-control';
@@ -309,7 +310,11 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
   }
 
   if (value.type === 'local-project/prepare-add') {
-    return typeof value.workspaceId === 'string' && typeof value.rootPath === 'string';
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.rootPath === 'string' &&
+      isOptionalBoolean(value.inspect)
+    );
   }
 
   if (value.type === 'local-project/list-roots') {
@@ -515,7 +520,9 @@ export function isLocalProjectControlResponse(
       typeof value.result.localProjectId === 'string' &&
       typeof value.result.name === 'string' &&
       typeof value.result.rootPath === 'string' &&
-      typeof value.result.alreadyRegistered === 'boolean'
+      typeof value.result.alreadyRegistered === 'boolean' &&
+      (value.result.inspection === undefined ||
+        ProjectLocalMemberProbeSchema.safeParse(value.result.inspection).success)
     );
   }
 

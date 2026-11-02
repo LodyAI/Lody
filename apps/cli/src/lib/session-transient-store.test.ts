@@ -220,12 +220,6 @@ describe('SessionTransientStore', () => {
       state.acpUpdateBuffer.push({} as any);
       expect(store.hasPendingTurnWork(sid('s1'))).toBe(true);
     });
-
-    it('returns true when pendingUnread is set', () => {
-      const store = new SessionTransientStore();
-      store.get(sid('s1')).pendingUnread = true;
-      expect(store.hasPendingTurnWork(sid('s1'))).toBe(true);
-    });
   });
 
   describe('clearTurnState', () => {
@@ -238,7 +232,6 @@ describe('SessionTransientStore', () => {
       store.beginTurn(id, { turnId: 'turn-1' });
       state.acpUpdateBuffer.push({} as any);
       state.permissionWaitMs = 42;
-      state.pendingUnread = true;
       state.suppressAcpReplayUntilTurnStart = true;
       state.suppressedAcpReplayCount = 3;
 
@@ -256,7 +249,6 @@ describe('SessionTransientStore', () => {
       // at the Stop boundary).
       expect(state.acpUpdateBuffer).toHaveLength(1);
       expect(state.permissionWaitMs).toBe(0);
-      expect(state.pendingUnread).toBe(false);
       expect(state.suppressAcpReplayUntilTurnStart).toBe(false);
       expect(state.suppressedAcpReplayCount).toBe(0);
 

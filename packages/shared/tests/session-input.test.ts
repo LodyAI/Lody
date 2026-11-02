@@ -1,3 +1,4 @@
+import { encodeSessionFilePath } from '../src/project-path';
 import { describe, expect, it } from 'vitest';
 
 import { Loro } from 'loro-crdt';
@@ -515,6 +516,21 @@ describe('session-input helpers', () => {
 
     // r2 transport carries no machineId; it must not leak back in.
     expect(historyItemsToInputBlocks(historyItems)).toEqual(inputBlocks);
+  });
+
+  it('round trips member file provenance without accepting malformed root keys', () => {
+    const sourcePath = encodeSessionFilePath({
+      rootId: 'member:docs',
+      relativePath: 'reports/a.pdf',
+    });
+    const payload = SessionFileBlockSchema.parse({ ...r2FilePayload, sourcePath });
+    expect(historyItemsToInputBlocks(inputBlocksToHistoryItems([payload]))).toEqual([payload]);
+    expect(
+      SessionFileBlockSchema.safeParse({
+        ...r2FilePayload,
+        sourcePath: '\0lody-root:member:docs/../secret',
+      }).success
+    ).toBe(false);
   });
 
   it('accepts only workspace-relative agent upload provenance', () => {

@@ -251,7 +251,10 @@ describe('durable submission', () => {
       } finally {
         f.close();
       }
-    }
+    },
+    // Two real child processes, each allowed 30 s above; the 5 s default cut
+    // them off on slower machines while the children were still starting.
+    60_000
   );
 
   it('rejects different-body duplicates, retains conflict and requires exact acknowledgement', async () => {

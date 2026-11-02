@@ -194,6 +194,7 @@ test('note opening requires a nonempty abstract in the authored language', async
   const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   const header = '# Example\nStatus: proposed\nTranslation: pending\n\n';
+  f.write('README.md', `[decision](${note})\n`);
   f.write(note, header + '## Problem\nA problem.\n');
   assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Abstract')));
   f.write(note, header + '## Abstract\n\n## Problem\nA problem.\n');
@@ -407,20 +408,45 @@ test('scope schema rejects unknown keys and untraceable reviews', async (t) => {
   }
 });
 
-test('translation statuses must agree and every AGENTS file stays under 8 KiB', async (t) => {
+test('translation statuses must agree and AGENTS files respect their word ceilings', async (t) => {
   const f = await fixture(t);
+  const words = (count) => `${'word '.repeat(count)}\n`;
   f.write('specs/flow.md', '# Flow\nStatus: approved\nTranslation: current\n');
-  f.write('AGENTS.md', 'x'.repeat(8191));
+  f.write('AGENTS.md', words(1200));
   assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Status differs')));
-  assert.ok(!(await documentStatus(f.root)).errors.some((e) => e.includes('8192 bytes')));
-  f.write('apps/AGENTS.md', 'x'.repeat(8192));
-  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('apps/AGENTS.md: 8192')));
+  assert.ok(!(await documentStatus(f.root)).errors.some((e) => e.includes('word ceiling')));
+  f.write('apps/AGENTS.md', words(1201));
+  assert.ok(
+    (await documentStatus(f.root)).errors.some((e) =>
+      e.includes('apps/AGENTS.md: 1201 words exceeds its 1200-word ceiling')
+    )
+  );
+  f.write(
+    'scripts/docs/agents-budgets.json',
+    JSON.stringify({ default: 1200, files: { 'apps/AGENTS.md': 1300 } })
+  );
+  assert.ok(!(await documentStatus(f.root)).errors.some((e) => e.includes('ceiling')));
+  f.write(
+    'scripts/docs/agents-budgets.json',
+    JSON.stringify({ default: 1200, files: { 'apps/AGENTS.md': 1300, 'gone/AGENTS.md': 10 } })
+  );
+  assert.ok(
+    (await documentStatus(f.root)).errors.some((e) => e.includes('gone/AGENTS.md is budgeted'))
+  );
+  f.write('scripts/docs/agents-budgets.json', JSON.stringify({ default: 0, files: {} }));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('positive integer')));
+  f.write(
+    'scripts/docs/agents-budgets.json',
+    JSON.stringify({ default: 1200, files: { 'apps/README.md': 5 } })
+  );
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('not an AGENTS.md')));
 });
 
 test('a pending note counterpart warns without failing the check', async (t) => {
   const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   f.write(note, '# Note\n\nStatus: proposed\nTranslation: pending\n\n## Abstract\n\nBody.\n');
+  f.write('README.md', `[decision](${note})\n`);
   const pending = await documentStatus(f.root);
   assert.ok(
     pending.warnings.some((w) => w.includes(`${note}: ${note.replace(/\.md$/, '.zh.md')}`))
@@ -436,20 +462,119 @@ test('a pending note counterpart warns without failing the check', async (t) => 
   assert.deepEqual((await documentStatus(f.root)).warnings, []);
 });
 
-test('an AGENTS file near the gate warns without failing the check', async (t) => {
+test('an AGENTS file near its ceiling warns without failing the check', async (t) => {
   const f = await fixture(t);
-  f.write('AGENTS.md', 'x'.repeat(7000));
+  const words = (count) => `${'word '.repeat(count)}\n`;
+  f.write('AGENTS.md', words(1080));
   assert.deepEqual((await documentStatus(f.root)).warnings, []);
-  f.write('AGENTS.md', 'x'.repeat(7001));
+  f.write('AGENTS.md', words(1081));
   const near = await documentStatus(f.root);
-  assert.ok(near.warnings.some((w) => w.includes('AGENTS.md: 7001') && w.includes('1191 left')));
+  assert.ok(
+    near.warnings.some((w) => w.includes('AGENTS.md: 1081 of 1200 words') && w.includes('119 left'))
+  );
   assert.ok(!near.errors.some((e) => e.includes('AGENTS.md')));
   await f.commit();
   await confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
   assert.equal(await main(f.root, ['check']), 0, 'a warning alone must not fail the check');
-  f.write('AGENTS.md', 'x'.repeat(8192));
+  f.write('AGENTS.md', words(1201));
   await f.commit();
   assert.equal(await main(f.root, ['check']), 1);
+});
+
+test('note hygiene gates apply to notes the task changed and queue stale references', async (t) => {
+  const f = await fixture(t);
+  const note = '.agents/notes/implemented/bug-fix/2026-09-06-example.md';
+  const header =
+    '# Example\n\nStatus: implemented\nTranslation: pending\n\n## Abstract\n\nBody.\n\n';
+  f.write('apps/kept.ts', 'export {};\n');
+  f.write(note, header + '## Plan\n\nAll 12 tests pass. See `apps/kept.ts` and `apps/moved.ts`.\n');
+  const fresh = await documentStatus(f.root);
+  assert.ok(
+    fresh.errors.some((e) => e.startsWith(`${note}: implemented notes`) && e.includes('"## Plan"'))
+  );
+  assert.ok(
+    fresh.warnings.some((w) => w.startsWith(`${note}: run-log phrase "All 12 tests pass"`))
+  );
+  assert.deepEqual(fresh.staleReferences, [{ file: note, missing: ['apps/moved.ts'] }]);
+  await f.commit();
+  const committed = await documentStatus(f.root);
+  assert.ok(!committed.errors.some((e) => e.includes(note)), 'earlier records are not reopened');
+  assert.ok(!committed.warnings.some((w) => w.includes('run-log phrase')));
+  assert.equal(committed.staleReferences.length, 1, 'stale references stay queued');
+  const base = await f.git('rev-parse', 'HEAD~1');
+  assert.ok((await documentStatus(f.root, { base })).errors.some((e) => e.includes(note)));
+  f.write(note, header + '## Decision\n\nThe owning suite pins the ordering.\n');
+  const fixed = await documentStatus(f.root);
+  assert.ok(!fixed.errors.some((e) => e.includes(note)));
+  assert.deepEqual(fixed.staleReferences, []);
+});
+
+test('a new note must be linked from a current-state owner document', async (t) => {
+  const f = await fixture(t);
+  const note = '.agents/notes/implemented/bug-fix/2026-09-08-provider-quirk.md';
+  const body = '# Quirk\n\nStatus: implemented\nTranslation: current\n\n## Abstract\n\nBody.\n';
+  const unlinked = (report) => report.errors.some((e) => e.startsWith(`${note}: a new note needs`));
+  f.write(note, body);
+  f.write(note.replace(/\.md$/, '.zh.md'), body.replace('Abstract', '摘要'));
+  f.write(
+    '.agents/notes/implemented/bug-fix/2026-09-09-sibling.md',
+    `[quirk](2026-09-08-provider-quirk.md)\n`
+  );
+  const fresh = await documentStatus(f.root);
+  assert.ok(unlinked(fresh), 'a link from another note does not make it discoverable');
+  assert.equal(fresh.errors.filter((e) => e.includes('a new note needs')).length, 2);
+  assert.ok(fresh.unlinkedNotes.includes(note));
+  f.write(
+    'apps/README.md',
+    '[Why the quirk exists](../.agents/notes/implemented/bug-fix/2026-09-08-provider-quirk.zh.md)\n'
+  );
+  const linked = await documentStatus(f.root);
+  assert.ok(!unlinked(linked), 'a link to either language satisfies the pair');
+  assert.ok(!linked.unlinkedNotes.includes(note));
+  rmSync(path.join(f.root, 'apps/README.md'));
+  f.write(
+    '.agents/notes/AGENTS.md',
+    '[Rationale](implemented/bug-fix/2026-09-08-provider-quirk.md)\n'
+  );
+  assert.ok(!unlinked(await documentStatus(f.root)), 'the note rules file is an owner, not a note');
+  rmSync(path.join(f.root, '.agents/notes/AGENTS.md'));
+  await f.commit();
+  const existing = await documentStatus(f.root);
+  assert.ok(!unlinked(existing), 'existing notes are queued, not failed');
+  assert.ok(existing.unlinkedNotes.includes(note));
+  const moved = note.replace('/implemented/', '/proposed/');
+  mkdirSync(path.join(f.root, path.dirname(moved)), { recursive: true });
+  await f.git('mv', note, moved);
+  await f.git('mv', note.replace(/\.md$/, '.zh.md'), moved.replace(/\.md$/, '.zh.md'));
+  for (const file of [moved, moved.replace(/\.md$/, '.zh.md')])
+    f.write(file, readFileSync(path.join(f.root, file), 'utf8').replace('implemented', 'proposed'));
+  assert.ok(
+    !(await documentStatus(f.root)).errors.some((e) => e.includes('a new note needs')),
+    'a lifecycle move is not a new note'
+  );
+});
+
+test('a fully superseded note must already be archived', async (t) => {
+  const f = await fixture(t);
+  const note = '.agents/notes/implemented/process/2026-09-07-new.md';
+  const body = (target) =>
+    `# New\n\nStatus: implemented\nTranslation: pending\nSupersedes: [old](${target})\n\n## Abstract\n\nBody.\n`;
+  f.write(note, body('2026-09-01-old.md'));
+  f.write(
+    '.agents/notes/implemented/process/2026-09-01-old.md',
+    '# Old\n\nStatus: implemented\nTranslation: pending\n\n## Abstract\n\nBody.\n'
+  );
+  assert.ok(
+    (await documentStatus(f.root)).errors.some((e) => e.includes(`${note}: Supersedes target`))
+  );
+  f.write(note, body('../../archived/process/2026-09-01-old.md'));
+  assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Supersedes target')));
+  f.write(
+    '.agents/notes/archived/process/2026-09-01-old.md',
+    '# Old\n\nStatus: implemented\nArchived: 2026-09-07\nTranslation: pending\n\n## Abstract\n\nBody.\n'
+  );
+  rmSync(path.join(f.root, '.agents/notes/implemented/process/2026-09-01-old.md'));
+  assert.ok(!(await documentStatus(f.root)).errors.some((e) => e.includes('Supersedes')));
 });
 
 test('a shallow clone of a consolidated commit can diff blobs without the original PR revision', async (t) => {

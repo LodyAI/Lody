@@ -1,7 +1,10 @@
 import { fileLocksLegacy } from '@/utils/file-lock';
 import type { MachineId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import type { LocalWorkspaceCatalogService } from '@/lib/local-workspace-catalog';
+import type {
+  LocalWorkspaceCatalogError,
+  LocalWorkspaceCatalogService,
+} from '@/lib/local-workspace-catalog';
 import { formatErrorMessage } from '@/utils/format-error';
 
 export type RemoteBridgeWorkspace = {
@@ -9,6 +12,8 @@ export type RemoteBridgeWorkspace = {
   name: string;
   slug: string | null;
   role: string;
+  contentMode?: string;
+  genesisHash?: string;
 };
 
 export type RemoteBridgeRuntime = {
@@ -20,6 +25,7 @@ export type RemoteBridgeRuntime = {
 export type RemoteBridgeReconcileResult = {
   allowedWorkspaceIds: Set<string>;
   revokedRunningWorkspaceIds: Set<string>;
+  encryptedCatalogError?: LocalWorkspaceCatalogError;
 };
 
 const ATTACH_RETRY_INITIAL_DELAY_MS = 5_000;
@@ -34,6 +40,7 @@ export class RemoteBridge {
     private readonly args: {
       logger: Logger;
       catalog: LocalWorkspaceCatalogService;
+      e2eeMachineScope?: { workspaceId: string; genesisHash: string };
       userId: string;
       machineId: MachineId;
       machineName: string;
@@ -45,16 +52,34 @@ export class RemoteBridge {
     workspaces: RemoteBridgeWorkspace[];
     runningWorkspaceIds: Iterable<string>;
   }): Promise<RemoteBridgeReconcileResult> {
-    await fileLocksLegacy.runPromise(
-      this.args.catalog.cacheRemoteWorkspaces({
-        identity: { userId: this.args.userId },
-        machine: {
-          machineId: this.args.machineId,
-          machineName: this.args.machineName,
-        },
-        workspaces: input.workspaces,
-      })
-    );
+    const scope = this.args.e2eeMachineScope;
+    if (
+      scope &&
+      (input.workspaces.length !== 1 ||
+        input.workspaces.some(
+          (workspace) =>
+            workspace.id !== scope.workspaceId ||
+            workspace.contentMode !== 'e2ee' ||
+            workspace.genesisHash !== scope.genesisHash
+        ))
+    ) {
+      throw new Error('Paired machine discovery scope mismatch');
+    }
+    // A service credential cannot reconcile the account-wide workspace catalog.
+    // Keep the same attach/retry/revoke owner for its encrypted runtime.
+    const cached = scope
+      ? undefined
+      : await fileLocksLegacy.runPromise(
+          this.args.catalog.cacheRemoteWorkspaces({
+            authenticatedOnline: true,
+            identity: { userId: this.args.userId },
+            machine: {
+              machineId: this.args.machineId,
+              machineName: this.args.machineName,
+            },
+            workspaces: input.workspaces,
+          })
+        );
 
     const allowedWorkspaceIds = new Set(input.workspaces.map((workspace) => workspace.id));
     this.allowedWorkspaceIds = allowedWorkspaceIds;
@@ -76,7 +101,13 @@ export class RemoteBridge {
       }
     }
 
-    return { allowedWorkspaceIds, revokedRunningWorkspaceIds };
+    return {
+      allowedWorkspaceIds,
+      revokedRunningWorkspaceIds,
+      ...(cached?.encryptedCatalogError
+        ? { encryptedCatalogError: cached.encryptedCatalogError }
+        : {}),
+    };
   }
 
   async attachAllowedRuntimes(workspaceIds: Iterable<string>): Promise<void> {

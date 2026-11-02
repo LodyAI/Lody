@@ -1,8 +1,19 @@
+import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
+import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
+import type {
+  LocalE2eeResetRequest,
+  LocalE2eeResetResponse,
+  LocalE2eePairingRequest,
+  LocalE2eePrepareReply,
+  LocalE2eeActivateResponse,
+} from '@lody/shared/e2ee-local-pairing';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { initCliAnalytics } from '@/lib/analytics/posthog';
 import { ensureImplicitLocalWorkspace } from '@/lib/cli-platform';
 import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
+import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 import {
   startLocalIpcSocketServers,
   stopLocalIpcSocketServers,
@@ -88,12 +99,17 @@ import {
 } from '@lody/shared';
 import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import { Effect } from 'effect';
-import { AgentExecutionSlots } from './agent-execution-slots';
+import { ScheduleConfigurationError } from './schedules/schedule-engine';
 import {
   createScheduleWorkspace,
   type ScheduleWorkspaceHandle,
 } from './schedules/schedule-workspace';
 import { workspaceCleanupOwnerLegacy } from './workspace-cleanup-legacy';
+import {
+  createAutomationWorkspaceLegacy,
+  type AutomationWorkspaceHandle,
+} from '@/automations/workspace-legacy';
+import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
@@ -112,6 +128,8 @@ type WorkspaceListItem = {
   name: string;
   slug: string | null;
   role: string;
+  contentMode?: string;
+  genesisHash?: string;
 };
 
 type AuthorizedWorkspaceList = Extract<CloudAccessSnapshot, { status: 'authorized' }>;
@@ -120,8 +138,12 @@ type WorkspaceRuntimeState = {
   workspace: WorkspaceListItem;
   lody: Lody;
   unsubscribeTerminalCleanup: () => void;
-  prPollerWorkspace: PrPollerWorkspaceHandle;
+  prPollerWorkspace: PrPollerWorkspaceHandle | null;
   schedules: ScheduleWorkspaceHandle;
+  automations?: AutomationWorkspaceHandle;
+  automationsStart?: Promise<AutomationWorkspaceHandle>;
+  automationsRetryAt?: number;
+  localProjectReconciliation?: { stop: AbortController; done: Promise<void> };
   cleanupOwner?: ReturnType<typeof workspaceCleanupOwnerLegacy>;
   cleanupReceipt?: Promise<void>;
   cleanupFailure?: unknown;
@@ -154,9 +176,21 @@ export class LodyFleet {
 
   private readonly runtimes = new Map<string, WorkspaceRuntimeState>();
   private readonly startInFlight = new Map<string, Promise<void>>();
+  private readonly e2eeActivationInFlight = new Map<
+    string,
+    { intent: string; completion: Promise<void> }
+  >();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly desiredWorkspaces = new Map<string, WorkspaceListItem>();
+  private readonly e2eeResets = new Map<string, Promise<LocalE2eeResetResponse>>();
+  private readonly waitingForPairing = new Set<string>();
   private readonly remoteRevokedWorkspaceIds = new Set<string>();
+  // The local catalog only knows workspaces an earlier run reconciled. Pairing a
+  // workspace it lacks waits for the first authoritative list outcome, never longer.
+  private settleFirstRemoteWorkspaceList: () => void = () => {};
+  private readonly firstRemoteWorkspaceListSettled = new Promise<void>((resolve) => {
+    this.settleFirstRemoteWorkspaceList = resolve;
+  });
 
   private unsubscribeWorkspaces: (() => void) | null = null;
   private stopped = false;
@@ -220,16 +254,18 @@ export class LodyFleet {
     this.onFatalAuthFailure = options.onFatalAuthFailure;
     this.localWorkspaceCatalog = options.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.memoryPressure = new MemoryPressureSampler(this.logger);
-    this.remoteBridge = this.cloudPort.streamsTokens
-      ? new RemoteBridge({
-          logger: this.logger,
-          catalog: this.localWorkspaceCatalog,
-          userId: this.userId,
-          machineId: this.machineId,
-          machineName: this.machineName,
-          getRuntime: (workspaceId) => this.runtimes.get(workspaceId)?.lody,
-        })
-      : null;
+    this.remoteBridge =
+      this.cloudPort.streamsTokens || this.cloudPort.e2eeMachineScope
+        ? new RemoteBridge({
+            logger: this.logger,
+            catalog: this.localWorkspaceCatalog,
+            e2eeMachineScope: this.cloudPort.e2eeMachineScope,
+            userId: this.userId,
+            machineId: this.machineId,
+            machineName: this.machineName,
+            getRuntime: (workspaceId) => this.runtimes.get(workspaceId)?.lody,
+          })
+        : null;
     this.localPlatform = this.cloudPort.kind === 'local';
     // The local platform has no cloud reconcile: the catalog bootstrap is the
     // only workspace source, so it is unconditionally on.
@@ -281,6 +317,24 @@ export class LodyFleet {
       dispatchSession: async (message, options) =>
         await this.dispatchLocalSessionControl(message, options),
       dispatchProject: async (message) => await this.dispatchLocalProjectControl(message),
+      dispatchAutomation: async (message) => {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
+        try {
+          return {
+            ok: true,
+            result: await (
+              await this.ensureAutomations(runtime)
+            ).command(message.command, message.requesterSessionId),
+          };
+        } catch (cause) {
+          return {
+            ok: false,
+            error: cause instanceof Error ? cause.message : 'Automation command failed',
+          };
+        }
+      },
+      dispatchE2eeReset: (message) => this.resetLocalE2eeIdentity(message),
+      dispatchE2eePairing: (message) => this.dispatchLocalE2eePairing(message),
       dispatchSchedule: async (message) => {
         const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
         const { executeScheduleCommand } = await import('./schedules/schedule-command-service');
@@ -418,6 +472,21 @@ export class LodyFleet {
       return;
     }
 
+    if (snapshot.encryptedCatalogError || snapshot.encryptedCatalogUnavailable) {
+      this.logger.warn(
+        '[fleet] Encrypted workspace catalog unavailable; ordinary cached workspaces remain usable.'
+      );
+      this.runtimeStateReporter.upsertIssue({
+        code: 'encrypted_workspace_catalog_unavailable',
+        severity: 'warning',
+        recoverable: true,
+        message:
+          'Encrypted workspace cache is unavailable. Its files have been preserved; retry after local storage recovers.',
+      });
+    } else {
+      this.runtimeStateReporter.clearIssue('encrypted_workspace_catalog_unavailable');
+    }
+
     const workspaces = snapshot.workspaces.filter((workspace) => workspace.state === 'active');
     if (workspaces.length === 0) {
       this.logger.debug('[fleet] Local workspace catalog is empty');
@@ -448,6 +517,7 @@ export class LodyFleet {
           message,
         });
         void this.handleRemoteBridgeOffline();
+        this.settleFirstRemoteWorkspaceList();
         const error = new Error(message);
         if (!initialResolved) {
           initialResolved = true;
@@ -488,6 +558,10 @@ export class LodyFleet {
           this.runtimeStateReporter.clearIssue('workspace_subscription_error');
           this.lastValidWorkspaceListResult = result;
           const applyPromise = this.applyRemoteWorkspaceList(result);
+          void applyPromise.then(
+            this.settleFirstRemoteWorkspaceList,
+            this.settleFirstRemoteWorkspaceList
+          );
 
           if (!initialResolved) {
             initialResolved = true;
@@ -529,6 +603,7 @@ export class LodyFleet {
           // Transient subscription errors get a grace window before the data
           // plane detaches; a recovered workspace list cancels the timer.
           this.scheduleRemoteBridgeOffline();
+          this.settleFirstRemoteWorkspaceList();
 
           if (!initialResolved) {
             initialResolved = true;
@@ -558,6 +633,11 @@ export class LodyFleet {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    const releases = [...this.runtimes.values()].map(({ lody }) => lody.prepareForShutdown());
+    await Promise.allSettled(releases);
+  }
+
   shutdown(): Promise<void> {
     return (this.shutdownReceipt ??= this.shutdownOnce());
   }
@@ -577,6 +657,8 @@ export class LodyFleet {
         await this.retryWorkspaceCleanup(id);
       // Workspace recovery cannot prove release of a failed global service owner.
       if (this.localServiceReleaseFailure) throw this.localServiceReleaseFailure;
+      // A failed close retains the same writer owner; a released one is a no-op.
+      await closeProcessLocalLoroWriterLegacy();
       await this.finishGlobalShutdown();
     })();
     this.shutdownRecovery = attempt;
@@ -588,6 +670,7 @@ export class LodyFleet {
 
   private async shutdownOnce(): Promise<void> {
     this.stopped = true;
+    this.settleFirstRemoteWorkspaceList();
     this.stopRuntimeStateLoop();
     this.memoryPressure.stop();
     Effect.runSync(this.prStatusPoller.stop);
@@ -638,6 +721,14 @@ export class LodyFleet {
       );
       failures.push(this.localServiceReleaseFailure);
     }
+    // Retained workspace and connection owners still release through this writer.
+    if (!failures.length) {
+      try {
+        await closeProcessLocalLoroWriterLegacy();
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
     if (failures.length)
       throw new AggregateError(failures, 'Fleet shutdown retains unresolved workspace resources');
     await this.finishGlobalShutdown();
@@ -648,6 +739,14 @@ export class LodyFleet {
   }
 
   private async finishGlobalShutdownOnce(): Promise<void> {
+    // Pairing uses native stores outside a started workspace. Join those owners
+    // before retiring the account's cloud port; cancelled socket waiters do not
+    // mean their ledger/key operations have settled.
+    await Promise.allSettled(
+      [...this.e2eeActivationInFlight.values()]
+        .map((flight) => flight.completion)
+        .concat([...this.e2eeResets.values()].map((work) => work.then(() => undefined)))
+    );
     await this.workspaceWatchCoordinator.dispose();
     await this.cloudPort.dispose();
 
@@ -674,11 +773,13 @@ export class LodyFleet {
       ...this.runtimes.keys(),
       ...this.retryTimers.keys(),
       ...this.startInFlight.keys(),
+      ...this.waitingForPairing,
     ]);
 
     // Remove workspaces no longer present.
     for (const workspaceId of prevIds) {
       if (nextIds.has(workspaceId)) continue;
+      this.waitingForPairing.delete(workspaceId);
       if (options.retainRunningWorkspaceIds?.has(workspaceId) && this.runtimes.has(workspaceId)) {
         continue;
       }
@@ -689,7 +790,9 @@ export class LodyFleet {
 
     // Workspace repos are independent SQLite databases. Start a small bounded
     // batch concurrently so one slow workspace does not serialize fleet readiness.
-    const workspacesToStart = next.filter((workspace) => !this.runtimes.has(workspace.id));
+    const workspacesToStart = next.filter(
+      (workspace) => !this.runtimes.has(workspace.id) && !this.waitingForPairing.has(workspace.id)
+    );
     for (
       let index = 0;
       index < workspacesToStart.length;
@@ -704,6 +807,22 @@ export class LodyFleet {
 
     this.runtimeStateReporter.clearIssue('workspace_list_apply_failed');
     this.refreshRuntimeState();
+  }
+
+  /**
+   * Synchronous access verdict for one running workspace. The latest remote
+   * snapshot wins as soon as it arrives; before the first one, the cached entry
+   * the runtime was bootstrapped from stands. A subscription error keeps the
+   * last authorized snapshot: only a confirmed revocation or token rejection denies.
+   */
+  readWorkspaceAccess(workspaceId: string): DaemonWorkspaceAccess {
+    if (this.invalidTokenReported) return { status: 'unauthorized' };
+    const remote = this.lastValidWorkspaceListResult;
+    const workspace = remote
+      ? remote.workspaces.find((candidate) => candidate.id === workspaceId)
+      : this.desiredWorkspaces.get(workspaceId);
+    if (workspace) return { status: 'authorized', workspace };
+    return remote ? { status: 'revoked' } : { status: 'unknown' };
   }
 
   private async applyRemoteWorkspaceList(result: AuthorizedWorkspaceList): Promise<void> {
@@ -722,12 +841,15 @@ export class LodyFleet {
         workspace.name,
         workspace.slug,
         workspace.role,
+        workspace.contentMode,
+        workspace.genesisHash,
       ]),
     });
     // A valid workspace list means the control plane is reachable again; cancel
     // any pending offline grace timer before it detaches the data plane.
     this.cancelScheduledRemoteBridgeOffline();
     let revokedRunningWorkspaceIds = new Set<string>();
+    let encryptedCacheUnavailable = false;
     if (signature !== this.lastCachedWorkspaceSignature) {
       const reconcile = await remoteBridge.reconcileOnline({
         workspaces: [...result.workspaces],
@@ -740,7 +862,22 @@ export class LodyFleet {
       for (const workspaceId of revokedRunningWorkspaceIds) {
         this.remoteRevokedWorkspaceIds.add(workspaceId);
       }
-      this.lastCachedWorkspaceSignature = signature;
+      encryptedCacheUnavailable = !!reconcile.encryptedCatalogError;
+      if (encryptedCacheUnavailable) {
+        // Authorization/revocation already used the current remote result.
+        // Only the failed encrypted cache remains pending, without preventing
+        // healthy workspaces from starting or attaching.
+        this.runtimeStateReporter.upsertIssue({
+          code: 'encrypted_workspace_catalog_unavailable',
+          severity: 'warning',
+          recoverable: true,
+          message:
+            'Encrypted workspace cache is unavailable. Its files have been preserved; retry after local storage recovers.',
+        });
+      } else {
+        this.lastCachedWorkspaceSignature = signature;
+        this.runtimeStateReporter.clearIssue('encrypted_workspace_catalog_unavailable');
+      }
     }
     await this.applyWorkspaceList([...result.workspaces], {
       retainRunningWorkspaceIds: this.remoteRevokedWorkspaceIds,
@@ -748,7 +885,8 @@ export class LodyFleet {
     await remoteBridge.attachAllowedRuntimes(result.workspaces.map((workspace) => workspace.id));
     this.refreshRuntimeState();
     // A full apply succeeded; drop any pending reconcile retry + reset backoff.
-    this.clearReconcileRetry();
+    if (encryptedCacheUnavailable) this.scheduleReconcileRetry();
+    else this.clearReconcileRetry();
     this.runtimeStateReporter.clearIssue('workspace_list_apply_failed');
   }
 
@@ -782,7 +920,7 @@ export class LodyFleet {
   }
 
   private async startWorkspace(workspace: WorkspaceListItem): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.e2eeResets.has(workspace.id)) return;
     if (!this.desiredWorkspaces.has(workspace.id)) return;
     if (this.startupCleanupOwners.has(workspace.id) || this.cleanupOwners.has(workspace.id)) {
       try {
@@ -819,7 +957,9 @@ export class LodyFleet {
       });
 
       let lody: Lody | null = null;
+      let memberRemoved = false;
       let stopSchedules: (() => Promise<void>) | undefined;
+      let stopAutomations: (() => Promise<void>) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
       let detachTerminals: (() => void) | undefined;
       const workspaceStartAt = Date.now();
@@ -827,10 +967,73 @@ export class LodyFleet {
         lody = await Lody.create({
           logger: workspaceLogger,
           onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
+          onInboxAvailabilityChange: (message) => {
+            const code = `inbox_unavailable:${workspace.id}`;
+            if (message)
+              this.runtimeStateReporter.upsertIssue({
+                code,
+                severity: 'warning',
+                recoverable: true,
+                message,
+              });
+            else this.runtimeStateReporter.clearIssue(code);
+          },
+          onEncryptedMemberRemoved: async (owner) => {
+            memberRemoved = true;
+            const state = this.runtimes.get(workspace.id);
+            if (!state || state.lody === owner) this.desiredWorkspaces.delete(workspace.id);
+            if (state?.lody === owner) await this.stopWorkspace(workspace.id);
+            else await owner.cleanup();
+          },
           builtinAgentConfigCliTypes: this.builtinAgentConfigCliTypes,
           supportRegistryAgentTypes: this.supportRegistryAgentTypes,
           workspaceId: workspace.id as WorkspaceId,
+          remoteAutomation: {
+            handshake: async () => {
+              const nonce = this.runtimes.get(workspace.id)?.automations?.remoteControlNonce;
+              return nonce
+                ? {
+                    type: 'machine/automation-control_response',
+                    machineId: this.machineId,
+                    success: true,
+                    runtimeNonce: nonce,
+                  }
+                : {
+                    type: 'machine/automation-control_response',
+                    machineId: this.machineId,
+                    success: false,
+                    error: 'AUTOMATION_REMOTE_AUTH_UNAVAILABLE',
+                  };
+            },
+            control: async (input) => {
+              try {
+                const automation = this.runtimes.get(workspace.id)?.automations;
+                if (!automation) throw new Error('AUTOMATION_OWNER_UNAVAILABLE');
+                const result = await automation.remoteControl(input);
+                const { remoteAutomationResultSchema } = await import('@lody/shared/automations');
+                return {
+                  type: 'session/automation-control_response',
+                  sessionId: input.sessionId,
+                  success: true,
+                  result: remoteAutomationResultSchema.parse(result),
+                };
+              } catch (error) {
+                const message = error instanceof Error ? error.message : '';
+                return {
+                  type: 'session/automation-control_response',
+                  sessionId: input.sessionId,
+                  success: false,
+                  error: /^AUTOMATION_[A-Z_]+$/.test(message)
+                    ? message
+                    : 'AUTOMATION_CONTROL_FAILED',
+                };
+              }
+            },
+          },
+          contentMode: workspace.contentMode,
+          genesisHash: workspace.genesisHash,
           workspaceSlug: workspace.slug ?? undefined,
+          readWorkspaceAccess: () => this.readWorkspaceAccess(workspace.id),
           token: this.cliToken,
           userId: this.userId,
           machineId: this.machineId,
@@ -847,25 +1050,14 @@ export class LodyFleet {
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
           await lody.cleanup();
           return;
         }
 
         await lody.start();
 
-        await reconcileMachineLocalProjectRootPaths(
-          lody.documentManager.repo,
-          workspace.id as WorkspaceId,
-          this.machineId,
-          lody.documentManager
-        ).catch((error: unknown) => {
-          workspaceLogger.warn(
-            `Failed to reconcile local project paths: ${formatErrorMessage(error)}`
-          );
-        });
-
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
           await lody.cleanup();
           return;
         }
@@ -875,43 +1067,109 @@ export class LodyFleet {
           this.terminalPtyService.closeSession(sessionId);
         });
         detachTerminals = unsubscribeTerminalCleanup;
-        const prPollerWorkspace = (partialPoller = createLodyPrPollerWorkspace({
-          documentManager: startedLody.documentManager,
-          workspaceId: workspace.id,
-          userId: this.userId,
-          machineId: this.machineId,
-          githubTokens: this.cloudPort.githubTokens,
-          prAssociation: this.cloudPort.prAssociation,
-          logger: workspaceLogger,
-        }));
+        // The poller reads decrypted repo/branch metadata and has independent
+        // hosted credential/association ports. Do not construct it for E2EE:
+        // sanitizing Lody's own cloud port does not fence this Fleet owner.
+        const prPollerWorkspace =
+          workspace.contentMode === 'e2ee'
+            ? null
+            : (partialPoller = createLodyPrPollerWorkspace({
+                documentManager: startedLody.documentManager,
+                workspaceId: workspace.id,
+                userId: this.userId,
+                machineId: this.machineId,
+                githubTokens: this.cloudPort.githubTokens,
+                prAssociation: this.cloudPort.prAssociation,
+                logger: workspaceLogger,
+                wantsWorkflowObservations: (sessionId) =>
+                  this.runtimes
+                    .get(workspace.id)
+                    ?.automations?.wantsWorkflowObservations(sessionId) ?? false,
+                recordWorkflowObservations: async (...args) => {
+                  await this.runtimes
+                    .get(workspace.id)
+                    ?.automations?.recordWorkflowObservations(...args);
+                },
+                recordObservations: async (...args) => {
+                  const runtime = this.runtimes.get(workspace.id);
+                  await runtime?.automations?.recordObservations(...args);
+                },
+              }));
         // Scheduled automation: this machine runs the schedules it owns, so
         // entrusted work continues while nobody is looking.
-        const executionSlots = new AgentExecutionSlots();
-        const schedules = await createScheduleWorkspace({
-          manager: startedLody.documentManager,
-          workspace,
-          auth: {
-            token: this.cliToken,
-            userId: this.userId,
-            userName: '',
-            userEmail: '',
-            machineId: this.machineId,
-            machineName: this.machineName,
-          },
-          localOnly: this.localPlatform,
-          slots: executionSlots,
-          logger: workspaceLogger,
-          hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
-        });
+        const schedules: ScheduleWorkspaceHandle = !workspaceSupports(
+          { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+          'schedules'
+        )
+          ? {
+              evaluate: async () => {},
+              dispose: async () => {},
+              hasUncertainLegacyQuota: () => false,
+            }
+          : await createScheduleWorkspace({
+              manager: startedLody.documentManager,
+              workspace,
+              auth: {
+                token: this.cliToken,
+                userId: this.userId,
+                userName: '',
+                userEmail: '',
+                machineId: this.machineId,
+                machineName: this.machineName,
+              },
+              localOnly: this.localPlatform,
+              authorize: (request) => startedLody.authorizeScheduleExecution(request),
+              logger: workspaceLogger,
+              hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
+              dispatchQuotaSchedule: async (run, prepared) => {
+                const automation = this.runtimes.get(workspace.id)?.automations;
+                if (!automation)
+                  throw new ScheduleConfigurationError('AUTOMATION_OWNER_UNAVAILABLE');
+                return automation.dispatchQuotaSchedule(run, prepared);
+              },
+              hasSessionTurnWork: (sessionId) => startedLody.hasAutomationTurnWork(sessionId),
+            });
         stopSchedules = schedules.dispose;
-        this.runtimes.set(workspace.id, {
+        const automationsSupported = workspaceSupports(
+          { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+          'automations'
+        );
+        const automations = !automationsSupported
+          ? undefined
+          : await createAutomationWorkspaceLegacy({
+              lody: startedLody,
+              hasUncertainLegacyQuota: schedules.hasUncertainLegacyQuota,
+              workspace,
+              logger: workspaceLogger,
+              verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
+              auth: {
+                token: this.cliToken,
+                userId: this.userId,
+                userName: '',
+                userEmail: '',
+                machineId: this.machineId,
+                machineName: this.machineName,
+              },
+            }).catch((cause) => {
+              workspaceLogger.error(
+                'Automations could not start; the Host will retry while manual sessions remain available.',
+                cause
+              );
+              return undefined;
+            });
+        stopAutomations = automations?.dispose;
+        const runtime: WorkspaceRuntimeState = {
           workspace,
           lody: startedLody,
           unsubscribeTerminalCleanup,
           prPollerWorkspace,
           schedules,
-        });
-        this.prStatusPoller.registerWorkspace(prPollerWorkspace);
+          automations,
+          automationsRetryAt:
+            !automationsSupported || automations ? undefined : Date.now() + 60_000,
+        };
+        this.runtimes.set(workspace.id, runtime);
+        if (prPollerWorkspace) this.prStatusPoller.registerWorkspace(prPollerWorkspace);
         void this.remoteBridge?.attachRuntimeIfAllowed(workspace.id);
         this.logger.debug(`[fleet] Connected workspace: ${workspaceLabel} (${workspace.id})`);
         this.logger.debug(
@@ -921,10 +1179,26 @@ export class LodyFleet {
         );
         this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
         this.refreshRuntimeState();
+        // Observation is not a prerequisite for pollers, schedules or runtime readiness.
+        // Keep its lifetime with this runtime so shutdown never closes its document mid-write.
+        const stop = new AbortController();
+        const done = reconcileMachineLocalProjectRootPaths(
+          startedLody.documentManager.repo,
+          workspace.id as WorkspaceId,
+          this.machineId,
+          startedLody.documentManager,
+          stop.signal
+        ).catch((error: unknown) => {
+          workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
+        });
+        runtime.localProjectReconciliation = { stop, done };
       } catch (error) {
         if (lody) {
           const retained = lody;
           const owner = workspaceCleanupOwnerLegacy([
+            async () => {
+              await stopAutomations?.();
+            },
             async () => {
               await stopSchedules?.();
             },
@@ -953,6 +1227,15 @@ export class LodyFleet {
       }
     })()
       .catch((error: unknown) => {
+        if (
+          workspace.contentMode === 'e2ee' &&
+          error instanceof Error &&
+          error.message === 'e2ee_pairing_required'
+        ) {
+          this.waitingForPairing.add(workspace.id);
+          this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
+          return;
+        }
         const message = `[fleet] Failed to start workspace runtime ${workspace.id}: ${formatErrorMessage(
           error,
           { includeStack: true }
@@ -1007,16 +1290,69 @@ export class LodyFleet {
     this.refreshRuntimeState();
   }
 
+  private ensureAutomations(state: WorkspaceRuntimeState): Promise<AutomationWorkspaceHandle> {
+    if (
+      !workspaceSupports(
+        { mode: state.workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'automations'
+      )
+    )
+      return Promise.reject(new Error('AUTOMATIONS_UNSUPPORTED_FOR_ENCRYPTED_WORKSPACE'));
+    if (state.cleanupOwner) return Promise.reject(new Error('AUTOMATION_OWNER_CLOSING'));
+    if (state.automations) return Promise.resolve(state.automations);
+    if (state.automationsStart) return state.automationsStart;
+    const pending = createAutomationWorkspaceLegacy({
+      lody: state.lody,
+      hasUncertainLegacyQuota: state.schedules.hasUncertainLegacyQuota,
+      workspace: state.workspace,
+      logger: this.logger,
+      verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
+      auth: {
+        token: this.cliToken,
+        userId: this.userId,
+        userName: '',
+        userEmail: '',
+        machineId: this.machineId,
+        machineName: this.machineName,
+      },
+    }).then((handle) => {
+      state.automations = handle;
+      state.automationsRetryAt = undefined;
+      return handle;
+    });
+    state.automationsStart = pending;
+    void pending.then(
+      () => {
+        state.automationsStart = undefined;
+      },
+      () => {
+        state.automationsStart = undefined;
+        state.automationsRetryAt = Date.now() + 60_000;
+      }
+    );
+    return pending;
+  }
+
   private cleanupWorkspaceRuntime(state: WorkspaceRuntimeState, recover = false): Promise<void> {
     if (state.cleanupReceipt && !recover) return state.cleanupReceipt;
     this.cleanupOwners.set(state.workspace.id, state);
     state.cleanupOwner ??= workspaceCleanupOwnerLegacy([
+      async () => {
+        await state.automationsStart?.catch(() => undefined);
+        await state.automations?.dispose();
+      },
+      async () => {
+        state.localProjectReconciliation?.stop.abort();
+        await state.localProjectReconciliation?.done;
+      },
       () => state.schedules.dispose(),
       async () => {
         await state.lody.cleanup();
         state.unsubscribeTerminalCleanup();
       },
-      () => state.prPollerWorkspace.dispose(),
+      async () => {
+        await state.prPollerWorkspace?.dispose();
+      },
       async () => {
         if (this.runtimes.get(state.workspace.id) === state)
           this.runtimes.delete(state.workspace.id);
@@ -1054,6 +1390,23 @@ export class LodyFleet {
     this.refreshRuntimeState();
     const timer = setInterval(() => {
       this.refreshRuntimeState();
+      if (this.stopped) return;
+      for (const state of this.runtimes.values()) {
+        if (
+          workspaceSupports(
+            { mode: state.workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+            'automations'
+          ) &&
+          !state.automations &&
+          !state.automationsStart &&
+          !state.cleanupOwner &&
+          (state.automationsRetryAt ?? 0) <= Date.now()
+        ) {
+          void this.ensureAutomations(state).catch((cause) =>
+            this.logger.warn('Automation storage still unavailable; retry retained', cause)
+          );
+        }
+      }
     }, FLEET_RUNTIME_STATE_INTERVAL_MS);
     timer.unref?.();
     this.runtimeStateTimer = timer;
@@ -1102,7 +1455,9 @@ export class LodyFleet {
   }
 
   private refreshRuntimeState(): void {
-    const desiredCount = this.desiredWorkspaces.size;
+    const desiredCount = [...this.desiredWorkspaces.keys()].filter(
+      (id) => !this.waitingForPairing.has(id)
+    ).length;
     let connectedCount = 0;
     let reconnectingCount = 0;
     let totalActiveSessions = 0;
@@ -1198,6 +1553,34 @@ export class LodyFleet {
     message: LocalSessionControlRequest,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
+    if (message.type === 'machine/dsh-providers') {
+      const providers = new Map<string, { id: string; name: string }>();
+      for (const runtime of this.runtimes.values()) {
+        const configs = await listMergedAgentConfigs(
+          runtime.lody.documentManager.repo,
+          runtime.workspace.id as WorkspaceId,
+          [this.machineId]
+        );
+        for (const config of configs) {
+          if (
+            config.machineId === this.machineId &&
+            config.cliType === 'builtin' &&
+            config.agentType === 'deepseek'
+          ) {
+            providers.set(config.id, { id: config.id, name: config.name });
+          }
+        }
+      }
+      const response = {
+        type: 'machine/dsh-providers_response' as const,
+        providers: [...providers.values()].sort(
+          (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+        ),
+      };
+      options.onResponse?.(response);
+      return [response];
+    }
+
     // Image and file uploads (from the in-session MCP server) may omit the
     // workspaceId; resolve it by finding the single active runtime that holds
     // the session doc. Both share the same resolution + ambiguity handling.
@@ -1572,7 +1955,12 @@ export class LodyFleet {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: runtime.lody.documentManager, reason: 'local-project-add' }
+      {
+        sync: runtime.lody.documentManager,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 
@@ -1681,6 +2069,135 @@ export class LodyFleet {
       }
     }
     return rootPaths;
+  }
+
+  private async resetLocalE2eeIdentity(
+    message: LocalE2eeResetRequest
+  ): Promise<LocalE2eeResetResponse> {
+    const workspace = this.desiredWorkspaces.get(message.workspaceId);
+    if (
+      this.stopped ||
+      this.localPlatform ||
+      message.accountId !== this.userId ||
+      message.machineId !== this.machineId ||
+      workspace?.contentMode !== 'e2ee'
+    )
+      throw new Error('e2ee_account_unavailable');
+    if (this.e2eeResets.has(workspace.id)) throw new Error('e2ee_identity_busy');
+    const completion = (async () => {
+      const { resetCliE2eeIdentity, completedCliE2eeIdentityReset } =
+        await import('./e2ee/reset-identity');
+      const previous = await Effect.runPromise(completedCliE2eeIdentityReset(message));
+      if (previous)
+        return { ok: true as const, resetId: message.resetId, archive: previous.archive };
+      await this.e2eeActivationInFlight.get(workspace.id)?.completion.catch(() => undefined);
+      await this.startInFlight.get(workspace.id);
+      const timer = this.retryTimers.get(workspace.id);
+      if (timer) {
+        clearTimeout(timer);
+        this.retryTimers.delete(workspace.id);
+      }
+      if (this.runtimes.has(workspace.id)) await this.stopWorkspace(workspace.id);
+      if (this.cleanupOwners.has(workspace.id) || this.startupCleanupOwners.has(workspace.id))
+        await this.retryWorkspaceCleanup(workspace.id);
+      const archive = await Effect.runPromise(
+        Effect.scoped(resetCliE2eeIdentity({ ...message, now: Date.now() }))
+      );
+      this.waitingForPairing.add(workspace.id);
+      this.refreshRuntimeState();
+      return { ok: true as const, resetId: message.resetId, archive };
+    })().finally(() => this.e2eeResets.delete(workspace.id));
+    this.e2eeResets.set(workspace.id, completion);
+    return completion;
+  }
+
+  private async dispatchLocalE2eePairing(
+    message: LocalE2eePairingRequest
+  ): Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse> {
+    if (
+      this.stopped ||
+      this.localPlatform ||
+      message.accountId !== this.userId ||
+      !this.cloudPort.e2ee
+    )
+      throw new Error('e2ee_account_unavailable');
+    if (this.e2eeResets.has(message.workspaceId)) throw new Error('e2ee_identity_busy');
+    const e2eeCloud = this.cloudPort.e2ee;
+    const bound = (candidate: WorkspaceListItem | undefined) =>
+      candidate?.contentMode === 'e2ee' && candidate.genesisHash === message.genesisHash;
+    if (!bound(this.desiredWorkspaces.get(message.workspaceId))) {
+      // A daemon started after this workspace was created has not cached it yet.
+      // Only the authoritative list may refuse it; a cached match stays offline-capable.
+      await this.firstRemoteWorkspaceListSettled;
+      if (this.stopped) throw new Error('e2ee_account_unavailable');
+      if (this.e2eeResets.has(message.workspaceId)) throw new Error('e2ee_identity_busy');
+    }
+    const workspace = this.desiredWorkspaces.get(message.workspaceId);
+    if (
+      !workspace ||
+      workspace.contentMode !== 'e2ee' ||
+      workspace.genesisHash !== message.genesisHash
+    )
+      throw new Error('e2ee_binding_conflict');
+    const {
+      activateCliE2eeWorkspaceLegacy,
+      prepareCliE2eeMachineLegacy,
+      validateCliE2eePairingIntentLegacy,
+    } = await import('./e2ee/workspace-legacy');
+    if (this.e2eeResets.has(message.workspaceId)) throw new Error('e2ee_identity_busy');
+    if (message.type === 'prepare') {
+      const material = await prepareCliE2eeMachineLegacy({ ...message });
+      if ('superseded' in material)
+        return {
+          ok: true,
+          type: 'prepare-superseded',
+          machineId: this.machineId,
+          pairingSessionId: material.pairingSessionId,
+        };
+      return { ok: true, type: 'prepare', machineId: this.machineId, ...material };
+    }
+    const captured = {
+      accountId: this.userId,
+      machineId: this.machineId,
+      workspaceId: workspace.id,
+      genesisHash: message.genesisHash,
+      pairingSessionId: message.pairingSessionId,
+      frontendSigningPublicKey: message.frontendSigningPublicKey,
+      signingPublicKey: message.signingPublicKey,
+    };
+    const intent = JSON.stringify(captured);
+    let flight = this.e2eeActivationInFlight.get(workspace.id);
+    if (flight && flight.intent !== intent) throw new Error('e2ee_binding_conflict');
+    if (!flight) {
+      const completion = (async () => {
+        await validateCliE2eePairingIntentLegacy(captured);
+        await this.startInFlight.get(workspace.id);
+        if (this.cleanupOwners.has(workspace.id) || this.startupCleanupOwners.has(workspace.id))
+          await this.retryWorkspaceCleanup(workspace.id);
+        const running = this.runtimes.get(workspace.id);
+        if (running && (await running.lody.confirmEncryptedWorkspacePairing(captured))) return;
+        if (running) await this.stopWorkspace(workspace.id);
+        await activateCliE2eeWorkspaceLegacy({
+          accountId: captured.accountId,
+          workspaceId: captured.workspaceId,
+          genesisHash: captured.genesisHash,
+          expectedSigningPublicKey: captured.signingPublicKey,
+          pairingSessionId: captured.pairingSessionId,
+          frontendSigningPublicKey: captured.frontendSigningPublicKey,
+          cloud: e2eeCloud,
+          onUnavailable: () => this.logger.debug('e2ee_background_unavailable'),
+        });
+        this.waitingForPairing.delete(workspace.id);
+        await this.startWorkspace(workspace);
+        await this.resolveWorkspaceRuntime(workspace.id as WorkspaceId);
+      })().finally(() => {
+        this.e2eeActivationInFlight.delete(workspace.id);
+      });
+      flight = { intent, completion };
+      this.e2eeActivationInFlight.set(workspace.id, flight);
+    }
+    await flight.completion;
+    return { ok: true, type: 'activate' };
   }
 
   private async resolveWorkspaceRuntime(workspaceId: WorkspaceId): Promise<WorkspaceRuntimeState> {
@@ -1805,6 +2322,13 @@ export class LodyFleet {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(message.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }

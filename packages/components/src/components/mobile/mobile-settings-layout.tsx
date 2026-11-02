@@ -8,6 +8,8 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import type { MobileWorkspaceTab, MobileWorkspaceTabBarLabels } from './mobile-workspace-tabbar';
 import { MobileDrillPageLayout, useMobileDrillAnimatedBack } from './mobile-drill-page-layout';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 
 export type MobileSettingsLayoutProps = {
   title: string;
@@ -105,6 +107,17 @@ function SettingsInnerContent({
 }) {
   const location = useLocation();
   const pathname = location.pathname;
+  const [main, setMain] = useState<HTMLElement | null>(null);
+  const isCategoryList = /\/settings\/?$/.test(pathname);
+  const isUsagePage = /\/settings\/ai-usage\/?$/.test(pathname);
+  const isWorkspacePage = /\/settings\/workspace\/?$/.test(pathname);
+  const isFoldDetailPage = /\/settings\/(account|appearance|preferences|about|github)\/?$/.test(
+    pathname
+  );
+  const fold = useHorizontalFoldLayout(
+    main,
+    isCategoryList || isUsagePage || isWorkspacePage || isFoldDetailPage || isAgentConfigTab
+  );
 
   /* Suppress the inner drill on the very first commit: the outer
      `MobileDrillPageLayout` already animates the whole settings
@@ -125,12 +138,20 @@ function SettingsInnerContent({
   );
 
   return (
-    <main className="min-h-0 min-w-0 flex-1">
-      {isAgentConfigTab ? (
-        <div className="h-full min-h-0">{body}</div>
-      ) : (
-        <ScrollArea className="h-full">{body}</ScrollArea>
-      )}
+    <main ref={setMain} className="min-h-0 min-w-0 flex-1">
+      <MobileSettingsFoldContext.Provider value={fold}>
+        {isAgentConfigTab ? (
+          <div className={cn('h-full min-h-0', fold && 'overflow-hidden')}>{body}</div>
+        ) : (
+          <ScrollArea
+            className="h-full"
+            viewportClassName={fold ? '[&>div]:h-full' : undefined}
+            viewportStyle={fold ? { overflowY: 'hidden' } : undefined}
+          >
+            {body}
+          </ScrollArea>
+        )}
+      </MobileSettingsFoldContext.Provider>
     </main>
   );
 }

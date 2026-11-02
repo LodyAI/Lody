@@ -52,6 +52,17 @@ export const withQuickActionOrigin = (origin: string, prompt: string): string =>
 export const withPrBranchUpkeep = (basePrompt: string, upkeep: string): string =>
   `${basePrompt}\n\n${upkeep}`;
 
+/** Applies a PR or Commit & Push quick action to the conversation's Project group. */
+export const withProjectGroupPrScope = (prompt: string): string =>
+  `${prompt}\n\n${[
+    'Project group scope:',
+    '- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.',
+    '- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.',
+    '- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.',
+    '- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.',
+    '- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.',
+  ].join('\n')}`;
+
 /** Composed form for callers without i18n. */
 export const CREATE_PR_PROMPT = withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT);
 

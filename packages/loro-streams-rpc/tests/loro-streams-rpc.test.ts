@@ -1950,6 +1950,53 @@ describe('LoroStreamsMachineRpcClient', () => {
     }
   });
 
+  it('roundtrips a project member probe with its typed result', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    try {
+      const pending = client.requestProjectProbeLocalMember({
+        localProjectId: 'local-1' as LocalProjectId,
+        requestedByUserId: 'user-1',
+      });
+      await fake.waitForAppendedCount(1);
+      const request = fake.appended[0]!.value as { id: string; method: string; params: unknown };
+      expect(request).toMatchObject({
+        method: 'project/probe-local-member',
+        params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+      });
+      const result = {
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        isGit: true,
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+      };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result,
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      expect(await pending).toEqual(result);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('sends local project git state requests and resolves git state responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
@@ -3500,6 +3547,46 @@ describe('pending RPC deadline', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await expect(pending).resolves.toBeNull();
 
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('LoroStreamsRpcResponseDispatcher response loop', () => {
+  it('keeps reading responses when recreating a missing response stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 1) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+
+      await dispatcher.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(1));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      expect(ensureCalls).toBe(2);
       dispatcher.stop();
     } finally {
       vi.useRealTimers();

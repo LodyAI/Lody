@@ -34,9 +34,8 @@ import {
   type SessionFileErrorActions,
 } from '@/lib/session-file-actions';
 import { isAbsoluteFilePath, resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
-import { resolveSessionFileOpenTarget } from '@/lib/session-file-open-target';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import type { FileLinkCandidate } from '@lody/shared';
+import { resolveDirectMarkdownFileOpenTarget } from '@/lib/session-file-open-target';
+import { getMarkdownAgentFileCopyPath } from '@/lib/markdown-agent-file-link';
 import {
   buildPathLauncherLaunchInput,
   buildPathLauncherProbes,
@@ -127,15 +126,10 @@ export type SessionFileActions = {
    * file-tree menu, this deliberately never offers download/share remotely:
    * outside the owning local Electron machine it is Copy Path only.
    */
-  readonly buildMarkdownLinkMenuItems: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
-  /**
-   * Pending choice when a Markdown-link action matched files in several
-   * worktrees; the owner renders the picker and calls `choose`.
-   */
-  readonly markdownLinkChoice: {
-    readonly candidates: readonly FileLinkCandidate[];
-    readonly choose: (candidate: FileLinkCandidate | null) => void;
-  } | null;
+  readonly buildMarkdownLinkMenuItems: (
+    href: string,
+    copyPath?: string
+  ) => readonly MarkdownAgentFileLinkMenuItem[];
   /**
    * The same actions as a menu, for the file tree's context menu and the side
    * panel's ⋯ menu. Stable across renders so a memoized tree row can take it.
@@ -156,17 +150,26 @@ export function useSessionFileActions({
   /** Null while the surface has no session yet; every action is then absent. */
   readonly session: SessionMeta | null | undefined;
   /**
-   * Only `openFile` is used (for the remote download), so both the file
-   * workspace and session provider shapes fit.
+   * Preview bytes cover ordinary downloads; the optional download path handles
+   * larger files without entering the preview/editor cache.
    */
   readonly fileProvider?: {
     openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+    downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   } | null;
 }): SessionFileActions {
   const { t } = useTranslation();
   const postHog = usePostHog();
   const nativeShell = isNativeAppShell();
   const exportingRef = useRef(false);
+  const downloadControllers = useRef(new Set<AbortController>());
+  const largeDownloadInProgress = useRef(false);
+  useEffect(
+    () => () => {
+      for (const controller of downloadControllers.current) controller.abort();
+    },
+    [session?.id]
+  );
   // `session/file_action`: one event per user-invoked file action. Only the
   // extension bucket leaves the client, never the path.
   const trackFileAction = useCallback(
@@ -537,15 +540,8 @@ export function useSessionFileActions({
   const download = useMemo(() => {
     if (!session || !availability.download || !fileProvider) return null;
 
-    // KNOWN CEILING: this reads through the preview API, which answers in ONE
-    // bounded response (10 MiB text / 5 MiB binary remotely). So the download
-    // covers ordinary files and cannot cover the oversized ones — the very
-    // files whose error card sent the user looking for a way out. Saying that
-    // is the point of `downloadTooLarge`: a generic "could not download" reads
-    // as a glitch worth retrying. A real answer for those needs a ranged or
-    // streamed transfer, which is a Machine RPC protocol change (new method
-    // plus a negotiated `protocolCapabilities` key, never inferred from the CLI
-    // version) rather than a client-side fix.
+    // Preview stays bounded. Paid machines can supply original bytes in small chunks
+    // through the separately negotiated download path when preview cannot return them.
     const reportUnavailable = (reason: CodeCollabContentUnavailableReason | 'no-bytes') => {
       if (reason === 'deleted') {
         toast.error(t('sessions.fileActions.fileMissing', 'That file no longer exists.'));
@@ -569,14 +565,35 @@ export function useSessionFileActions({
         exportingRef.current = true;
         setSharing(true);
       }
+      const controller = new AbortController();
+      downloadControllers.current.add(controller);
       void (async () => {
         try {
           const exportBytes = async (bytes: Uint8Array) => {
             if (nativeShell) await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
             else downloadBytesAsFile(filePath, bytes);
           };
+          const downloadOriginal = async () => {
+            if (largeDownloadInProgress.current) return true;
+            largeDownloadInProgress.current = true;
+            try {
+              const bytes = await fileProvider.downloadFile?.(filePath, controller.signal);
+              controller.signal.throwIfAborted();
+              if (!bytes) return false;
+              await exportBytes(bytes);
+              return true;
+            } finally {
+              largeDownloadInProgress.current = false;
+            }
+          };
           const result = await fileProvider.openFile(filePath);
+          controller.signal.throwIfAborted();
           if (result.status !== 'ready') {
+            if (
+              (result.reason === 'text-too-large' || result.reason === 'blob-too-large') &&
+              (await downloadOriginal())
+            )
+              return;
             reportUnavailable(result.reason);
             return;
           }
@@ -591,14 +608,17 @@ export function useSessionFileActions({
           }
           // A `binary` snapshot with no bytes is the machine declining to send
           // them, which is the same "too big for one response" situation.
+          if (await downloadOriginal()) return;
           reportUnavailable('no-bytes');
         } catch {
+          if (controller.signal.aborted) return;
           toast.error(
             nativeShell
               ? t('sessions.fileActions.shareFailed', 'Could not share that file.')
               : t('sessions.fileActions.downloadFailed', 'Could not download that file.')
           );
         } finally {
+          downloadControllers.current.delete(controller);
           if (nativeShell) {
             exportingRef.current = false;
             setSharing(false);
@@ -651,105 +671,13 @@ export function useSessionFileActions({
     [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing, trackFileAction]
   );
 
-  const resolveMarkdownLinkFilePath = useCallback(
-    (href: string): string | null => {
-      const trimmed = href.trim();
-      if (!trimmed) return null;
-      return resolveSessionFileOpenTarget({
-        rawPath: trimmed,
-        pathKind: 'markdown-href',
-        workspacePath,
-        preserveWorktreePath: isElectronRenderer && isLocalMachine,
-      }).filePath;
-    },
-    [isElectronRenderer, isLocalMachine, workspacePath]
-  );
-
-  // Markdown-link actions act on the same file a click opens: relative links
-  // resolve across nested worktrees first, and several matches require a choice.
-  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const linkActionRef = useRef(0);
-  useEffect(
-    () => () => {
-      linkActionRef.current += 1;
-    },
-    [session?.id, workspacePath]
-  );
-  const [linkChoice, setLinkChoice] = useState<{
-    readonly sessionId: string | undefined;
-    readonly candidates: readonly FileLinkCandidate[];
-    readonly act: (filePath: string) => void;
-  } | null>(null);
-  const withMarkdownLinkPath = useCallback(
-    (href: string, filePath: string, act: (filePath: string) => void) => {
-      const request = ++linkActionRef.current;
-      setLinkChoice(null);
-      const target = resolveSessionFileOpenTarget({
-        rawPath: href.trim(),
-        pathKind: 'markdown-href',
-        workspacePath,
-        preserveWorktreePath: isElectronRenderer && isLocalMachine,
-      });
-      if (!target.resolveMarkdownLink || !runtime || !session) {
-        act(filePath);
-        return;
-      }
-      void runtime
-        .requestFilePreview(
-          session.machineId,
-          { sessionId: session.id, path: target.filePath, resolveMarkdownLink: true },
-          { ownerSessionId: session.parentSessionId ?? session.id, workspaceRoot: workspacePath }
-        )
-        .then((link) => {
-          if (request !== linkActionRef.current) return;
-          if (link.status === 'resolved-link') {
-            if (link.candidates.length > 1)
-              setLinkChoice({ sessionId: session.id, candidates: link.candidates, act });
-            else act(link.candidates[0]!.absolutePath);
-          } else if (link.status === 'error' && link.code !== 'unsupported_protocol') {
-            toast.error(
-              t(
-                'sessions.fileLinks.resolveFailed',
-                'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
-              )
-            );
-          } else {
-            // Older daemons cannot discover worktrees: keep the session-root path.
-            act(filePath);
-          }
-        })
-        .catch(() => {
-          if (request !== linkActionRef.current) return;
-          toast.error(
-            t(
-              'sessions.fileLinks.resolveFailed',
-              'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
-            )
-          );
-        });
-    },
-    [isElectronRenderer, isLocalMachine, runtime, session, t, workspacePath]
-  );
-  const markdownLinkChoice = useMemo(
-    () =>
-      linkChoice && linkChoice.sessionId === session?.id
-        ? {
-            candidates: linkChoice.candidates,
-            choose: (candidate: FileLinkCandidate | null) => {
-              setLinkChoice(null);
-              if (candidate) linkChoice.act(candidate.absolutePath);
-            },
-          }
-        : null,
-    [linkChoice, session?.id]
-  );
-
   const buildMarkdownLinkMenuItems = useCallback(
-    (href: string): readonly MarkdownAgentFileLinkMenuItem[] => {
-      const filePath = resolveMarkdownLinkFilePath(href);
-      if (!filePath) return [];
-      const withPath = (act: (filePath: string) => void) => () =>
-        withMarkdownLinkPath(href, filePath, act);
+    (href: string, originalPath?: string): readonly MarkdownAgentFileLinkMenuItem[] => {
+      const filePath = resolveDirectMarkdownFileOpenTarget(href)?.filePath;
+      const copyTarget = originalPath ?? getMarkdownAgentFileCopyPath(href);
+      const withPath = (act: (filePath: string) => void) => () => {
+        if (filePath) act(filePath);
+      };
 
       const items: MarkdownAgentFileLinkMenuItem[] = [
         {
@@ -757,17 +685,17 @@ export function useSessionFileActions({
           id: 'copy-path',
           label: t('sessions.fileActions.copyPath', 'Copy Path'),
           icon: Copy,
-          run: withPath((path) => {
-            trackFileAction('copy_path', 'md_link_context_menu', path);
-            copyPath(path);
-          }),
+          run: () => {
+            trackFileAction('copy_path', 'md_link_context_menu', copyTarget);
+            writePathToClipboard(copyTarget);
+          },
         },
       ];
 
       // The exact same local-host gate protects every path handed to Electron.
       // A remote agent's href can still be copied, but must never reach this
       // viewer's shell or advertise actions that will fail.
-      if (!localHost || !resolveHostPath(filePath)) return items;
+      if (!filePath || !localHost || !resolveHostPath(filePath)) return items;
 
       items.push({
         kind: 'action',
@@ -827,15 +755,13 @@ export function useSessionFileActions({
       return items;
     },
     [
-      copyPath,
+      writePathToClipboard,
       availableEditorLaunchers,
       localHost,
       resolveHostPath,
-      resolveMarkdownLinkFilePath,
       runEditorAction,
       t,
       trackFileAction,
-      withMarkdownLinkPath,
     ]
   );
 
@@ -919,7 +845,6 @@ export function useSessionFileActions({
     download,
     buildErrorActions,
     buildMarkdownLinkMenuItems,
-    markdownLinkChoice,
     menuItems,
   };
 }

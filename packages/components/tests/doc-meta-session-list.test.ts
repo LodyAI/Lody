@@ -1,3 +1,4 @@
+import { planPullRequestLifecycle, resolveSessionPullRequests } from '@lody/shared';
 import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import { getSessionRoomId, type MachineId, type SessionId, type SessionMeta } from '@lody/shared';
@@ -105,4 +106,27 @@ describe('sessionListAtom', () => {
       newerChildId,
     ]);
   });
+});
+
+it('refreshes sidebar lifecycle without association writes and suppresses revision-only renders', () => {
+  const store = createStore();
+  store.set(sessionMetaCacheAtom, { [roomId]: session });
+  const before = store.get(sessionListAtom);
+  const first = planPullRequestLifecycle(
+    { url: prUrl, status: 'merged', updatedAt: '2026-01-01T00:00:00Z' },
+    undefined,
+    'webhook'
+  )!;
+  store.set(sessionMetaCacheAtom, { [roomId]: { ...session, [first.field]: first.value } });
+  const after = store.get(sessionListAtom);
+  expect(after).not.toBe(before);
+  expect(resolveSessionPullRequests(after[0])[0]?.status).toBe('merged');
+  expect(after[0]?.pullRequests).toEqual(session.pullRequests);
+  const next = planPullRequestLifecycle(
+    { url: prUrl, status: 'merged', updatedAt: '2026-01-02T00:00:00Z' },
+    undefined,
+    'webhook'
+  )!;
+  store.set(sessionMetaCacheAtom, { [roomId]: { ...session, [next.field]: next.value } });
+  expect(store.get(sessionListAtom)).toBe(after);
 });

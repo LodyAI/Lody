@@ -23,6 +23,8 @@ import {
 } from '@/components/settings/usage-timeline-bucket-label';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { cn } from '@/lib/utils';
+import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
 /* Full-bleed hero stat: oversized count-up number with a quiet label
    above it. Used for the headline tokens + cost totals so they read
@@ -54,10 +56,11 @@ function HeroStat({
 }
 
 export function MobileStatsSettings() {
+  const fold = useMobileSettingsFold();
   const { t, i18n } = useTranslation();
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const { activeOrganization } = useOrganization();
-  const [range, setRange] = useState<SettingsUsageRange>('day');
+  const [range, setRange] = useState<SettingsUsageRange>('week');
   const { workspaceId, usageTimelineByRange, usageCalendar } = useSettingsDataCache();
   const [selectedUsageDayMs, setSelectedUsageDayMs] = useState<number | null>(null);
   const { day: usageDay, loading: usageDayLoading } = useSettingsUsageDay(selectedUsageDayMs);
@@ -118,100 +121,108 @@ export function MobileStatsSettings() {
   }, [getBucketLabel, usageTimeline]);
 
   return (
-    <div className="pb-6 pt-1">
-      <MobileSettingsSection title={activeOrganization?.name || t('workspace.usage.title')}>
-        <div className="px-3 py-3">
-          <Tabs.Root
-            value={range}
-            onValueChange={(nextValue) => {
-              setRange(nextValue as SettingsUsageRange);
-            }}
-          >
-            <Tabs.List size="large" stretch>
-              <Tabs.Tab value="day">{t('workspace.usage.tabs.day')}</Tabs.Tab>
-              <Tabs.Tab value="week">{t('workspace.usage.tabs.week')}</Tabs.Tab>
-              <Tabs.Tab value="month">{t('workspace.usage.tabs.month')}</Tabs.Tab>
-              <Tabs.Tab value="total">{t('workspace.usage.tabs.total')}</Tabs.Tab>
-            </Tabs.List>
-          </Tabs.Root>
-        </div>
-      </MobileSettingsSection>
-
-      <MobileSettingsSection title={t('workspace.usage.title')} noCard>
-        <div className="mx-3 grid grid-cols-1 gap-3">
-          <HeroStat
-            label={t('workspace.usage.tokens')}
-            value={activeTotals?.tokens ?? 0}
-            ready={Boolean(activeTotals)}
-            format={formatTokensCompact}
-          />
-          <HeroStat
-            label={t('workspace.usage.cost')}
-            value={activeTotals?.costUSD ?? 0}
-            ready={Boolean(activeTotals)}
-            format={formatUSD}
-          />
-        </div>
-      </MobileSettingsSection>
-
-      {/* While a workspace is selected, a missing calendar only means its query
-         is still in flight — keep the section's shape with the skeleton. */}
-      {workspaceId ? (
-        <MobileSettingsSection noCard>
-          <div className="mx-3">
-            {usageCalendar ? (
-              <UsageCalendarVisualization
-                calendar={usageCalendar}
-                timeline={usageTimeline}
-                workspaceName={activeOrganization?.name}
-                dayDetail={usageDay}
-                dayDetailLoading={usageDayLoading}
-                onSelectedDayChange={setSelectedUsageDayMs}
-              />
-            ) : (
-              <UsageCalendarSkeleton range={range} />
-            )}
+    <div className={cn(fold ? 'flex h-full min-h-0 flex-col' : 'pb-6 pt-1')}>
+      <div
+        data-usage-summary
+        className={cn(fold && 'min-h-0 overflow-y-auto pt-1')}
+        style={fold ? { flex: `0 0 ${fold.messageHeight}px` } : undefined}
+      >
+        <MobileSettingsSection title={activeOrganization?.name || t('workspace.usage.title')}>
+          <div className="px-3 py-3">
+            <Tabs.Root
+              value={range}
+              onValueChange={(nextValue) => {
+                setRange(nextValue as SettingsUsageRange);
+              }}
+            >
+              <Tabs.List size="large" stretch>
+                <Tabs.Tab value="day">{t('workspace.usage.tabs.day')}</Tabs.Tab>
+                <Tabs.Tab value="week">{t('workspace.usage.tabs.week')}</Tabs.Tab>
+                <Tabs.Tab value="month">{t('workspace.usage.tabs.month')}</Tabs.Tab>
+                <Tabs.Tab value="total">{t('workspace.usage.tabs.total')}</Tabs.Tab>
+              </Tabs.List>
+            </Tabs.Root>
           </div>
         </MobileSettingsSection>
-      ) : null}
 
-      {/* No section title here: `UsageStackedAreaChart` renders its own
+        <MobileSettingsSection title={t('workspace.usage.title')} noCard>
+          <div className={cn('mx-3 grid gap-3', fold ? 'grid-cols-2' : 'grid-cols-1')}>
+            <HeroStat
+              label={t('workspace.usage.tokens')}
+              value={activeTotals?.tokens ?? 0}
+              ready={Boolean(activeTotals)}
+              format={formatTokensCompact}
+            />
+            <HeroStat
+              label={t('workspace.usage.cost')}
+              value={activeTotals?.costUSD ?? 0}
+              ready={Boolean(activeTotals)}
+              format={formatUSD}
+            />
+          </div>
+        </MobileSettingsSection>
+      </div>
+      {fold ? <div aria-hidden="true" style={{ flex: `0 0 ${fold.gapHeight}px` }} /> : null}
+      <div data-usage-charts className={cn(fold && 'min-h-0 flex-1 overflow-y-auto pb-6')}>
+        {/* While a workspace is selected, a missing calendar only means its query
+         is still in flight — keep the section's shape with the skeleton. */}
+        {workspaceId ? (
+          <MobileSettingsSection noCard>
+            <div className="mx-3">
+              {usageCalendar ? (
+                <UsageCalendarVisualization
+                  calendar={usageCalendar}
+                  timeline={usageTimeline}
+                  workspaceName={activeOrganization?.name}
+                  dayDetail={usageDay}
+                  dayDetailLoading={usageDayLoading}
+                  onSelectedDayChange={setSelectedUsageDayMs}
+                />
+              ) : (
+                <UsageCalendarSkeleton range={range} />
+              )}
+            </div>
+          </MobileSettingsSection>
+        ) : null}
+
+        {/* No section title here: `UsageStackedAreaChart` renders its own
          bordered card header with the same section label, so a section
          title would duplicate it. `noCard` lets the chart claim the full
          horizontal scroll area inside the section gutter. */}
-      <MobileSettingsSection noCard>
-        <div className="mx-3">
-          <UsageStackedAreaChart
-            title={t('workspace.usage.byModel')}
-            buckets={byModelBuckets}
-            emptyText={t('workspace.usage.empty', 'No usage data in this range')}
-            valueFormatter={formatTokensCompact}
-            tooltipValueFormatter={formatTokensCompact}
-            loading={loading}
-            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
-          />
-        </div>
-      </MobileSettingsSection>
+        <MobileSettingsSection noCard>
+          <div className="mx-3">
+            <UsageStackedAreaChart
+              title={t('workspace.usage.byModel')}
+              buckets={byModelBuckets}
+              emptyText={t('workspace.usage.empty', 'No usage data in this range')}
+              valueFormatter={formatTokensCompact}
+              tooltipValueFormatter={formatTokensCompact}
+              loading={loading}
+              loadingText={t('workspace.usage.loading', 'Loading usage data...')}
+            />
+          </div>
+        </MobileSettingsSection>
 
-      <MobileSettingsSection noCard>
-        <div className="mx-3">
-          <UsageStackedAreaChart
-            title={t('workspace.usage.byUser')}
-            buckets={byMemberBuckets}
-            emptyText={t('workspace.usage.empty', 'No usage data in this range')}
-            valueFormatter={formatTokensCompact}
-            tooltipValueFormatter={formatTokensCompact}
-            loading={loading}
-            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
-          />
-        </div>
-      </MobileSettingsSection>
+        <MobileSettingsSection noCard>
+          <div className="mx-3">
+            <UsageStackedAreaChart
+              title={t('workspace.usage.byUser')}
+              buckets={byMemberBuckets}
+              emptyText={t('workspace.usage.empty', 'No usage data in this range')}
+              valueFormatter={formatTokensCompact}
+              tooltipValueFormatter={formatTokensCompact}
+              loading={loading}
+              loadingText={t('workspace.usage.loading', 'Loading usage data...')}
+            />
+          </div>
+        </MobileSettingsSection>
 
-      {!workspaceId && (
-        <div className="mx-3 mt-5 rounded-2xl border border-dashed border-border/60 bg-card p-4 text-sm text-muted-foreground">
-          {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
-        </div>
-      )}
+        {!workspaceId && (
+          <div className="mx-3 mt-5 rounded-2xl border border-dashed border-border/60 bg-card p-4 text-sm text-muted-foreground">
+            {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

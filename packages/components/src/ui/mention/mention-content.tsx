@@ -84,6 +84,10 @@ interface MentionContentProps
    */
   positionAnchor?: 'caret' | 'composer';
 
+  /** Mobile dock placement. Full-height composers use `bottom` (above the
+      footer) instead of the default above-composer strip. */
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
+
   /**
    * Event handler called when the `Escape` key is pressed.
    *
@@ -127,6 +131,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       trackAnchor = true,
       positionAnchor = 'caret',
       dockedOnMobile = true,
+      mobilePanelPlacement = 'above-composer',
       onEscapeKeyDown,
       onPointerDownOutside,
       style,
@@ -452,7 +457,11 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
           onArrowChange={positionerContext.onArrowChange}
           forceMount={forceMount}
         >
-          <MentionMobilePanel open={forceMount || context.open} anchorRef={context.inputRef}>
+          <MentionMobilePanel
+            open={forceMount || context.open}
+            anchorRef={context.inputRef}
+            placement={mobilePanelPlacement}
+          >
             {contentProps.children}
           </MentionMobilePanel>
         </MentionContentProvider>

@@ -33,6 +33,7 @@ import {
 import nowledgeLogo from '@/assets/nowledge-mem.png';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { withoutEncryptedSharedMachines } from '@/lib/visible-machine-index';
 import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useMemoryProvider } from '@/hooks/use-memory-provider';
 import { useOpenSettings } from '@/hooks/use-open-settings';
@@ -77,8 +78,17 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     flexWrap: 'wrap',
+    // Keep the cluster at its content width: a shrinking cluster wraps its
+    // avatar under the label, so the label's position depends on how long the
+    // description happens to be.
+    flexShrink: 0,
+    // The title line is the stable anchor. Centring against the row would move
+    // the label whenever a description wraps to another line. The small start
+    // margin centres the avatar controls with the name, not the row.
+    alignSelf: 'flex-start',
     gap: space[1],
     maxWidth: '45%',
+    marginBlockStart: space[1],
   },
   assignedLabel: { whiteSpace: 'nowrap' },
   unlinkRow: { display: 'flex', justifyContent: 'flex-end' },
@@ -105,6 +115,10 @@ const styles = stylex.create({
     filter: 'grayscale(1)',
   },
   description: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
     fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
@@ -377,7 +391,13 @@ export function MemoryIdentityList({
 
 export function MemorySetting() {
   const { t } = useTranslation();
-  const { machines, accessByMachineId } = useVisibleMachineMetas();
+  const visibleMachineIndex = useVisibleMachineMetas();
+  const { accessByMachineId } = visibleMachineIndex;
+  // Memory provider configuration uses machine RPC, fenced for encrypted shared machines.
+  const machines = useMemo(
+    () => withoutEncryptedSharedMachines(visibleMachineIndex.machines, visibleMachineIndex),
+    [visibleMachineIndex]
+  );
   const localId = useAtomValue(localMachineIdAtom);
   const onlineIds = useOnlineMachineIds();
   const remote = useAppCapability('remoteMachines');

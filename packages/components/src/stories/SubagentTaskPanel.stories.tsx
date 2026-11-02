@@ -364,3 +364,8 @@ export const DeferredRuns: Story = {
     renderHistory,
   },
 };
+
+/** Agents and shell commands in one turn: Subagents and Tasks tabs. */
+export const SubagentsAndCommands: Story = {
+  args: { tasks: [...running, ...backgroundCommands] },
+};

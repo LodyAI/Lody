@@ -6,7 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
-import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
+import {
+  createHistoryWriter,
+  resolveSessionAcpRuntimeConfig,
+  resolveSessionConversationConfig,
+} from '@lody/shared';
 import {
   useConversationVersion,
   useConversationIndexRows,
@@ -34,6 +38,10 @@ import { useSessionTurnFacts } from '../src/components/sessions/session-turn-fac
 import { useSessionMcpSelection } from '../src/hooks/use-session-mcp-selection';
 import { FloatingPermissionRequest } from '../src/components/sessions/floating-permission-request';
 import { initI18n } from '../src/i18n';
+import {
+  buildAcpSessionConfigCandidates,
+  EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+} from '../src/lib/acp-session-config-selection';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -635,7 +643,7 @@ const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }]
 // for a hang, since nothing here waits on wall-clock time.
 const MCP_SELECTION_HYDRATION_TIMEOUT_MS = 30_000;
 it.each([false, true])(
-  'preserves explicit empty MCP selection after mounting composer hooks: windowed=%s',
+  'preserves MCP selection and reported Plan exit while composer history hydrates: windowed=%s',
   async (windowed) => {
     const host = container;
     const history = buildFixtureHistory(25);
@@ -646,7 +654,7 @@ it.each([false, true])(
       ...history[48]!.inputConfig,
       agentRoleId: null,
       mcpServerIds: [],
-      configOptionValues: { effort: 'high' },
+      configOptionValues: { effort: 'high', plan_mode: true },
     };
     const doc = buildSessionDoc(history);
     const idle = createManualIdle();
@@ -658,18 +666,56 @@ it.each([false, true])(
       scheduleIdle: idle.scheduleIdle,
       yieldToEventLoop: () => gate,
     });
+    const view = windowed
+      ? createConversationViewFromReader(
+          {
+            ...session.sessionData.history,
+            readTurnForDisplay: async (id) => {
+              if (id === history[48]!.id) await gate;
+              return session.sessionData.history.readTurnForDisplay(id);
+            },
+          },
+          {
+            sessionId: FIXTURE_SESSION_ID,
+            scheduleIdle: idle.scheduleIdle,
+            yieldToEventLoop: () => gate,
+          }
+        )
+      : session.history;
+    await flushReaderChanges();
+    const runtimeSnapshot = {
+      acpSessionId: 'synthetic-agent-session',
+      basedOnUserTurnId: history[48]!.id,
+      revision: 1,
+      configOptionValues: { effort: 'high', plan_mode: false },
+    };
     let sent: readonly string[] | undefined;
+    let sentPlan: unknown;
     let selected: readonly string[] = [];
+    let selectedPlan: unknown;
+    let legacyPlan: unknown;
+    let tailHasUserTurn = false;
     function Stream() {
-      useConversationStreamItems(session.history, FIXTURE_SESSION_ID);
+      useConversationStreamItems(view, FIXTURE_SESSION_ID);
       return null;
     }
     function Composer() {
-      const tail = useConversationTail(session.history, { extendToLastUserTurn: true });
-      const config = resolveSessionConversationConfig(
-        collectConversationConfigSources(session.history, tail.from)
-      );
-      useSessionTurnFacts(session.history);
+      const tail = useConversationTail(view, { extendToLastUserTurn: true });
+      const sources = collectConversationConfigSources(view, tail.from);
+      const config = resolveSessionConversationConfig(sources);
+      const runtimeConfig = resolveSessionAcpRuntimeConfig(sources, [], runtimeSnapshot);
+      selectedPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: runtimeConfig,
+      }).configOptionValues.plan_mode;
+      legacyPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: resolveSessionAcpRuntimeConfig(sources, [], undefined),
+      }).configOptionValues.plan_mode;
+      tailHasUserTurn = tail.turns.some((turn) => turn.id === runtimeSnapshot.basedOnUserTurnId);
+      useSessionTurnFacts(view);
       selected = useSessionMcpSelection(config.mcpServerIds, { existingSession: true }).selectedIds;
       return (
         <>
@@ -677,6 +723,7 @@ it.each([false, true])(
           <button
             onClick={() => {
               sent = [...selected];
+              sentPlan = selectedPlan;
             }}
           >
             send
@@ -695,6 +742,9 @@ it.each([false, true])(
       await act(async () => vi.runAllTimersAsync());
       act(() => host.querySelector('button')!.click());
       const before = sent;
+      expect(sentPlan, 'send before body hydration keeps the reported Plan exit').toBe(false);
+      expect(legacyPlan, 'an older daemon without a snapshot keeps its turn config').toBe(true);
+      if (windowed) expect(tailHasUserTurn, 'exercise the unloaded body path').toBe(false);
       resume();
       await act(async () => {
         await gate;
@@ -702,10 +752,12 @@ it.each([false, true])(
         await vi.runAllTimersAsync();
       });
       expect(selected, 'after hydration').toEqual([]);
+      expect(selectedPlan, 'hydration must not change the reported Plan exit').toBe(false);
       expect(before, 'send while range loading').toEqual([]);
     } finally {
       resume();
       await act(async () => root.render(null));
+      if (view !== session.history) view.dispose();
       session.history.dispose();
       session.mirror.dispose();
       doc.free();

@@ -420,6 +420,23 @@ describe('CliSupervisor lifecycle actor', () => {
     expect(supervisor.getActiveChild()).toBe(second.child);
   });
 
+  it('finishes quit immediately when the CLI exits at three seconds of a ten second grace', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table);
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 10_000,
+      processOptions: { nodeProcess: table.api },
+    });
+    await supervisor.start();
+    const stopped = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(3_000);
+    table.exitOnItsOwn(run.pid);
+    await vi.advanceTimersByTimeAsync(20);
+    await stopped;
+    expect(supervisor.getState().phase).toBe('stopped');
+    expect(table.isAlive(run.pid)).toBe(false);
+  });
+
   it('escalates an unanswered graceful shutdown to SIGKILL and waits for the real exit', async () => {
     const table = new FakeProcessTable();
     const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
@@ -490,6 +507,44 @@ describe('CliSupervisor lifecycle actor', () => {
       phase: 'stopping',
       message: expect.stringContaining('did not exit after SIGKILL'),
     });
+
+    // A retry re-sends SIGKILL at once instead of waiting out another grace period.
+    const retry = supervisor.stop();
+    const retryFailure = expect(retry).rejects.toThrow('did not exit after SIGKILL');
+    await vi.advanceTimersByTimeAsync(600);
+    await retryFailure;
+  });
+
+  it('retries termination of a group member that survived SIGKILL after its leader exited', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
+    const descendant = table.addDescendant(run.pid, { ignores: ['SIGTERM', 'SIGKILL'] });
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 1_000,
+      forceKillWaitMs: 500,
+      processOptions: { nodeProcess: table.api },
+    });
+
+    await supervisor.start();
+    const first = supervisor.stop();
+    const firstFailure = expect(first).rejects.toThrow('did not exit after SIGKILL');
+    await vi.advanceTimersByTimeAsync(1_600);
+    await firstFailure;
+    expect(table.isAlive(run.pid)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(true);
+
+    // The leader is gone, but the group is not released: a retry must not report success.
+    const second = supervisor.stop();
+    const secondFailure = expect(second).rejects.toThrow('did not exit after SIGKILL');
+    // An already escalated run goes straight to SIGKILL instead of a second grace period.
+    await vi.advanceTimersByTimeAsync(600);
+    await secondFailure;
+
+    table.exitOnItsOwn(descendant);
+    const third = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(600);
+    await third;
+    expect(supervisor.getState().phase).toBe('stopped');
   });
 
   it('cancels an in-progress preparation before restart and spawns only the new generation', async () => {
@@ -583,55 +638,89 @@ describe('CliSupervisor lifecycle actor', () => {
     }
   });
 
-  it('becomes fatal after a second V8 OOM even when each run passed the healthy timer', async () => {
-    const first = createRun(580);
-    const second = createRun(581);
-    const spawn = vi
-      .fn<() => LaunchHandle>()
-      .mockReturnValueOnce(first.handle)
-      .mockReturnValueOnce(second.handle);
-    const supervisor = createSupervisor(async () => ({ spawn }), {
-      healthyRunMs: 500,
-      fatalOomWindowMs: 30 * 60_000,
-      fatalOomThreshold: 2,
-      decideExit: () => ({
-        action: 'retry',
-        countFailure: true,
-        failureClass: 'v8_oom',
-        message: 'worker V8 OOM',
-      }),
-    });
+  it.each(['cooldown', 'start', 'stop'] as const)(
+    'recovers repeated V8 OOMs through %s without a second host',
+    async (recovery) => {
+      const first = createRun(580);
+      const second = createRun(581);
+      const third = createRun(582);
+      const fourth = createRun(583);
+      const terminal = vi.fn();
+      const spawn = vi
+        .fn<() => LaunchHandle>()
+        .mockReturnValueOnce(first.handle)
+        .mockReturnValueOnce(second.handle)
+        .mockReturnValueOnce(third.handle)
+        .mockReturnValueOnce(fourth.handle);
+      const supervisor = createSupervisor(async () => ({ spawn }), {
+        healthyRunMs: 500,
+        onTerminal: terminal,
+        fatalOomWindowMs: 30 * 60_000,
+        fatalOomThreshold: 2,
+        decideExit: () => ({
+          action: 'retry',
+          countFailure: true,
+          failureClass: 'v8_oom',
+          message: 'worker V8 OOM',
+        }),
+      });
 
-    await supervisor.start();
-    await vi.advanceTimersByTimeAsync(600);
-    first.exit({
-      code: null,
-      signal: 'SIGABRT',
-      terminationKind: 'v8_oom',
-      stdout: '',
-      stderr: 'FATAL ERROR: Reached heap limit',
-    });
-    await flushMicrotasks();
-    expect(supervisor.getState().phase).toBe('reconnecting');
+      await supervisor.start();
+      await vi.advanceTimersByTimeAsync(600);
+      first.exit({
+        code: null,
+        signal: 'SIGABRT',
+        terminationKind: 'v8_oom',
+        stdout: '',
+        stderr: 'FATAL ERROR: Reached heap limit',
+      });
+      await flushMicrotasks();
+      expect(supervisor.getState().phase).toBe('reconnecting');
 
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(600);
-    second.exit({
-      code: null,
-      signal: 'SIGABRT',
-      terminationKind: 'v8_oom',
-      stdout: '',
-      stderr: 'FATAL ERROR: Reached heap limit',
-    });
-    await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(600);
+      second.exit({
+        code: null,
+        signal: 'SIGABRT',
+        terminationKind: 'v8_oom',
+        stdout: '',
+        stderr: 'FATAL ERROR: Reached heap limit',
+      });
+      await flushMicrotasks();
 
-    expect(supervisor.getState()).toMatchObject({
-      phase: 'fatal',
-      desiredState: 'running',
-    });
-    expect(supervisor.getState().message).toContain('exhausted its V8 heap 2 times');
-    expect(spawn).toHaveBeenCalledTimes(2);
-  });
+      expect(supervisor.getState()).toMatchObject({
+        phase: 'fatal',
+        desiredState: 'running',
+      });
+      expect(supervisor.getState().message).toContain('exhausted its V8 heap 2 times');
+      expect(supervisor.getState().retryInMs).toBe(10 * 60_000);
+      expect(terminal).not.toHaveBeenCalled();
+      if (recovery === 'stop') {
+        await supervisor.stop();
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(supervisor.getActiveChild()).toBeNull();
+        expect(supervisor.getState().phase).toBe('stopped');
+        return;
+      }
+      if (recovery === 'start') await supervisor.start();
+      else {
+        await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+        expect(supervisor.getActiveChild()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(supervisor.getActiveChild()).toBe(third.child);
+      third.exit({ code: 1, stdout: '', stderr: 'oom again' });
+      await flushMicrotasks();
+      expect(supervisor.getState().phase).toBe('reconnecting');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(supervisor.getActiveChild()).toBe(fourth.child);
+      fourth.exit({ code: 1, stdout: '', stderr: 'oom again' });
+      await flushMicrotasks();
+      expect(supervisor.getState().phase).toBe('fatal');
+      expect(supervisor.getState().retryInMs).toBe(10 * 60_000);
+      await supervisor.stop();
+    }
+  );
 
   it('attaches to a healthy external runtime without claiming or killing it', async () => {
     const runtime = {

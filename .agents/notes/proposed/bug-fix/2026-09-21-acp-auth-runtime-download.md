@@ -39,8 +39,8 @@ which downloads the runtime on the spot when it is not installed.
   status, launch, and retry until the cache directory was deleted by hand.
   Upstream #906 fixed this half first: pin-mismatched entries are treated as
   absent and reinstalled, startup cache maintenance tolerates per-runtime
-  failures, and unparseable metadata deliberately still hard-errors on
-  launch/install. This PR keeps that design and does not re-litigate it.
+  failures, and unparseable metadata still rejects launch. The owner-approved cache repair below
+  replaces the former permanent install/status rejection.
 
 ## Decision
 
@@ -65,10 +65,31 @@ Alternatives considered:
 - Refusing to download on the login path (require a Settings download first):
   safer, but changes first-run UX; download-on-login is now visible and
   cancellable instead.
-- Extending cache degradation to unparseable metadata and the reuse scan:
-  dropped after #906; torn writes are already invisible (the `.lody-complete`
-  marker is written after the metadata), and upstream deliberately keeps
-  launch/install loud about corrupt caches.
+- Corrupt metadata remains unlaunchable; status reports not-installed with a warning.
+  Repairs publish a verified sibling `<arch>.gen-<uuid>` and preserve the original
+  path and bytes, including on failed downloads. Same-version replacements also use
+  a generation; publication never deletes an existing installation. Status, install
+  and launch share selection across the base and all completed generations: filter
+  current pins and host compatibility first, then rank by installedAt and command.
+  Choosing a generation before checking pins hides valid same-version artifacts
+  from another build, causing offline failures and repeated downloads.
+  Bad older entries are skipped during reuse. Moving a directory before download,
+  or even after verification, breaks active readers: the manager owns installs but
+  has no process-lifetime leases to prove those readers absent. Independent generations
+  avoid that dependency and keep repair available. The existing best-effort scan
+  retains unreadable originals and generation trees conservatively; reclaiming those
+  trees requires future reader-lifetime evidence and may retain extra disk space.
+  The complete marker alone cannot repair corruption after publication.
+  Downloads stop after 60 seconds without data, with no total deadline: a fixed
+  ten-minute cap interrupts healthy slow transfers. Streaming writes directly to
+  `.downloads/*.part`, retained after idle timeout for the next Range request.
+  The outer cancellation catch only moves an already-complete archive back from
+  scratch; partial streaming recovery does not depend on that outer signal.
+  Consumer cancellation retains the existing independent leases and cleanup join.
+  Session/provider orchestration stays Promise-based; migrating those owners would
+  exceed this local fix. Provider setup download cancellation is not implemented:
+  its stop signal is not forwarded inside session-execution-service. That wiring
+  remains follow-up work outside this PR.
 
 ## Evidence
 

@@ -1,4 +1,5 @@
-import type { DeviceKind, Role } from '@lody/e2ee-core/protocol';
+import { historicalContentIdentity, type DeviceKind, type Role } from '@lody/e2ee-core/protocol';
+import { Result } from 'effect';
 import { bytesToHex, type VerifiedLedgerHistory } from './e2ee-ledger-history';
 
 /** Members are labelled by admission order on this page: member 1 created the workspace. */
@@ -35,6 +36,7 @@ export type LedgerEventSummary =
       member: LedgerMemberLabel;
       epoch: number;
     }
+  | { type: 'removeMember'; actor: LedgerMemberLabel | null; member: LedgerMemberLabel }
   | { type: 'declareCapabilities'; actor: LedgerMemberLabel | null; capabilities: string };
 
 export interface LedgerOverview {
@@ -44,6 +46,8 @@ export interface LedgerOverview {
   /** Same order as `history.records`. */
   events: LedgerEventSummary[];
 }
+
+type ReadableSigner = import('@lody/e2ee-core/protocol').Bytes.SigningPublicKey;
 
 const ROLE_ORDER: Record<Role, number> = { owner: 0, admin: 1, member: 2, guest: 3 };
 
@@ -58,14 +62,21 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
     ordinal: ordinals.get(membershipId) ?? null,
     membershipId,
   });
+  let contiguousPrefix = true;
   const admit = (membershipId: string) => {
-    if (!ordinals.has(membershipId)) ordinals.set(membershipId, ordinals.size + 1);
+    if (contiguousPrefix && !ordinals.has(membershipId))
+      ordinals.set(membershipId, ordinals.size + 1);
   };
-  const actorOf = (signer: string) => {
-    const membership = deviceMember.get(signer);
-    return membership === undefined ? null : label(membership);
+  const actorOf = (signer: ReadableSigner) => {
+    const membership = deviceMember.get(bytesToHex(signer.toBytes()));
+    if (membership !== undefined) return label(membership);
+    const identity = historicalContentIdentity(history.view, signer);
+    return Result.isFailure(identity)
+      ? null
+      : label(bytesToHex(identity.success.memberInstance.toBytes()));
   };
-  const events = history.records.map((record): LedgerEventSummary => {
+  const events = history.records.map((record, index): LedgerEventSummary => {
+    if (record.index !== index) contiguousPrefix = false;
     const body = record.body;
     const signer = bytesToHex(body.signer.toBytes());
     if (body.type === 'genesis') {
@@ -74,7 +85,7 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
       deviceMember.set(signer, membership);
       return { type: 'genesis', actor: label(membership) };
     }
-    const actor = actorOf(signer);
+    const actor = actorOf(body.signer);
     const op = body.operation;
     switch (op.type) {
       case 'admitMember': {
@@ -98,7 +109,12 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
       }
       case 'revokeDevice': {
         const device = bytesToHex(op.target.toBytes());
-        const owner = deviceMember.get(device);
+        const identity = historicalContentIdentity(history.view, op.target);
+        const owner =
+          deviceMember.get(device) ??
+          (Result.isSuccess(identity)
+            ? bytesToHex(identity.success.memberInstance.toBytes())
+            : undefined);
         return {
           type: 'revokeDevice',
           actor,
@@ -114,6 +130,12 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
         };
       case 'publishEpoch':
         return { type: 'publishEpoch', actor, epoch: op.epoch };
+      case 'removeMember':
+        return {
+          type: 'removeMember',
+          actor,
+          member: label(bytesToHex(op.membershipId.toBytes())),
+        };
       case 'removeMemberAndPublishEpoch':
         return {
           type: 'removeMemberAndPublishEpoch',

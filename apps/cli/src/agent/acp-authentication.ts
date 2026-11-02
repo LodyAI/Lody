@@ -35,7 +35,12 @@ import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
-import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
+import {
+  shutdownLocalAcpAgent,
+  spawnAcpProcess,
+  prepareAcpProcessEnvironmentLegacy,
+  terminateAcpProcessTree,
+} from './acp-runner';
 import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -564,6 +569,12 @@ export class AcpAuthenticationManager {
     magpieGatewayUrl?: string;
     env?: Record<string, string>;
     codexProfile?: ResolvedCodexProfile;
+    /**
+     * Sign-in method the reader picked from the advertised list, when the
+     * Machine RPC carried one. Protocol-driven sign-in uses it instead of
+     * asking again; a stale id falls back to the daemon's own selection.
+     */
+    methodId?: string;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
     authenticateManagedProfile?: (context: {
       signal: AbortSignal;
@@ -777,12 +788,17 @@ export class AcpAuthenticationManager {
       options.onProgress?.({ status: 'error', error: message });
       return { success: false, disposition: 'error', error: message };
     } finally {
-      await releaseProfile?.();
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      if (this.runningByAgentType.get(options.agentType) === running) {
-        this.runningByAgentType.delete(options.agentType);
+      try {
+        await releaseProfile?.();
+      } catch {
+        this.logger.warn(
+          'Codex authentication process record cleanup failed; retained for recovery'
+        );
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (this.runningByAgentType.get(options.agentType) === running) {
+          this.runningByAgentType.delete(options.agentType);
+        }
       }
     }
   }
@@ -934,6 +950,7 @@ export class AcpAuthenticationManager {
       agentConfigId?: string;
       magpieGatewayUrl?: string;
       env?: Record<string, string>;
+      methodId?: string;
       onProgress?: (event: AcpAuthenticationProgressEvent) => void;
     },
     running: RunningAuthentication
@@ -947,12 +964,16 @@ export class AcpAuthenticationManager {
       magpieGatewayUrl: options.magpieGatewayUrl,
       signal: running.abortController.signal,
     });
-    const env = await buildAuthenticationProcessEnv({
+    const env = await prepareAcpProcessEnvironmentLegacy(
       launch,
-      agentType: options.agentType,
-      env: options.env,
-      resolveLoginShellEnv: this.resolveLoginShellEnv,
-    });
+      await buildAuthenticationProcessEnv({
+        launch,
+        agentType: options.agentType,
+        env: options.env,
+        resolveLoginShellEnv: this.resolveLoginShellEnv,
+      }),
+      { logger: this.logger, signal: running.abortController.signal, cwd: process.cwd() }
+    );
     // The process stdout is the ACP JSON-RPC channel. In a headless shell,
     // TERM can make browser launchers fall back to w3m/lynx and render HTML
     // onto stdout, corrupting that channel.
@@ -1138,7 +1159,17 @@ export class AcpAuthenticationManager {
                     );
                   }
                   let methodId: string | undefined;
-                  if (methods.length === 1) {
+                  // A method picked before the flow started is honored only while
+                  // the agent still advertises it: the list the reader saw may
+                  // come from an older probe or an older agent build.
+                  const requestedMethodId = options.methodId?.trim() || undefined;
+                  if (
+                    requestedMethodId &&
+                    methods.some((method) => method.id === requestedMethodId)
+                  ) {
+                    methodId = requestedMethodId;
+                  }
+                  if (!methodId && methods.length === 1) {
                     methodId = methods[0]?.id;
                   }
                   if (!methodId) {

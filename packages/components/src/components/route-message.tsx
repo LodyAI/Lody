@@ -17,11 +17,16 @@ export function RouteMessage({
   title,
   description = '',
   onRetry,
+  actionLabel,
+  testId,
 }: {
+  testId?: string;
   gate: string | null;
   title: string;
   description?: string;
   onRetry?: () => void;
+  /** Replaces the Retry label for a terminal message's single explicit action. */
+  actionLabel?: string;
 }) {
   const { t } = useTranslation();
   const observationRef = useRef(useWorkspaceDataScopeState());
@@ -34,7 +39,7 @@ export function RouteMessage({
 
   if (showRecovery && gate !== null) return <FailedScreenRecovery gate={gate} />;
   return (
-    <div className="flex min-h-[100dvh] w-full items-center justify-center bg-background p-6 text-center">
+    <div data-testid={testId} className="flex min-h-[100dvh] w-full items-center justify-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-1">
         <div className="text-sm font-medium text-foreground">{title}</div>
         {description ? (
@@ -43,7 +48,7 @@ export function RouteMessage({
         {gate === null ? (
           onRetry ? (
             <Button variant="secondary" onClick={onRetry}>
-              {t('common.retry')}
+              {actionLabel ?? t('common.retry')}
             </Button>
           ) : null
         ) : (

@@ -3,6 +3,7 @@ import { useState, type ComponentProps } from 'react';
 import type { ConversationMessage, SessionMeta } from '@lody/shared';
 import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { PlaintextCopyConfirmationView } from '@/hooks/use-plaintext-copy';
 
 const meta = {
   title: 'Sessions/ChatShareImageDialog',
@@ -15,6 +16,11 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const DecryptedCopyConfirmation: Story = {
+  args: { open: true, onOpenChange: () => {}, session: null, messages: [] },
+  render: () => <PlaintextCopyConfirmationView open onAnswer={() => {}} />,
+};
 
 // Synthetic fixtures only — never real transcripts.
 const multiTurnMessages: ConversationMessage[] = [

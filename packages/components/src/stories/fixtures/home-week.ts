@@ -163,7 +163,9 @@ const pr = (number: number, status: HomeNowPr['status'], ci: HomeNowPr['ci'], re
 });
 
 /** A synthetic afternoon: agents running, two asking for the person, a failed check, drafts. */
-export function homeNowFixture(kind: 'busy' | 'quiet' | 'starting' = 'busy'): HomeNowModel {
+export function homeNowFixture(
+  kind: 'busy' | 'quiet' | 'starting' | 'idle' = 'busy'
+): HomeNowModel {
   if (kind === 'quiet') return buildHomeNow({ rows: [] }, HOME_WEEK_NOW.getTime());
   if (kind === 'starting') {
     // The first agent of the afternoon: the board's quiet card gives way to the lists.
@@ -218,5 +220,15 @@ export function homeNowFixture(kind: 'busy' | 'quiet' | 'starting' = 'busy'): Ho
     nowRow('s-recent-3', 'Read the README', 2100),
     nowRow('s-recent-4', 'Run the test suite', 2400),
   ];
-  return buildHomeNow({ rows }, HOME_WEEK_NOW.getTime());
+  return buildHomeNow(
+    {
+      rows:
+        kind === 'idle'
+          ? rows.map((session) =>
+              session.working ? { ...session, working: false, unread: true } : session
+            )
+          : rows,
+    },
+    HOME_WEEK_NOW.getTime()
+  );
 }

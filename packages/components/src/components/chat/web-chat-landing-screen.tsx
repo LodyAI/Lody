@@ -153,10 +153,8 @@ export function WebChatLandingScreen({
           <div aria-hidden="true" {...stylex.props(stage.below)} />
         </div>
 
-        {/* Docked composer. Reuse the session composer's shell class verbatim so the
-            landing inherits its exact bottom docking + iPad `--native-keyboard-height`
-            lift and can never drift from the session composer. Hints sit above the
-            composer so its bottom edge stays pinned to the shell when a hint toggles. */}
+        {/* The workspace root owns the native keyboard lift; the composer shell
+            supplies only safe-area spacing. Hints stay above the composer. */}
         <div className={getSessionChatInputAreaShellClassName()}>
           <ConversationColumn className="@container">
             {noMachineHint != null ? <div className="pb-2">{noMachineHint}</div> : null}

@@ -86,6 +86,45 @@ describe('MachineDocument ACP capabilities', () => {
     expect([...flock.rows.values()][0]?.value).toMatchObject({ acknowledgedSteer: true });
   });
 
+  it('keeps advertised sign-in methods when the writer did not ask the agent again', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T00:00:00.000Z'));
+    const flock = new FakeMachineFlock();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId
+    );
+    const write = (authMethods?: { type: 'agent'; id: string; name: string }[]) =>
+      document.updateAcpCapabilities(
+        'config-1' as AgentConfigId,
+        'registry',
+        'opencode',
+        [],
+        [{ modelId: 'model-a', name: 'Model A' }],
+        undefined,
+        undefined,
+        false,
+        'opencode@1.0.0',
+        undefined,
+        true,
+        undefined,
+        { authMethods }
+      );
+
+    await write([{ type: 'agent', id: 'oauth', name: 'OAuth' }]);
+    // A session-created capability update never asked the agent again.
+    await expect(write()).resolves.toMatchObject({
+      authMethods: [{ type: 'agent', id: 'oauth', name: 'OAuth' }],
+    });
+    // A probe that did ask, and found none, clears the list.
+    await expect(write([])).resolves.toMatchObject({ authMethods: [] });
+  });
+
   it('rewrites an unchanged entry only once it is old enough to need renewing', async () => {
     vi.useFakeTimers();
     const start = new Date('2026-07-15T00:00:00.000Z').getTime();

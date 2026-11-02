@@ -298,6 +298,7 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
     sizeBytes: block.sizeBytes,
@@ -325,6 +326,7 @@ const toFilePayload = (
   return {
     type: 'file',
     fileId: block.fileId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     fileName: block.fileName,
     mimeType: block.mimeType,
     sizeBytes: block.sizeBytes,

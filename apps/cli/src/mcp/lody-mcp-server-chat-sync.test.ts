@@ -10,9 +10,11 @@ import {
   type LodyOperationCompletion,
   type LodyOperationItemResult,
   type SessionId,
+  type MachineId,
 } from '@lody/shared';
 import { LodyOperationStoreError, type LodyOperationStore } from '@/orchestration/operation-store';
 import type { SessionToolHandlers } from './session-tool-router';
+import { runWithDaemonWorkspace } from '@/lib/session-command-environment';
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
@@ -92,7 +94,10 @@ vi.mock('@/session/session-backend', async (importOriginal) => {
     createSessionBackend: vi.fn(async (doc, meta) =>
       doc?.sessionData
         ? actual.createSessionBackend(doc, meta)
-        : { history: { readTurn: mocks.readTurn }, readHistory: async () => [] }
+        : {
+            history: { readTurn: mocks.readTurn, readMetadata: async () => [] },
+            readHistory: async () => [],
+          }
     ),
   };
 });
@@ -120,6 +125,7 @@ import {
 
 import {
   MachineFlockReadUnavailableError,
+  MachineOfflineError,
   resolveEffectiveSessionCreateDispatchConfig,
 } from '@/commands/session';
 import { LoroRepo, RepoTransportError } from 'loro-repo';
@@ -130,7 +136,11 @@ import type { AgentConfigMeta, WorkspaceId } from '@lody/shared';
 import { MachineAccessVerificationError } from '@/session/session-access-retry';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 
-import { __lodyMcpServerInternals, buildSessionToolServer } from './lody-mcp-server';
+import {
+  __lodyMcpServerInternals,
+  buildSessionToolServer,
+  runWithMcpSessionContext,
+} from './lody-mcp-server';
 
 const {
   mcpErrorResult,
@@ -224,6 +234,50 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('returns an explicit Inbox error before opening storage, then accepts calls after recovery', async () => {
+  let available = false;
+  const handlers: SessionToolHandlers = new Map();
+  const server = buildSessionToolServer(handlers);
+  const handler = handlers.get('lody_operation_get');
+  if (!handler) throw new Error('operation_get handler missing');
+  const call = () =>
+    runWithMcpSessionContext(
+      {
+        machineId: 'machine-id',
+        workspaceId: 'workspace-id',
+        sessionId: requesterSession.id as SessionId,
+        localControlSocketPath: undefined,
+        workdir: '/tmp',
+        assertOperationInboxAvailable: () => {
+          if (!available)
+            throw new LodyOperationStoreError(
+              'INBOX_UNAVAILABLE',
+              'Inbox is temporarily unavailable',
+              true
+            );
+        },
+      },
+      () => handler({ operationId: 'startup-test' })
+    );
+  try {
+    const degraded = await call();
+    expect(degraded.isError).toBe(true);
+    expect(JSON.parse((degraded.content[0] as { text: string }).text)).toMatchObject({
+      ok: false,
+      error: { code: 'INBOX_UNAVAILABLE', retryable: true },
+    });
+    available = true;
+    mocks.snapshot.mockReturnValue({ operationId: 'startup-test', state: 'active' });
+    const recovered = await call();
+    expect(JSON.parse((recovered.content[0] as { text: string }).text)).toMatchObject({
+      operationId: 'startup-test',
+      state: 'active',
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 describe('session chat prevalidation sync failures', () => {
   beforeEach(() => {
     mocks.validateSessionChatTarget.mockRejectedValue(
@@ -294,6 +348,18 @@ describe('turn-scoped reverse chat rejection', () => {
   let root: string;
   let writer: ReturnType<typeof createHistoryWriter>;
   let delivered: { sessionId: string; prompt: string }[];
+
+  const withActiveRuntime = <T>(run: () => Promise<T>) =>
+    runWithDaemonWorkspace(
+      {
+        workspaceId: 'workspace-id' as WorkspaceId,
+        machineId: requesterSession.machineId as MachineId,
+        userId: requesterSession.userId,
+        manager: {} as LoroDocumentManager,
+        readInvocation: mocks.activeInvocation,
+      },
+      run
+    );
 
   const setInput = (turnId: string, senderSessionId?: string) => {
     writer.append({
@@ -442,7 +508,8 @@ describe('turn-scoped reverse chat rejection', () => {
             machineName: 'Local',
           } as never,
           { id: 'workspace-id', name: 'Workspace', slug: 'workspace', role: 'owner' },
-          {} as never,
+          // An ordinary workspace: recovery keeps its existing, unencrypted path.
+          { isEncryptedWorkspace: () => false } as never,
           'Recovered work',
           {
             workspaceMetaPrewriteSatisfied: true,
@@ -550,36 +617,87 @@ describe('turn-scoped reverse chat rejection', () => {
     }
   );
 
-  it('rejects only the reverse item in a mixed batch and persists the unrelated target once', async () => {
-    const thirdSession = { ...targetSession, id: 'third-session-id' };
-    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
-      const session = [requesterSession, targetSession, thirdSession].find(
-        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
-      );
-      return session ? { meta: session } : undefined;
-    });
-    const args = {
-      operationId: 'mixed-batch',
-      items: [
-        { sessionId: targetSession.id, prompt: 'Reply to A' },
-        { sessionId: thirdSession.id, prompt: 'Work for C' },
-      ],
-    };
-    await startSessionChatManyOperation(args);
-    const accepted = store.get(requesterSession.id as SessionId, args.operationId);
-    expect(accepted.items[0]).toMatchObject({
-      status: 'failed',
-      error: { code: 'REVERSE_CHAT_FORBIDDEN', retryable: false },
-    });
-    expect(accepted.items[1]).toMatchObject({
-      status: 'active',
-      inputDurable: true,
-      target: { sessionId: thirdSession.id },
-    });
-    expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
-    await startSessionChatManyOperation(args);
-    expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
-  });
+  it.each(['history', 'runtime'] as const)(
+    'rejects only the reverse item using %s provenance and persists the unrelated target once',
+    async (source) => {
+      if (source === 'runtime') {
+        mocks.activeInvocation.mockReturnValue({
+          ...mocks.activeInvocation(),
+          sender: { kind: 'agent', sessionId: targetSession.id },
+        });
+        mocks.readTurn.mockImplementation(async (id: string) => {
+          if (!id.startsWith('assistant:')) throw new Error('Input history unavailable');
+          return sessionData.history.readTurn(id);
+        });
+      }
+      const thirdSession = { ...targetSession, id: 'third-session-id' };
+      mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+        const session = [requesterSession, targetSession, thirdSession].find(
+          (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+        );
+        return session ? { meta: session } : undefined;
+      });
+      const args = {
+        operationId: 'mixed-batch',
+        items: [
+          { sessionId: targetSession.id, prompt: 'Reply to A' },
+          { sessionId: thirdSession.id, prompt: 'Work for C' },
+        ],
+      };
+      const dispatch = () => startSessionChatManyOperation(args);
+      await (source === 'runtime' ? withActiveRuntime(dispatch) : dispatch());
+      const accepted = store.get(requesterSession.id as SessionId, args.operationId);
+      expect(accepted.items[0]).toMatchObject({
+        status: 'failed',
+        error: { code: 'REVERSE_CHAT_FORBIDDEN', retryable: false },
+      });
+      expect(accepted.items[1]).toMatchObject({
+        status: 'active',
+        inputDurable: true,
+        target: { sessionId: thirdSession.id },
+      });
+      expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
+      await (source === 'runtime' ? withActiveRuntime(dispatch) : dispatch());
+      expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
+    }
+  );
+
+  it.each(['single', 'batch'] as const)(
+    'accepts a %s chat from a Goal turn without an input history row',
+    async (kind) => {
+      writer.append({
+        id: 'assistant:goal:resume:synthetic',
+        role: 'assistant',
+        timestamp: '2026-10-12T00:00:00Z',
+        author: {
+          v: 1,
+          kind: 'agent',
+          sessionId: requesterSession.id,
+          turnId: 'goal:resume:synthetic',
+          name: 'Agent B',
+        },
+        items: [],
+        fileDiff: [],
+      });
+      mocks.activeInvocation.mockReturnValue({
+        ...mocks.activeInvocation(),
+        sourceTurnId: 'goal:resume:synthetic',
+        sender: { kind: 'user' },
+      });
+      const args = { sessionId: targetSession.id, prompt: 'Continue the task' };
+      if (kind === 'single') {
+        await withActiveRuntime(() =>
+          startSessionChatOperation({ ...args, operationId: 'goal-single' })
+        );
+      } else {
+        await withActiveRuntime(() =>
+          startSessionChatManyOperation({ operationId: 'goal-batch', items: [args] })
+        );
+      }
+      expect(storedOperations()).toHaveLength(1);
+      expect(delivered).toEqual([args]);
+    }
+  );
 
   it.each(['human', 'another-agent'] as const)(
     'allows a later %s input to chat to A despite the earlier delegated turn',
@@ -753,6 +871,151 @@ describe('Machine catalog retry guidance and accepted chat recovery', () => {
   });
 });
 
+describe('chat Machine offline verdicts', () => {
+  const remoteSession = {
+    ...targetSession,
+    id: 'remote-session-id',
+    machineId: 'remote-machine-id',
+  };
+  const offline = {
+    code: 'MACHINE_OFFLINE',
+    message: 'Target Machine is offline: remote-machine-id',
+    retryable: true,
+  };
+  let stored: { state: string; items: LodyOperationItemResult[] } | undefined;
+  let delivered: string[];
+
+  const errorOf = (result: ReturnType<typeof mcpErrorResult>) => {
+    const content = result.content[0];
+    if (!content || content.type !== 'text') throw new Error('expected text result');
+    return (JSON.parse(content.text) as { error: unknown }).error;
+  };
+
+  beforeEach(() => {
+    stored = undefined;
+    delivered = [];
+    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+      const session = [requesterSession, remoteSession].find(
+        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+      );
+      return session ? { meta: session } : undefined;
+    });
+    mocks.validateSessionChatTarget.mockResolvedValue(remoteSession);
+    mocks.accept.mockImplementation((input: { items: LodyOperationItemResult[] }) => {
+      stored = { state: 'active', items: input.items };
+      return {
+        operation: stored,
+        claimedItemIndexes: input.items.flatMap((item, index) =>
+          item.status === 'active' ? [index] : []
+        ),
+      };
+    });
+    mocks.sendSessionChatResult.mockImplementation(
+      async (
+        _auth: unknown,
+        _workspace: unknown,
+        _manager: unknown,
+        sessionId: string,
+        prompt: string,
+        _config: unknown,
+        _output: unknown,
+        _requester: unknown,
+        orchestration: { userTurnId: string }
+      ) => {
+        delivered.push(`${sessionId}:${prompt}`);
+        return { sessionId, userTurnId: orchestration.userTurnId };
+      }
+    );
+    mocks.get.mockImplementation(() => stored);
+    mocks.snapshot.mockImplementation((operation) => operation);
+  });
+
+  it('keeps an accepted chat active for replay when its Machine goes offline before delivery', async () => {
+    mocks.sendSessionChatResult.mockRejectedValue(
+      new MachineOfflineError({ machineId: 'remote-machine-id' })
+    );
+
+    const result = await startSessionChatOperation({
+      operationId: 'offline-before-materialization',
+      sessionId: remoteSession.id,
+      prompt: 'continue',
+    });
+
+    expect(result).toEqual({
+      state: 'active',
+      items: [expect.objectContaining({ status: 'active', inputDurable: false })],
+    });
+  });
+
+  it('keeps the validator offline verdict retryable instead of COMMAND_REJECTED', async () => {
+    mocks.validateSessionChatTarget.mockRejectedValue(
+      new MachineOfflineError({ machineId: 'remote-machine-id' })
+    );
+
+    const single = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'went-offline-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(single)).toEqual(offline);
+    expect(stored).toBeUndefined();
+
+    await startSessionChatManyOperation({
+      operationId: 'went-offline-batch',
+      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
+    });
+    expect(stored?.items).toEqual([expect.objectContaining({ status: 'failed', error: offline })]);
+    expect(delivered).toEqual([]);
+  });
+
+  it('keeps access and archive rejections as their original errors', async () => {
+    const accessError = new MachineAccessVerificationError(false, 1, new Error('Unauthorized'));
+    mocks.validateSessionChatTarget.mockRejectedValue(accessError);
+    const access = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'denied-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(access)).toEqual({
+      code: 'MACHINE_ACCESS_CHECK_FAILED',
+      message: accessError.message,
+      retryable: false,
+    });
+
+    const archived = `Session ${remoteSession.id} is archived. Restore it before chatting.`;
+    mocks.validateSessionChatTarget.mockRejectedValue(new Error(archived));
+    const single = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'archived-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(single)).toEqual({
+      code: 'COMMAND_REJECTED',
+      message: archived,
+      retryable: false,
+    });
+    expect(stored).toBeUndefined();
+
+    await startSessionChatManyOperation({
+      operationId: 'archived-batch',
+      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
+    });
+    expect(stored?.items).toEqual([
+      expect.objectContaining({
+        status: 'failed',
+        error: { code: 'INVALID_ITEM', message: archived, retryable: false },
+      }),
+    ]);
+    expect(delivered).toEqual([]);
+  });
+});
+
 describe('session create prevalidation failures', () => {
   const syncFailures = [
     {
@@ -780,6 +1043,56 @@ describe('session create prevalidation failures', () => {
       }),
     },
   ];
+
+  it('preserves omitted, empty, and explicit MCP selections through batch creation', async () => {
+    let acceptedInput:
+      | {
+          items: LodyOperationItemResult[];
+          frozenContinuationConfig: { targetDispatchConfigs: unknown[] };
+          canonicalCommand: { items: Record<string, unknown>[] };
+        }
+      | undefined;
+    mocks.accept.mockImplementation((input: unknown) => {
+      acceptedInput = input as NonNullable<typeof acceptedInput>;
+      return { operation: { ...acceptedInput, state: 'active' }, claimedItemIndexes: [0, 1, 2] };
+    });
+    mocks.snapshot.mockImplementation((operation: unknown) => operation);
+    mocks.validateSessionCreateOptions.mockImplementation(
+      ({ dispatchConfig }: { dispatchConfig: unknown }) => dispatchConfig
+    );
+    const createdConfigs: unknown[] = [];
+    mocks.createSessionResult.mockImplementation(
+      async (_auth, _workspace, _manager, _prompt, options, dispatchConfig) => {
+        createdConfigs.push(dispatchConfig);
+        return { sessionId: options.sessionId, userTurnId: options.userTurnId };
+      }
+    );
+
+    await startSessionCreateManyOperation({
+      operationId: 'mcp-selection-batch',
+      items: [
+        { prompt: 'use target defaults' },
+        { prompt: 'select none', mcpServerIds: [] },
+        { prompt: 'select servers', mcpServerIds: ['server-a', 'server-b'] },
+      ],
+    });
+
+    expect(acceptedInput?.canonicalCommand.items.map((item) => item.mcpServerIds)).toEqual([
+      undefined,
+      [],
+      ['server-a', 'server-b'],
+    ]);
+    const selection = (config: unknown) =>
+      config && typeof config === 'object' && 'mcpServerIds' in config
+        ? config.mcpServerIds
+        : undefined;
+    expect(acceptedInput?.frozenContinuationConfig.targetDispatchConfigs.map(selection)).toEqual([
+      undefined,
+      [],
+      ['server-a', 'server-b'],
+    ]);
+    expect(createdConfigs.map(selection)).toEqual([undefined, [], ['server-a', 'server-b']]);
+  });
 
   it.each([
     { field: 'builtinDefaultModeId', value: 'agent-auto-review' },

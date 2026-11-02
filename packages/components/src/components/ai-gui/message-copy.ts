@@ -6,6 +6,7 @@ import {
   type MessageTextSpanKind,
 } from '@lody/shared';
 import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
+import { restoreMessageQuoteDrafts, type PastedTextDraft } from '@/lib/pasted-text-draft';
 
 export const USER_TEXT_RENDER_LINE_LIMIT = 10;
 export const USER_TEXT_RENDER_CHAR_LIMIT = 900;
@@ -95,6 +96,32 @@ export const getTextContentFromMessageItems = (items: MessageContent[]): string 
     .map(getCopyableItemText)
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
+
+export function getMessageQuoteEditDraft(items: MessageContent[]): {
+  text: string;
+  drafts: PastedTextDraft[];
+} {
+  let text = '';
+  const drafts: PastedTextDraft[] = [];
+  for (const item of items) {
+    const value = getCopyableItemText(item);
+    if (!value.trim()) continue;
+    if (text) text += '\n\n';
+    const restored = restoreMessageQuoteDrafts(
+      value,
+      item.type === 'text' ? item.spans : undefined
+    );
+    drafts.push(
+      ...restored.drafts.map((draft) => ({
+        ...draft,
+        start: draft.start + text.length,
+        end: draft.end + text.length,
+      }))
+    );
+    text += restored.text;
+  }
+  return { text, drafts };
+}
 
 /**
  * Span kinds that are copied as what the user wrote, not as what the agent read.

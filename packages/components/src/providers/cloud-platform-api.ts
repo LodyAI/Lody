@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import type { CloudAction, CloudApi, CloudMutation, CloudQuery } from '@lody/platform';
 import {
+  useOptionalRecoverableConvexQuery,
   usePublicConvexQuery,
   useRecoverableConvexQuery,
 } from '@/hooks/use-recoverable-convex-query';
@@ -76,4 +77,15 @@ export function useCloudPlatformClient() {
     }),
     [client]
   );
+}
+
+/** Optional catalog failures remain data, so unrelated workspace surfaces can continue. */
+export function useOptionalCloudPlatformQuery<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  args: Args | 'skip'
+): { data: Result | undefined; error: Error | null } {
+  return useOptionalRecoverableConvexQuery(
+    queryReference(operation),
+    args as Parameters<typeof useOptionalRecoverableConvexQuery>[1]
+  ) as { data: Result | undefined; error: Error | null };
 }

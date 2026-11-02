@@ -22,6 +22,7 @@ export type VisibleLocalProjectEntry = {
 };
 
 type BuildArgs = {
+  includeMemberOnly?: boolean;
   rawMachines: Map<MachineId, MachineViewMeta>;
   machineAccessByMachineId: ReadonlyMap<MachineId, MachineVisibilityAccess>;
   convexAccessRows: ReadonlyArray<LocalProjectVisibilityAccess>;
@@ -31,6 +32,7 @@ type BuildArgs = {
 
 export type VisibleLocalProjectIndex = {
   projects: Map<string, VisibleLocalProjectEntry>;
+  registeredProjects: Map<string, VisibleLocalProjectEntry>;
   accessByProjectKey: Map<string, LocalProjectVisibilityAccess>;
   accessByMachineId: ReadonlyMap<MachineId, MachineVisibilityAccess>;
   isLoading: boolean;
@@ -57,6 +59,7 @@ export function buildVisibleLocalProjectIndex({
   convexAccessRows,
   currentUserId,
   isLoading,
+  includeMemberOnly = false,
 }: BuildArgs): VisibleLocalProjectIndex {
   const accessByProjectKey = new Map<string, LocalProjectVisibilityAccess>();
 
@@ -110,7 +113,10 @@ export function buildVisibleLocalProjectIndex({
   }
 
   return {
-    projects,
+    registeredProjects: projects,
+    projects: includeMemberOnly
+      ? projects
+      : new Map([...projects].filter(([, entry]) => entry.project.standaloneVisible !== false)),
     accessByProjectKey,
     accessByMachineId: machineAccessByMachineId,
     isLoading,

@@ -8,7 +8,8 @@ import { makeSqliteRecipientMailbox, type RecipientMailboxRemote } from './harne
 import { makeSqliteKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import { envelopeFixture, recipientPair } from './fixture';
 import { synthetic } from './protection-fixture';
-import { prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
+import { ContentError, prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
+import { Bytes, possessionSigningBytes } from '@lody/e2ee-core/protocol';
 import { mailboxDigest } from '@lody/e2ee-core/protocol';
 const ok = Result.getOrThrow,
   hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
@@ -33,6 +34,103 @@ const inspect = (file: string) => {
   }
 };
 describe('real recipient receive/repair/fetch composition', () => {
+  it.each(['retired', 'unknown'] as const)(
+    'skips a %s sender without installing it or starving the next row; unknown bytes retry after ledger refresh',
+    async (kind) => {
+      const f = envelopeFixture(),
+        dir = directory(),
+        pair = await recipientPair();
+      const third = f.ed(12),
+        enc = new Uint8Array(32).fill(12);
+      const membershipId = f.view().inspectState().devices.get(hex(f.owner.raw))!.membershipId;
+      const admit = () =>
+        f.append([
+          4,
+          0,
+          third.raw,
+          enc,
+          third.signBytes(
+            ok(
+              possessionSigningBytes({
+                genesis: f.context.genesis,
+                targetMembershipId: membershipId,
+                signingPublicKey: third.publicKey,
+                encryptionPublicKey: ok(Bytes.encryptionPublicKey(enc)),
+                kind: 'personal',
+              })
+            )
+          ),
+        ]);
+      const oldView = f.view();
+      admit();
+      const senderFrame = await Effect.runPromise(
+        prepareEpochEnvelope({
+          context: { ...f.context, sender: third.publicKey },
+          key: f.secret,
+          signer: third.signer,
+          ledger: f.ledger,
+        })
+      );
+      if (kind === 'retired') f.append([5, third.raw]);
+      let local = kind === 'unknown' ? oldView : f.view();
+      const good = await Effect.runPromise(f.prepare());
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const host = yield* makeSqliteKeyMailbox({
+              path: path.join(dir, 'host.sqlite'),
+              mode: 'create',
+              genesis: f.context.genesis,
+              ledger: f.ledger,
+            });
+            const bound = ok(host.bind(f.phone.publicKey));
+            const client = yield* makeSqliteRecipientMailbox({
+              path: path.join(dir, 'receive.sqlite'),
+              mode: 'create',
+              genesis: f.context.genesis,
+              signer: f.phone.signer,
+              pair,
+              ledger: () => Effect.sync(() => local),
+              remote: {
+                ...bound,
+                fetch: () =>
+                  Effect.succeed({
+                    items: [
+                      { sender: hex(third.raw), frame: senderFrame },
+                      { sender: hex(f.owner.raw), frame: good },
+                    ],
+                    next: 'later-page',
+                  }),
+              },
+              repairStore: { path: path.join(dir, 'repair.sqlite'), mode: 'create' },
+              keyStore: {
+                path: path.join(dir, 'keys.sqlite'),
+                mode: 'create',
+                protector: synthetic().protector,
+              },
+            });
+            const page = yield* client.fetchAndInstall();
+            expect(page).toMatchObject({ processed: 2, next: 'later-page' });
+            expect(inspect(path.join(dir, 'receive.sqlite'))).toHaveLength(1);
+            expect(page.retiredDigests ?? []).toEqual(
+              kind === 'retired' ? [mailboxDigest(senderFrame)] : []
+            );
+            expect(page.refreshRequired ?? false).toBe(kind === 'unknown');
+            const db = new Database(path.join(dir, 'host.sqlite'));
+            expect(db.prepare('SELECT COUNT(*) AS n FROM mailbox_rejected').get()).toEqual({
+              n: 0,
+            });
+            db.close();
+            if (kind === 'unknown') {
+              local = f.view();
+              yield* client.fetchAndInstall();
+              expect(inspect(path.join(dir, 'receive.sqlite'))).toHaveLength(2);
+            }
+          })
+        )
+      );
+    }
+  );
   it('fetches through the actual bound mailbox, installs protected keys/reports, and performs durable repair with retained usable ciphertext', async () => {
     const f = envelopeFixture(),
       dir = directory(),
@@ -96,6 +194,57 @@ describe('real recipient receive/repair/fetch composition', () => {
       )
     );
   });
+  it('does not authorize rejecting an envelope when local report signing fails', async () => {
+    const f = envelopeFixture(),
+      dir = directory(),
+      pair = await recipientPair();
+    const frame = await Effect.runPromise(f.prepare());
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const host = yield* makeSqliteKeyMailbox({
+            path: path.join(dir, 'host.sqlite'),
+            mode: 'create',
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+          });
+          const sender = ok(host.bind(f.owner.publicKey)),
+            remote = ok(host.bind(f.phone.publicKey));
+          yield* sender.put('ac'.repeat(16), frame);
+          const client = yield* makeSqliteRecipientMailbox({
+            path: path.join(dir, 'receive.sqlite'),
+            mode: 'create',
+            genesis: f.context.genesis,
+            signer: {
+              ...f.phone.signer,
+              sign: () => Effect.fail(new ContentError({ code: 'bad-signature' })),
+            },
+            pair,
+            ledger: f.ledger,
+            remote,
+            repairStore: { path: path.join(dir, 'repair.sqlite'), mode: 'create' },
+            keyStore: {
+              path: path.join(dir, 'keys.sqlite'),
+              mode: 'create',
+              protector: synthetic().protector,
+            },
+          });
+          const result = yield* Effect.result(client.fetchAndInstall());
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isSuccess(result)) throw new Error('expected report signing failure');
+          expect(result.failure).toMatchObject({
+            cryptographicRejection: false,
+            cause: { code: 'bad-signature' },
+          });
+          expect((yield* remote.fetch(0, null, 100)).items).toHaveLength(1);
+          expect(inspect(path.join(dir, 'receive.sqlite'))).toMatchObject([
+            { phase: 'Install', report: null },
+          ]);
+        })
+      )
+    );
+  });
+
   it('identifies a signed unopenable first envelope for durable targeted repair without skipping the page', async () => {
     const f = envelopeFixture(),
       dir = directory(),
@@ -158,6 +307,7 @@ describe('real recipient receive/repair/fetch composition', () => {
             recipient: hex(f.phone.raw),
             sender: hex(f.owner.raw),
             frameDigest: mailboxDigest(bad),
+            cryptographicRejection: true,
           });
           expect(failed.failure).not.toHaveProperty('next');
           expect(inspect(config.path)).toEqual([{ phase: 'Install', report: null }]);

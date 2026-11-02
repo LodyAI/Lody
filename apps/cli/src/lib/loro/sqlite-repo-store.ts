@@ -1,4 +1,6 @@
 import fs from 'fs/promises';
+import Database from 'better-sqlite3';
+import { z } from 'zod';
 import path from 'path';
 import {
   InMemoryRemoteCursorStore,
@@ -63,6 +65,45 @@ export class AliasedRemoteCursorStore<
   }
 }
 
+const checkpointRow = z.object({ generation: z.string().min(1), cursors: z.string() });
+const remoteCursor = z.object({
+  streamUrl: z.string().url(),
+  nextOffset: z
+    .string()
+    .min(1)
+    .refine((offset) => offset !== '-1'),
+  serverLowerBoundVersion: z.record(z.string(), z.unknown()),
+  updatedAtMs: z.number(),
+});
+
+/**
+ * Read-only compatibility with the pinned Repo SQLite checkpoint format.
+ * Local row writes and replica acquisition can create a generation, but no cursor.
+ * Remote cursor saves follow the matching replica's durable receive barrier.
+ */
+export function hasPersistedFlockRemoteState(dbPath: string, flockDocId: string): boolean {
+  const database = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 0 });
+  try {
+    const row = checkpointRow.safeParse(
+      database
+        .prepare('SELECT generation, cursors FROM replica_checkpoints WHERE resource_key = ?')
+        .get(`flock:${flockDocId}`)
+    );
+    if (!row.success) return false;
+    let cursors: unknown;
+    try {
+      cursors = JSON.parse(row.data.cursors);
+    } catch {
+      return false;
+    }
+    return (
+      Array.isArray(cursors) && cursors.some((cursor) => remoteCursor.safeParse(cursor).success)
+    );
+  } finally {
+    database.close();
+  }
+}
+
 export type CliSqliteRepoStore = {
   sqliteStore: SqliteRepoStore;
   storageAdapter: SqliteRepoStore['storage'];
@@ -78,15 +119,15 @@ export type CliSqliteRepoStore = {
 
 export const createCliSqliteRepoStore = async (
   workspaceId: WorkspaceId,
-  onWriteFailure?: (error: Error) => void
+  onWriteFailure?: (error: Error) => void,
+  baseDir = getLoroRepoStorageBaseDir(workspaceId)
 ): Promise<CliSqliteRepoStore> => {
-  const baseDir = getLoroRepoStorageBaseDir(workspaceId);
   await fs.mkdir(baseDir, { recursive: true });
 
   // Do not import the pre-SQLite remote-cursors.json file. Those cursors were
   // only durable together with FileSystemStorageAdaptor snapshots; migrating
   // cursors without doc/meta state could skip required stream replay.
-  const dbPath = getLoroRepoSqliteDbPath(workspaceId);
+  const dbPath = path.join(baseDir, 'repo.sqlite3');
   const sqliteStore = new SqliteRepoStore({ path: dbPath, onWriteFailure });
   // Lock contention reported for this database will name its other openers.
   sqliteLockReporterLegacy.register(dbPath);

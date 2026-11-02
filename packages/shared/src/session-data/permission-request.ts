@@ -23,9 +23,17 @@ export const mergeToolCallWithPermission = (
   const kind = (toolCall.kind ?? tool.kind ?? undefined) as
     | ToolCallMessageContent['kind']
     | undefined;
-  // Permission enrichment must not project or reparse an existing stored list.
+  // Plan approval can arrive after streamed arguments but before tool start.
+  // Its content is the review document, replacing the arguments preview.
+  // Other tools retain their stored content without projecting it again.
+  const reviewContent =
+    kind === 'switch_mode' && !toolCall.permissionRequest?.outcome
+      ? sanitizeToolCallContentForHistory(tool.content ?? undefined, kind)
+      : undefined;
   const content =
-    toolCall.content ?? sanitizeToolCallContentForHistory(tool.content ?? undefined, kind);
+    reviewContent ??
+    toolCall.content ??
+    sanitizeToolCallContentForHistory(tool.content ?? undefined, kind);
   const locations =
     toolCall.locations ??
     (Array.isArray(tool.locations) && tool.locations.length > 0 ? tool.locations : undefined) ??

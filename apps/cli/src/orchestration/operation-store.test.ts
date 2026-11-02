@@ -292,6 +292,23 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('does not count a running delegated Operation as turn work for its idle requester', async () => {
+    const store = await makeStore();
+    const op = baseInput();
+    try {
+      store.inbox.activate(op.workspaceId, 'owner');
+      store.accept(op);
+      // The requester's own Turn ended; only its delegated child is still running.
+      expect(store.hasPendingWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+      expect(store.hasTurnWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(false);
+      store.finish(op.requesterSessionId, op.operationId, { type: 'cancelled' });
+      // The queued receipt will wake the requester, so it is turn work again.
+      expect(store.hasTurnWorkForRequester(op.workspaceId, op.requesterSessionId)).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
   it('counts wakeable queued receipts and retained execution as work; pause makes receipts passive', async () => {
     const store = await makeStore();
     const op = baseInput();
@@ -410,7 +427,7 @@ describe('LodyOperationStore', () => {
     store.inbox.begin(input, 'execution');
     const batch = store.inbox.prepare(input, 'owner')!;
     expect(store.inbox.fence(batch, 'execution')).toBe(true);
-    store.inbox.release({ ...input, executionId: 'execution', outcome: 'unreleased' });
+    store.inbox.release({ ...input, executionId: 'execution', outcome: 'failed' });
     store.inbox.pause(input, 'execution', [], 'stop');
     store.close();
     let db = new Database(filename);

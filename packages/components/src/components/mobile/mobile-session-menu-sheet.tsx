@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /**
  * Bottom sheet that replaces the mobile session header "…" dropdown. A dropdown
@@ -70,6 +71,7 @@ export function MobileSessionMenuSheet({
   owner,
 }: MobileSessionMenuSheetProps) {
   const { t } = useTranslation();
+  const maxHeight = useFoldAwareSheetHeight();
   const heading = title ?? t('sessions.moreActions', 'More actions');
   const [ownerListOpen, setOwnerListOpen] = useState(false);
   // Reopening the sheet should start from the collapsed row again.
@@ -86,7 +88,7 @@ export function MobileSessionMenuSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent style={{ maxHeight }} className="h-auto! rounded-t-2xl border-border/60">
         <DrawerTitle className="sr-only">{heading}</DrawerTitle>
         <DrawerDescription className="sr-only">{heading}</DrawerDescription>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">

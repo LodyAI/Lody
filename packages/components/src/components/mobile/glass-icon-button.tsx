@@ -1,4 +1,6 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
+import { ChevronLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 
@@ -257,3 +259,19 @@ export const GlassIconButton = forwardRef<
     </button>
   );
 });
+
+/** The shared back control used by the mobile conversation header. */
+export function MobileSessionHeaderBackButton({
+  onBack,
+  label,
+}: {
+  onBack: () => void;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <GlassIconButton label={label ?? t('common.back', 'Back')} onClick={onBack} className="-ms-1">
+      <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />
+    </GlassIconButton>
+  );
+}

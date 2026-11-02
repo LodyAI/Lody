@@ -40,7 +40,8 @@ Provider 向界面提供名称、安装链接和支持的创建字段。调用�
 
 首个适配器为 Nowledge Mem。执行 `nmem status -j`；找不到可执行文件时，在该机器的
 记忆设置页（以及 Role 记忆选择区）内显示说明文案，并提供
-`https://mem.nowledge.co/en`；状态不是 `ok` 时提示启动 Mem 后刷新。进入记忆设置
+`https://mem.nowledge.co/en`；命令成功退出且顶层状态为 `ok` 或 `healthy` 时视为就绪，
+其他状态值提示启动 Mem 后刷新。进入记忆设置
 仍会自动探测当前机器。nmem 未安装或未运行不得弹出对话框。就绪后执行
 `nmem agents list -j`，读取 `agentProfiles`。创建执行 `nmem agents enroll <id> -j`，
 名称必填，描述、角色和默认 Space 可选，表单复用现有设置编辑对话框。Enrollment

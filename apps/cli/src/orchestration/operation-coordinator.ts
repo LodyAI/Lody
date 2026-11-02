@@ -30,8 +30,13 @@ import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher'
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import type { SessionUserResolver } from '@/session/session-user-resolver';
 import type { Logger } from '@/utils/logger';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
 
-import { getLodyOperationStorePath, LodyOperationStore } from './operation-store';
+import {
+  getLodyOperationStorePath,
+  LodyOperationStore,
+  LodyOperationStoreError,
+} from './operation-store';
 
 const WORKER_BOOT_ID = randomUUID();
 
@@ -49,6 +54,7 @@ export type LodyOperationCoordinatorOptions = {
   userResolver?: Pick<SessionUserResolver, 'resolve'>;
   logger: Logger;
   storeFactory?: () => LodyOperationStore;
+  onAvailabilityChange?: (message: string | undefined) => void;
   storePath?: string;
   now?: () => number;
   operationStoreWatchFactory?: (
@@ -74,6 +80,10 @@ export class LodyOperationCoordinator {
   private store: LodyOperationStore | null = null;
   private storeWatch: Pick<FSWatcher, 'close'> | null = null;
   private started = false;
+  private startupComplete = false;
+  private startupFailure: unknown;
+  private startupRetry?: ReturnType<typeof setTimeout>;
+  private startupRetryDelay = 30_000;
   private nativeEpoch: object | undefined;
   private nativeRuntime?: ManagedRuntime.ManagedRuntime<CoordinatorScope, unknown>;
   private nativeReady?: Promise<CoordinatorScope['Service']>;
@@ -102,13 +112,26 @@ export class LodyOperationCoordinator {
   start(): void {
     if (this.started) return;
     if (!this.stoppedComplete) throw new Error('Coordinator shutdown is not complete');
+    try {
+      this.startAttempt();
+    } catch (cause) {
+      this.degradeStartup(cause);
+    }
+  }
+
+  private startAttempt(): void {
+    this.startupComplete = false;
     this.shutdown = undefined;
     this.shutdownFailure = undefined;
     this.shutdownRecovery = undefined;
     this.quiesceReceipt = undefined;
     this.quiesceFailure = undefined;
 
+    if (this.startupRetry) clearTimeout(this.startupRetry);
+    this.startupRetry = undefined;
     this.stoppedComplete = false;
+    this.store = this.storeFactory();
+    this.store.inbox.activate(this.options.workspaceId, this.workerBootId);
     this.started = true;
     this.metaWatch = this.options.workspaceDocument.repo.watch(
       (event) => {
@@ -127,8 +150,6 @@ export class LodyOperationCoordinator {
     // observe its own file churn and wake itself in a loop that starves the
     // event loop (multiple workspace coordinators watching the shared
     // machine-level store amplify it).
-    this.store = this.storeFactory();
-    this.store.inbox.activate(this.options.workspaceId, this.workerBootId);
     this.inbox = operationInboxLegacy({
       workspaceId: this.options.workspaceId,
       owner: this.workerBootId,
@@ -138,7 +159,9 @@ export class LodyOperationCoordinator {
         const store = this.storeFactory();
         return { sql: store.inbox, close: () => store.close() };
       },
-      quiesce: () => this.options.executionService.quiesceInboxExecutions?.(),
+      quiesce: () => {
+        if (this.startupComplete) this.options.executionService.quiesceInboxExecutions?.();
+      },
       ready: (batch) => {
         if (!this.started) return false;
         const sessionId = batch.sessionId as SessionId;
@@ -227,15 +250,101 @@ export class LodyOperationCoordinator {
         })
         .catch((cause) => this.options.logger.warn(String(cause)));
     });
+    this.startupComplete = true;
+    this.startupFailure = undefined;
+    this.startupRetryDelay = 30_000;
+    this.reportAvailability(undefined);
     void this.wake('startup');
   }
 
+  private degradeStartup(cause: unknown): void {
+    this.options.executionService.setOperationInbox?.(undefined);
+    const retryDelay = this.startupRetryDelay;
+    try {
+      void this.stop().catch((failure) =>
+        this.options.logger.error(`[inbox] Startup cleanup failed: ${String(failure)}`)
+      );
+    } catch (failure) {
+      this.options.logger.error(`[inbox] Startup cleanup failed: ${String(failure)}`);
+    }
+    this.startupRetryDelay = retryDelay;
+    this.startupFailure = cause;
+    this.options.logger.error(`[inbox] Startup degraded: ${String(cause)}`);
+    const reason =
+      cause instanceof Error && /^INBOX_[A-Z_]+$/.test(cause.message)
+        ? cause.message
+        : cause instanceof Error &&
+            'code' in cause &&
+            typeof cause.code === 'string' &&
+            /^[A-Z_]+$/.test(cause.code)
+          ? cause.code
+          : 'storage unavailable';
+    this.reportAvailability(
+      `Task orchestration database cannot open (${reason}). Agent tasks and automatic continuation are temporarily unavailable; ordinary chat is unaffected.`
+    );
+    if (reason !== 'INBOX_SCHEMA_UNSUPPORTED' && reason !== 'INBOX_PROTOCOL_REQUIRED') {
+      this.startupRetry = setTimeout(() => {
+        this.startupRetry = undefined;
+        const failure = this.startupFailure;
+        void Promise.resolve()
+          .then(() => (this.shutdownFailure ? this.recoverStopResources() : this.shutdown))
+          .then(() => {
+            if (this.startupFailure !== failure) return;
+            try {
+              this.start();
+            } catch (retryCause) {
+              this.degradeStartup(retryCause);
+            }
+          })
+          .catch((retryCause) => {
+            if (this.startupFailure === failure) this.degradeStartup(retryCause);
+          });
+      }, this.startupRetryDelay);
+      this.startupRetry.unref();
+      this.startupRetryDelay = Math.min(this.startupRetryDelay * 2, 600_000);
+    }
+  }
+
+  private reportAvailability(message: string | undefined): void {
+    try {
+      this.options.onAvailabilityChange?.(message);
+    } catch (cause) {
+      this.options.logger.warn(`[inbox] Could not report availability: ${String(cause)}`);
+    }
+  }
+
+  assertInboxAvailable(): void {
+    if (!this.started)
+      throw new LodyOperationStoreError(
+        'INBOX_UNAVAILABLE',
+        'INBOX_UNAVAILABLE: Agent tasks and automatic continuation are temporarily unavailable; ordinary chat is unaffected.',
+        true
+      );
+  }
+
   hasPendingWorkForRequester(sessionId: SessionId): boolean {
-    return this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? true;
+    return (
+      this.started &&
+      (this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? false)
+    );
+  }
+
+  hasTurnWorkForRequester(sessionId: SessionId): boolean {
+    // A degraded Inbox runs no turn work; reporting it busy would hold every scheduled
+    // message until the database recovers, or forever for an incompatible schema.
+    // Before startup settles, absence stays conservative.
+    if (this.startupFailure !== undefined) return false;
+    return this.store?.hasTurnWorkForRequester(this.options.workspaceId, sessionId) ?? true;
   }
 
   stop(): Promise<void> {
+    if (this.startupRetry) clearTimeout(this.startupRetry);
+    this.startupRetry = undefined;
+    this.startupRetryDelay = 30_000;
+    this.startupFailure = undefined;
+    this.reportAvailability(undefined);
     if (this.shutdown) return this.shutdown;
+    if (this.stoppedComplete) return Promise.resolve();
     this.started = false;
     this.metaWatch?.unsubscribe();
     this.metaWatch = null;
@@ -259,18 +368,18 @@ export class LodyOperationCoordinator {
     // Keep the native runtime/connection alive for the final release and settlement receipts.
     await withTimeout(
       (async () => {
-        await this.idle();
-        await this.options.executionService.drainInboxExecutions?.();
+        await this.drainActivity();
+        if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
-      15_000,
+      TURN_BUDGETS.cliShutdownMs,
       'Coordinator resources did not drain'
     );
     await this.inbox?.close();
     if (this.nativeCloseFailed) {
       if (this.nativeCore) await Effect.runPromise(this.nativeCore.recoverSubscriptions());
-    } else {
-      this.nativeClose ??= Effect.runPromiseExit(this.nativeRuntime!.disposeEffect)
+    } else if (this.nativeRuntime) {
+      this.nativeClose ??= Effect.runPromiseExit(this.nativeRuntime.disposeEffect)
         .then((exit) => {
           if (Exit.isFailure(exit))
             throw new Error('Coordinator Scope release failed', { cause: exit.cause });
@@ -284,10 +393,22 @@ export class LodyOperationCoordinator {
     this.options.executionService.setOperationInbox?.(undefined);
     this.store?.close();
     this.store = null;
+    this.inbox = undefined;
+    this.nativeRuntime = undefined;
+    this.nativeReady = undefined;
+    this.nativeCore = undefined;
+    this.nativeClose = undefined;
+    this.nativeCloseFailed = false;
     this.stoppedComplete = true;
   }
   recoverStop(): Promise<void> {
-    if (this.stoppedComplete) return Promise.resolve();
+    if (this.startupRetry) clearTimeout(this.startupRetry);
+    this.startupRetry = undefined;
+    this.startupFailure = undefined;
+    return this.recoverStopResources();
+  }
+  private recoverStopResources(): Promise<void> {
+    if (this.stoppedComplete) return this.stop();
     if (!this.shutdownFailure) return this.stop();
     if (this.shutdownRecovery) return this.shutdownRecovery;
     const recovery = (async () => {
@@ -312,7 +433,16 @@ export class LodyOperationCoordinator {
   }
 
   wake(reason: string): Promise<void> {
-    if (!this.started) return Promise.resolve();
+    if (!this.started)
+      return this.startupFailure
+        ? Promise.reject(
+            new LodyOperationStoreError(
+              'INBOX_UNAVAILABLE',
+              'INBOX_UNAVAILABLE: Task orchestration is temporarily unavailable.',
+              true
+            )
+          )
+        : Promise.resolve();
     const epoch = this.nativeEpoch;
     const runtime = this.nativeRuntime!;
     return this.nativeReady!.then(({ activity }) => {
@@ -321,6 +451,10 @@ export class LodyOperationCoordinator {
     }).catch((cause) => this.options.logger.warn(String(cause)));
   }
   async idle(): Promise<void> {
+    if (!this.started && this.shutdown) return this.shutdown;
+    await this.drainActivity();
+  }
+  private async drainActivity(): Promise<void> {
     if (!this.nativeReady) return;
     if (this.nativeClose) return;
     const { activity } = await this.nativeReady;

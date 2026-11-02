@@ -486,12 +486,21 @@ describe('runNpxStartupWithRecovery', () => {
     expect(attempts[0]?.startupTimeouts?.initTimeoutMs).toBe(COLD_NPX_INIT_TIMEOUT_MS);
   });
 
-  it('purges Lody npm cache and retries after a cold connection.initialize timeout', async () => {
+  it.each([
+    { cause: 'a cold connection.initialize timeout', purge: false },
+    { cause: 'npm cache corruption', purge: true },
+  ])('retries after $cause and purges shared cache only for corruption', async ({ purge }) => {
     const attempts: NpxStartupAttemptInput[] = [];
     const cache = getLodyNpmCacheDir();
     const npxRoot = join(cache, '_npx');
     const cacache = join(cache, '_cacache');
-    const io = makeIo({ dirs: { [npxRoot]: [], [cacache]: [] } });
+    const tarball = join(cacache, 'downloaded-tarball');
+    const otherInstall = join(npxRoot, 'other-agent');
+    const io = makeIo({
+      dirs: { [npxRoot]: ['other-agent'], [otherInstall]: [], [cacache]: [] },
+      files: { [tarball]: 'downloaded bytes' },
+    });
+    let cleanedUp = false;
 
     const result = await runNpxStartupWithRecovery({
       command: 'npx',
@@ -501,19 +510,27 @@ describe('runNpxStartupWithRecovery', () => {
       logPrefix: '[test]',
       npxCacheIo: io,
       npxCacheRoots: [npxRoot],
-      getStderrTail: () => '',
+      getStderrTail: () => (purge ? 'npm error code EINTEGRITY' : ''),
+      cleanupFailedAttempt: async () => {
+        cleanedUp = true;
+      },
       attempt: async (input) => {
         attempts.push(input);
         if (attempts.length === 1) {
+          if (purge) throw new Error('ACP connection closed');
           throw new AcpTimeoutError('connection.initialize', COLD_NPX_INIT_TIMEOUT_MS, 'session-1');
         }
+        expect(cleanedUp).toBe(true);
+        expect(io.existsSync(tarball)).toBe(!purge);
+        expect(io.existsSync(otherInstall)).toBe(!purge);
         return 'ok';
       },
     });
 
     expect(result).toBe('ok');
     expect(attempts).toHaveLength(2);
-    expect(new Set(io.removed)).toEqual(new Set([npxRoot, cacache]));
+    expect(io.existsSync(cacache)).toBe(!purge);
+    expect(new Set(io.removed)).toEqual(new Set(purge ? [npxRoot, cacache] : []));
   });
 
   it('keeps a whole cold-timeout retry run inside the client backstop', async () => {

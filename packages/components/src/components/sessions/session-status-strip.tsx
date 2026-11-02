@@ -1,5 +1,6 @@
+import { workspaceFeatureUnavailableMessage } from '@/lib/workspace-feature';
 import type { ComponentType, SVGProps } from 'react';
-import { Trash2, WifiOff } from 'lucide-react';
+import { Trash2, WifiOff, Info } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
@@ -27,18 +28,21 @@ import type { MachineOnlineStatus } from '@/atoms/presence';
  * (SessionInfoBar item); mobile renders the standalone strip.
  */
 export type SessionStatusStripState =
+  | { kind: 'presence-unavailable' }
   | { kind: 'browser-offline' }
   | { kind: 'machine-removed' }
   | { kind: 'machine-offline'; machineName: string | null };
 
 export function resolveSessionStatusStripState(args: {
   browserOnline: boolean;
+  presenceAvailable?: boolean;
   machineRemoved: boolean;
   machineOnlineStatus: MachineOnlineStatus;
   machineName?: string | null;
 }): SessionStatusStripState | null {
   if (!args.browserOnline) return { kind: 'browser-offline' };
   if (args.machineRemoved) return { kind: 'machine-removed' };
+  if (args.presenceAvailable === false) return { kind: 'presence-unavailable' };
   if (args.machineOnlineStatus === 'offline') {
     return { kind: 'machine-offline', machineName: args.machineName ?? null };
   }
@@ -58,6 +62,12 @@ export function useSessionStatusPresentation(
   if (!state) return null;
 
   switch (state.kind) {
+    case 'presence-unavailable':
+      return {
+        Icon: Info,
+        text: workspaceFeatureUnavailableMessage('presence', t),
+        warning: false,
+      };
     case 'browser-offline': {
       const text = t('sessions.statusStrip.browserOffline', 'You are offline. Reconnect to sync.');
       return {

@@ -24,7 +24,12 @@ export interface PlatformUser {
 
 export type PlatformSessionState =
   | { status: 'loading' }
-  | { status: 'unauthenticated' }
+  | {
+      status: 'unauthenticated';
+      /** A transport failure is not confirmed logout. Ordinary cloud access
+       * remains unauthenticated; E2EE may resolve its local identity natively. */
+      uncertain?: true;
+    }
   | { status: 'authenticated'; user: PlatformUser };
 
 export interface PlatformIdentity {

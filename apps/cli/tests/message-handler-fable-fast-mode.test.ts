@@ -25,6 +25,7 @@ type ApplyAcpModeAndModel = (
     acpSessionId: ACPSessionId;
     agentClient: {
       isCreated: () => boolean;
+      getAvailableCommands: () => [];
       getConfigOptions: () => Array<{ id: string; category?: string }>;
       setSessionMode: (sessionId: ACPSessionId, modeId: string) => Promise<void>;
       unstable_setSessionModel: (sessionId: ACPSessionId, modelId: string) => Promise<void>;
@@ -78,6 +79,7 @@ function createHarness() {
     acpSessionId: 'acp-session-1' as ACPSessionId,
     agentClient: {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [
         { id: 'model', category: 'model' },
         { id: 'fast', category: 'model_config' },

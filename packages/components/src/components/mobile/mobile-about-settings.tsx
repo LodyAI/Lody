@@ -18,6 +18,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { LODY_APP_INFO_UPDATED_EVENT, readNativeAppInfo } from '@/lib/native-app-info';
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import {
   MobileSettingsRow,
   MobileSettingsRowGroup,
@@ -165,159 +166,166 @@ export function MobileAboutSettings() {
   const showDeveloperModeSwitch = developerModeEnabled || revealTaps >= DEVELOPER_MODE_REVEAL_TAPS;
 
   return (
-    <>
-      <MobileSettingsSection title={t('settings.about.title')}>
-        <MobileSettingsRowGroup>
-          {aboutVersion ? (
-            <MobileSettingsRow label={t('settings.about.version')}>
-              <span className="font-mono text-[0.85rem] text-muted-foreground">{aboutVersion}</span>
+    <MobileSettingsFoldPanels
+      upper={
+        <MobileSettingsSection title={t('settings.about.title')}>
+          <MobileSettingsRowGroup>
+            {aboutVersion ? (
+              <MobileSettingsRow label={t('settings.about.version')}>
+                <span className="font-mono text-[0.85rem] text-muted-foreground">
+                  {aboutVersion}
+                </span>
+              </MobileSettingsRow>
+            ) : null}
+            <MobileSettingsRow label={t('settings.about.buildDate')}>
+              <span className="font-mono text-[0.85rem] text-muted-foreground">
+                {formatBuildDate(BUILD_DATE)}
+              </span>
             </MobileSettingsRow>
-          ) : null}
-          <MobileSettingsRow label={t('settings.about.buildDate')}>
-            <span className="font-mono text-[0.85rem] text-muted-foreground">
-              {formatBuildDate(BUILD_DATE)}
-            </span>
-          </MobileSettingsRow>
-          {/* The reveal target is the commit row, not the version row: the
+            {/* The reveal target is the commit row, not the version row: the
              version row only renders when a version is known (absent on narrow
              web), which would leave the gesture unreachable exactly where the
              desktop panel is also unavailable. */}
-          <MobileSettingsRow
-            label={t('settings.about.commitHash')}
-            onClick={() => setRevealTaps((count) => count + 1)}
-          >
-            <span className="font-mono text-[0.85rem] text-muted-foreground">{GIT_COMMIT}</span>
-          </MobileSettingsRow>
-        </MobileSettingsRowGroup>
-      </MobileSettingsSection>
-
-      <MobileSettingsSection title={t('settings.about.linksTitle', 'Links')}>
-        <MobileSettingsRowGroup>
-          <MobileSettingsRow label={t('settings.about.community', 'Community')}>
-            <JoinCommunityButton />
-          </MobileSettingsRow>
-          <MobileSettingsRow
-            label={t('settings.about.downloadApps', 'Download apps')}
-            onClick={handleOpenDownloadPage}
-            trailing={<ExternalLink className="h-4 w-4" />}
-          />
-          <MobileSettingsRow
-            label={t('settings.about.website', 'Website')}
-            onClick={handleOpenWebsite}
-            trailing={<ExternalLink className="h-4 w-4" />}
-          />
-          {/* Dialog is self-contained (renders its own DialogTrigger button); we
+            <MobileSettingsRow
+              label={t('settings.about.commitHash')}
+              onClick={() => setRevealTaps((count) => count + 1)}
+            >
+              <span className="font-mono text-[0.85rem] text-muted-foreground">{GIT_COMMIT}</span>
+            </MobileSettingsRow>
+          </MobileSettingsRowGroup>
+        </MobileSettingsSection>
+      }
+      lower={
+        <>
+          <MobileSettingsSection title={t('settings.about.linksTitle', 'Links')}>
+            <MobileSettingsRowGroup>
+              <MobileSettingsRow label={t('settings.about.community', 'Community')}>
+                <JoinCommunityButton />
+              </MobileSettingsRow>
+              <MobileSettingsRow
+                label={t('settings.about.downloadApps', 'Download apps')}
+                onClick={handleOpenDownloadPage}
+                trailing={<ExternalLink className="h-4 w-4" />}
+              />
+              <MobileSettingsRow
+                label={t('settings.about.website', 'Website')}
+                onClick={handleOpenWebsite}
+                trailing={<ExternalLink className="h-4 w-4" />}
+              />
+              {/* Dialog is self-contained (renders its own DialogTrigger button); we
              keep the trigger button in the row's right slot rather than making
              the entire row tappable so the dialog's controlled-open state stays
              owned by `OpenSourceAttributionsDialog` (no need to refactor it to
              accept external open/onOpenChange just for the mobile surface). */}
-          <MobileSettingsRow
-            label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}
-          >
-            <OpenSourceAttributionsDialog />
-          </MobileSettingsRow>
-        </MobileSettingsRowGroup>
-      </MobileSettingsSection>
-
-      {updaterState && phase !== 'disabled' ? (
-        <MobileSettingsSection title={t('settings.about.updatesTitle', 'Updates')}>
-          <MobileSettingsRow
-            label={t('settings.about.checkForUpdates')}
-            helper={
-              showStatus ? (
-                <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />
-              ) : undefined
-            }
-          >
-            {isDownloaded ? (
-              <Button
-                size="small"
-                onClick={() => {
-                  void handleQuitAndInstall();
-                }}
-                disabled={isInstalling}
+              <MobileSettingsRow
+                label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}
               >
-                {isInstalling ? (
-                  <Spinner className="mr-1 h-3.5 w-3.5" />
+                <OpenSourceAttributionsDialog />
+              </MobileSettingsRow>
+            </MobileSettingsRowGroup>
+          </MobileSettingsSection>
+
+          {updaterState && phase !== 'disabled' ? (
+            <MobileSettingsSection title={t('settings.about.updatesTitle', 'Updates')}>
+              <MobileSettingsRow
+                label={t('settings.about.checkForUpdates')}
+                helper={
+                  showStatus ? (
+                    <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />
+                  ) : undefined
+                }
+              >
+                {isDownloaded ? (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void handleQuitAndInstall();
+                    }}
+                    disabled={isInstalling}
+                  >
+                    {isInstalling ? (
+                      <Spinner className="mr-1 h-3.5 w-3.5" />
+                    ) : (
+                      <Download className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    {t('settings.about.updateAndRestart')}
+                  </Button>
                 ) : (
-                  <Download className="mr-1 h-3.5 w-3.5" />
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => {
+                      void handleCheckForUpdates();
+                    }}
+                    disabled={isChecking || phase === 'downloading'}
+                  >
+                    {isChecking ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
+                    {t('settings.about.checkForUpdates')}
+                  </Button>
                 )}
-                {t('settings.about.updateAndRestart')}
-              </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                size="small"
-                onClick={() => {
-                  void handleCheckForUpdates();
-                }}
-                disabled={isChecking || phase === 'downloading'}
-              >
-                {isChecking ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
-                {t('settings.about.checkForUpdates')}
-              </Button>
-            )}
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
 
-      {showDeveloperModeSwitch ? (
-        <MobileSettingsSection title={t('settings.about.developerMode', 'Developer mode')}>
-          <MobileSettingsRowGroup>
-            <MobileSettingsRow
-              label={t('settings.about.developerMode', 'Developer mode')}
-              helper={t(
-                'settings.about.developerModeHelper',
-                'Shows local diagnostic controls in settings.'
-              )}
-            >
-              <Switch
-                checked={developerModeEnabled}
-                onCheckedChange={(checked) => {
-                  setDeveloperModeEnabled(checked);
-                  // Turning it off re-hides the section, matching desktop: the
-                  // reveal has to be earned again.
-                  if (!checked) setRevealTaps(0);
-                }}
-                aria-label={t('settings.about.developerMode', 'Developer mode')}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsRowGroup>
-        </MobileSettingsSection>
-      ) : null}
+          {showDeveloperModeSwitch ? (
+            <MobileSettingsSection title={t('settings.about.developerMode', 'Developer mode')}>
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={t('settings.about.developerMode', 'Developer mode')}
+                  helper={t(
+                    'settings.about.developerModeHelper',
+                    'Shows local diagnostic controls in settings.'
+                  )}
+                >
+                  <Switch
+                    checked={developerModeEnabled}
+                    onCheckedChange={(checked) => {
+                      setDeveloperModeEnabled(checked);
+                      // Turning it off re-hides the section, matching desktop: the
+                      // reveal has to be earned again.
+                      if (!checked) setRevealTaps(0);
+                    }}
+                    aria-label={t('settings.about.developerMode', 'Developer mode')}
+                  />
+                </MobileSettingsRow>
+              </MobileSettingsRowGroup>
+            </MobileSettingsSection>
+          ) : null}
 
-      {developerModeEnabled ? (
-        <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
-          <MobileSettingsRowGroup>
-            <MobileSettingsRow
-              label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
-              helper={t(
-                'settings.beta.e2eeWorkspaceHelper',
-                'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
-              )}
-            >
-              <Switch
-                checked={e2eeCreationEnabled}
-                onCheckedChange={setE2eeCreationEnabled}
-                aria-label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
-              />
-            </MobileSettingsRow>
-            <MobileSettingsRow
-              label={t('settings.beta.inbox', 'Inbox')}
-              helper={t(
-                'settings.beta.inboxHelper',
-                'Show the unfinished mobile Inbox tab. In development — expect rough edges.'
-              )}
-            >
-              <Switch
-                checked={inboxBetaEnabled}
-                onCheckedChange={setInboxBetaEnabled}
-                aria-label={t('settings.beta.inbox', 'Inbox')}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsRowGroup>
-        </MobileSettingsSection>
-      ) : null}
-    </>
+          {developerModeEnabled ? (
+            <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
+                  helper={t(
+                    'settings.beta.e2eeWorkspaceHelper',
+                    'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
+                  )}
+                >
+                  <Switch
+                    checked={e2eeCreationEnabled}
+                    onCheckedChange={setE2eeCreationEnabled}
+                    aria-label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
+                  />
+                </MobileSettingsRow>
+                <MobileSettingsRow
+                  label={t('settings.beta.inbox', 'Inbox')}
+                  helper={t(
+                    'settings.beta.inboxHelper',
+                    'Show the unfinished mobile Inbox tab. In development — expect rough edges.'
+                  )}
+                >
+                  <Switch
+                    checked={inboxBetaEnabled}
+                    onCheckedChange={setInboxBetaEnabled}
+                    aria-label={t('settings.beta.inbox', 'Inbox')}
+                  />
+                </MobileSettingsRow>
+              </MobileSettingsRowGroup>
+            </MobileSettingsSection>
+          ) : null}
+        </>
+      }
+    />
   );
 }

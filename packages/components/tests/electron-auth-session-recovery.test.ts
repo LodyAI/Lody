@@ -152,4 +152,73 @@ describe('desktop session recovery with a stale renderer bearer', () => {
     client.getSession.mockRejectedValueOnce(offline);
     await expect(service.getSession()).rejects.toBe(offline);
   });
+
+  function deferredSession() {
+    let resolve!: (value: unknown) => void;
+    const promise = new Promise((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+
+  it('keeps a session that resolves after the startup check timed out', async () => {
+    vi.useFakeTimers();
+    const service = new AuthService();
+    const slow = deferredSession();
+    client.getSession.mockReturnValueOnce(slow.promise);
+    const timedOut = expect(service.getSession()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+
+    slow.resolve(session);
+    await vi.advanceTimersByTimeAsync(0);
+    client.getSession.mockRejectedValueOnce(new Error('synthetic offline'));
+    expect(await service.getSession()).toEqual(session);
+  });
+
+  it('discards a late session that resolves after sign-out', async () => {
+    vi.useFakeTimers();
+    const service = new AuthService();
+    const slow = deferredSession();
+    client.getSession.mockReturnValueOnce(slow.promise);
+    const timedOut = expect(service.getSession()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+
+    await service.signOut();
+    slow.resolve(session);
+    await vi.advanceTimersByTimeAsync(0);
+    const offline = new Error('synthetic offline');
+    client.getSession.mockRejectedValueOnce(offline);
+    await expect(service.getSession()).rejects.toBe(offline);
+  });
+
+  it('discards a late session that resolves after a definitive rejection', async () => {
+    vi.useFakeTimers();
+    const service = new AuthService();
+    const slow = deferredSession();
+    client.getSession.mockReturnValueOnce(slow.promise);
+    const timedOut = expect(service.getSession()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+
+    // Both the renderer bearer and the durable cookie are definitively rejected.
+    client.getSession.mockResolvedValueOnce(unauthorized).mockResolvedValueOnce(unauthorized);
+    expect(await service.getSession(staleBearer)).toEqual(unauthorized);
+    slow.resolve(session);
+    await vi.advanceTimersByTimeAsync(0);
+    const offline = new Error('synthetic offline');
+    client.getSession.mockRejectedValueOnce(offline);
+    await expect(service.getSession()).rejects.toBe(offline);
+  });
+
+  it('authorizes requests with the durable cookie when session verification is unreachable', async () => {
+    const service = new AuthService();
+    client.getSession.mockRejectedValueOnce(new Error('synthetic offline'));
+    expect(await service.getSessionToken(staleBearer)).toBe('synthetic-current');
+
+    client.getCookie.mockReturnValue('');
+    client.getSession.mockRejectedValueOnce(new Error('synthetic offline'));
+    expect(await service.getSessionToken(staleBearer)).toBe('synthetic-stale');
+  });
 });

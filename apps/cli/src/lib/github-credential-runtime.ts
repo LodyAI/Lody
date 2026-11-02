@@ -53,9 +53,10 @@ const readManagedCandidate = async (repoFullName, source) => {
 // failure of the actual operation; never restart this iterator to retry a source.
 async function* githubCredentials(repo, policy, localCandidate, anonymous = false) {
   const failures = [];
-  for (const source of ['personal', 'local', 'app', ...(anonymous ? ['anonymous'] : [])]) {
+  const native = getContext().nativeRepositories?.some(name => name.toLowerCase() === repo.toLowerCase());
+  for (const source of native ? ['local'] : ['personal', 'local', 'app', ...(anonymous ? ['anonymous'] : [])]) {
     if (source === 'personal' && policy.personalEnabled === false) continue;
-    if (source === 'local' && !policy.allowLocalAuth) continue;
+    if (source === 'local' && !native && !policy.allowLocalAuth) continue;
     try {
       const candidate = source === 'anonymous' ? { token: null } : source === 'local' ? await localCandidate() : await readManagedCandidate(repo, source);
       if (!candidate) throw credentialError('credential_missing');

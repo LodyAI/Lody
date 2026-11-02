@@ -11,7 +11,10 @@ import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
-import { useRecoverableConvexQuery } from '../src/hooks/use-recoverable-convex-query';
+import {
+  useRecoverableConvexQuery,
+  useOptionalRecoverableConvexQuery,
+} from '../src/hooks/use-recoverable-convex-query';
 import { ErrorBoundary } from '../src/components/error-boundary';
 
 const mocks = vi.hoisted(() => ({
@@ -244,6 +247,24 @@ describe('useRecoverableConvexQuery', () => {
     await act(async () => renderConsumer({ skip: true }));
 
     expect(container.textContent).toBe('local loading');
+  });
+
+  it('returns optional catalog failure as scoped data while its ordinary sibling stays mounted', async () => {
+    mocks.queryResult = new Error('ordinary query failure');
+    function Optional() {
+      const result = useOptionalRecoverableConvexQuery(query, { id: 'project-1' });
+      return <div>{result.error ? 'optional failed' : 'optional loading'}</div>;
+    }
+    await act(async () =>
+      root.render(
+        <AuthenticatedConvexContext.Provider value={context}>
+          <span>ordinary work</span>
+          <Optional />
+        </AuthenticatedConvexContext.Provider>
+      )
+    );
+    expect(container.textContent).toContain('ordinary work');
+    expect(container.textContent).toContain('optional failed');
   });
 
   it('still throws ordinary query failures to the normal error boundary', async () => {

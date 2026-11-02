@@ -632,6 +632,8 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
 // =============================================================================
 
 export interface FloatingPermissionRequestProps {
+  /** Mobile session drawers render outside the workspace keyboard padding. */
+  liftAboveKeyboard?: boolean;
   sessionId: SessionId;
   sessionStatus: SessionStatus | undefined;
   sessionHistory: SessionDoc['history'] | undefined;
@@ -653,6 +655,7 @@ type SendError = { requestId: string; message: string } | null;
  * them, and answering one brings up the next in the same place.
  */
 export function FloatingPermissionRequest({
+  liftAboveKeyboard = false,
   sessionId,
   sessionStatus,
   sessionHistory,
@@ -743,7 +746,8 @@ export function FloatingPermissionRequest({
       <ScrollArea
         hidden={!current.isAskUserQuestion}
         className={cn(
-          'mx-3 mb-[calc(0.5rem+var(--native-keyboard-height,0px))]',
+          'mx-3',
+          liftAboveKeyboard ? 'mb-[calc(0.5rem+var(--native-keyboard-height,0px))]' : 'mb-2',
           'max-h-[calc(100dvh-var(--native-keyboard-height,0px)-4rem)]',
           'transition-[margin-bottom] duration-[250ms] ease-out'
         )}

@@ -199,3 +199,24 @@ describe('session title capability negotiation', () => {
     ).toEqual({ version: 1 });
   });
 });
+
+describe('Core prompt suggestions', () => {
+  it('negotiates v1 and preserves the native result without inventing a source turn', () => {
+    expect(
+      parseLodyExtensionCapabilities({ lody: { promptSuggestions: { version: 1 } } })
+    ).toMatchObject({ promptSuggestions: { version: 1 } });
+    const update = {
+      sessionId: 'native',
+      suggestionId: 'suggestion-1',
+      result: { type: 'completed', text: '  Continue\nplease  ' },
+    };
+    expect(
+      parseLodyExtensionMessage({
+        method: '_lody/session/prompt_suggestion',
+        params: update,
+        sessionId: 'native',
+        provider: 'claude',
+      })
+    ).toEqual({ type: 'promptSuggestion', update });
+  });
+});

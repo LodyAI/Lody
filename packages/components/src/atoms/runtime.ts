@@ -1,4 +1,9 @@
-import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
+import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
+import type {
+  MemoryProviderRequest,
+  MemoryProviderResponse,
+  ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -182,6 +187,14 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestSessionAutomationControl?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: import('@lody/shared/automations').RemoteAutomationOperation
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationResult>;
+  /** Local document access is independent of permission to transmit content. */
+  waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */
@@ -197,6 +210,16 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
+  readonly contentMode?: 'plaintext' | 'e2ee';
+  /** Host RPC support only; each operation still requires live admission and grants. */
+  readonly protectedRpcAvailable?: boolean;
+  /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
+  readonly protectedCodeCollabRole?: {
+    get(): 'read' | 'write';
+    subscribe(listener: () => void): () => void;
+  };
+  readonly attachmentToken?: () => Promise<string>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -234,6 +257,11 @@ export type WorkspaceRuntime = {
     sessionIds: readonly SessionId[] | null
   ) => void;
   setAuthToken: (token: string | null) => Promise<void>;
+  subscribePromptSuggestion: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    listener: (text: string | null) => void
+  ) => () => void;
   subscribeMachineMonitor: (
     machineId: MachineId,
     listener: (snapshot: import('@lody/shared').MachineMonitorSnapshot | null) => void
@@ -348,7 +376,12 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
+    options?: {
+      timeoutMs?: number;
+      subagentTaskId?: string;
+      cancelId?: string;
+      pauseInbox?: boolean;
+    }
   ) => Promise<SessionCancelResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,
@@ -398,6 +431,14 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
+  /** Native original preparation plus an encrypted acceleration attempt; durable activation remains independent. */
+  prepareEncryptedDispatch?: (
+    machineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) => Promise<{
+    original: import('@lody/shared/e2ee-rpc').E2eePreparedDispatch;
+    send: () => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck | null>;
+  }>;
   requestSessionPreviewCreate: (
     machineId: MachineId,
     sessionId: SessionId,
@@ -427,6 +468,11 @@ export type WorkspaceRuntime = {
    * File Preview v3: read one file from the machine. Never activates Code Collab
    * there, and always resolves (transport failures come back as `status: 'error'`).
    */
+  requestFileDownloadChunk: (
+    machineId: MachineId,
+    request: FileDownloadRequest,
+    ownerSessionId?: string
+  ) => Promise<FileDownloadResponse>;
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -518,14 +564,29 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
+  requestProjectProbeLocalMember: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { timeoutMs?: number }
+  ) => Promise<ProjectProbeLocalMemberResult | null>;
   requestLocalProjectControl: (
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectControlResponse | null>;
   requestLocalMcpTools: (
     machineId: MachineId,
-    server: WorkspaceMcpServerMeta
+    server: WorkspaceMcpServerMeta,
+    requesterUserId?: string
   ) => Promise<McpToolListResult>;
+  requestLocalMcpAuthentication: (
+    machineId: MachineId,
+    params: Extract<
+      import('@lody/shared').LocalMachineRpcRequest,
+      { method: 'mcp/authentication' }
+    >['params']
+  ) => Promise<import('@lody/shared').McpAuthenticationResult>;
   requestMachineBugReport: (
     machineId: MachineId,
     args: {
@@ -557,6 +618,13 @@ export type WorkspaceRuntime = {
     command: import('@lody/shared').IosSimulatorCommand;
     timeoutMs?: number;
   }) => Promise<import('@lody/shared').IosSimulatorResponse>;
+  requestAndroidEmulatorControl: (request: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: import('@lody/shared').AndroidEmulatorCommand;
+    timeoutMs?: number;
+  }) => Promise<import('@lody/shared').AndroidEmulatorResponse>;
   dispose: () => Promise<void>;
 };
 
@@ -571,7 +639,9 @@ export type WorkspaceRuntimeInitFailure = {
   errorType: string;
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
-  modeAdmission?: { knownEncrypted: boolean };
+  modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
+  /** Present for encrypted access loss, so the gate can route to re-pairing. */
+  workspaceId?: string;
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);

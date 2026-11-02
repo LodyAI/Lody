@@ -4,6 +4,8 @@ export type DesktopLaunchEvent = { url?: string; activate?: boolean }
 export function createDesktopLaunchBuffer(): {
   push: (event: DesktopLaunchEvent) => void
   bind: (handler: (event: DesktopLaunchEvent) => void) => void
+  /** Takes events that must be handed to another running installation. */
+  takePending: () => DesktopLaunchEvent[]
 } {
   let handle: ((event: DesktopLaunchEvent) => void) | undefined
   const pending: DesktopLaunchEvent[] = []
@@ -19,6 +21,9 @@ export function createDesktopLaunchBuffer(): {
       if (handle) throw new Error('Desktop launch handler is already bound')
       handle = handler
       for (const event of pending.splice(0)) handler(event)
+    },
+    takePending() {
+      return pending.splice(0)
     }
   }
 }

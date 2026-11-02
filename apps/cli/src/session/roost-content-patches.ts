@@ -1,4 +1,5 @@
 import type { AgentHistoryTextAppend, AgentHistoryMutationPath } from '@lody/shared';
+import { isDeepStrictEqual } from 'node:util';
 import { decodeJson } from '@loro-dev/roost';
 import {
   applicationJsonText,
@@ -50,6 +51,68 @@ export function decodeAgentReceipt(value: Uint8Array): { digest: string } {
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+/** Size/equality need no canonical key order. This restricted JSON domain has
+ * the same byte length and absence rules in native JSON. Floats, unusual
+ * objects and malformed scalars retain the SDK encoder. Caches live for one
+ * immutable planning attempt; they never become a content authority. */
+function contentJsonChecks() {
+  const objects = new WeakMap<object, boolean>(),
+    strings = new Set<string>();
+  const supported = (value: unknown): boolean => {
+    if (value === null || value === undefined || typeof value === 'boolean') return true;
+    if (typeof value === 'number') return Number.isSafeInteger(value);
+    if (typeof value === 'string') {
+      if (strings.has(value)) return true;
+      // Unicode-mode regex treats a valid surrogate pair as one scalar.
+      if (/[\uD800-\uDFFF]/u.test(value)) return false;
+      strings.add(value);
+      return true;
+    }
+    if (typeof value !== 'object') return false;
+    const cached = objects.get(value);
+    if (cached !== undefined) return cached;
+    objects.set(value, false); // Cycles retain the original encoder/error path.
+    const array = Array.isArray(value),
+      prototype = Object.getPrototypeOf(value);
+    if (
+      array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null
+    )
+      return false;
+    if (
+      'toJSON' in value ||
+      Reflect.ownKeys(value).length !== (array ? value.length + 1 : Object.keys(value).length)
+    )
+      return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (array && key === 'length') continue;
+      const descriptor = typeof key === 'string' ? descriptors[key] : undefined;
+      if (
+        !descriptor?.enumerable ||
+        !('value' in descriptor) ||
+        !supported(key) ||
+        !supported(descriptor.value)
+      )
+        return false;
+    }
+    if (array) for (let i = 0; i < value.length; i++) if (!Object.hasOwn(value, i)) return false;
+    objects.set(value, true);
+    return true;
+  };
+  const text = (value: unknown) => (supported(value) ? JSON.stringify(value) : undefined);
+  return {
+    supported,
+    bytes: (value: unknown) => Buffer.byteLength(text(value) ?? encodeRoostContentText(value)),
+    equal: (a: unknown, b: unknown) => {
+      const left = text(a),
+        right = text(b);
+      return left === undefined || right === undefined
+        ? encodeRoostContentText(a) === encodeRoostContentText(b)
+        : isDeepStrictEqual(JSON.parse(left), JSON.parse(right));
+    },
+  };
+}
+
 export type TextAppend = Pick<AgentHistoryTextAppend, 'previous' | 'value' | 'text'>;
 export type TextAppendHints = ReadonlyMap<string, TextAppend>;
 export const contentPathKey = (path: ContentOp['path']) =>
@@ -89,6 +152,172 @@ export function coalesceAgentTextAppends(
 }
 const textAppendAt = (path: ContentOp['path'], appends?: TextAppendHints) =>
   appends?.get(contentPathKey(path));
+
+/** A stream reducer may split its last text item after parsing a closing tag.
+ * Keep the verified old text in place instead of deleting it and reinserting
+ * the same body at the next array index. This does not interpret any markup. */
+function tailTextSplit(
+  before: unknown[],
+  after: unknown[],
+  path: ContentOp['path'],
+  appends: TextAppendHints | undefined
+): ContentOp[] | undefined {
+  const root = path[0],
+    field = path[1];
+  if (
+    !appends ||
+    path.length !== 2 ||
+    !root ||
+    !('key' in root) ||
+    root.key !== 'content' ||
+    !field ||
+    !('key' in field) ||
+    field.key !== 'items' ||
+    !before.length ||
+    after.length <= before.length ||
+    after.length - before.length > 8
+  )
+    return undefined;
+  const index = before.length - 1,
+    previous = before[index];
+  if (!object(previous) || previous.type !== 'text' || typeof previous.text !== 'string')
+    return undefined;
+  const previousText = previous.text;
+  const textPath = [...path, { index: BigInt(index) }, { key: 'text' }];
+  const append = textAppendAt(textPath, appends);
+  if (
+    !append ||
+    append.previous !== previous.text ||
+    append.value !== append.previous + append.text ||
+    !before.slice(0, index).every((item, i) => isDeepStrictEqual(item, after[i]))
+  )
+    return undefined;
+  let match:
+    | { index: number; item: Record<string, unknown>; from: number; end: number }
+    | undefined;
+  for (let i = index; i < after.length; i++) {
+    const item = after[i];
+    if (
+      !object(item) ||
+      (item.type !== 'text' && item.type !== 'thought') ||
+      typeof item.text !== 'string' ||
+      item.text.length < 1024
+    )
+      continue;
+    const from = append.value.indexOf(item.text),
+      end = from + item.text.length;
+    if (
+      from < 0 ||
+      Math.min(end, previous.text.length) - from < 1024 ||
+      append.value.indexOf(item.text, from + 1) !== -1
+    )
+      continue;
+    if (match) return undefined;
+    match = { index: i, item, from, end };
+  }
+  if (!match) return undefined;
+  const keepEnd = Math.min(match.end, previous.text.length);
+  const scalar = (offset: number): bigint | undefined => {
+    let at = 0,
+      count = 0;
+    for (const value of previousText) {
+      if (at === offset) return BigInt(count);
+      at += value.length;
+      count++;
+      if (at > offset) return undefined;
+    }
+    return at === offset ? BigInt(count) : undefined;
+  };
+  const fromScalar = scalar(match.from),
+    endScalar = scalar(keepEnd),
+    lengthScalar = scalar(previous.text.length);
+  if (fromScalar === undefined || endScalar === undefined || lengthScalar === undefined)
+    return undefined;
+  const ops: ContentOp[] = [];
+  // Release old text before adding any new values, preserving the size budget.
+  if (endScalar < lengthScalar)
+    ops.push({
+      kind: 'spliceText',
+      path: textPath,
+      index: endScalar,
+      delete: lengthScalar - endScalar,
+      text: '',
+    });
+  if (fromScalar)
+    ops.push({ kind: 'spliceText', path: textPath, index: 0n, delete: fromScalar, text: '' });
+  const suffix = append.value.slice(keepEnd, match.end);
+  if (suffix) ops.push({ kind: 'appendText', path: textPath, text: suffix });
+  const retained = previous.text.slice(match.from, keepEnd) + suffix;
+  ops.push(
+    ...roostContentPatches({ ...previous, text: retained }, match.item).map((op) => ({
+      ...op,
+      path: [...path, { index: BigInt(index) }, ...op.path.slice(1)],
+    }))
+  );
+  const prefix = after.slice(index, match.index),
+    tail = after.slice(match.index + 1);
+  if (prefix.length)
+    ops.push({
+      kind: 'spliceArray',
+      path,
+      index: BigInt(index),
+      delete: 0n,
+      valuesJson: encodeRoostContentText(prefix),
+    });
+  if (tail.length)
+    ops.push({
+      kind: 'spliceArray',
+      path,
+      index: BigInt(match.index + 1),
+      delete: 0n,
+      valuesJson: encodeRoostContentText(tail),
+    });
+  if (ops.length > 16) return undefined;
+  // Only the rare split takes this path. Bound intermediate JSON as well as the
+  // final result; ordinary suffix appends never scan or encode an old body here.
+  const checks = contentJsonChecks(),
+    { bytes } = checks;
+  const limit = Math.max(bytes({ items: before }), bytes({ items: after }));
+  let staged: unknown = { items: before };
+  for (const op of ops) {
+    staged = stageRoostContent(staged, [op]);
+    if (staged === undefined || bytes(staged) > limit) return undefined;
+  }
+  // The sole caller verifies the complete staged entry against its exact target.
+  // A conservative per-frame/path allowance charges extra operations as well
+  // as payloads. Require substantial headroom, not a marginal estimated saving.
+  const budget = (edits: readonly ContentOp[]) =>
+    edits.reduce(
+      (total, op) =>
+        total +
+        80 +
+        op.path.reduce(
+          (size, part) => size + ('key' in part ? Buffer.byteLength(part.key) + 12 : 11),
+          0
+        ) +
+        ('text' in op
+          ? Buffer.byteLength(op.text)
+          : 'contentJson' in op
+            ? Buffer.byteLength(op.contentJson)
+            : 'valuesJson' in op
+              ? Buffer.byteLength(op.valuesJson)
+              : 0),
+      0
+    );
+  const candidateBudget = budget(ops);
+  // The ordinary membership splice inserts after.slice(before.length). An
+  // owned, safe text value there alone lower-bounds its encoded payload; avoid
+  // constructing that expensive full-body diff merely to prove this saving.
+  if (
+    match.index >= before.length &&
+    Object.hasOwn(match.item, 'text') &&
+    checks.supported(match.item) &&
+    candidateBudget + 1024 < Buffer.byteLength(match.item.text as string)
+  )
+    return ops;
+  const original = roostContentPatches({ items: before }, { items: after });
+  return candidateBudget + 1024 < budget(original) ? ops : undefined;
+}
 
 /** Apply verified content operations with private path copies. Native remains
  * authoritative for limits, ownership, sequence and final edited JSON validity. */
@@ -215,6 +444,7 @@ export function roostContentPatches(
   changes?: readonly AgentHistoryMutationPath[]
 ): ContentOp[] {
   const ops: ContentOp[] = [];
+  let split = false;
   const walk = (left: unknown, right: unknown, path: ContentOp['path']) => {
     if (Object.is(left, right)) return;
     if (right === undefined) {
@@ -273,6 +503,12 @@ export function roostContentPatches(
       return;
     }
     if (Array.isArray(left) && Array.isArray(right)) {
+      const aligned = tailTextSplit(left, right, path, appends);
+      if (aligned) {
+        ops.push(...aligned);
+        split = true;
+        return;
+      }
       if (left.length === right.length) {
         for (let i = 0; i < left.length; i++)
           walk(left[i], right[i] === undefined ? null : right[i], [...path, { index: BigInt(i) }]);
@@ -329,5 +565,10 @@ export function roostContentPatches(
         [{ key: 'content' }, { key }]
       );
   } else walk(before, after, [{ key: 'content' }]);
+  if (split) {
+    const staged = stageRoostContent(before, ops, appends);
+    if (staged === undefined || !contentJsonChecks().equal(staged, after))
+      return roostContentPatches(before, after, undefined, changes);
+  }
   return ops;
 }
