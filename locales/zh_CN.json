@@ -2104,6 +2104,7 @@
   "sessions.copyConversationHistoryUnavailable": "当前标签页暂无可复制的对话历史",
   "sessions.copyFullConversation": "复制完整对话",
   "sessions.copySuccess": "复制成功",
+  "sessions.copyDeepLink": "复制 deeplink",
   "sessions.copyUrl": "复制链接",
   "sessions.createDraftPr": "创建草稿 PR",
   "sessions.createPr": "创建 PR",

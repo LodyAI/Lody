@@ -221,6 +221,7 @@ import type { Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { buildSessionLink } from '@lody/shared/session-link';
+import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
@@ -1341,6 +1342,7 @@ export function SessionHeaderMenu({
   machineName,
   onCopyConversationHistory,
   onCopyUrl,
+  onCopyDeepLink,
   onOpenPublicShare,
   sharing,
   onShareWithTeam,
@@ -1369,6 +1371,7 @@ export function SessionHeaderMenu({
   machineName?: string | null;
   onCopyConversationHistory?: () => void | Promise<void>;
   onCopyUrl: () => void | Promise<void>;
+  onCopyDeepLink?: () => void | Promise<void>;
   /** Opens the page-owned static-share editor. Omitted when publishing is unavailable. */
   onOpenPublicShare?: () => void;
   sharing?: SessionSharingState;
@@ -1981,6 +1984,11 @@ export function SessionHeaderMenu({
               >
                 {t('sessions.copyUrl', 'Copy URL')}
               </Menu.Item>
+              {onCopyDeepLink ? (
+                <Menu.Item onClick={() => void onCopyDeepLink()} icon={Copy}>
+                  {t('sessions.copyDeepLink', 'Copy deeplink')}
+                </Menu.Item>
+              ) : null}
             </Menu.Content>
           </Menu.Submenu>
 
@@ -7015,19 +7023,24 @@ export const SessionChatInterface = memo(
       openSettings('preferences');
     }, [captureSessionEvent, openSettings]);
 
-    const handleCopySessionLink = useCallback(async () => {
-      try {
-        if (!workspaceId) throw new Error('Workspace is not ready');
-        await navigator.clipboard.writeText(
-          buildSessionLink({ sessionId: session.id, workspaceId })
-        );
-        captureSessionEvent('session/share_link_copied');
-        toast.success(t('sessions.urlCopied', 'Session URL copied to clipboard'));
-      } catch {
-        captureSessionEvent('session/share_link_copy_failed');
-        toast.error(t('sessions.shareFailed', 'Unable to share link'));
-      }
-    }, [captureSessionEvent, t, session.id, workspaceId]);
+    const handleCopySessionLink = useCallback(
+      async (linkFormat: 'https' | 'deeplink' = 'https') => {
+        try {
+          if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
+          await navigator.clipboard.writeText(
+            linkFormat === 'deeplink'
+              ? buildSessionLink({ sessionId: session.id, workspaceId })
+              : buildAppSessionUrl(workspaceSlug, session.id)
+          );
+          captureSessionEvent('session/share_link_copied');
+          toast.success(t('sessions.urlCopied', 'Session URL copied to clipboard'));
+        } catch {
+          captureSessionEvent('session/share_link_copy_failed');
+          toast.error(t('sessions.shareFailed', 'Unable to share link'));
+        }
+      },
+      [captureSessionEvent, t, session.id, workspaceId, workspaceSlug]
+    );
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
@@ -7172,6 +7185,7 @@ export const SessionChatInterface = memo(
         onCopyUrl={() => {
           void handleCopySessionLink();
         }}
+        onCopyDeepLink={() => handleCopySessionLink('deeplink')}
         sharing={headerSharing}
         onShareWithTeam={headerShareWithTeam}
         onShareAsImage={headerShareAsImage}
@@ -7277,7 +7291,7 @@ export const SessionChatInterface = memo(
             state={headerSharing}
             onShareWithTeam={headerShareWithTeam}
             publicShare={headerPublicShare}
-            onCopyLink={handleCopySessionLink}
+            onCopyLink={() => handleCopySessionLink()}
             exportActions={headerExportActions}
           />
         </div>

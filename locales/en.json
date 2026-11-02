@@ -2104,6 +2104,7 @@
   "sessions.copyConversationHistoryUnavailable": "Conversation history is unavailable for this tab",
   "sessions.copyFullConversation": "Copy full conversation",
   "sessions.copySuccess": "Copied successfully",
+  "sessions.copyDeepLink": "Copy deeplink",
   "sessions.copyUrl": "Copy URL",
   "sessions.createDraftPr": "Create Draft PR",
   "sessions.createPr": "Create PR",

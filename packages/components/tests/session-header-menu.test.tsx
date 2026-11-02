@@ -125,6 +125,41 @@ describe('SessionHeaderMenu', () => {
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
 
+  it.each(['Copy URL', 'Copy deeplink'])(
+    'dispatches %s independently from the other link action',
+    async (label) => {
+      let copied = '';
+      await act(async () => {
+        root?.render(
+          <SessionHeaderMenu
+            session={session}
+            onCopyUrl={() => {
+              copied = 'https://lody.ai/acme/sessions/child';
+            }}
+            onCopyDeepLink={() => {
+              copied = 'lody://session/child?workspace=ws';
+            }}
+            t={translate}
+          />
+        );
+      });
+      await openMenu();
+      const copySubmenu = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      ).find((item) => item.textContent === 'Copy');
+      expect(copySubmenu).toBeDefined();
+      await act(async () => copySubmenu!.click());
+      expect(menuItem('Copy URL')).toBeDefined();
+      expect(menuItem('Copy deeplink')).toBeDefined();
+      await act(async () => menuItem(label).click());
+      expect(copied).toBe(
+        label === 'Copy URL'
+          ? 'https://lody.ai/acme/sessions/child'
+          : 'lody://session/child?workspace=ws'
+      );
+    }
+  );
+
   it('leaves pointer-opened actions unhighlighted and toggles full width only on activation', async () => {
     const store = createStore();
     store.set(conversationWideModeAtom, false);
