@@ -142,6 +142,10 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **Manual pairing** uses the same string.
 - **Scope.** One approval covers all the account's encrypted workspaces, with
   deselection.
+- **Member approvers.** A Member cannot sign snapshot invitations, so its approvals stay
+  awaiting delivery. A [pending increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-pending-increment)
+  proposes rows without an invitation, verified by full history. It is not implemented
+  before owner approval.
 
 ## Rejected alternatives
 
