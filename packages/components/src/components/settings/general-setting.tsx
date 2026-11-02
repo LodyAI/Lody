@@ -694,24 +694,6 @@ export function GeneralSettingsComponent() {
         {/* Settings are grouped by what they are about, so no group is one row
           and no row needs a sentence to say where it applies. */}
         <CompactSection title={t('settings.general.sections.conversations', 'Conversations')}>
-          {isElectron ? (
-            <CompactRow
-              labelId={prImagesLabelId}
-              helperId={prImagesHelperId}
-              label={t('settings.general.prImages.label', 'Automatically load PR images')}
-              helper={t(
-                'settings.general.prImages.helper',
-                'HTTPS image websites can see your IP address.'
-              )}
-            >
-              <Switch
-                aria-labelledby={prImagesLabelId}
-                aria-describedby={prImagesHelperId}
-                checked={prImagesEnabled === true}
-                onCheckedChange={setPrImagesEnabled}
-              />
-            </CompactRow>
-          ) : null}
           <CompactRow
             label={t(
               'settings.general.sessions.queuedMessageBehavior.label',
@@ -834,7 +816,6 @@ export function GeneralSettingsComponent() {
           </CompactSection>
         )}
 
-        {/* Clear local cache stays last in General settings. */}
         <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>
           <ExperimentalFeatureRows />
           <CompactRow
@@ -846,6 +827,24 @@ export function GeneralSettingsComponent() {
               {t('settings.cache.clearCache.button')}
             </Button>
           </CompactRow>
+          {isElectron ? (
+            <CompactRow
+              labelId={prImagesLabelId}
+              helperId={prImagesHelperId}
+              label={t('settings.general.prImages.label', 'Automatically load PR images')}
+              helper={t(
+                'settings.general.prImages.helper',
+                'HTTPS image websites can see your IP address.'
+              )}
+            >
+              <Switch
+                aria-labelledby={prImagesLabelId}
+                aria-describedby={prImagesHelperId}
+                checked={prImagesEnabled === true}
+                onCheckedChange={setPrImagesEnabled}
+              />
+            </CompactRow>
+          ) : null}
         </CompactSection>
       </div>
       <ClearCacheConfirmDialog
