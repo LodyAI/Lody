@@ -989,6 +989,7 @@ export function useGitHubPrDetails({
       try {
         const currentPullRequest = await fetchCurrentPullRequestDetails(targetCacheKey);
         if (!currentPullRequest) return;
+        if (currentPullRequest.stack) throw new Error('Merge this stack on GitHub.');
         const result = await withGitHubOperationTokenRetry(
           workspaceId,
           normalizedRepoFullName,
