@@ -766,6 +766,47 @@ export async function invoke(action: string) {
             });
             return true;
           }
+          // A Member approver cannot sign a snapshot: install from the full history.
+          case 'accountApproveByHistory': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            yield* host.acceptAccountHistory({
+              ...pin,
+              pages: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: { length: records.length, headHash: toHex(view().head.toBytes()) },
+                  startIndex: 0,
+                  recordsHex: records.map(toHex),
+                  position: 'opaque/' + records.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+            return true;
+          }
           case 'accountOpen':
             if (session) yield* session.close();
             session = yield* host.open(

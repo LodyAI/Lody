@@ -65,10 +65,10 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
   `HMAC-SHA256(requestKey, canonical request)`. The canonical request covers:
   - the account, `lookupId`, direction, display name and expiry;
   - every per-workspace `(genesis, signing key, encryption key, possession proof,
-    credential hash)` row.
+credential hash)` row.
 - `approvalKey`: label `"approval-mac"`. `approvalTag` is
   `HMAC-SHA256(approvalKey, requestDigest || A's signing key || per-workspace
-  (genesis, admission record hash, invitation digest))`.
+(genesis, admission record hash, invitation digest))`.
 
 ### Flow
 
@@ -142,10 +142,9 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 - **Manual pairing** uses the same string.
 - **Scope.** One approval covers all the account's encrypted workspaces, with
   deselection.
-- **Member approvers.** A Member cannot sign snapshot invitations, so its approvals stay
-  awaiting delivery. A [pending increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-pending-increment)
-  proposes rows without an invitation, verified by full history. It is not implemented
-  before owner approval.
+- **Member approvers.** A Member cannot sign snapshot invitations. Under the
+  [history increment](../../../../specs/e2ee-foundations.md#member-approvers-deliver-history-instead-of-a-snapshot-approved-increment)
+  its row carries no invitation and the new device verifies the full history instead.
 
 ## Rejected alternatives
 
@@ -176,6 +175,7 @@ Each value is HKDF-SHA256 over `S` with salt `"lody-e2ee/pair/v1\0"` and its own
 
 The public relay DTOs are in [`packages/cloud-api`](../../../../packages/cloud-api/src/e2ee-account-pairing.ts)
 under `e2eeAccountPairing`: submit, pending, read by lookup ID, decline, publish and claim.
+
 - **Authoritative bytes.** Clients trust only the canonical request and approval bytes and
   their tags. Status, device name, expiry, location and the workspace routing list are
   advisory copies for routing, rate limiting and notifications.
@@ -190,6 +190,7 @@ The host port is the optional `E2eeAccountPairingRuntime` in
 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts). The pages
 are in [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx),
 behind the developer-mode beta switch "Account-wide device pairing".
+
 - **Ownership.** The host owns `S`, every tag check, the lifetime check, terminal records
   and signing. The UI checks a typed code locally only to name a typo before any network
   request, and wipes the decoded bytes at once.
@@ -214,15 +215,19 @@ behind an `AccountPairingStore` port.
 is the desktop's SQLite store and composition.
 [`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts)
 connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 port.
+
 - **Workspace list.** The renderer passes its encrypted workspace list as routing hints.
   The host verifies every genesis against its own ledger or the request tag.
 - **New device.** It proves possession for the membership that verified history assigns
   to the account's crypto user. On accept it finds the admission record by its
   tag-authenticated ledger hash, takes that record's signer as the endorser, and installs
   the invitation through the existing per-workspace join journal.
-- **Member approvers.** A Member cannot endorse a snapshot, so its approvals stay
-  awaiting delivery. A pending Spec increment proposes history delivery; it is not
-  implemented.
+- **Member approvers.** A Member's invitation port returns `null`, so its row carries
+  an all-zero invitation digest (the relay body is a one-byte placeholder). The new
+  device then verifies the full signed history from the tag-authenticated genesis,
+  finds its admission by the authenticated record hash, takes its signer as endorser
+  and installs through the per-workspace history path. Rows with an invitation keep the
+  snapshot path. No wire or relay format changes.
 - **After install.** The new device opens the workspace, refreshes it and runs one key
   round with its own credential, as the per-workspace claim does. This is best effort:
   opening the workspace later repeats it.
@@ -259,6 +264,7 @@ connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 po
 
 [`account-requester.ts`](../../../../packages/e2ee-client/src/account-requester.ts) is the
 mobile and Web new-device side, and the personal device host implements it.
+
 - **Fixed offer.** A portable identity's credential packet is bound to an offer, but the
   account flow prepares the identity before any approver is known. Each workspace
   therefore uses one fixed account offer: its genesis record and membership, a
@@ -272,4 +278,3 @@ mobile and Web new-device side, and the personal device host implements it.
   Keystore on mobile, web-crypto on Web.
 - **Known limit.** Portable hosts do not report an unfinished per-workspace join yet, so
   such a workspace is not shown as blocked.
-

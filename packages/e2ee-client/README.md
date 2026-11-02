@@ -198,7 +198,8 @@ workflow's.
 - **`AccountPairingIdentityHost`** is the per-workspace host port. It prepares or reuses
   this workspace's identity for a verified genesis record and membership, reports an
   unfinished per-workspace join, installs a snapshot invitation for a given endorser,
-  and can optionally activate the workspace.
+  optionally installs from verified full history (`acceptAccountHistory`, for rows a
+  Member approved without an invitation), and can optionally activate the workspace.
 - **`makePortableAccountPairingRequester`** turns such hosts into the shared workflow's
   requester ports:
   - It verifies the full history and finds this account's single membership.
@@ -212,7 +213,8 @@ workflow's.
   - it appends the journaled original with the new device's credential hash through
     the injected account-authenticated `appendRecord`, then settles the outcome from
     the verified ledger (committed, lost, or not yet decided);
-  - it delivers a signed snapshot invitation as Owner or Admin, and `null` as Member;
+  - it delivers a signed snapshot invitation as Owner or Admin. A Member gets `null`,
+    so its row carries no invitation and the new device verifies the full history;
   - its device access for the relay stays inside this composition.
 - **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
   per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
