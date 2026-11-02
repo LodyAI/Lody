@@ -2718,14 +2718,16 @@ export const SessionChatInterface = memo(
       sourceFence: durableConversationSourceFence,
       documentReady: sessionDocReady,
     });
+    // Runtime attribution needs turn identity, which the index already has;
+    // waiting for bodies would temporarily revive the turn's old Plan request.
     const sessionRuntimeConfig = useMemo(
       () =>
         resolveSessionAcpRuntimeConfig(
-          sessionTailHistory,
+          conversationConfigSources,
           sessionDoc?.mq ?? [],
           sessionDoc?.acpRuntimeConfig
         ),
-      [sessionDoc?.acpRuntimeConfig, sessionTailHistory, sessionDoc?.mq]
+      [sessionDoc?.acpRuntimeConfig, conversationConfigSources, sessionDoc?.mq]
     );
     // A local send and its history/queue row share one fence, so landing the
     // send cannot consume edits made for the next draft during its upload.
