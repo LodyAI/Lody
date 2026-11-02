@@ -1850,21 +1850,21 @@ Meta+B行为全同。原两次零帧采集失败和宽build门禁失败保留，
 
 ### 公开调用方与剩余层叠边界
 
-自147起已接受的有界迁移移除209处源码utility，含189六处私有间距、211／212／214共25处声明、
-216两处描述及220九处helper私有SVG尺寸。192两处opacity仍保留Tailwind。六处重复尺寸／shrink
-另列清理，恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
+自147起已接受的有界迁移移除212处源码utility，含189六处私有间距、211／212／214共25处声明、
+216两处描述、220九处helper私有SVG及222三处私有commit-tooltip尺寸。192两处opacity仍保留Tailwind。
+六处重复尺寸／shrink另列清理；恢复的native compiler试验默认值信用零。声明桥转移归属但仍保旧输出。
 
-已接受218的components切面在1,399产品源中识别1,266处AST出现次数／144文件／770未解析。
-helper220在30源中识别194处／8文件／21未解析。v2合计1,460处／152文件／791未解析表达式。
-桥仍输出59个utility位置（原10、217新增28、218新增21），一个仅桥consumer不在AST文件列表。
-加回已知输出后，**保守兼容下界为1,519处／153文件**。十三alias及Tailwind排序仍保留；
-49个Sidebar位置是归属迁移，不是净移除49处。未解析含普通StyleX及runtime表达式，不是791个
-已确认Tailwind用法或完成百分比。此前215冻结值仍为AST1,518加桥10，兼容下界1,528／153。
+已接受221的components切面在1,399产品源中识别1,257处AST出现次数／143文件／776未解析。
+helper222在30源中识别191处／8文件／21未解析。v2合计1,448处／151文件／797未解析表达式。
+桥仍输出68个utility位置（原10、217新增28、218新增21、221新增九），两个仅桥consumer不在AST
+utility文件列表；加回后，**保守兼容下界为1,516处／153文件**。十三alias与Tailwind排序保留；
+217／218／221共58个位置是归属迁移，不是净删除58处。未解析含普通StyleX／runtime表达式，
+不是797个已确认Tailwind用法或完成百分比。此前215与220下界继续冻结为1,528与1,519。
 
-components切面见inventory-source-through218-accepted-proof.json与
-inventory-v2-through218-accepted-fullsrc.json；helper见inventory-helper-source-through220-proof.json与
-inventory-helper-v2-after220.json，仅在冻结214银行overlay已采用renderer，不混入无关用户修改。
-库存不代表新增整套测试／renderer资格。
+components切面见inventory-source-through221-accepted-proof.json与
+inventory-v2-through221-accepted-fullsrc.json；helper见inventory-helper-source-through222-proof.json与
+inventory-helper-v2-after222.json。仅在各自此前冻结快照覆盖四个221源及222 renderer；story不计入
+产品源码库存，但其literal仍可能进入隐式CSS扫描。库存不代表新增组合Root整套测试／renderer资格。
 
 此前204三个template-class退出未解析计数不是额外utility删除。185手工移除二十literal，但原仅七个
 在v2解析范围；保留的h-svh hook及147原字典缺口仍在下界外。198的@lody/ui扫描识别84源零utility，
@@ -1930,7 +1930,9 @@ Electron 采集，也不包含后续 161 源码或隔离 159 原型。各 owning
 | 原生焦点环214 | 六个ReviewCheck／Checkbox焦点utility迁为原生:has(:focus-visible)，无React焦点状态或marker。十一对保519目标、473导航及5,759几何，九PNG／RGBA同；物理box-shadow严格同。 | 原两OPEN保1,968原始／1,632阈值像素，位于header角及group标题文字，具体原因未知。三十个具名ring color／shadow逗号空白差异保两侧raw并逐项核锁定语法／consumer，不称raw对象相同。63注册及732保留规则同，whole at-rule183→181不同。207／208旧OPEN不关闭。 |
 | 保selector声明215 | StyleX拥有MobileInlinePicker／AdaptiveTabStrip使用十次的八flat声明，五绑定保class字符串及cn／Slot合同。原八生产／四DEV对PNG／RGBA同，106 CSS及两官方renderer-only CSS同；当前215＋216另补八对／456节点同、106 CSS同及稳定620文件／6,218组件测试。 | 八alias与Tailwind保留／排序仍在，十literal改import不是净移除十处。DEV40精确source-line载体及当前14个已核CSS URL另列。HMR实际200→404→200拒绝0.6且有overlay，旧UI仍0.7，不称整页fail closed。生产CSS map缺口、旧Vite close失败及全部旧矩阵／OPEN保留；最终文档／fixture另验。 |
 | Sidebar声明归属217／218 | 49个utility位置保留原cn／Slot顺序，桥共十三声明／十八绑定。原21＋21对为19＋20 PNG同，两批106 CSS同，各冻结620文件／6,218测试通过。 | 三个UA移动布局OPEN保留：217共32,090raw／max1，218共21,320／max3，threshold12均零，target ROI含差异。fine-pointer Chromium UA模拟不是touch／Safari。GroupAction DEV映射新增null。测试扫描候选清理及最终Root另验，不计净删除。 |
-| 私有helper SVG220 | 九个实际glyph utility改局部精确spacing表达式及原控件opt-out marker。32 Storybook＋7官方file://对PNG／RGBA同；171完整target及1,638导航geometry／state记录同。 | phone-map active BODY textContent少71字符、原因未知。两DOM-only祖先反例保留，非已识别host合同，不称任意外部SVG utility等价。39处prepared主题／依赖有明确匹配hash。viewer仅源审，不是第三运行矩阵。 |
+| Workspace／drop声明221 | 九个utility位置通过三个新绑定复用十三flat声明。十七真实Storybook对PNG／RGBA同，覆盖2,377 body／36 target，含trusted原生拖放、self／disabled及draft。另两对真实隔离Electron图同，覆盖633节点／四target。 | 实际App固定ID与boot elapsed差异（含两个隐藏mark物理animation-delay字段）仍保，不称启动历史或App拖放等价。首容器CLI-marker发现失败保留。共同fixture候选会影响隐式CSS扫描；106份CSS相同只属于共同fixture冻结切面，不计净移除。 |
+| 私有commit Tooltip222 | 三处尺寸utility改精确局部StyleX字段，不改primitive／API。20可见Storybook＋2官方file://对PNG／RGBA同；576 target记录物理字段全同。 | 两个390px popup box仍屏外，其中一诊断73raw／零阈值OPEN、原因未知；总24对23 PNG同。原hover／keyboard／readiness失败保留；四次剪贴板读取均被拒绝，Check成功不代表独立读取到SHA。固定Vesper，不称普遍light-theme／全App覆盖。 |
+| 私有helper SVG220 | 九个实际glyph utility改局部精确spacing表达式及原控件opt-out marker。32 Storybook＋7官方file://对PNG／RGBA同；171完整target及1,638导航geometry／state记录同。 | phone-map active BODY textContent少71字符、原因未知。独立真实文件导航补充在两侧显示完整注释DOM并有相同新PNG，但不恢复原挂载历史或关闭原OPEN。两DOM-only祖先反例保留，非已识别host合同，不称任意外部SVG utility等价。39处prepared主题／依赖有明确匹配hash。viewer仅源审，不是第三运行矩阵。 |
 | Legacy描述字号216 | Vaul-backed DrawerDescription新增物理fontSize，保省略路径、caller style及Radix child优先级。移除两处工作区面板utility及原被覆盖的重复StyleX字号。22正式对保66完整目标／祖先记录、464几何及36精确class／style载体，21 PNG／RGBA同。真实输入、blocked／pending及关闭重开重置保留。 | 原light390输入聚焦状态保719原始／零阈值像素、最大通道差9，位于目标描述之外；具体原因未知，未采input完整computed。十二API状态仅After-only。真实CSS仅删除旧utility规则，模块图仅少一条已无用pure helper import。浮点／readiness及过强图oracle失败保留，不称真正工作区创建成功。 |
 | ShareCard阴影反例 | 真实公开className后代shadow-none规则Before胜出，After被无层StyleX私有writer压过。三utility候选拒绝，信用零，Root源码未改。 | 一个真实端点两侧各自采集内49完整后代记录稳定，但物理大阴影改变；95,906原始／12,307阈值像素不同。原高亮readiness／准备失败保留在next-native-share-card-counter-acceptance.html；只拒绝已证明候选，不表示所有未来ShareCard迁移均阻塞。 |
 | Spinner透明度192与queued pulse | 两opacity候选拒绝：4个direct控制同，4个真实零特异性祖先使0.7→1，共721原始像素；Root源码未改。 | 旧named默认在utilities中凭特异性胜出，普通StyleX则早于caller utility层，直接替换不能保合同。另完整animation变量简写在锁定compiler模式下不产CSS；默认keyframes不能替代元素本地变量合同。未采用compiler模式、新primitive API或特异性补丁。 |

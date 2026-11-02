@@ -9,13 +9,13 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
-Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of thirteen flat declarations with eighteen bindings used at fifty-nine utility positions in MobileInlinePicker, AdaptiveTabStrip and the public legacy Sidebar, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
+Moving public Tailwind defaults across layers or replacing their class identities changes supported caller precedence. A bounded build adapter now gives StyleX ownership of thirteen flat declarations with twenty-one bindings used at sixty-eight utility positions in MobileInlinePicker, AdaptiveTabStrip, the public legacy Sidebar, WorkspaceCard and SessionMentionDropLayer, while retaining the original selectors, classes and rule positions. It removes each original declaration before inserting actual StyleX compiler metadata; ordinary StyleX collection remains separate. Real production, development and current-source integration comparisons preserve rendering and CSS, but the bridge still depends on Tailwind candidate retention and ordering. This is a migration boundary, not removal of Tailwind or a general styling API.
 
 ## Ownership and compilation
 
 | Owner                                                                                                          | Responsibility                                                                                                                            |
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Thirteen real StyleX declarations and eighteen scalar/group class bindings.                                                               |
+| [`legacy-defaults.stylex.ts`](../../../../packages/components/src/style/legacy-defaults.stylex.ts)             | Thirteen real StyleX declarations and twenty-one scalar/group class bindings.                                                             |
 | [`legacy-declaration-profile.ts`](../../../../packages/components/src/style/legacy-declaration-profile.ts)     | One explicit declaration/property/legacy-alias map and ordered binding membership; the existing source scan retains its thirteen aliases. |
 | [`vite-legacy-declarations.ts`](../../../../packages/components/vite-legacy-declarations.ts)                   | Closed source compilation, declaration equivalence and replacement at the original CSS slots.                                             |
 | [`legacy-declaration-bridge.test.ts`](../../../../packages/components/tests/legacy-declaration-bridge.test.ts) | Real compiler, `cn`, source-map, rejection and recovery behavior.                                                                         |
@@ -32,7 +32,7 @@ flowchart LR
 ```
 
 The pre-transform validates a fixed AST grammar before React/docgen transforms.
-It accepts literal flat declarations and the eighteen approved `stylex.props`
+It accepts literal flat declarations and the twenty-one approved `stylex.props`
 bindings, folds them with the pinned native compiler, and emits their original
 class strings in the original order. Dynamic values, conditions, namespace
 escapes, mixed class construction and unsafe query loaders reject. The source
@@ -67,8 +67,8 @@ The retained 366px container query and frozen-transition utilities keep their
 existing paths. DOM, refs, events, disabled state and responsive behavior do not
 move into the compiler adapter.
 
-Fifty-nine consumer utility positions becoming imported bindings are not fifty-nine fewer
-remaining legacy occurrences. The thirteen aliases and fifty-nine compiled output occurrences
+Sixty-eight consumer utility positions becoming imported bindings are not sixty-eight fewer
+remaining legacy occurrences. The thirteen aliases and sixty-eight compiled output occurrences
 remain explicit compatibility dependencies. Scanner v2 continues to report only
 its recognized AST occurrences; the bridge's known outputs are listed separately
 and added back for the conservative remaining boundary. The
@@ -140,6 +140,25 @@ its same60px input at runtime so implicit Tailwind scanning does not introduce a
 production rule absent from Root's original stories; final Root build qualification
 is separate from those original captures. Source and visual evidence are owned by
 `leaves217-delivery.json`, `leaves218-delivery.json` and their independent reviews.
+
+The WorkspaceCard/drop-layer extension221 reuses those same thirteen properties
+through three appended bindings at nine utility positions. Its seventeen real
+Storybook pairs are PNG/RGBA exact over2,377 body and36 target records; only
+seventeen individually verified CSS URLs differ. Trusted native drag/drop,
+self-exclusion, disabled drops and retained drafts are exercised. Two actual
+isolated Electron pairs also match PNG/RGBA over633 nodes/four targets. Their
+fixed-position IDs, resource paths and actual boot elapsed writer/reader differences
+remain explicit, including two physical hidden-mark `animation-delay` fields;
+matching pixels do not establish identical startup history or
+actual-App drag coverage. The first container's missing CLI discovery marker and
+its failure remain; the retry copies the existing workspace marker and identical
+prebuilt runtime bytes to both private containers, without changing CLI source.
+
+The committed native-drag/caller fixture is shared by both221 source cuts. Its
+new literal candidates can enter Tailwind's implicit production scan, while its
+StyleX atoms belong to the story graph. Therefore those106 matching resources
+prove the frozen common-fixture comparison, not CSS identity against the older
+Root tree without that fixture. Final combined Root qualification stays separate.
 
 The original production Vite pipeline does not publish a usable CSS source map.
 JS and real development CSS author mappings are verified; complete production CSS

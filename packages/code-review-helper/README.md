@@ -24,6 +24,12 @@ gutter glyph stays on its legacy path. Actual standalone/viewer hosts and the
 renderer props provide no arbitrary SVG-utility wrapper contract; the preserved
 DOM-only ancestor counterexample is not a promise of such compatibility.
 
+The private commit Tooltip owns its width, maximum width and padding through
+local StyleX expressions. Its portal reads spacing at the popup itself; a variable
+on the source row is not implicitly a portal ancestor. Keep the exact zero-spacing
+expression and maximum tied to the root font size. Existing narrow-screen left-side clipping
+and clipboard-read permission limits remain documented in its visual acceptance.
+
 The local DropdownMenu, Tooltip, Button, ToggleGroup and Separator use StyleX on ordinary
 elements while preserving the original Tailwind cascade for legal Radix `asChild`
 children. Slot concatenates parent and

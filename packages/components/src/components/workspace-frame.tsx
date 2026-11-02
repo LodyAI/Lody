@@ -3,6 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { WORKSPACE_FRAME_CSS } from '@/lib/workspace-frame';
 import { cn } from '@/lib/utils';
+import { workspaceCardLayoutClass } from '@/style/legacy-defaults.stylex';
 import { DocumentStyle } from './document-style';
 
 const styles = stylex.create({
@@ -39,7 +40,8 @@ export function WorkspaceCard({
         data-workspace-card
         data-anchored={anchored}
         className={cn(
-          'lody-workspace-card flex min-w-0 w-full flex-1 flex-col overflow-hidden',
+          'lody-workspace-card',
+          workspaceCardLayoutClass,
           stylex.props(styles.card).className,
           className
         )}

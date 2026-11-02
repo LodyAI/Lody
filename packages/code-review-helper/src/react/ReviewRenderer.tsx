@@ -2999,6 +2999,11 @@ function ColumnResizer({
 }
 
 const treeCommitStyles = stylex.create({
+  tooltipPopup: {
+    width: 'calc(var(--spacing) * 72)',
+    maxWidth: '18rem',
+    padding: 'calc(var(--spacing) * 0)',
+  },
   tree: {
     'margin-inline': 'calc(var(--spacing) * -1)',
     display: 'grid',
@@ -3746,7 +3751,11 @@ function CommitRow({
               </div>
             )}
           </TooltipTrigger>
-          <TooltipContent side="left" align="start" className="w-72 max-w-[18rem] p-0">
+          <TooltipContent
+            side="left"
+            align="start"
+            className={stylex.props(treeCommitStyles.tooltipPopup).className}
+          >
             <div {...stylex.props(treeCommitStyles.tooltipBody)}>
               <p {...stylex.props(treeCommitStyles.tooltipSubject)}>{subject}</p>
               <p {...stylex.props(treeCommitStyles.tooltipMetadata)}>

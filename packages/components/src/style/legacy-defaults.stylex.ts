@@ -63,3 +63,18 @@ export const sidebarMinWidthClass = legacyClass(stylex.props(styles.minimum).cla
 export const sidebarColumnClass = legacyClass(stylex.props(styles.column).className);
 export const sidebarGapClass = legacyClass(stylex.props(styles.gapTwo).className);
 export const sidebarOverflowClass = legacyClass(stylex.props(styles.clipped).className);
+
+export const workspaceCardLayoutClass = legacyClass(
+  stylex.props(
+    styles.row,
+    styles.minimum,
+    styles.fullWidth,
+    styles.remainder,
+    styles.column,
+    styles.clipped
+  ).className
+);
+export const sessionDropPositionClass = legacyClass(stylex.props(styles.positioned).className);
+export const sessionDropClipClass = legacyClass(
+  stylex.props(styles.minimumHeight, styles.clipped).className
+);

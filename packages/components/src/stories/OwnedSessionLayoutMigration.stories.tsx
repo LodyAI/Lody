@@ -2,8 +2,22 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
 import { createStore, Provider } from 'jotai';
 import { DesktopSessionDetailLayout } from '../components/sessions/desktop-session-detail-layout';
+import * as stylex from '@stylexjs/stylex';
+import { SessionMentionDropLayer } from '../components/sessions/session-mention-drop-layer';
+import { startSessionMentionDrag } from '../lib/session-mention-drag';
 import { WorkspaceCard } from '../components/workspace-frame';
 import { ForceDesktopLayoutProvider } from '../hooks/use-mobile';
+
+const fixtureStyles = stylex.create({
+  opaque: {
+    display: 'grid',
+    minWidth: 74,
+    width: 83,
+    flex: 0,
+    flexDirection: 'row',
+    overflow: 'visible',
+  },
+});
 
 const PANEL_STORAGE_KEY = 'react-resizable-panels:session-detail-panels';
 const meta = {
@@ -57,16 +71,34 @@ function Pane({ side }: { side: boolean }) {
 function Fixture({
   mode = 'open',
 }: {
-  mode?: 'open' | 'closed' | 'variables' | 'caller' | 'unanchored';
+  mode?:
+    | 'open'
+    | 'closed'
+    | 'variables'
+    | 'caller'
+    | 'unanchored'
+    | 'arbitrary'
+    | 'zero'
+    | 'opaque'
+    | 'initial'
+    | 'inherit';
 }) {
   const [store] = useState(createStore);
+  const [dropEnabled, setDropEnabled] = useState(true);
+  const [dropResult, setDropResult] = useState('');
+  const [dragTrusted, setDragTrusted] = useState(false);
+  const [dropTrusted, setDropTrusted] = useState(false);
+  const [dragEnded, setDragEnded] = useState(false);
+  const [dragTypes, setDragTypes] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(mode !== 'closed');
   const [restoreSeq, setRestoreSeq] = useState(0);
   const [request, setRequest] = useState<{ seq: number; minWidthPx: number } | null>(null);
   const scope =
     mode === 'variables'
       ? ({ '--spacing': '6px', '--sidebar-ring': '15 90% 45%' } as CSSProperties)
-      : undefined;
+      : mode === 'initial' || mode === 'inherit'
+        ? ({ '--spacing': mode } as CSSProperties)
+        : undefined;
   const restore = (open: boolean) => {
     setRestoreSeq((previous) => previous + 1);
     setSidebarOpen(open);
@@ -76,6 +108,18 @@ function Fixture({
       <ForceDesktopLayoutProvider>
         <main
           data-session-layout-fixture={mode}
+          data-drop-enabled={String(dropEnabled)}
+          data-drop-result={dropResult}
+          data-drag-trusted={String(dragTrusted)}
+          data-drop-trusted={String(dropTrusted)}
+          data-drag-ended={String(dragEnded)}
+          data-drag-types={dragTypes}
+          className={
+            mode === 'zero'
+              ? '[&_:where([data-workspace-card])]:block [&_:where([data-session-mention-drop-layer])]:overflow-visible'
+              : undefined
+          }
+          onDropCapture={(event) => setDropTrusted(event.nativeEvent.isTrusted)}
           data-sidebar-open={sidebarOpen}
           data-restore-seq={restoreSeq}
           style={{
@@ -89,6 +133,43 @@ function Fixture({
           }}
         >
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 8 }}>
+            {(['sample-remote', 'sample-self'] as const).map((id) => (
+              <button
+                type="button"
+                key={id}
+                draggable
+                data-frame-drag-source={id}
+                onDragStart={(event) => {
+                  setDragTrusted(event.nativeEvent.isTrusted);
+                  setDragEnded(false);
+                  startSessionMentionDrag(event, { sessionId: id, title: id });
+                  setDragTypes(Array.from(event.dataTransfer.types).join('|'));
+                }}
+                onDragEnd={() => setDragEnded(true)}
+              >
+                Drag {id}
+              </button>
+            ))}
+            <label>
+              <input
+                type="checkbox"
+                data-frame-drop-enabled
+                checked={dropEnabled}
+                onChange={(event) => setDropEnabled(event.target.checked)}
+              />
+              Accept drops
+            </label>
+            <button
+              type="button"
+              data-frame-drop-reset
+              onClick={() => {
+                setDropResult('');
+                setDropTrusted(false);
+              }}
+            >
+              Reset drop
+            </button>
+            <output data-frame-drop-output>{dropResult || 'No drop'}</output>
             <button type="button" onClick={() => setSidebarOpen((open) => !open)}>
               Toggle panel
             </button>
@@ -114,38 +195,49 @@ function Fixture({
               className={
                 mode === 'caller'
                   ? 'min-w-[360px] w-4/5 flex-none flex-row overflow-visible'
-                  : undefined
+                  : mode === 'arbitrary'
+                    ? '[display:block] [min-width:70px] [width:80px] [flex:0] [flex-direction:row] [overflow:visible]'
+                    : mode === 'opaque'
+                      ? stylex.props(fixtureStyles.opaque).className
+                      : undefined
               }
             >
-              <DesktopSessionDetailLayout
-                defaultSizes={{ main: 65, sidebar: 35 }}
-                topBar={
-                  <header
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      height: 40,
-                      paddingInline: 12,
-                      flexShrink: 0,
-                      borderBottom: '1px solid hsl(var(--border))',
-                    }}
-                  >
-                    Session tabs · synthetic-layout
-                  </header>
-                }
-                chatSurfaces={<Pane side={false} />}
-                terminalDock={
-                  <footer style={{ padding: 8, borderTop: '1px solid hsl(var(--border))' }}>
-                    Terminal dock remains in conversation
-                  </footer>
-                }
-                secondaryPanel={<Pane side />}
-                sidebarOpen={sidebarOpen}
-                onSidebarCollapse={() => setSidebarOpen(false)}
-                sidebarRestoreSeq={restoreSeq}
-                sidebarMinWidthRequest={request}
-                deleteConfirmDialog={null}
-              />
+              <SessionMentionDropLayer
+                enabled={dropEnabled}
+                excludeSessionId="sample-self"
+                onDropSessionId={setDropResult}
+                className={mode === 'caller' ? 'static min-h-[40px] overflow-visible' : undefined}
+              >
+                <DesktopSessionDetailLayout
+                  defaultSizes={{ main: 65, sidebar: 35 }}
+                  topBar={
+                    <header
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        height: 40,
+                        paddingInline: 12,
+                        flexShrink: 0,
+                        borderBottom: '1px solid hsl(var(--border))',
+                      }}
+                    >
+                      Session tabs · synthetic-layout
+                    </header>
+                  }
+                  chatSurfaces={<Pane side={false} />}
+                  terminalDock={
+                    <footer style={{ padding: 8, borderTop: '1px solid hsl(var(--border))' }}>
+                      Terminal dock remains in conversation
+                    </footer>
+                  }
+                  secondaryPanel={<Pane side />}
+                  sidebarOpen={sidebarOpen}
+                  onSidebarCollapse={() => setSidebarOpen(false)}
+                  sidebarRestoreSeq={restoreSeq}
+                  sidebarMinWidthRequest={request}
+                  deleteConfirmDialog={null}
+                />
+              </SessionMentionDropLayer>
             </WorkspaceCard>
           </div>
         </main>
@@ -159,3 +251,9 @@ export const Closed: Story = { render: () => <Fixture mode="closed" /> };
 export const SubtreeVariables: Story = { render: () => <Fixture mode="variables" /> };
 export const CallerOverrides: Story = { render: () => <Fixture mode="caller" /> };
 export const Unanchored: Story = { render: () => <Fixture mode="unanchored" /> };
+
+export const ArbitraryDefaults: Story = { render: () => <Fixture mode="arbitrary" /> };
+export const ZeroSpecificityDefaults: Story = { render: () => <Fixture mode="zero" /> };
+export const OpaqueDefaults: Story = { render: () => <Fixture mode="opaque" /> };
+export const InitialSpacing: Story = { render: () => <Fixture mode="initial" /> };
+export const InheritSpacing: Story = { render: () => <Fixture mode="inherit" /> };

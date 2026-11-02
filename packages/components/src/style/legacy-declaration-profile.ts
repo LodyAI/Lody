@@ -34,4 +34,7 @@ export const legacyBindings = {
   sidebarColumnClass: ['column'],
   sidebarGapClass: ['gapTwo'],
   sidebarOverflowClass: ['clipped'],
+  workspaceCardLayoutClass: ['row', 'minimum', 'fullWidth', 'remainder', 'column', 'clipped'],
+  sessionDropPositionClass: ['positioned'],
+  sessionDropClipClass: ['minimumHeight', 'clipped'],
 } as const;
