@@ -213,6 +213,7 @@ import {
   type MobileProjectFileBrowserHandle,
 } from '@/components/files/mobile-project-file-browser';
 import { buildSessionLink } from '@lody/shared/session-link';
+import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
@@ -3242,11 +3243,19 @@ const SessionDetail = ({
   }, [activeSession, currentWorkspaceId, deleteArchivedSession, handleBackToList, repoFullName, t]);
 
   const handleCopyUrl = useCallback(
-    async (successMessage?: string, failureMessage?: string) => {
+    async (
+      successMessage?: string,
+      failureMessage?: string,
+      format: 'https' | 'deeplink' = 'https'
+    ) => {
       try {
-        if (!currentWorkspaceId || !activeSessionTabId) throw new Error('Session is not ready');
+        if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
+          throw new Error('Session is not ready');
+        }
         await navigator.clipboard.writeText(
-          buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+          format === 'deeplink'
+            ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+            : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
         );
         captureSessionDetailEvent('session/share_link_copied');
         toast.success(successMessage ?? t('sessions.urlCopied', 'Session URL copied to clipboard'));
@@ -3255,7 +3264,7 @@ const SessionDetail = ({
         toast.error(failureMessage ?? t('sessions.copyFailed', 'Unable to copy'));
       }
     },
-    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId]
+    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId, workspaceSlug]
   );
 
   const handleRequestShareSession = useCallback(
@@ -6333,6 +6342,14 @@ const SessionDetail = ({
       label: t('sessions.copyUrl', 'Copy URL'),
       onClick: () => {
         void handleCopyUrl();
+      },
+    });
+    mobileMenuActions.push({
+      id: 'copy-deeplink',
+      icon: <Link {...stylex.props(detailStyles.icon14)} />,
+      label: t('sessions.copyDeepLink', 'Copy deeplink'),
+      onClick: () => {
+        void handleCopyUrl(undefined, undefined, 'deeplink');
       },
     });
     // Share-as-image arms message selection inside the chat surface, so it is
