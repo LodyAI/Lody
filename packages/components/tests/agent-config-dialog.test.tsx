@@ -855,9 +855,10 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 6)
+        .slice(0, 7)
         .map((option) => option.textContent)
     ).toEqual([
+      expect.stringContaining('Lody Agent'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
       expect.stringContaining('Grok'),
@@ -926,10 +927,14 @@ describe('AgentConfigDialog', () => {
       createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
       onSubmit
     );
+    expect(getOptionButtons()[0]?.textContent).toContain('Lody Agent');
     await act(async () => {
       getOptionByText('Lody Agent').click();
     });
     expect(getSelectedOption()?.textContent).toContain('Lody Agent');
+    expect(document.body.textContent).toContain(
+      'After setup, open this provider to sign in and choose an available account.'
+    );
     await act(async () => {
       getPrimaryAction('Create').click();
     });

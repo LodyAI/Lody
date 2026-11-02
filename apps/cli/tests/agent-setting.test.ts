@@ -344,7 +344,7 @@ describe('resolveBuiltinACPSetting', () => {
         SORBET_OBSERVABILITY_RECORDING: 'false',
         SORBET_OBSERVABILITY_CONFIG: '',
       },
-      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4',
+      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4+auth-discovery:1',
     });
   });
 

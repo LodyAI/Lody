@@ -42,6 +42,21 @@ describe('ACP capability cache compatibility', () => {
     expect(getReadableAcpCapabilityCacheEntry(preview)).toBe(preview);
   });
 
+  it('retires only the old Sorbet method list while keeping other capabilities', () => {
+    const old = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'sorbet',
+      sourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4',
+      authMethods: [],
+    };
+    const { authMethods: _methods, ...retained } = old;
+    expect(getReadableAcpCapabilityCacheEntry(old)).toEqual(retained);
+    const current = { ...old, sourceVersion: `${old.sourceVersion}+auth-discovery:1` };
+    expect(getReadableAcpCapabilityCacheEntry(current)).toEqual(current);
+    const other = { ...old, agentType: 'devin' };
+    expect(getReadableAcpCapabilityCacheEntry(other)).toEqual(other);
+  });
+
   it('invalidates Pi plugin catalogs when selections change or become empty', () => {
     const capability: AcpCapabilityCacheEntry = {
       ...entry(ACP_CAPABILITY_CACHE_VERSION),

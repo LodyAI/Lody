@@ -114,6 +114,7 @@ export type CreateAcpClientOptions = {
    * adapter uses the native local runner; other agents default to true.
    */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
@@ -155,6 +156,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     resolveAdditionalDirectories: options.resolveAdditionalDirectories,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
+    discoverAuthenticationMethods: options.discoverAuthenticationMethods,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
     onRequestPermission: options.onRequestPermission,
@@ -287,6 +289,7 @@ export type StartLocalAcpAgentOptions = {
   terminalManager: TerminalManager;
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
   onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
@@ -684,6 +687,7 @@ async function startLocalAcpProtocol<T>(
         },
         launcher,
         terminalEnabled: options.terminalEnabled,
+        discoverAuthenticationMethods: options.discoverAuthenticationMethods,
         onUpdateMessage: options.onUpdateMessage,
         onRequestPermission: options.onRequestPermission,
         startupTimeouts,

@@ -475,6 +475,17 @@ export const getReadableAcpCapabilityCacheEntry = (
   if (!entry) {
     return undefined;
   }
+  // Older Sorbet probes omitted URL elicitation and always returned an empty
+  // method list. Preserve other capabilities while forcing method discovery.
+  if (
+    entry.cliType === 'builtin' &&
+    entry.agentType === 'sorbet' &&
+    entry.sourceVersion === 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4' &&
+    entry.authMethods !== undefined
+  ) {
+    const { authMethods: _staleAuthMethods, ...compatible } = entry;
+    entry = compatible;
+  }
   if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
     const { availableCommands: _projectCommands, ...compatible } = entry;
     entry = compatible;

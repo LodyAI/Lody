@@ -1008,6 +1008,16 @@ type AgentTypeOption = {
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
   {
     kind: 'builtin',
+    value: 'builtin:sorbet',
+    label: 'Lody Agent',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'Lody Agent runtime',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    searchKeys: 'lody agent sorbet',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:kimi',
     label: 'Kimi Code',
     descriptionKey: 'settings.agent.dialog.option.kimi.description',
@@ -1066,16 +1076,6 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     agentType: 'deepseek',
     experimental: true,
     searchKeys: 'deepseek harness dsh acp',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:sorbet',
-    label: 'Lody Agent',
-    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
-    descriptionDefault: 'Lody Agent runtime',
-    cliType: 'builtin',
-    agentType: 'sorbet',
-    searchKeys: 'lody agent sorbet',
   },
   {
     kind: 'builtin',
@@ -3139,6 +3139,22 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 {t(
                   'settings.agent.codex.boundChatgptAccount',
                   'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+                )}
+              </p>
+            </Field>
+          ) : null}
+          {mode.kind === 'create' &&
+          formData.cliType === 'builtin' &&
+          formData.agentType === 'sorbet' &&
+          !showAuthenticationPanel ? (
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <p {...stylex.props(styles.statusText)}>
+                {t(
+                  'settings.agent.dialog.lodyAgentSignInHint',
+                  'After setup, open this provider to sign in and choose an available account.'
                 )}
               </p>
             </Field>

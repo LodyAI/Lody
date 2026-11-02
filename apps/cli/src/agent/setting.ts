@@ -323,7 +323,7 @@ export function getAcpCapabilitySourceVersion(
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
       if (input.agentType === 'sorbet') {
-        return `builtin-sorbet:${SORBET_ACP_PACKAGE}`;
+        return `builtin-sorbet:${SORBET_ACP_PACKAGE}+auth-discovery:1`;
       }
       if (input.agentType === 'dimcode') {
         return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;

@@ -312,7 +312,9 @@ connection.
 A protocol agent publishes its sign-in methods in the `initialize` response. The capability
 probe stores that list on the Provider's capability row (`authMethods`), so the account panel
 and the in-conversation auth notice list what the agent supports before anyone starts a
-sign-in; picking a row sends its `methodId` with the `start` request. The daemon re-reads the
+sign-in. Sorbet's probe advertises URL and credential-form discovery; ordinary sessions do
+not. Earlier Sorbet probe method lists are ignored and refreshed under the new source version.
+Picking a row sends its `methodId` with the `start` request. The daemon re-reads the
 advertised list on its own connection, ignores a pick the agent no longer advertises (falling
 back to the single method or its own picker), and still runs `authenticate` itself. A machine
 that predates `acpAuthenticationMethodSelection` receives no `methodId` at all, because its
