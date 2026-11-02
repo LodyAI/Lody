@@ -3246,14 +3246,14 @@ const SessionDetail = ({
     async (
       successMessage?: string,
       failureMessage?: string,
-      format: 'https' | 'deeplink' = 'https'
+      linkFormat: 'https' | 'deeplink' = 'https'
     ) => {
       try {
         if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
           throw new Error('Session is not ready');
         }
         await navigator.clipboard.writeText(
-          format === 'deeplink'
+          linkFormat === 'deeplink'
             ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
             : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
         );

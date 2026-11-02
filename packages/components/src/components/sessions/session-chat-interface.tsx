@@ -7024,11 +7024,11 @@ export const SessionChatInterface = memo(
     }, [captureSessionEvent, openSettings]);
 
     const handleCopySessionLink = useCallback(
-      async (format: 'https' | 'deeplink' = 'https') => {
+      async (linkFormat: 'https' | 'deeplink' = 'https') => {
         try {
           if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
           await navigator.clipboard.writeText(
-            format === 'deeplink'
+            linkFormat === 'deeplink'
               ? buildSessionLink({ sessionId: session.id, workspaceId })
               : buildAppSessionUrl(workspaceSlug, session.id)
           );
