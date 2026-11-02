@@ -276,7 +276,7 @@ export function compileLegacyDeclarations(
   return { code: output.code, map: output.map, raw, filename, declarations };
 }
 
-function comparable(property: string, value: string): string | number {
+function comparable(alias: string, property: string, value: string): string | number {
   if (property === 'opacity') {
     assert(
       /^(?:0|1|0?\.\d+|\d+(?:\.\d+)?%)$/.test(value),
@@ -286,7 +286,7 @@ function comparable(property: string, value: string): string | number {
     assert(n >= 0 && n <= 1);
     return n;
   }
-  if (property === 'min-width') {
+  if (alias === 'min-w-0' && property === 'min-width') {
     assert(
       /^calc\(var\(--spacing\)\s*\*\s*0\)$/.test(value),
       'Keep the element-local calc-zero expression'
@@ -371,8 +371,8 @@ export function replaceLegacyDeclarations(
         claimed.add(old);
         assert.equal(old.prop, aligned.prop);
         assert.equal(
-          comparable(old.prop, old.value),
-          comparable(aligned.prop, aligned.value),
+          comparable(alias, old.prop, old.value),
+          comparable(alias, aligned.prop, aligned.value),
           'Unequal compatibility declaration: ' + alias
         );
         const replacement = aligned.clone();

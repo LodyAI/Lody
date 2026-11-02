@@ -83,6 +83,15 @@ duplicate, missing, unequal, important or extra-body slots reject. Static opacit
 numbers/percentages compare numerically within 0–1; the original element-local
 `calc(var(--spacing) * 0)` remains an expression, not literal zero.
 
+The calc-zero minimum-width normalization belongs only to the `min-w-0`
+alias. Applying it to every `min-width` rejected an otherwise exact200px native
+slot. Other aliases keep exact-value comparison; the zero alias still rejects
+literal0 or200px even when both compared bodies match. Three added real compiler/
+Tailwind regression cases preserve that distinction. Replaying the original
+rejected247 source now passes all four PostCSS modes; current91-key/113-binding
+CSS and native code remain unchanged across all modes. This tool correction adds
+no consumer credit and does not accept247's separate ordinary-style visual failure.
+
 Storybook, components Vite, the Electron renderer and components Vitest install
 the adapter. Vitest's binding-only route is a test transform, not application SSR.
 The normal StyleX collector remains unchanged. Compiler inputs use direct pinned

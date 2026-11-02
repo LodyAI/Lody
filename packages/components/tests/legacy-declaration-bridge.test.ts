@@ -279,6 +279,64 @@ describe('closed legacy declaration bridge', () => {
     );
   });
 
+  it('replaces an exact nonzero minimum with genuine native metadata and rejects unequal values', async () => {
+    const alias = 'min-w-[200px]';
+    const native = compileLegacyDeclarations(
+      raw.replace(
+        "minimum: { minWidth: 'calc(var(--spacing) * 0)' }",
+        "minimum: { minWidth: '200px' }"
+      ),
+      filename
+    );
+    const declaration = native.declarations.find((entry) => entry.alias === 'min-w-0')!;
+    // Exercise replacement independently of the unchanged production alias profile.
+    const compiled = { ...native, declarations: [{ ...declaration, alias }] };
+    const css = await originalCSS([alias]);
+    const output = replaceLegacyDeclarations(css, 'nonzero-minimum.css', compiled);
+    expect(output.css).toBe(css);
+    const values: postcss.Declaration[] = [];
+    output.root.walkDecls('min-width', (entry) => {
+      values.push(entry);
+    });
+    expect(values).toHaveLength(1);
+    expect(values[0].value).toBe(declaration.declaration.value);
+    expect(values[0].source?.input.file).toBe(filename);
+
+    const unequal = postcss.parse(css);
+    unequal.walkDecls('min-width', (entry) => {
+      entry.value = '201px';
+    });
+    const input = unequal.toString();
+    expect(() => replaceLegacyDeclarations(input, 'nonzero-minimum.css', compiled)).toThrow(
+      'Unequal compatibility declaration'
+    );
+    expect(unequal.toString()).toBe(input);
+  });
+
+  it.each(['0', '200px'])(
+    'rejects an equal but invalid %s body under the min-w-0 alias',
+    async (value) => {
+      const native = compileLegacyDeclarations(
+        raw.replace(
+          "minimum: { minWidth: 'calc(var(--spacing) * 0)' }",
+          `minimum: { minWidth: '${value}' }`
+        ),
+        filename
+      );
+      const declaration = native.declarations.find((entry) => entry.alias === 'min-w-0')!;
+      const compiled = { ...native, declarations: [declaration] };
+      const css = postcss.parse(await originalCSS(['min-w-0']));
+      css.walkDecls('min-width', (entry) => {
+        entry.value = declaration.declaration.value;
+      });
+      const input = css.toString();
+      expect(() => replaceLegacyDeclarations(input, 'zero-minimum.css', compiled)).toThrow(
+        'Keep the element-local calc-zero expression'
+      );
+      expect(css.toString()).toBe(input);
+    }
+  );
+
   it.each([
     ['h-10', 'height', '40px'],
     ['max-w-xs', 'max-width', 'var(--container-xs, 20rem)'],

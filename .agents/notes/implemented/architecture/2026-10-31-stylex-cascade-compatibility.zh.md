@@ -63,6 +63,12 @@ selector差异及八对浏览器补充均冻结保留，修复后源码有独立
 静态opacity数字／百分比只在0–1内按数值比较；元素本地calc(var(--spacing) * 0)保留为表达式，
 不能换字面零。
 
+calc-zero最小宽度正规化仅属于min-w-0 alias；原来对所有min-width一概应用，误拒精确匹配的
+200px原生声明。其它alias仍精确比较值；即使双方一致，零alias也继续拒绝literal0或200px。
+新增三个真实compiler／Tailwind回归case保护此区别。原被拒247源码在四种PostCSS模式均可重放，
+当前91key／113绑定的CSS与原生code在全部模式保持不变。此工具更正没有consumer迁移信用，
+也不接受247另一个普通样式的视觉失败候选。
+
 Storybook、components Vite、Electron renderer及components Vitest接入adapter。
 Vitest仅绑定路径是测试transform，不代表应用SSR。普通StyleX收集器不变。直接锁版依赖为
 Babel7.29.7、StyleX0.19.0、PostCSS8.5.6，trace-mapping0.3.31核map；版本均已在lock／cache。

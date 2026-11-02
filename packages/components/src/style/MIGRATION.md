@@ -71,6 +71,11 @@ during serve. An empty PostCSS optimize object defaults to non-minified output;
 Vite's producer has different defaults. Producer options are mutually exclusive.
 Raw/library callers must opt into a matching phase explicitly.
 
+Keep normalization specific to the alias whose contract requires it. Only
+`min-w-0` accepts the original element-local calc-zero expression; a nonzero
+minimum keeps exact value comparison. Equal literal-zero bodies under that zero
+alias still reject. Do not relax value equality to accept a new owner.
+
 The only supported multi-declaration rule is the exact `font-medium` pair:
 the element-local `--tw-font-weight` writer followed by `font-weight`, both
 reading `var(--font-weight-medium)`. Keep its original registration and order.
