@@ -323,15 +323,22 @@ export class CoordinatorWorkflow {
       const userTurn = output.find(
         (entry) => entry.id === successorTurnId && entry.role === 'user'
       );
+      const next = output.find(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === successorTurnId
+      );
+      if (!next) {
+        // An applied steer can still lose the race with the turn it targeted
+        // (stale-turn, or a failure before handoff) and never start a successor.
+        // Only an unsettled input may still hand off; otherwise `current` stands.
+        const settling =
+          userTurn === undefined ||
+          userTurn.status === 'processing' ||
+          userTurn.status === 'pending_apply';
+        return settling ? { _tag: 'Running' } : { _tag: 'Done', assistant: current };
+      }
       if (userTurn?.status === 'failed') return { _tag: 'Failed' };
       if (userTurn?.status === 'canceled') return { _tag: 'Cancelled', userTurn };
-      const next = output.find(
-        (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === successorTurnId &&
-          isTerminalAssistantEntry(entry)
-      );
-      if (!next) return { _tag: 'Running' };
+      if (!isTerminalAssistantEntry(next)) return { _tag: 'Running' };
       current = next;
     }
     return { _tag: 'Done', assistant: current };
