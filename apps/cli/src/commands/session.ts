@@ -4131,8 +4131,9 @@ export const deliveryFromSteerResponse = (
   if (response.applied) return 'steered';
   switch (response.disposition) {
     case 'unsupported':
-    case 'stale-turn':
       return 'queued';
+    // stale-turn is ambiguous: promoted to the queue, or consumed after the
+    // provider accepted it too late. Report nothing rather than a false queue.
     case 'no-active-turn':
       return 'dispatched';
     default:

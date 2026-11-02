@@ -1965,6 +1965,15 @@ describe('agent chat to a busy target', () => {
     expect(fixture.dispatched).toEqual([]);
   });
 
+  it('reports no receipt for an ambiguous stale-turn steer', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+    fixture.setSteerDisposition('stale-turn');
+
+    expect(await fixture.run('chat', {}, userTurnId, true)).not.toHaveProperty('delivery');
+  });
+
   it('dispatches ordinarily when the target is idle', async () => {
     const fixture = createFixture('codex');
     await fixture.seedChat(inputConfig);
