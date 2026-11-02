@@ -134,6 +134,20 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 - `makeIndexedDbAccountPairingStore` 为每个账号维护一个数据库。每次修改都要等事务完成后才返回；事务中止或超出存储配额时，状态不会前进。
 - `makeAccountPairingTabOwnership` 与 `withAccountPairingTabOwnership` 通过 Web Locks 保证同一时间只有一个标签页负责该账号的配对，因为配对密钥只保存在那个标签页的内存里。其他标签页会收到 `pairing-elsewhere`；标签页关闭后锁会自动释放。
 
+`@lody/e2ee-client/account-requester` 是便携宿主上新设备一侧的实现：
+- **`AccountPairingIdentityHost`** 是按工作区的宿主端口。它负责四件事：
+  - 根据已验证的 genesis 记录和成员身份，生成或复用该工作区的身份；
+  - 报告未完成的按工作区配对；
+  - 按给定的背书者安装快照邀请；
+  - 可选地激活工作区。
+- **`makePortableAccountPairingRequester`** 把这类宿主转换成共享流程需要的新设备端口：
+  - 它校验完整历史，并找出本账号唯一的成员身份。
+  - 安装时，批准标签认证了准入记录的账本哈希；它找到这条记录，把记录的签名者当作背书者。
+  - 遇到无关的待完成配对时，它报告 `pairing-journal-busy`，流程会把该工作区显示为 `blocked`。
+- **`makeAccountE2eeRuntime`** 把账号级 `E2eeWorkspaceRuntime` 的调用分发到各工作区的运行时。它只暴露列出的方法，因此“按方法是否存在判断能力”的做法依然准确。
+
+身份保护方式由各宿主的平台决定（`PersonalHostPlatform.protection`）。
+
 ## 验证与限制
 
 `pnpm --filter @lody/e2ee-client test` 检查固定证明和 credential 边界。

@@ -80,6 +80,7 @@ import {
   type PersonalPairingOffer,
   type PersonalExchange,
   type PersonalExchangeResponse,
+  accountPairingOffer,
 } from '../../src';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -716,6 +717,61 @@ export async function invoke(action: string) {
               localStorage.setItem('initial-invitation', invitation);
             return true;
           }
+          // Account-wide pairing: no per-workspace offer; the endorser arrives with the approval.
+          case 'accountPrepare':
+            return yield* host.prepareAccount({
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            });
+          case 'accountApproveAndAccept': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            const receipt = yield* signLedgerSnapshot({
+              signer: owner,
+              ledger: () => Effect.succeed(view()),
+            });
+            const invitationHex = encodePersonalInvitation({
+              ...receipt,
+              workspaceId: offer.workspaceId,
+              offset: 'opaque/' + records.length,
+            });
+            yield* host.acceptAccount({
+              ...pin,
+              invitationHex,
+              endorser: toHex(owner.publicKey.toBytes()),
+            });
+            return true;
+          }
+          case 'accountOpen':
+            if (session) yield* session.close();
+            session = yield* host.open(
+              accountPairingOffer(host.scope, {
+                genesisRecordHex: offer.genesisRecordHex,
+                membershipId: offer.membershipId,
+              })
+            );
+            return true;
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);

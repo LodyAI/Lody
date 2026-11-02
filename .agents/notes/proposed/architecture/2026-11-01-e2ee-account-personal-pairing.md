@@ -254,3 +254,22 @@ connects it to the per-workspace hosts, and `E2eeIpc` exposes it to the #2196 po
   digest matches. Anything else from the relay is ignored.
 - **Decoding.** Relayed bytes are decoded by core's strict `decodePairingRequest` and
   `decodePairingApproval`, which accept only canonical encodings.
+
+## Portable host
+
+[`account-requester.ts`](../../../../packages/e2ee-client/src/account-requester.ts) is the
+mobile and Web new-device side, and the personal device host implements it.
+- **Fixed offer.** A portable identity's credential packet is bound to an offer, but the
+  account flow prepares the identity before any approver is known. Each workspace
+  therefore uses one fixed account offer: its genesis record and membership, a
+  placeholder endorser (`00…`), and a `pairingSessionId` derived from the workspace ID.
+  Every request and reopen finds the same identity and journal, and the local credential
+  format is unchanged.
+- **Real endorser.** The real endorser is the signer of the admission record whose ledger
+  hash the approval tag authenticated. It is stored with the approval original, and
+  snapshot verification and the ledger origin use it in place of the placeholder.
+- **Protection.** Identity protection stays with each platform's custody: Keychain or
+  Keystore on mobile, web-crypto on Web.
+- **Known limit.** Portable hosts do not report an unfinished per-workspace join yet, so
+  such a workspace is not shown as blocked.
+
