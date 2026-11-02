@@ -177,7 +177,7 @@ const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // User-managed version; refresh capabilities explicitly after upgrading.
 const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
-const SORBET_ACP_PACKAGE = '@sorbetai/acp@0.1.0-alpha.4';
+const SORBET_ACP_PACKAGE = '@sorbetai/acp@0.1.0-alpha.5';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are

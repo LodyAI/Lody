@@ -335,7 +335,7 @@ describe('resolveBuiltinACPSetting', () => {
       args: [
         '--prefer-offline',
         '-y',
-        '@sorbetai/acp@0.1.0-alpha.4',
+        '@sorbetai/acp@0.1.0-alpha.5',
         '--no-session-title',
         '--example',
       ],
@@ -344,7 +344,7 @@ describe('resolveBuiltinACPSetting', () => {
         SORBET_OBSERVABILITY_RECORDING: 'false',
         SORBET_OBSERVABILITY_CONFIG: '',
       },
-      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4+auth-discovery:1',
+      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.5+auth-discovery:1',
     });
   });
 
