@@ -1,3 +1,4 @@
+import { ScheduleMentionForm } from './schedule-mention-form';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -54,7 +55,6 @@ import { DesktopMachineMenu } from '@/components/sessions/desktop-run-config-men
 import { ProjectRefSelector } from '@/components/shared/project-ref-selector';
 import { WorktreeCheckboxPill } from '@/components/shared/workdir-mode-selector';
 import {
-  ScheduleForm,
   ScheduleListView,
   matchingScheduleRuntime,
   newScheduleFormValue,
@@ -806,6 +806,7 @@ function ScheduleEditor({
       : ownSessionId
         ? [...sessions, ...archivedSessions].find((meta) => meta.id === ownSessionId)
         : undefined;
+  const mentionProject = destination.kind === 'new_session' ? project : destinationMeta?.project;
   const chooseDestination = (next: ScheduleDestination) => {
     setDestination(next);
     if (next.kind === 'existing_session' && next.sessionId) {
@@ -928,7 +929,29 @@ function ScheduleEditor({
             )
           : undefined;
   return (
-    <ScheduleForm
+    <ScheduleMentionForm
+      mentionSource={
+        mentionProject?.kind === 'github'
+          ? { kind: 'github', repoFullName: mentionProject.repoFullName }
+          : mentionProject?.kind === 'local' && machineId && runtime
+            ? {
+                kind: 'local',
+                machineId,
+                workspaceId: runtime.workspaceId,
+                localProjectId: mentionProject.localProjectId,
+                githubRepoFullName: mentionProject.githubRepoFullName,
+              }
+            : undefined
+      }
+      skillAgent={
+        selected?.cliType && selected.agentType
+          ? {
+              cliType: selected.cliType,
+              agentType: selected.agentType,
+              machineId: selected.machineId,
+            }
+          : undefined
+      }
       stickyFooter
       onCancel={onCancel}
       initial={initial}
