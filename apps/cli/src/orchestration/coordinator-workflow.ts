@@ -32,7 +32,17 @@ type SteerHandoffOutcome =
   | { readonly _tag: 'Done'; readonly assistant: SessionHistoryInput }
   | { readonly _tag: 'Running' }
   | { readonly _tag: 'Failed' }
-  | { readonly _tag: 'Cancelled'; readonly userTurn: SessionHistoryInput };
+  | {
+      readonly _tag: 'Cancelled';
+      readonly cancellationReason: SessionHistoryInput['cancellationReason'];
+    };
+
+const HANDOFF_PROGRESS_STATUS = {
+  Done: 'succeeded',
+  Running: 'running',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
+} as const satisfies Record<SteerHandoffOutcome['_tag'], OperationProgressStatus>;
 export class CoordinatorWorkflow {
   recoverSubscriptions = () =>
     Effect.forEach([...this.subscriptions.values()], (detach) => detach, { discard: true });
@@ -277,16 +287,7 @@ export class CoordinatorWorkflow {
             }
             if (assistantRead !== undefined && isTerminalAssistantEntry(assistantRead)) {
               const handoff = yield* this.followSteerHandoff(backend, meta, assistantRead);
-              statuses.set(
-                key,
-                handoff._tag === 'Done'
-                  ? 'succeeded'
-                  : handoff._tag === 'Failed'
-                    ? 'failed'
-                    : handoff._tag === 'Cancelled'
-                      ? 'cancelled'
-                      : 'running'
-              );
+              statuses.set(key, HANDOFF_PROGRESS_STATUS[handoff._tag]);
               return;
             }
             const execution = this.ports.execution(target.sessionId);
@@ -337,7 +338,9 @@ export class CoordinatorWorkflow {
         return settling ? { _tag: 'Running' } : { _tag: 'Done', assistant: current };
       }
       if (userTurn?.status === 'failed') return { _tag: 'Failed' };
-      if (userTurn?.status === 'canceled') return { _tag: 'Cancelled', userTurn };
+      if (userTurn?.status === 'canceled') {
+        return { _tag: 'Cancelled', cancellationReason: userTurn.cancellationReason };
+      }
       if (!isTerminalAssistantEntry(next)) return { _tag: 'Running' };
       current = next;
     }
@@ -487,14 +490,21 @@ export class CoordinatorWorkflow {
           entry.userTurnId === item.target.userTurnId &&
           isTerminalAssistantEntry(entry)
       );
-      if (userTurn?.status === 'failed') {
-        return {
-          status: 'failed',
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-          error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
-        };
-      }
+      const targetFailed = (): LodyOperationItemResult => ({
+        status: 'failed',
+        ...(item.label ? { label: item.label } : {}),
+        target: item.target,
+        error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
+      });
+      const targetCancelled = (
+        cancellationReason: SessionHistoryInput['cancellationReason']
+      ): LodyOperationItemResult => ({
+        status: 'cancelled',
+        ...(cancellationReason ? { cancellationReason } : {}),
+        ...(item.label ? { label: item.label } : {}),
+        target: item.target,
+      });
+      if (userTurn?.status === 'failed') return targetFailed();
       if (userTurn?.status === 'delivery_unknown') {
         // An Agent chat steer whose provider verdict is uncertain. Never replay it:
         // the requesting Agent decides whether resending is safe.
@@ -509,37 +519,12 @@ export class CoordinatorWorkflow {
           ),
         };
       }
-      if (userTurn?.status === 'canceled') {
-        return {
-          status: 'cancelled',
-          ...(userTurn.cancellationReason
-            ? { cancellationReason: userTurn.cancellationReason }
-            : {}),
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-        };
-      }
+      if (userTurn?.status === 'canceled') return targetCancelled(userTurn.cancellationReason);
       const handoff = assistant
         ? yield* this.followSteerHandoff(backend, metaRecord.meta as SessionMeta, assistant)
         : undefined;
-      if (handoff?._tag === 'Failed') {
-        return {
-          status: 'failed',
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-          error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
-        };
-      }
-      if (handoff?._tag === 'Cancelled') {
-        return {
-          status: 'cancelled',
-          ...(handoff.userTurn.cancellationReason
-            ? { cancellationReason: handoff.userTurn.cancellationReason }
-            : {}),
-          ...(item.label ? { label: item.label } : {}),
-          target: item.target,
-        };
-      }
+      if (handoff?._tag === 'Failed') return targetFailed();
+      if (handoff?._tag === 'Cancelled') return targetCancelled(handoff.cancellationReason);
       if (handoff?._tag === 'Done') {
         const output = assistantOutputPreview(handoff.assistant);
         return {
