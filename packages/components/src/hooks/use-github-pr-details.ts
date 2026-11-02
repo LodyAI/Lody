@@ -130,6 +130,7 @@ const READY_FOR_REVIEW_SETTLE_TIMEOUT_MS = 15000;
 // stop at the first settled verdict; it only tears down when the PR merges/closes
 // or the tab is hidden.
 const CHECK_RUNS_POLL_INTERVAL_MS = 15000;
+const FRESH_READ: GitHubReadRequestOptions = { cache: 'reload' };
 
 /**
  * Thrown when GitHub is still reporting the PR as a draft after the
@@ -719,16 +720,19 @@ export function useGitHubPrDetails({
   );
 
   // --- Revalidation on mount (principle #1: click-to-open ⇒ latest) -------
+  // Mount and server-invalidation reads bypass the browser HTTP cache: GitHub
+  // answers `max-age=60`, so a cached response would be recorded as a fresh
+  // read and the newer server version would never be fetched.
   useEffect(() => {
     if (!canFetch || !cacheKey) return;
     // Always refetch prDetails first so checkRuns can use the fresh headSha.
     void (async () => {
-      await fetchSlice('prDetails');
+      await fetchSlice('prDetails', FRESH_READ);
       await Promise.all([
-        fetchSlice('reviewComments'),
-        fetchSlice('reviews'),
-        fetchSlice('issueComments'),
-        fetchSlice('checkRuns'),
+        fetchSlice('reviewComments', FRESH_READ),
+        fetchSlice('reviews', FRESH_READ),
+        fetchSlice('issueComments', FRESH_READ),
+        fetchSlice('checkRuns', FRESH_READ),
       ]);
     })();
   }, [cacheKey, canFetch, fetchSlice]);
@@ -824,7 +828,7 @@ export function useGitHubPrDetails({
       const localTs = versionsRef.current[sliceToFetchedAtKey(slice)];
       if (serverTs == null) continue;
       if (localTs != null && serverTs <= localTs) continue;
-      void fetchSlice(slice);
+      void fetchSlice(slice, FRESH_READ);
     }
   }, [cacheKey, fetchSlice, isAuthenticated, serverVersions]);
 

@@ -641,6 +641,27 @@ describe('useGitHubPrDetails target isolation', () => {
     expect((await refreshed)?.pullRequest.title).toBe('After merge');
   });
 
+  it('bypasses the browser cache on open and when the server reports newer PR data', async () => {
+    const input = { workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 };
+    await renderHook(input);
+    await waitForResult(
+      (result) =>
+        result.state === 'ready' &&
+        !result.isRevalidating &&
+        githubMocks.githubFetchCheckRuns.mock.calls.length === 1
+    );
+    expect(githubMocks.githubFetchPullRequestDetails.mock.calls[0]?.[3]).toEqual({
+      cache: 'reload',
+    });
+    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
+
+    githubMocks.githubFetchCheckRuns.mockClear();
+    identityMocks.versions = { checkRunsUpdatedAt: Date.now() + 60_000 } as never;
+    await renderHook({ ...input });
+    await waitForResult(() => githubMocks.githubFetchCheckRuns.mock.calls.length === 1);
+    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
+  });
+
   it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
     const refreshedPullRequest = createPullRequest(1, {
       title: 'Refreshed pull request',
