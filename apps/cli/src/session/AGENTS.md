@@ -43,6 +43,9 @@
 
 ## Turn execution
 
+- Explicit E2EE test builds bind the policy Clock at encrypted claim and daemon
+  derivation checks. Turn ownership, cancellation and cleanup timers keep real time.
+
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before

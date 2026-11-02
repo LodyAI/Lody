@@ -95,7 +95,9 @@ import {
 import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
 import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
 import Database from 'better-sqlite3';
-import { Data, Effect, Fiber, Result } from 'effect';
+import { Clock, Data, Effect, Fiber, Result } from 'effect';
+import * as e2eeClock from '@lody/shared/node/e2ee-clock';
+import { makeFileE2eeClock } from '../../../packages/shared/src/node/e2ee-clock-file';
 import type { LoroRepo } from 'loro-repo';
 import { execFileSync } from 'node:child_process';
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
@@ -3669,6 +3671,110 @@ describe('SessionExecutionService', () => {
         }
       }
     });
+  });
+
+  it('uses the protocol clock for pending encrypted turn admission and its exact deadline', async () => {
+    const f = encryptedExecutionFixture();
+    const clockFile = path.join(f.directory, 'clock');
+    const start = 1_000_000;
+    fs.writeFileSync(clockFile, '', { mode: 0o600 });
+    fs.utimesSync(clockFile, start / 1000, start / 1000);
+    const clock = makeFileE2eeClock(clockFile, Effect.runSync(Clock.Clock));
+    const binding = vi
+      .spyOn(e2eeClock, 'withE2eeTestClock')
+      .mockImplementation((work) => Effect.provideService(work, Clock.Clock, clock));
+    const gate = makeEncryptedAgentExecution({
+      genesis: 'genesis',
+      workspaceId: 'workspace-1',
+      targetMachineId: 'machine-1',
+      journal: lazyExecutionJournal(f.filename, () => start),
+      resolveVerifiedOriginal: () =>
+        Effect.succeed({ state: 'pending-evidence', expiresAt: start + 1000 }),
+      authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
+    });
+    const submitted: string[] = [];
+    const dispatch = () =>
+      runSilentPromptTurn({
+        sessionId: 'protocol-clock-pending',
+        prepared: true,
+        encryptedExecution: gate,
+        onPrompt: async () => {
+          submitted.push('unexpected');
+        },
+      });
+    try {
+      const pending = await dispatch();
+      expect(pending.getHistory()[0]?.status).toBe('pending');
+      expect(pending.failureMessages).toEqual([]);
+      fs.utimesSync(clockFile, (start + 1000) / 1000, (start + 1000) / 1000);
+      const expired = await dispatch();
+      expect(expired.getHistory()[0]?.status).toBe('failed');
+      expect(expired.failureMessages).toEqual([
+        'This encrypted turn expired before execution. Send a new turn to continue.',
+      ]);
+      expect(submitted).toEqual([]);
+    } finally {
+      binding.mockRestore();
+      f.close();
+    }
+  });
+
+  it('uses the protocol clock for the daemon encrypted derivation authorization', async () => {
+    const f = encryptedExecutionFixture();
+    const clockFile = path.join(f.directory, 'clock');
+    const start = 1_000_000;
+    fs.writeFileSync(clockFile, '', { mode: 0o600 });
+    fs.utimesSync(clockFile, start / 1000, start / 1000);
+    const clock = makeFileE2eeClock(clockFile, Effect.runSync(Clock.Clock));
+    const binding = vi
+      .spyOn(e2eeClock, 'withE2eeTestClock')
+      .mockImplementation((work) => Effect.provideService(work, Clock.Clock, clock));
+    const gate = makeEncryptedAgentExecution({
+      genesis: 'genesis',
+      workspaceId: 'workspace-1',
+      targetMachineId: 'machine-1',
+      journal: lazyExecutionJournal(f.filename, () => start),
+      resolveVerifiedOriginal: () =>
+        Effect.succeed({
+          requesterDevice: 'ab'.repeat(32),
+          requesterCryptoUserId: 'member-1',
+          expiresAt: start + 1000,
+        }),
+      authorizeExecution: () =>
+        Effect.map(Clock.currentTimeMillis, (now) =>
+          now < start + 1000
+            ? { _tag: 'Authorized' as const }
+            : { _tag: 'Denied' as const, reason: 'not-authorized' }
+        ),
+    });
+    const receiver = {
+      encryptedExecution: gate,
+      executionService: { reserveEncryptedDerivation: () => ({ kind: 'member' as const }) },
+      machineId: 'machine-1',
+    };
+    const classify = (
+      MessageHandler.prototype as unknown as {
+        classifyEncryptedDerivation(
+          this: typeof receiver,
+          origin: { sessionId: string; userTurnId: string },
+          target: { machineId: string }
+        ): Promise<'owner' | 'member'>;
+      }
+    ).classifyEncryptedDerivation;
+    const invoke = () =>
+      classify.call(
+        receiver,
+        { sessionId: 'protocol-origin', userTurnId: 'origin-turn' },
+        { machineId: 'machine-1' }
+      );
+    try {
+      await expect(invoke()).resolves.toBe('member');
+      fs.utimesSync(clockFile, (start + 1000) / 1000, (start + 1000) / 1000);
+      await expect(invoke()).rejects.toThrow('e2ee_derivation_denied');
+    } finally {
+      binding.mockRestore();
+      f.close();
+    }
   });
 
   it('keeps a snapshot turn pending until its original signed update becomes available', async () => {
