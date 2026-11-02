@@ -99,6 +99,29 @@ afterEach(() => {
 });
 
 describe('deferred PostHog initialization', () => {
+  it.each([
+    { __LODY_ELECTRON__: true },
+    { __LODY_NATIVE__: true },
+    { Capacitor: { getPlatform: () => 'ios' } },
+    { Capacitor: { getPlatform: () => 'android' } },
+  ])('omits native page lifecycle events while delivering product events: %j', (nativeWindow) => {
+    vi.stubGlobal('window', { ...nativeWindow, location: { href: 'https://example.test/' } });
+    const { calls, client } = createClient();
+    const scheduled = createScheduler();
+    const controller = createDeferredPostHogController(client, scheduled.scheduler);
+    controller.configure('synthetic-key', {});
+
+    controller.trackPageView('/workspace');
+    controller.trackPageView('/workspace/session');
+    controller.trackPageView('/workspace/session', new Date(), { force: true });
+    controller.client.capture('session/message_submit_requested', {});
+    controller.flushForPageHide();
+
+    expect(calls.filter(({ method }) => method === 'capture').map(({ args }) => args[0])).toEqual([
+      'session/message_submit_requested',
+    ]);
+  });
+
   it('waits for the delay and idle window, then replays startup calls in order', () => {
     const { calls, client } = createClient();
     const scheduled = createScheduler();
