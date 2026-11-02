@@ -38,11 +38,14 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind, including the user-installed
+- `setting.ts` — launch resolution for every agent kind, including Sorbet's pinned
+  `@sorbetai/acp` alpha package through the isolated npx cache and the user-installed
   `dimcode acp` builtin. Users manage Dimcode installation and versions; Lody disables
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
+  [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
+  uses the existing protected ACP interaction path.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.
@@ -272,8 +275,10 @@ failures retain the URL plus nested transport cause for diagnostics.
 ### Authentication
 
 Which authentication path runs is decided by the provider, not the caller: a managed builtin
-runs its pinned login command, and everything else (registry and custom ACP) opens a
-temporary standard ACP connection in the same bounded lifecycle. Kimi runs `acp --login`;
+runs its pinned login command; registry, custom ACP, and builtin Devin and Sorbet open a
+temporary standard ACP connection in the same bounded lifecycle. The authentication connection
+advertises credential form version 1; forms support text, secret and single-select fields.
+Kimi runs `acp --login`;
 Grok runs the official `login --device-auth`; Claude Code runs the official
 `auth login --claudeai` subscription flow. Codex ChatGPT runs official
 `login --device-auth`; managed API profiles use the existing secret-input interaction

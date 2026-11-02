@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 import {
   type AgentConfigCliType,
@@ -176,6 +177,7 @@ const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // User-managed version; refresh capabilities explicitly after upgrading.
 const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
+const SORBET_ACP_PACKAGE = '@sorbetai/acp@0.1.0-alpha.4';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -319,6 +321,9 @@ export function getAcpCapabilitySourceVersion(
         return baseUrl?.trim()
           ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+      }
+      if (input.agentType === 'sorbet') {
+        return `builtin-sorbet:${SORBET_ACP_PACKAGE}`;
       }
       if (input.agentType === 'dimcode') {
         return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
@@ -565,6 +570,24 @@ async function resolveBuiltinACPProcessLaunch(
     });
     return {
       ...launch,
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
+  if (input.agentType === 'sorbet') {
+    return {
+      command: 'npx',
+      args: [
+        NPX_CACHE_MODE_ARG,
+        '-y',
+        SORBET_ACP_PACKAGE,
+        '--no-session-title',
+        ...(input.extraArgs ?? []),
+      ],
+      env: {
+        SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+        SORBET_OBSERVABILITY_RECORDING: 'false',
+        SORBET_OBSERVABILITY_CONFIG: '',
+      },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }

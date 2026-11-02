@@ -1069,6 +1069,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:sorbet',
+    label: 'Sorbet',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'Sorbet agent runtime',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    searchKeys: 'sorbet',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:pi',
     label: 'Pi',
     descriptionKey: 'settings.agent.dialog.option.pi.description',
@@ -1568,7 +1578,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     testingBuiltinSetup &&
     publishedConfig?.machineId === machine.id &&
     publishedConfig.cliType === 'builtin' &&
-    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+    (publishedConfig.agentType === 'bub' ||
+      publishedConfig.agentType === 'dimcode' ||
+      publishedConfig.agentType === 'sorbet');
   const builtinSetup = testingBuiltinSetup
     ? setups.find((setup) => setup.id === agentConfigId)
     : undefined;
@@ -1718,7 +1730,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
   const isQueuedBuiltin =
-    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
+    isBubBuiltin ||
+    (formData.cliType === 'builtin' &&
+      (formData.agentType === 'dimcode' || formData.agentType === 'sorbet'));
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);

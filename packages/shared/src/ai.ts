@@ -45,6 +45,7 @@ export const BUILTIN_AGENTS = [
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
   { agentType: 'dimcode', displayName: 'Dimcode' },
+  { agentType: 'sorbet', displayName: 'Sorbet' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -74,6 +75,7 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'>
   // keeps running its isolated title agent.
   bub: 'none',
   dimcode: 'none',
+  sorbet: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -672,7 +674,10 @@ export const isManagedBuiltinAgentType = (
  * Dimcode uses the same verification path with its npx-managed package.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'dimcode';
+  isManagedBuiltinAgentType(agentType) ||
+  agentType === 'bub' ||
+  agentType === 'dimcode' ||
+  agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string

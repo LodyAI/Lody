@@ -9,6 +9,7 @@ import {
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
 } from 'acp-extension-dsh/profile';
 import { REGISTRY_ACP_AGENTS, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { spawn } from 'node:child_process';
 
 import {
@@ -320,6 +321,50 @@ describe('resolveBuiltinACPSetting', () => {
     } finally {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
+    }
+  });
+
+  it('launches the pinned Sorbet ACP package with additional arguments', async () => {
+    const launch = await resolveACPProcessLaunchAsync({
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      extraArgs: ['--example'],
+    });
+    expect(launch).toEqual({
+      command: 'npx',
+      args: [
+        '--prefer-offline',
+        '-y',
+        '@sorbetai/acp@0.1.0-alpha.4',
+        '--no-session-title',
+        '--example',
+      ],
+      env: {
+        SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+        SORBET_OBSERVABILITY_RECORDING: 'false',
+        SORBET_OBSERVABILITY_CONFIG: '',
+      },
+      capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4',
+    });
+  });
+
+  it('shares Sorbet state across launches within the selected Lody data directory', async () => {
+    const previous = process.env.LODY_DATA_DIR;
+    try {
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-a');
+      const first = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      const second = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      });
+      expect(first.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-a', 'sorbet'));
+      expect(second.env?.SORBET_DATA_DIR).toBe(first.env?.SORBET_DATA_DIR);
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-b');
+      const other = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      expect(other.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-b', 'sorbet'));
+    } finally {
+      if (previous === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previous;
     }
   });
 

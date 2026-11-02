@@ -566,7 +566,7 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it.each(['custom', 'devin'] as const)(
+  it.each(['custom', 'devin', 'sorbet'] as const)(
     'bridges request-scoped ACP form elicitation for %s',
     async (provider) => {
       const child = createFakeChild();
@@ -578,10 +578,15 @@ describe('AcpAuthenticationManager', () => {
       const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
       const agent = acp
         .agent({ name: 'test-auth-agent' })
-        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-          protocolVersion: params.protocolVersion,
-          authMethods: [{ id: 'oauth', name: 'OAuth' }],
-        }))
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+          expect(params.clientCapabilities?.auth?._meta).toEqual({
+            lody: { credentialForm: { version: 1 } },
+          });
+          return {
+            protocolVersion: params.protocolVersion,
+            authMethods: [{ id: 'oauth', name: 'OAuth' }],
+          };
+        })
         .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
           const reply = await client.request(acp.methods.client.elicitation.create, {
             mode: 'form',
@@ -620,8 +625,8 @@ describe('AcpAuthenticationManager', () => {
       });
       const authentication = manager.authenticate({
         requestId: 'auth-custom',
-        cliType: provider === 'devin' ? 'builtin' : 'custom',
-        agentType: provider === 'devin' ? 'devin' : 'custom-test',
+        cliType: provider === 'custom' ? 'custom' : 'builtin',
+        agentType: provider === 'custom' ? 'custom-test' : provider,
         runtimeOverrides: provider === 'devin' ? { devinPath: '/test/devin' } : undefined,
         customAcp: { command: '/test/custom-acp', args: [] },
         onProgress: (event) => {
@@ -649,6 +654,13 @@ describe('AcpAuthenticationManager', () => {
       expect(
         manager.submitAuthenticationInput(
           'auth-custom',
+          'stale-interaction',
+          JSON.stringify({ action: 'accept', content: { token: 'discarded' } })
+        )
+      ).toMatchObject({ success: false, disposition: 'error' });
+      expect(
+        manager.submitAuthenticationInput(
+          'auth-custom',
           interactionId,
           JSON.stringify({
             action: 'accept',
@@ -664,6 +676,83 @@ describe('AcpAuthenticationManager', () => {
         success: true,
         disposition: 'authenticated',
       });
+    }
+  );
+
+  it.each(['initialize', 'authenticate'] as const)(
+    'does not expose agent error text when ACP %s fails',
+    async (failingMethod) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const progress: unknown[] = [];
+      const formReceived = createDeferred<string>();
+      const agent = acp
+        .agent({ name: 'test-auth-error-agent' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+          if (failingMethod === 'initialize') {
+            throw new acp.RequestError(-32603, 'secret-from-agent');
+          }
+          return {
+            protocolVersion: params.protocolVersion,
+            authMethods: [{ id: 'login', name: 'Login' }],
+          };
+        })
+        .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+          const reply = await client.request(acp.methods.client.elicitation.create, {
+            mode: 'form',
+            requestId,
+            message: 'Enter token',
+            requestedSchema: {
+              type: 'object',
+              properties: { token: { type: 'string', title: 'Token', _meta: { secret: true } } },
+              required: ['token'],
+            },
+          });
+          if (reply.action !== 'accept') throw new Error('Expected accepted input');
+          throw new acp.RequestError(-32603, `secret-from-agent ${reply.content?.token}`);
+        });
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+        resolveLoginShellEnv: async () => ({}),
+      });
+      const authentication = manager.authenticate({
+        requestId: 'auth-error',
+        cliType: 'custom',
+        agentType: 'custom-test',
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: (event) => {
+          progress.push(event);
+          if (event.status === 'input-required') formReceived.resolve(event.interactionId);
+        },
+      });
+      if (failingMethod === 'authenticate') {
+        const interactionId = await formReceived.promise;
+        expect(
+          manager.submitAuthenticationInput(
+            'auth-error',
+            interactionId,
+            JSON.stringify({ action: 'accept', content: { token: 'submitted-secret' } })
+          )
+        ).toEqual({ success: true, disposition: 'input-accepted' });
+      }
+      const result = await authentication;
+      expect(result).toEqual({
+        success: false,
+        disposition: 'error',
+        error:
+          failingMethod === 'initialize'
+            ? 'custom-test ACP initialization failed. Check the agent configuration and try again.'
+            : 'custom-test ACP authentication failed. Check the sign-in details and try again.',
+      });
+      expect(JSON.stringify({ result, progress })).not.toContain('secret-from-agent');
+      expect(JSON.stringify({ result, progress })).not.toContain('submitted-secret');
     }
   );
 
@@ -1081,7 +1170,7 @@ describe('AcpAuthenticationManager', () => {
           error: expect.stringContaining(expected),
         })
       );
-      expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toEqual({
+      expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toMatchObject({
         terminal: false,
       });
     }

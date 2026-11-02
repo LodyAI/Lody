@@ -19,6 +19,7 @@ import { InlineSvg } from './inline-svg';
 import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
 import bubSvg from '@/assets/bub.svg?raw';
 import dimcodeSvg from '@/assets/dimcode.svg?raw';
+import sorbetSvg from '@/assets/sorbet.svg?raw';
 
 const registryNameMap = new Map(REGISTRY_ACP_AGENTS.map((a) => [a.id, a.name] as const));
 
@@ -97,10 +98,10 @@ export function AgentIcon({
     if (agentType === 'claude') return <AnthropicIcon className={cls} />;
     if (agentType === 'codex') return <OpenAIIcon className={cls} />;
     if (agentType === 'deepseek') return <DeepSeekIcon className={cls} />;
-    if (agentType === 'bub' || agentType === 'dimcode') {
+    if (agentType === 'bub' || agentType === 'dimcode' || agentType === 'sorbet') {
       return (
         <InlineSvg
-          raw={agentType === 'dimcode' ? dimcodeSvg : bubSvg}
+          raw={agentType === 'sorbet' ? sorbetSvg : agentType === 'dimcode' ? dimcodeSvg : bubSvg}
           className={`${cls} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
         />
       );

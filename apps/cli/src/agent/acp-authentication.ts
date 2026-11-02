@@ -1112,18 +1112,27 @@ export class AcpAuthenticationManager {
               );
               await Promise.race([
                 app.connectWith(stream, async (context) => {
-                  const initialized = await context.request(
-                    acp.methods.agent.initialize,
-                    {
-                      protocolVersion: acp.PROTOCOL_VERSION,
-                      clientCapabilities: {
-                        auth: { terminal: false },
-                        elicitation: { form: {}, url: {} },
+                  const initialized = await context
+                    .request(
+                      acp.methods.agent.initialize,
+                      {
+                        protocolVersion: acp.PROTOCOL_VERSION,
+                        clientCapabilities: {
+                          auth: {
+                            terminal: false,
+                            _meta: { lody: { credentialForm: { version: 1 } } },
+                          },
+                          elicitation: { form: {}, url: {} },
+                        },
+                        clientInfo: { name: 'lody', title: 'Lody', version: '1' },
                       },
-                      clientInfo: { name: 'lody', title: 'Lody', version: '1' },
-                    },
-                    { cancellationSignal: running.abortController.signal }
-                  );
+                      { cancellationSignal: running.abortController.signal }
+                    )
+                    .catch(() => {
+                      throw new Error(
+                        `${options.agentType} ACP initialization failed. Check the agent configuration and try again.`
+                      );
+                    });
                   const advertisedMethods = [...(initialized.authMethods ?? [])];
                   const methods = advertisedMethods.filter(
                     (method) => getAuthMethodType(method) === 'agent'
@@ -1207,11 +1216,20 @@ export class AcpAuthenticationManager {
                       `${options.agentType} no longer advertises authentication method ${methodId}`
                     );
                   }
-                  await context.request(
-                    acp.methods.agent.authenticate,
-                    { methodId },
-                    { cancellationSignal: running.abortController.signal }
-                  );
+                  await context
+                    .request(
+                      acp.methods.agent.authenticate,
+                      { methodId },
+                      { cancellationSignal: running.abortController.signal }
+                    )
+                    .catch(() => {
+                      // The agent controls JSON-RPC error text and may echo submitted
+                      // credentials, including encoded or partial values. Never forward it.
+                      throw new Error(
+                        interactionError ??
+                          `${options.agentType} ACP authentication failed. Check the sign-in details and try again.`
+                      );
+                    });
                   if (interactionError) {
                     throw new Error(interactionError);
                   }

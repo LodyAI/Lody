@@ -492,6 +492,7 @@
   "sharing.request.delivered": "已发布，agent 现在可以获取完整链接。",
   "sharing.request.deny": "不分享",
   "sharing.request.approve": "批准并分享",
+  "settings.agent.dialog.option.sorbet.description": "Sorbet 智能体运行时",
   "settings.agent.dialog.option.pi.description": "由 Lody 管理的 Pi ACP 运行时",
   "piExtensions.title": "Pi 扩展",
   "piExtensions.consent": "扫描仅列出已安装的全局扩展。勾选的扩展将在 Pi 及其子代理中以你的权限运行，不自动发现项目扩展。支持扩展注册模型，其余插件功能可能不适用于 ACP。",

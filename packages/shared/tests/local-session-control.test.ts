@@ -180,7 +180,7 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
   });
 
-  it.each(['bub', 'dimcode'])('accepts builtin %s in TS and CJS', (agentType) => {
+  it.each(['bub', 'dimcode', 'sorbet'])('accepts builtin %s in TS and CJS', (agentType) => {
     const request = {
       type: 'session/create',
       sessionId: 'session-builtin',
