@@ -1977,20 +1977,8 @@ const SessionDetail = ({
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
-  // Simulator follows the selected conversation unless explicitly opened by a
-  // Side Chat. Keep that origin while the side panel switches away from the chat.
-  const [iosSimulatorTarget, setIosSimulatorTarget] = useState<{
-    parentId: SessionId;
-    tabId: SessionId | undefined;
-    sessionId: SessionId;
-  } | null>(null);
-  const simulatorOwnerSession =
-    iosSimulatorTarget?.parentId === sessionId &&
-    iosSimulatorTarget.tabId === activeBrowserSession?.id
-      ? ([activeBrowserSession, ...visibleSideSessions].find(
-          (candidate) => candidate?.id === iosSimulatorTarget.sessionId
-        ) ?? activeBrowserSession)
-      : activeBrowserSession;
+  // Device previews belong to the main conversation, across child and draft tabs.
+  const simulatorOwnerSession = activeSession;
   const iosSimulatorMachine = useAtomValue(
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
@@ -4082,35 +4070,15 @@ const SessionDetail = ({
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
 
-  const handleOpenIosSimulatorForSession = useCallback(
-    (targetSessionId: SessionId) => {
-      setIosSimulatorTarget({
-        parentId: sessionId,
-        tabId: activeBrowserSession?.id,
-        sessionId: targetSessionId,
-      });
-      handleOpenIosSimulator();
-    },
-    [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
-  );
-
-  const handleOpenAndroidEmulatorForSession = useCallback(
-    (targetSessionId: SessionId) => {
-      setIosSimulatorTarget({
-        parentId: sessionId,
-        tabId: activeBrowserSession?.id,
-        sessionId: targetSessionId,
-      });
-      if (isMobile) {
-        setAndroidEmulatorOpen(true);
-      } else {
-        revealRightSidebar();
-        activateSidebarTab('android-emulator');
-        semanticRouterRef.current?.activate('side-panel');
-      }
-    },
-    [sessionId, activeBrowserSession?.id, isMobile, revealRightSidebar, activateSidebarTab]
-  );
+  const handleOpenAndroidEmulator = useCallback(() => {
+    if (isMobile) {
+      setAndroidEmulatorOpen(true);
+    } else {
+      revealRightSidebar();
+      activateSidebarTab('android-emulator');
+      semanticRouterRef.current?.activate('side-panel');
+    }
+  }, [isMobile, revealRightSidebar, activateSidebarTab]);
 
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
@@ -6538,8 +6506,8 @@ const SessionDetail = ({
                   )}
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
-                  onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
-                  onOpenAndroidEmulator={() => handleOpenAndroidEmulatorForSession(tabSession.id)}
+                  onOpenIosSimulator={() => handleOpenIosSimulator()}
+                  onOpenAndroidEmulator={() => handleOpenAndroidEmulator()}
                   onOpenBrowser={
                     previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
                   }
@@ -7278,8 +7246,8 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
-      onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
-      onOpenAndroidEmulator: () => handleOpenAndroidEmulatorForSession(chatSession.id),
+      onOpenIosSimulator: () => handleOpenIosSimulator(),
+      onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

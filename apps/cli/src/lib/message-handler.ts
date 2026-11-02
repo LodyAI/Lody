@@ -3337,6 +3337,25 @@ export class MessageHandler {
         ) {
           throw new Error('Simulator session access denied.');
         }
+        const parentSessionId = record.meta.parentSessionId;
+        if (parentSessionId === undefined || parentSessionId === null) return request.sessionId;
+        if (typeof parentSessionId !== 'string' || !parentSessionId) {
+          throw new Error('Invalid simulator parent session.');
+        }
+        const parent = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(parentSessionId as SessionId)
+        );
+        if (
+          !parent?.meta ||
+          isLoroRepoDocDeleted(parent) ||
+          parent.meta.isArchived ||
+          parent.meta.parentSessionId ||
+          parent.meta.machineId !== this.machineId ||
+          parent.meta.userId !== request.requestedByUserId
+        ) {
+          throw new Error('Simulator parent session access denied.');
+        }
+        return parentSessionId;
       },
     };
     this.iosSimulatorService = new IosSimulatorService({

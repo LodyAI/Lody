@@ -156,6 +156,7 @@ function SessionIosSimulatorPanelController({
     [platform, runtime, session.id, session.machineId, user?.id]
   );
 
+  const defaultQuality: AndroidEmulatorQuality = isLocalMachine ? 'clear' : 'balanced';
   const supportsQuality = platform === 'android' && machineSupportsAndroidEmulatorQuality(machine);
   const [catalog, setCatalog] = useState<IosSimulatorCatalogState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
@@ -182,7 +183,7 @@ function SessionIosSimulatorPanelController({
   const request = useCallback(
     async (
       command: IosSimulatorCommand,
-      requestedQuality: AndroidEmulatorQuality = 'balanced'
+      requestedQuality: AndroidEmulatorQuality = defaultQuality
     ): Promise<IosSimulatorResponse | null> => {
       if (!runtime || !requesterUserId) return null;
       if (platform === 'android') {
@@ -210,7 +211,15 @@ function SessionIosSimulatorPanelController({
         timeoutMs: command.action === 'exterior' ? 45000 : undefined,
       });
     },
-    [platform, requesterUserId, runtime, session.id, session.machineId, supportsQuality]
+    [
+      defaultQuality,
+      platform,
+      requesterUserId,
+      runtime,
+      session.id,
+      session.machineId,
+      supportsQuality,
+    ]
   );
 
   const refreshCatalog = useCallback(async () => {
@@ -368,7 +377,7 @@ function SessionIosSimulatorPanelController({
       kind: Exclude<IosSimulatorPendingAction, null>,
       udid: string | undefined,
       command: IosSimulatorCommand,
-      requestedQuality: AndroidEmulatorQuality = 'balanced'
+      requestedQuality: AndroidEmulatorQuality = defaultQuality
     ) => {
       // Only a newer action supersedes this one. A poll never does: it would
       // drop the answer and leave the action pending forever.
@@ -390,7 +399,7 @@ function SessionIosSimulatorPanelController({
         void refreshCatalog();
       }
     },
-    [refreshCatalog, request]
+    [defaultQuality, refreshCatalog, request]
   );
 
   const startPreview = useCallback(
