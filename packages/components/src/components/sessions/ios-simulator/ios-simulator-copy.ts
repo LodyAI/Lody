@@ -1,3 +1,4 @@
+import { useDevicePreviewPlatform } from './device-preview-platform';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getIosSimulatorDeviceAction } from '@/lib/ios-simulator/ios-simulator-model';
@@ -82,11 +83,20 @@ export type IosSimulatorErrorCopy = { title: string; detail: string };
 
 /** What went wrong, and what the person can do about it. The raw message stays below. */
 export function useIosSimulatorErrorCopy() {
+  const platform = useDevicePreviewPlatform();
   const { t } = useTranslation();
   return useCallback(
     (error: IosSimulatorError, machineName: string): IosSimulatorErrorCopy => {
       switch (error.code) {
         case 'environment':
+          if (platform === 'android')
+            return {
+              title: t('sessions.androidEmulator.environmentTitle', 'Android SDK is unavailable'),
+              detail: t(
+                'sessions.androidEmulator.environmentDetail',
+                'Install the Android SDK and configure an AVD on this machine, then refresh.'
+              ),
+            };
           return {
             title: t(
               'sessions.iosSimulator.error.xcodeMissing',
@@ -153,7 +163,7 @@ export function useIosSimulatorErrorCopy() {
           };
       }
     },
-    [t]
+    [platform, t]
   );
 }
 

@@ -26,7 +26,8 @@ vi.mock('../src/lib/app-platform', () => ({
   useAppCapability,
 }));
 
-const { useBillingOverviewPreload } = await import('../src/hooks/use-billing-overview-preload');
+const { BillingOverviewPreload, useBillingOverviewPreload } =
+  await import('../src/hooks/use-billing-overview-preload');
 
 function Probe({ workspaceId }: { workspaceId: string | null }) {
   useBillingOverviewPreload(workspaceId);
@@ -112,5 +113,51 @@ describe('useBillingOverviewPreload', () => {
     });
 
     expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
+  });
+
+  it('contains a rejected preload query and retries for the next workspace', async () => {
+    useAppCapability.mockReturnValue(true);
+    writeBillingOverviewCache('workspace-1', 'session-1', OPTIMISTIC_BILLING_OVERVIEW);
+    useCloudQuery.mockImplementation((_operation: unknown, args: unknown) => {
+      if (args !== 'skip' && (args as { workspaceId: string }).workspaceId === 'workspace-1')
+        throw new Error('Forbidden');
+      return { ...OPTIMISTIC_BILLING_OVERVIEW, effectivePlanTier: 'plus' };
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onError = (event: ErrorEvent) => event.preventDefault();
+    window.addEventListener('error', onError);
+
+    try {
+      await act(async () => {
+        root.render(
+          createElement(
+            'div',
+            null,
+            createElement(BillingOverviewPreload, { workspaceId: 'workspace-1' }),
+            'workspace content'
+          )
+        );
+      });
+      expect(container.textContent).toBe('workspace content');
+      expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
+
+      await act(async () => {
+        root.render(
+          createElement(
+            'div',
+            null,
+            createElement(BillingOverviewPreload, { workspaceId: 'workspace-2' }),
+            'workspace content'
+          )
+        );
+      });
+      expect(container.textContent).toBe('workspace content');
+      expect(readBillingOverviewCache('workspace-2', 'session-1')).toMatchObject({
+        effectivePlanTier: 'plus',
+      });
+    } finally {
+      window.removeEventListener('error', onError);
+      consoleError.mockRestore();
+    }
   });
 });

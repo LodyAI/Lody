@@ -379,6 +379,22 @@ export type AcpCommandSummary = {
 // 11: provider command previews come only from probes, never project sessions.
 export const ACP_CAPABILITY_CACHE_VERSION = 11;
 
+/**
+ * One sign-in method an ACP agent advertised in its `initialize` response.
+ *
+ * Persisted with the capability cache so the account panel can offer the
+ * agent's own sign-in methods without starting an authentication attempt
+ * first. `args` is display-only; the Machine resolves the trusted executable
+ * and arguments itself.
+ */
+export type AcpAuthMethodSummary = {
+  type: 'agent' | 'env_var' | 'terminal';
+  id?: string;
+  name?: string;
+  description?: string;
+  args?: string[];
+};
+
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
 export type AcpCapabilityCacheEntry = {
@@ -413,6 +429,15 @@ export type AcpCapabilityCacheEntry = {
   declaredModelControls?: Record<string, AcpModelControls>;
   /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
+  /**
+   * Sign-in methods the agent advertised in its `initialize` response.
+   *
+   * `undefined` means no probe has asked yet; an empty array means the agent was
+   * asked and advertised none. Only agent-driven (registry/custom/Devin)
+   * providers record this: built-in providers sign in with their own native
+   * login command, which the adapter's method list does not describe.
+   */
+  authMethods?: AcpAuthMethodSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
@@ -1958,6 +1983,8 @@ export type ACPSessionConfig = ACPTurnConfig & {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

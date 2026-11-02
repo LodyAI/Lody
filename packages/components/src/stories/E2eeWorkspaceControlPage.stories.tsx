@@ -178,3 +178,10 @@ export const OwnerMemberControls: Story = {
     memberManagement: { actorRole: 'owner', remove: fn(), setRole: fn() },
   },
 };
+
+export const CustodyLocked: Story = {
+  args: { failure: { kind: 'custody-locked', code: 'locked' } },
+};
+export const CustodyIndeterminate: Story = {
+  args: { failure: { kind: 'custody-indeterminate', code: 'indeterminate' } },
+};

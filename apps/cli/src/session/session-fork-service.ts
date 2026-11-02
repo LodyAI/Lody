@@ -1,3 +1,4 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import { toShared } from '@/platform/process-options';
 import { resolveSessionConversationConfig } from '@lody/shared';
 import {
@@ -342,7 +343,7 @@ export class SessionForkService {
       historyBackend:
         targetMeta?.historyBackend ?? marker.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
     });
-    const history = await targetBackend.readHistory();
+    const history = await targetBackend.readHistoryQuery();
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -359,6 +360,7 @@ export class SessionForkService {
       // Genuinely interrupted mid-saga: the process that owned it is gone.
       // Compensate the worktree from the marker payload (no source doc needed),
       // then leave the durable failed receipt for same-target retries to read.
+      const configHistory = await readSessionHistoryMetadata(targetBackend.history);
       await this.deps.sessionManager
         .cleanupForkWorktree({
           workspaceId: this.deps.workspaceId as never,
@@ -367,8 +369,8 @@ export class SessionForkService {
           agentConfigId: marker.cleanup.agentConfigId as never,
           agentCliType: marker.cleanup.cliType,
           agentType: marker.cleanup.agentType as never,
-          memory: resolveSessionConversationConfig(history).memory,
-          mcpServerIds: resolveSessionMcpSelection(history),
+          memory: resolveSessionConversationConfig(configHistory).memory,
+          mcpServerIds: resolveSessionMcpSelection(configHistory),
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
           githubRepo: marker.cleanup.repoFullName,

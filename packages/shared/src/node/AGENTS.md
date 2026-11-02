@@ -124,3 +124,13 @@ advertising a capability alone does not prove the local IPC path accepts it.
 
 E2EE: same-user socket only. `e2ee-identity.ts` holds sibling SQLite leases;
 reset drains native owners, archives whole dirs and retains idempotent receipts.
+
+## E2EE test clock
+
+`e2ee-clock.ts` provides the existing Effect Clock at native E2EE entry points.
+The compile-time gate and runtime `LODY_E2E=1` are both required. Public builds
+compile the gate to false and remove the file adapter. Test compositions alone
+may enable it. Preserve the same clock object across operations; new clock
+domains must not restart durable epoch grace. The private owner-only file moves
+wall and monotonic readings together; sleep and process ownership use real time.
+The inspector is passive and cannot initialize or mutate the clock.

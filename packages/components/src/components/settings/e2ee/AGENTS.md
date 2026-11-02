@@ -16,3 +16,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   and change; only explicit retry after confirmed conflict creates a new intent.
   Historical signer-revoked state is display/re-sign input, never execution evidence.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+
+- Remote device pages retain the protected sharing panel without a local agent;
+  this never enables general machine RPC or ordinary machine-sharing controls. Team management requires the current
+  host's verified personal-device role and credential; replacement runtimes must
+  qualify again before showing retained management controls.

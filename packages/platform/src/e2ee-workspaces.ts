@@ -9,6 +9,7 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
+import type { E2eeAccountPairingRuntime } from './e2ee-account-pairing';
 import type { ReadonlyStore } from './store';
 import type { PlatformSessionState } from './provider';
 
@@ -87,7 +88,8 @@ export interface E2eeRuntimeStatus {
   readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
-  /** Confirmed retained key usable for sends while current-key reception retries. */
+  /** Confirmed retained key for local history/admission; not authority for new seals.
+   * Native sealing always selects the current verified epoch. */
   readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
   readonly hasDeviceCredential?: boolean;
@@ -118,7 +120,7 @@ export interface E2eeManagementState {
   }[];
 }
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
-export interface E2eeWorkspaceRuntime {
+export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   readMachineSharing?(
@@ -316,6 +318,7 @@ export type E2eeContentContext = {
   continuationOffset?: string;
 };
 export type E2eeContentSeal = {
+  /** Minimum expected verified epoch. Hosts seal at their current epoch and reject future hints. */
   epoch: number;
   room: E2eeContentRoom;
   context: E2eeContentContext;

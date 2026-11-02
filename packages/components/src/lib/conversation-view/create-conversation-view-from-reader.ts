@@ -1,3 +1,4 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import type { MessageContent, SessionHistory, SessionId } from '@lody/shared';
 import type {
   SessionDataChange,
@@ -1248,6 +1249,7 @@ export function createConversationViewFromReader(
     // One consistent port read for export/replay/hash, instead of stitching the
     // windowed cache across a changing source.
     readAll: async () => (await reader.readAll()) as unknown as SessionHistory[],
+    readMetadata: () => readSessionHistoryMetadata(reader),
     turn: (i) => {
       const id = ids[i];
       if (!id) return undefined;

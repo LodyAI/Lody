@@ -160,6 +160,7 @@ import { placeProjectGroups } from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
+  selectSidebarTaskSessions,
   buildSidebarOpenerRowResolver,
   getEffectiveSessionActivitySummary,
   getEffectiveLatestMessageAt,
@@ -1408,7 +1409,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   defaultSessionTitle={defaultSessionTitle}
                   projectName={inProject ? project.name : null}
                   machineName={
-                    inProject ? trimmedMachineName : (resolveMachineName?.(session.machineId) ?? null)
+                    inProject
+                      ? trimmedMachineName
+                      : (resolveMachineName?.(session.machineId) ?? null)
                   }
                   author={resolveSessionAuthor?.(session) ?? null}
                   isSelected={session.id === selectedSessionId}
@@ -1659,10 +1662,11 @@ export function LoroAppSidebar({
   );
   const workspaceDataReady = workspaceDataScope?.status === 'ready';
   const scopedWorkspaceId = workspaceDataReady ? workspaceDataScope.workspaceId : null;
-  const { sessions, allActiveSessions } = useVisibleSessionMetas({
-    workspaceId: scopedWorkspaceId,
-    enabled: workspaceDataReady,
-  });
+  const { sessions, allActiveSessions, workspaceHistoryReadable, historyOnlySessionIds } =
+    useVisibleSessionMetas({
+      workspaceId: scopedWorkspaceId,
+      enabled: workspaceDataReady,
+    });
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
@@ -1794,8 +1798,18 @@ export function LoroAppSidebar({
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const rejectHistoryWrite = useCallback(
+    (ids: string[]) => {
+      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
+        return false;
+      toast.info(t('sessions.historyMachineUnavailable'));
+      return true;
+    },
+    [historyOnlySessionIds, workspaceHistoryReadable, t]
+  );
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
+      if (rejectHistoryWrite([sessionId])) return;
       void archiveSessionWithConfirmation(sessionId as SessionId)
         .then(async (archived) => {
           if (!archived || !workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
@@ -1808,21 +1822,27 @@ export function LoroAppSidebar({
           toast.error(error instanceof Error ? error.message : String(error));
         });
     },
-    [archiveSessionWithConfirmation, router, workspaceSlug]
+    [archiveSessionWithConfirmation, rejectHistoryWrite, router, workspaceSlug]
   );
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      void setSessionPinned(sessionId as SessionId, nextPinned);
+      if (rejectHistoryWrite([sessionId])) return;
+      void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
-    [setSessionPinned]
+    [rejectHistoryWrite, setSessionPinned]
   );
 
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
-      void markSessionUnread(sessionId as SessionId);
+      if (rejectHistoryWrite([sessionId])) return;
+      void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
-    [markSessionUnread]
+    [markSessionUnread, rejectHistoryWrite]
   );
 
   const sessionById = useMemo(() => {
@@ -2016,11 +2036,15 @@ export function LoroAppSidebar({
   const tasks = useMemo(() => {
     const sourceSessions = sessionsListLoading ? [] : sessions;
     return buildSidebarTaskRows(
-      sourceSessions.filter(
-        (session) => session.project?.kind !== 'local' || session.projectRun !== undefined
-      )
+      selectSidebarTaskSessions(sourceSessions, visibleLocalProjectMap, workspaceHistoryReadable)
     );
-  }, [buildSidebarTaskRows, sessions, sessionsListLoading]);
+  }, [
+    buildSidebarTaskRows,
+    sessions,
+    sessionsListLoading,
+    visibleLocalProjectMap,
+    workspaceHistoryReadable,
+  ]);
 
   const chatSessions = useMemo(
     () => tasks.filter((task) => !task.repoFullName && !task.projectGroup),
@@ -2048,9 +2072,10 @@ export function LoroAppSidebar({
   const sendStates = useAtomValue(sessionSendStatesAtom);
   const handleRenameSession = useCallback(
     (sessionId: string, nextTitle: string) => {
+      if (rejectHistoryWrite([sessionId])) return Promise.resolve();
       return updateSessionTitle(sessionId as SessionId, nextTitle);
     },
-    [updateSessionTitle]
+    [rejectHistoryWrite, updateSessionTitle]
   );
   const [repoCollapseState, setRepoCollapseState] = useAtom(repoCollapseStateAtom);
   const [repoOrder, setRepoOrder] = useAtom(repoOrderAtom);
@@ -2123,6 +2148,7 @@ export function LoroAppSidebar({
 
   const handleArchiveProjectChats = useCallback(
     (sessionIds: string[]) => {
+      if (rejectHistoryWrite(sessionIds)) return;
       void (async () => {
         for (const sessionId of sessionIds) {
           await archiveSession(sessionId as SessionId);
@@ -2137,7 +2163,7 @@ export function LoroAppSidebar({
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [archiveSession, router, selectedSessionId, workspaceSlug]
+    [archiveSession, rejectHistoryWrite, router, selectedSessionId, workspaceSlug]
   );
 
   const handleRevealProject = useCallback(

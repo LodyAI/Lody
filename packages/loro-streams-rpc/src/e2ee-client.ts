@@ -55,7 +55,8 @@ export function makeE2eeRpcClient(options: {
   workspaceId: string;
   requesterDevice: string;
   originals: E2eeRpcStore['Service'];
-  /** Native host policy preflight. The recipient still resolves the actual project and checks at start. */
+  /** Native host policy preflight: `false` is a verified denial; a failure means the
+   * policy could not be verified. The recipient still resolves the actual project and checks at start. */
   authorizeTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
   ledger: () => Effect.Effect<LedgerView, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
@@ -169,7 +170,8 @@ export function makeE2eeRpcClient(options: {
         if (
           !sameOwner &&
           !(yield* (authorizeTarget?.(machineId) ?? Effect.succeed(false)).pipe(
-            Effect.catch(() => Effect.succeed(false))
+            // Both refuse to sign; only a verified denial lets senders withhold the input.
+            Effect.mapError(() => new Error('e2ee_machine_sharing_unavailable'))
           ))
         )
           return yield* Effect.fail(new Error('e2ee_machine_not_shared'));

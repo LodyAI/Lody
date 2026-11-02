@@ -22,7 +22,7 @@ PR: [#1982](https://github.com/LodyAI/Lody/pull/1982)
 
 ## 替代方案与组合
 
-等待换代违背移除可用性；只按工作区编号删除会误删后来重新加入的实例；把所有无权限响应当移除会在单设备撤销、账号或网络失败时丢数据；独立成员日志会允许同一签名者并发存在未决提交；共用普通提交日志先核实 pending CAS 原件，未提交的换代 candidate 保持独立。
+等待换代违背移除可用性；只按工作区编号删除会误删后来重新加入的实例；把所有无权限响应当移除会在单设备撤销、账号或网络失败时丢数据（这一否决仍成立；精确的已认证设备撤销码后来单独获得了仅限本设备的清理，见[桌面设备撤销](../../implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.zh.md)）；独立成员日志会允许同一签名者并发存在未决提交；共用普通提交日志先核实 pending CAS 原件，未提交的换代 candidate 保持独立。
 
 本独立分支合并公开 main `281f40a7`，已包含 [24-A](https://github.com/LodyAI/Lody/pull/1979) 和待定换代恢复修补 [#1987](https://github.com/LodyAI/Lody/pull/1987)。最终验证直接使用合并代码，已移除临时 core 覆盖；publisher 与 main 一致，原生回归通过共享管理入口覆盖设备撤销与成员移除。私有采用 [#3880](https://github.com/loro-dev/lody/pull/3880) 与后端移除 [#3876](https://github.com/loro-dev/lody/pull/3876) 已合入；这只证明源码组合，不代表线上产品验收。本分支组合已合入的 [#1980](https://github.com/LodyAI/Lody/pull/1980) 设置实现，已验证其管理状态看到移除提示、单一管理拥有者等待全部已接纳命令结束；共享加入接线仍需组合 review。旧 Spec 的强制原子移除和暂停发送文字按明确 MVP 决定修订，仍为 draft，不标记批准。
 

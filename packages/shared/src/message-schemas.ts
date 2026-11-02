@@ -1,5 +1,6 @@
 import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
+import { automationOriginSchema } from './automations/contracts';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
@@ -146,11 +147,17 @@ export const SessionImagePayloadSchema = z
     height: OptionalPositiveIntegerSchema,
     storageSessionId: SessionIdSchema.optional(),
   })
-  .strict().superRefine((image, ctx) => {
+  .strict()
+  .superRefine((image, ctx) => {
     const manifest = image.encryption;
-    if (manifest && (manifest.kind !== 'image' || manifest.parts[0] !== image.imageId ||
-      manifest.sizeBytes !== image.sizeBytes || manifest.mimeType !== image.mimeType ||
-      manifest.fileName !== (image.fileName ?? ''))) {
+    if (
+      manifest &&
+      (manifest.kind !== 'image' ||
+        manifest.parts[0] !== image.imageId ||
+        manifest.sizeBytes !== image.sizeBytes ||
+        manifest.mimeType !== image.mimeType ||
+        manifest.fileName !== (image.fileName ?? ''))
+    ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Encrypted image reference mismatch' });
     }
   });
@@ -193,10 +200,20 @@ const refineSessionFileBlock = (
   ctx: z.RefinementCtx,
   basePath: PropertyKey[] = []
 ): void => {
-  if (block.encryption && (block.encryption.kind !== 'file' || block.fileId !== block.encryption.parts[0] ||
-    block.sizeBytes !== block.encryption.sizeBytes || block.fileName !== block.encryption.fileName ||
-    block.mimeType !== block.encryption.mimeType || block.transport !== 'r2')) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: basePath, message: 'Encrypted attachment reference mismatch' });
+  if (
+    block.encryption &&
+    (block.encryption.kind !== 'file' ||
+      block.fileId !== block.encryption.parts[0] ||
+      block.sizeBytes !== block.encryption.sizeBytes ||
+      block.fileName !== block.encryption.fileName ||
+      block.mimeType !== block.encryption.mimeType ||
+      block.transport !== 'r2')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: basePath,
+      message: 'Encrypted attachment reference mismatch',
+    });
   }
   // transport='local' means the bytes only exist on a specific machine pending
   // backfill; without machineId other devices can't render the honest
@@ -221,6 +238,7 @@ const MessageTextSpanSchema = z
     kind: z.enum(MESSAGE_TEXT_SPAN_KINDS),
     label: z.string().min(1),
     target: SharedOptionalStringSchema,
+    quoteVersion: z.literal(1).optional(),
     // The same bar `sanitizeMessageTextSpans` applies. This object is `.strict()`,
     // and a rejected span fails the whole block list — which surfaces as an empty
     // prompt, not as a missing chip — so a field one side knows must be declared
@@ -431,7 +449,10 @@ export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
 export const SessionHistoryInputConfigSchema = ACPTurnConfigSchema.partial()
-  .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
+  .extend({
+    _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional(),
+    _lodyAutomation: automationOriginSchema.optional(),
+  })
   .strip();
 
 const LooseSessionTurnInputConfigSchema = SessionHistoryInputConfigSchema.passthrough();
@@ -468,6 +489,8 @@ export const normalizeSessionTurnInputConfig = (
 
   const record = value as Record<string, unknown>;
   const normalized: SessionTurnInputConfig = {};
+  if (record._lodyAutomation !== undefined)
+    normalized._lodyAutomation = automationOriginSchema.parse(record._lodyAutomation);
 
   const prompt = trimOptionalString(record.prompt);
   if (prompt) {
@@ -1274,6 +1297,16 @@ const AcpConfigOptionSummarySchema = z
   })
   .strict();
 
+const MachineAcpAuthMethodSummarySchema = z
+  .object({
+    type: z.enum(['agent', 'env_var', 'terminal']),
+    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
+  })
+  .strict();
+
 const AcpCapabilityCacheEntrySchema = z
   .object({
     cliType: AgentConfigCliTypeSchema,
@@ -1295,6 +1328,10 @@ const AcpCapabilityCacheEntrySchema = z
           .strict()
       )
       .optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
@@ -1302,16 +1339,6 @@ const AcpCapabilityCacheEntrySchema = z
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
-  })
-  .strict();
-
-const MachineAcpAuthMethodSummarySchema = z
-  .object({
-    type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
-    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
-    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
   })
   .strict();
 
@@ -1483,6 +1510,8 @@ export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action'
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('start'),
     configId: AgentConfigIdSchema,
+    /** Sign-in method picked from the agent's advertised list. */
+    methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
   }).strict(),
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('cancel'),
@@ -2093,6 +2122,34 @@ export const SESSION_HISTORY_READ_MAX_PAGE = 500;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('readMetadata') }).strict(),
+    z.object({ kind: z.literal('readLatestGoal') }).strict(),
+    z
+      .object({
+        kind: z.literal('readTranscript'),
+        limit: z.number().int().nonnegative().optional(),
+        reverse: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readQuerySnapshot'),
+        from: z.number().int().nonnegative().optional(),
+        to: z.number().int().nonnegative().optional(),
+        transcriptVisibility: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readSelection'),
+        positions: z.array(z.number().int().nonnegative()),
+        token: z.string().regex(/^[a-f0-9]{64}$/),
+        transcriptVisibility: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({ kind: z.literal('readReplayPrompt'), excludeTurnId: z.string().optional() })
+      .strict(),
     z
       .object({
         kind: z.literal('watchChanges'),
@@ -2102,7 +2159,16 @@ export const SessionHistoryReadQuerySchema = z
         waitMs: z.number().int().nonnegative().max(15_000),
       })
       .strict(),
-    z.object({ kind: z.literal('count') }).strict(),
+    z
+      .object({
+        kind: z.literal('readQuery'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+        transcriptVisibility: z.boolean().optional(),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
+      })
+      .strict(),
+    z.object({ kind: z.literal('count'), withCheckpoint: z.literal(true).optional() }).strict(),
     z.object({ kind: z.literal('readAt'), position: z.number().int().nonnegative() }).strict(),
     z
       .object({
@@ -2123,6 +2189,7 @@ export const SessionHistoryReadQuerySchema = z
     z
       .object({
         kind: z.literal('readDirectory'),
+        atCheckpoint: z.string().min(1).max(1024).optional(),
         from: z.number().int().nonnegative(),
         to: z.number().int().nonnegative(),
       })
@@ -2154,7 +2221,13 @@ export const SessionHistoryReadQuerySchema = z
     z.object({ kind: z.literal('readTurnOutput'), userTurnId: SharedTrimmedNonEmptyStringSchema }).strict(),
   ])
   .superRefine((value, ctx) => {
-    if (value.kind !== 'readRange' && value.kind !== 'readDirectory') return;
+    if (value.kind === 'readQuerySnapshot') {
+      if (value.from !== undefined && value.to !== undefined && value.to < value.from)
+        ctx.addIssue({ code: 'custom', path: ['to'], message: 'Invalid history query range' });
+      return;
+    }
+    if (value.kind !== 'readRange' && value.kind !== 'readDirectory' && value.kind !== 'readQuery')
+      return;
     if (value.to < value.from) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

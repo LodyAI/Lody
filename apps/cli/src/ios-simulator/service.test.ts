@@ -11,6 +11,18 @@ import { SimulatorControlLeases } from './control-leases';
 import { parseSimulatorDevices } from './devices';
 import { MessageHandler } from '@/lib/message-handler';
 const udid = '5519CB11-71C9-46D9-AEFF-73C96F1104E0';
+describe('platform device leases', () => {
+  it('preserves case-sensitive device identities when supplied by a platform', () => {
+    const leases = new SimulatorControlLeases((id: string) => id);
+    expect(leases.acquire('android:Pixel_A', 'one', 'first')).toBe(true);
+    expect(leases.acquire('android:Pixel_a', 'two', 'second')).toBe(true);
+    leases.release('android:Pixel_A', 'one', 'stale');
+    expect(leases.occupancy('android:Pixel_A', 'two')).toBe('other-session');
+    leases.release('android:Pixel_A', 'one', 'first');
+    expect(leases.occupancy('android:Pixel_A', 'two')).toBe('available');
+    expect(leases.occupancy('android:Pixel_a', 'one')).toBe('other-session');
+  });
+});
 const device: IosSimulatorDevice = {
   udid,
   name: 'Phone',
@@ -46,7 +58,8 @@ function fixture(
   workspaceId = 'w',
   leases = new SimulatorControlLeases(),
   boot = async () => {},
-  tunnelGate: Promise<void> | (() => Promise<void>) = Promise.resolve()
+  tunnelGate: Promise<void> | (() => Promise<void>) = Promise.resolve(),
+  stopCapture: () => Promise<void> = async () => {}
 ) {
   const onAgentPreviewStarted = vi.fn(async (_sessionId: string, _operationId: string) => {});
   const remoteReady = deferred<void>();
@@ -82,6 +95,7 @@ function fixture(
         closed: processClosed.promise,
         control: async () => {},
         stop: async () => {
+          await stopCapture();
           processClosed.resolve();
         },
       };
@@ -670,4 +684,19 @@ it('reads idle artwork without acquiring a lease or starting a preview, and fenc
       false
     )
   ).toMatchObject({ success: true, exterior: asset });
+});
+
+it('retains only the unsafe device lease when capture shutdown cannot be confirmed', async () => {
+  const leases = new SimulatorControlLeases();
+  const first = fixture('first', leases, undefined, undefined, async () => {
+    throw Error('capture still running');
+  });
+  const second = fixture('second', leases);
+  const start = await first.call({ action: 'start', udid });
+  await first.ready.promise;
+  await first.call({ action: 'stop', operationId: start.preview!.operationId });
+  expect(await second.call({ action: 'start', udid })).toMatchObject({
+    success: false,
+    error: 'occupied',
+  });
 });

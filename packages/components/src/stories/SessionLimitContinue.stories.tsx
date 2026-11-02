@@ -36,8 +36,6 @@ const sessionId = 'session-limit-story' as SessionId;
 const internalError = "Internal error: You've hit your session limit · resets 2:30pm (UTC)";
 const title = 'Agent internal error';
 const detail = buildChatFailedNoticeDetail({ title, message: internalError });
-const timeLabel = '2:31 PM UTC';
-const timeLabelZh = '下午2:31 UTC';
 
 const failure = {
   id: 'session-limit-failure',
@@ -69,7 +67,7 @@ function FailureBanner({
   locale = 'en',
   copyLabel = 'Copy error',
 }: {
-  state: 'idle' | 'pending' | 'scheduled';
+  state: 'idle' | 'pending' | 'enabled';
   locale?: 'en' | 'zh_CN';
   copyLabel?: string;
 }) {
@@ -80,14 +78,7 @@ function FailureBanner({
       label={isChinese ? 'Agent 内部错误' : title}
       detail={detail}
       footer={<CopyButton label={copyLabel} />}
-      afterDetail={
-        <SessionLimitContinueRow
-          state={state}
-          timeLabel={isChinese ? timeLabelZh : timeLabel}
-          onSchedule={() => undefined}
-          onOpen={() => undefined}
-        />
-      }
+      afterDetail={<SessionLimitContinueRow state={state} onEnable={() => undefined} />}
     />
   );
 }
@@ -107,7 +98,7 @@ function ComposerPreview({
   state,
   locale = 'en',
 }: {
-  state: 'idle' | 'scheduled';
+  state: 'idle' | 'enabled';
   locale?: 'en' | 'zh_CN';
 }) {
   const [text, setText] = useState('Keep this draft while waiting for the quota window.');
@@ -148,11 +139,11 @@ export const Default: Story = {
   ),
 };
 
-export const Scheduled: Story = {
+export const Enabled: Story = {
   args: { message: failure, sessionId },
   render: () => (
-    <Preview caption="After one click the same row becomes the receipt; View opens the schedule.">
-      <FailureBanner state="scheduled" />
+    <Preview caption="After enabling, the row confirms the Session setting.">
+      <FailureBanner state="enabled" />
     </Preview>
   ),
 };
@@ -160,7 +151,7 @@ export const Scheduled: Story = {
 export const Pending: Story = {
   args: { message: failure, sessionId },
   render: () => (
-    <Preview caption="While the durable reservation is being confirmed.">
+    <Preview caption="While the Session setting is being saved.">
       <FailureBanner state="pending" />
     </Preview>
   ),
@@ -172,10 +163,10 @@ export const Mobile: Story = {
   render: () => <ComposerPreview state="idle" />,
 };
 
-export const MobileScheduled: Story = {
+export const MobileEnabled: Story = {
   args: { message: failure, sessionId },
   parameters: { viewport: { defaultViewport: 'mobile1' } },
-  render: () => <ComposerPreview state="scheduled" />,
+  render: () => <ComposerPreview state="enabled" />,
 };
 
 export const Chinese: Story = {
@@ -184,10 +175,10 @@ export const Chinese: Story = {
   render: () => <ComposerPreview state="idle" locale="zh_CN" />,
 };
 
-export const ChineseScheduled: Story = {
+export const ChineseEnabled: Story = {
   args: { message: failure, sessionId },
   globals: { locale: 'zh_CN' },
-  render: () => <ComposerPreview state="scheduled" locale="zh_CN" />,
+  render: () => <ComposerPreview state="enabled" locale="zh_CN" />,
 };
 
 export const Dark: Story = {
@@ -196,10 +187,10 @@ export const Dark: Story = {
   render: () => <FailureBanner state="idle" />,
 };
 
-export const NoProvenReset: Story = {
+export const UnsupportedTarget: Story = {
   args: { message: failure, sessionId },
   render: () => (
-    <Preview caption="No row when the reset is missing, expired, weekly, or another quota stays blocked.">
+    <Preview caption="A failure without a supported automation target has no recovery action.">
       <AgentNoticeBanner tone="error" label={title} detail={detail} footer={<CopyButton />} />
     </Preview>
   ),

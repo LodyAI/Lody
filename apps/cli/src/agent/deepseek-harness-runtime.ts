@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import {
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION,
+  ACP_EXTENSION_DSH_LEGACY_HOME_ENV,
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
@@ -456,6 +457,7 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     ],
     env: {
       [DEEPSEEK_HARNESS_HOME_ENV]: rootDir,
+      [ACP_EXTENSION_DSH_LEGACY_HOME_ENV]: legacyHome,
       [ACP_EXTENSION_DSH_SESSION_ROOT_ENV]: sessionsRoot,
       [ACP_EXTENSION_DSH_QUERY_PATH_ENV]: join(sessionsRoot, 'session-query.db'),
       [DSH_NODE_ARGS_ENV]: encodeBase64(JSON.stringify(dshNodeArgs)),

@@ -1,3 +1,8 @@
+import {
+  AndroidEmulatorCommandSchema,
+  AndroidEmulatorRequestSchema,
+  AndroidEmulatorResponseSchema,
+} from './android-emulator';
 import { SessionFileRootIdSchema } from './project-path';
 import { FileDownloadRequestSchema, FileDownloadResponseSchema } from './file-download';
 import { ProjectLocalMemberProbeSchema } from './workspace-project';
@@ -149,6 +154,16 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/control'),
     params: IosSimulatorRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/agent-control'),
+    params: z
+      .object({ sessionId: SessionIdSchema, command: AndroidEmulatorCommandSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/control'),
+    params: AndroidEmulatorRequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
@@ -440,6 +455,7 @@ export const LocalMachineRpcResultSchema = z.union([
   ProjectProbeLocalMemberResultSchema,
   MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
+  AndroidEmulatorResponseSchema,
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
   SessionToolResultSchema,

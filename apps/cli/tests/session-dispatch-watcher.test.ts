@@ -16,6 +16,7 @@ import type { MachineAccessVerification } from '../src/session/session-access-re
 import { fileLockLayer } from '../src/utils/file-lock';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { createSessionBackend } from '../src/session/session-backend';
+import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
@@ -2646,6 +2647,106 @@ describe('SessionDispatchWatcher', () => {
     expect(promoted?.id).toBe(queuedTurnId);
     return meta;
   };
+
+  it('keeps a promoted queue intent identical to its durable Loro config at the encrypted origin gate', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'queued-execution-origin-'));
+    const id = 'queue-origin' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      createdAt: '2026-10-30T00:00:00.000Z',
+      status: { type: 'idle' },
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    const loro = new LoroDoc();
+    composeTestSessionDoc(doc, { doc: loro });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      await doc.pushMessageQueue({
+        userTurnId: 'queued-turn',
+        task: 'synthetic queue prompt',
+        userId: 'user-1',
+        timestamp: '2026-10-30T20:17:36.812Z',
+        acpSessionConfig: {
+          prompt: 'synthetic queue prompt',
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+      } as never);
+      const promoted = await (
+        watcher as unknown as {
+          promoteNextQueuedMessage: (
+            doc: SessionDocument,
+            meta: SessionMeta,
+            history: SessionHistoryInput[]
+          ) => Promise<SessionHistoryInput | null>;
+        }
+      ).promoteNextQueuedMessage(doc, meta, []);
+      if (!promoted) throw new Error('queue promotion failed');
+      const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+      // Missing signed originals must defer, never deny because JS-only undefined
+      // fields differ from the exact durable input config before evidence lookup.
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          origins.resolve(
+            {
+              workspaceId: 'workspace-1',
+              sessionId: id,
+              userTurnId: promoted.id,
+              inputConfig: promoted.inputConfig,
+            },
+            loro,
+            () => Effect.die('no signed frame has arrived')
+          )
+        )
+      );
+      expect(result).toEqual({
+        state: 'pending-evidence',
+        expiresAt: Date.parse('2026-10-30T20:32:36.812Z'),
+      });
+      expect(
+        await Effect.runPromise(
+          Effect.scoped(
+            origins.resolve(
+              {
+                workspaceId: 'workspace-1',
+                sessionId: id,
+                userTurnId: promoted.id,
+                inputConfig: { ...promoted.inputConfig, prompt: 'different input' },
+              },
+              loro,
+              () => Effect.die('changed input must not open an original')
+            )
+          )
+        )
+      ).toBeUndefined();
+      const stored = await doc.sessionData.history.readTurn(promoted.id);
+      expect(stored.state).toBe('ready');
+      if (stored.state === 'ready')
+        expect(promoted.inputConfig).toStrictEqual(stored.turn.inputConfig);
+      expect(await doc.getMessageQueue()).toEqual([]);
+    } finally {
+      watcher.stop();
+      doc.mirror.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it('leaves no pending activation once a promoted queue turn is handled', async () => {
     // The settled state after a direct send has run: both pointers name it.

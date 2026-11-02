@@ -559,21 +559,59 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       })
     );
   });
-  const authorize = Effect.fnUntraced(function* (
+  type Target = Effect.Success<ReturnType<typeof target>>;
+  type Decide = (
+    ledger: LedgerView,
+    policy: VerifiedMachineSharingPolicy | null
+  ) => ReturnType<typeof authorizeMachineExecution>;
+  // The resource's accepted pin advances only on a newer verified head, and a failed or
+  // timed-out refresh never rewrites it. A pinned denial therefore stays known until a
+  // newer verified policy replaces it; it never grants anything. Its issuer only had to
+  // be eligible when it signed: a later revocation invalidates grants, never a denial.
+  const pinnedDenial = (initial: Target, decide: Decide, localProjectId: string | undefined) =>
+    Effect.gen(function* () {
+      const saved = yield* pin(initial.binding);
+      const original = saved?.original;
+      if (
+        saved?.head?.status !== 'active' ||
+        !original ||
+        original.revision !== saved.head.revision ||
+        original.digest !== saved.head.digest
+      )
+        return undefined;
+      const retained = yield* readFrame(
+        initial.binding,
+        original,
+        initial.machineGeneration,
+        { revision: original.revision, digest: original.digest },
+        true,
+        true
+      );
+      if (!retained.policy) {
+        // Historically authenticated owner-personal state: usable only as a denial.
+        if (!retained.state) return undefined;
+        if (!retained.state.sharedWithTeam)
+          return { allowed: false as const, reason: 'machine-not-shared' as const };
+        if (localProjectId !== undefined && !retained.state.projects.includes(localProjectId))
+          return { allowed: false as const, reason: 'project-not-shared' as const };
+        return undefined;
+      }
+      const decision = decide(yield* options.ledger(), retained.policy);
+      return !decision.allowed &&
+        (decision.reason === 'machine-not-shared' || decision.reason === 'project-not-shared')
+        ? decision
+        : undefined;
+    }).pipe(Effect.catch(() => Effect.succeed(undefined)));
+  const decider = Effect.fnUntraced(function* (
     machineId: string,
     requester: string,
-    localProjectId: string | undefined,
-    remote: SharingRemote
+    localProjectId: string | undefined
   ) {
-    yield* guard();
-    const owner = yield* authorizeOwner(options, machineId, requester, localProjectId);
-    if (owner) return owner;
     const qualified = yield* Effect.result(target(machineId));
-    if (Result.isFailure(qualified))
-      return { allowed: false as const, reason: 'policy-unavailable' as const };
+    if (Result.isFailure(qualified)) return undefined;
     const initial = qualified.success;
     const signer = yield* Effect.fromResult(Bytes.signingPublicKey(unhex(requester)));
-    const decide = (ledger: LedgerView, policy: VerifiedMachineSharingPolicy | null) =>
+    const decide: Decide = (ledger, policy) =>
       authorizeMachineExecution({
         ledger,
         machineGeneration: initial.machineGeneration,
@@ -588,9 +626,40 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           device: Result.getOrThrow(Bytes.signingPublicKey(unhex(initial.device))),
         },
       });
+    return { initial, decide };
+  });
+  /** Local only: the verified denial retained for this resource, without any network read. */
+  const knownDenial = Effect.fnUntraced(function* (
+    machineId: string,
+    requester: string,
+    localProjectId: string | undefined
+  ) {
+    yield* guard();
+    if (yield* authorizeOwner(options, machineId, requester, localProjectId)) return undefined;
+    const resolved = yield* decider(machineId, requester, localProjectId);
+    if (!resolved || resolved.decide(resolved.initial.ledger, null).allowed) return undefined;
+    return yield* pinnedDenial(resolved.initial, resolved.decide, localProjectId);
+  });
+  const authorize = Effect.fnUntraced(function* (
+    machineId: string,
+    requester: string,
+    localProjectId: string | undefined,
+    remote: SharingRemote
+  ) {
+    yield* guard();
+    const owner = yield* authorizeOwner(options, machineId, requester, localProjectId);
+    if (owner) return owner;
+    const resolved = yield* decider(machineId, requester, localProjectId);
+    if (!resolved) return { allowed: false as const, reason: 'policy-unavailable' as const };
+    const { initial, decide } = resolved;
     const own = decide(initial.ledger, null);
     if (own.allowed) return own;
     if (own.reason !== 'policy-unavailable') return own;
+    const unknown = () =>
+      Effect.map(
+        pinnedDenial(initial, decide, localProjectId),
+        (denial) => denial ?? { allowed: false as const, reason: 'policy-unavailable' as const }
+      );
     return yield* admitted(
       Effect.gen(function* () {
         const uncertain = yield* sql(() =>
@@ -599,12 +668,24 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             .all(key(initial.binding))
             .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
         );
-        if (uncertain) return { allowed: false as const, reason: 'policy-unavailable' as const };
-        const { policy } = yield* latest(initial.binding, remote, initial.machineGeneration);
+        if (uncertain) return yield* unknown();
+        const refreshed = yield* Effect.result(
+          latest(initial.binding, remote, initial.machineGeneration)
+        );
+        if (Result.isFailure(refreshed)) {
+          const denial = yield* pinnedDenial(initial, decide, localProjectId);
+          if (denial) return denial;
+          return yield* Effect.fail(refreshed.failure);
+        }
+        const { policy, head } = refreshed.success;
         yield* guard();
+        // An authenticated read found no policy for this generation (a new or re-paired
+        // machine is private by default) or its removal: a known denial, not unknown.
+        if (!policy && (head === null || head.status === 'removed'))
+          return { allowed: false as const, reason: 'machine-not-shared' as const };
         const cached = cache.get(key(initial.binding));
         if (!cached || cached.policy !== policy || !sharingFresh(cached.stamp, yield* sharingStamp))
-          return { allowed: false as const, reason: 'policy-unavailable' as const };
+          return yield* unknown();
         // Capture a synchronous final fence for the journal's no-yield actual-start boundary.
         const ledger = yield* options.ledger();
         const isCurrent = () =>
@@ -783,10 +864,27 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     const fiber = yield* Effect.forkIn(work, scope);
     return yield* Fiber.join(fiber);
   });
+  // Observe retained RAM only. This is not an execution decision and deliberately
+  // does not check/extend freshness, resolve a target or initialize an owner.
+  const inspectCache = (machineId: string) => {
+    let cachedPolicies = 0,
+      cachedExecutionGrants = 0;
+    for (const entry of cache.values()) {
+      const policy = entry.policy.inspect();
+      if (policy.machineId !== machineId) continue;
+      cachedPolicies++;
+      if (policy.sharedWithTeam) cachedExecutionGrants++;
+    }
+    return { cachedPolicies, cachedExecutionGrants };
+  };
   return {
+    /** Passive counts of retained policies/team grants, never current authorization. */
+    inspectCache,
     read: (...args: Parameters<typeof read>) => owned(read(...args)),
     write: (...args: Parameters<typeof write>) => owned(write(...args)),
     authorize: (...args: Parameters<typeof authorize>) => owned(authorize(...args)),
+    /** A retained verified denial, read locally; `undefined` is unknown, never permission. */
+    knownDenial: (...args: Parameters<typeof knownDenial>) => owned(knownDenial(...args)),
     invalidate: () => cache.clear(),
     stop: () => {
       closed = true;
@@ -830,6 +928,9 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
   };
   yield* Effect.addFinalizer(() => Effect.sync(stop));
   return {
+    /** Count an existing owner only; observing an unopened host never opens storage. */
+    inspectCache: (machineId: string) =>
+      owner?.inspectCache(machineId) ?? { cachedPolicies: 0, cachedExecutionGrants: 0 },
     read: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['read']>
     ) => Effect.flatMap(get, (value) => value.read(...args)),
@@ -845,6 +946,9 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
         if (ownDecision) return ownDecision;
         return yield* Effect.flatMap(get, (value) => value.authorize(...args));
       }),
+    knownDenial: (
+      ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['knownDenial']>
+    ) => Effect.flatMap(get, (value) => value.knownDenial(...args)),
     invalidate: () => owner?.invalidate(),
     stop,
   };

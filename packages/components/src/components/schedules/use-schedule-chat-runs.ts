@@ -9,7 +9,12 @@ export type ScheduleChatRun = {
   state: 'done' | 'running' | 'idle';
 };
 
-const runOf = (turn: SessionHistory): string | undefined => {
+type RunMetadata = Pick<
+  SessionHistory,
+  'id' | 'role' | 'timestamp' | 'userTurnId' | 'endedAt' | 'scheduleRun'
+>;
+
+const runOf = (turn: RunMetadata): string | undefined => {
   const marker = (turn as { scheduleRun?: { scheduleId?: unknown } }).scheduleRun;
   return typeof marker?.scheduleId === 'string' ? marker.scheduleId : undefined;
 };
@@ -19,14 +24,14 @@ const runOf = (turn: SessionHistory): string | undefined => {
  *
  * The daemon already stamps every run's user turn with `scheduleRun`, so the
  * chat is the record: nothing new is stored or synced. The chat is opened only
- * while the run history is on screen and read once in full (the authoritative
- * `readAll`), then again whenever its turn list changes.
+ * while the run history is on screen; only schedule markers and reply state
+ * are read, then refreshed whenever its turn list changes.
  */
 export function pickScheduleChatRuns(
-  history: readonly SessionHistory[],
+  history: readonly RunMetadata[],
   scheduleId: string
 ): ScheduleChatRun[] {
-  const replies = new Map<string, SessionHistory>();
+  const replies = new Map<string, RunMetadata>();
   for (const turn of history)
     if (turn.role !== 'user' && turn.userTurnId) replies.set(turn.userTurnId, turn);
   return history
@@ -59,7 +64,7 @@ export function useScheduleChatRuns(
       return undefined;
     }
     let current = true;
-    // One full read at a time; changes during it ask for exactly one more, so
+    // One metadata read at a time; changes during it ask for exactly one more, so
     // a burst of new turns costs two reads and an older result never lands last.
     let reading = false;
     let stale = false;
@@ -70,7 +75,7 @@ export function useScheduleChatRuns(
       }
       reading = true;
       void history
-        .readAll()
+        .readMetadata()
         .then((turns) => {
           if (current) setState({ runs: pickScheduleChatRuns(turns, scheduleId), loading: false });
         })

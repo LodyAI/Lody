@@ -296,6 +296,19 @@ export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
 );
 
+/** Shows account-wide personal device pairing where the host implements it. The
+ * existing per-workspace pairing stays available either way. */
+export const e2eeAccountPairingEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-account-pairing-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeAccountPairingFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeAccountPairingEnabledAtom)
+);
+
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,

@@ -597,6 +597,15 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         return;
       }
 
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+        if (context.onHistoryMove(event.shiftKey ? 1 : -1)) event.preventDefault();
+        return;
+      }
+      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === 'y') {
+        if (context.onHistoryMove(1)) event.preventDefault();
+        return;
+      }
+
       const input = event.currentTarget;
       const cursorPosition = input.selectionStart ?? 0;
       const selectionEnd = input.selectionEnd ?? cursorPosition;
@@ -637,6 +646,18 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
       }
 
+      if (event.key === 'Delete' && !context.open && !hasSelection && !context.readonly) {
+        const next = context.mentions.find(
+          (mention) => cursorPosition >= mention.start && cursorPosition < mention.end
+        );
+        if (next) {
+          event.preventDefault();
+          applyInputValue(removeMentionText(input.value, next, false), next.start, {
+            mentionsToRemove: [next],
+          });
+          return;
+        }
+      }
       if (event.key === 'Backspace' && !context.open && !hasSelection) {
         const isCtrlOrCmd = event.metaKey || event.ctrlKey;
 
@@ -850,6 +871,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const cursorPosition = input.selectionStart ?? 0;
 
       const inputType = event.inputType ?? (event.nativeEvent as InputEvent).inputType;
+      if (inputType === 'historyUndo' || inputType === 'historyRedo') {
+        if (isComposingRef.current) return;
+        if (context.onHistoryMove(inputType === 'historyUndo' ? -1 : 1)) event.preventDefault();
+        return;
+      }
       if (inputType === 'deleteContentBackward') {
         const mentionAtCursor = context.mentions.find(
           (mention) => cursorPosition > mention.start && cursorPosition <= mention.end

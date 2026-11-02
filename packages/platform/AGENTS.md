@@ -8,9 +8,11 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 ## Composition and capabilities
 
 - Settings must represent real platform support: local hides cloud usage and
-  PR-driven auto-archive, and omits machine selection when `remoteMachines` is
+  the legacy PR-driven auto-archive setting, and omits machine selection when `remoteMachines` is
   absent. Gate entries and their background work through capabilities rather
-  than build-kind or environment checks.
+  than build-kind or environment checks. Explicitly granted local Automations may
+  request ordinary Session archive through the local Host authority; this requires
+  no product-cloud port. [Contract](../../apps/cli/src/automations/README.md).
 - Shared packages stay platform-neutral. The public Electron composition
   selects `local` explicitly; private Web/mobile entries and cloud composition
   roots may inject `cloud` without forking those shared packages.
@@ -58,7 +60,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - `./host-keys` is host-only and remains unconnected until the crypto and host
   adapters are reviewed. CLI assembly receives machine identity only; never grant
   it personal management operations. No generic private export or arbitrary signing.
-- Credential-confirmed member removal is the explicit retention exception: match the originating identity, drain only that workspace and erase its local content/keys. Ordinary failures never authorize deletion.
+- Credential-confirmed member removal, and credential-confirmed revocation of this device, are the explicit retention exceptions: match the originating identity, drain only that workspace and erase that identity's local content/keys. Device revocation keeps membership and allows re-pairing. Ordinary failures never authorize deletion.
 - Failure, scope close, logout and ordinary cache cleanup must not delete identity
   keys. Preserve uncertain failure reasons and writes. Personal devices never use file protection; machine-only custody may select file protection at first creation under the owner-approved M1 policy, never on reopen.
 - Native fixtures use random UUIDs and isolated test keychains only. Verify exact

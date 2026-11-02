@@ -184,6 +184,9 @@ describe('ProviderRow reauthentication', () => {
       root.render(<DetailHarness />);
     });
 
+    expect(container.querySelector('[data-testid="agent-provider"]')?.getAttribute('data-agent-config-id')).toBe(config.id);
+    expect(container.querySelector('[data-testid="agent-provider"]')?.getAttribute('data-machine-id')).toBe(machineId);
+    expect(container.querySelector('[data-testid="agent-provider-name"]')?.textContent).toBe(config.name);
     const row = container.querySelector<HTMLButtonElement>('button[aria-label="Edit Config"]');
     await act(async () => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

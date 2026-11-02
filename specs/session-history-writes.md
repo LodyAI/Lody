@@ -224,6 +224,12 @@ conflicting edit. A cached goal guard is valid only for its exact history versio
 missing, invalid or concurrently changed cache evidence requires an authoritative
 check. Cache absence never establishes that no active goal exists.
 
+Ordinary Roost queries use logical fields and selected bodies. Structural edits
+use an SDK membership manifest referencing existing physical segments; reinserted
+business IDs receive fresh physical primaries. Final activation commits the root
+reference, branch revision and operation receipts atomically. This membership
+format requires matching SDK and Native capabilities.
+
 Opening a Roost conversation reads the latest active-branch window. Scrolling
 up loads older logical turns through a reverse cursor. Whole-history search,
 outline navigation, counts and facts must cover earlier pages without requiring

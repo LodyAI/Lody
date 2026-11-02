@@ -120,3 +120,8 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   inside the worker; `--import tsx` alone does not resolve their imports on Node 22.
 
 Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/AGENTS.md).
+
+Product content seals prefer installed current keys. Only genuine missing-key
+results permit retained published keys inside the durable fifteen-minute first-observation
+budget; uncertain timing fails closed. Membership/device/role checks remain mandatory.
+See the [owner tradeoff](../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).

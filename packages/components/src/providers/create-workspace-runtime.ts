@@ -5,6 +5,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import {
   machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryWatch,
 } from '@lody/shared';
@@ -113,6 +114,7 @@ import {
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import {
@@ -581,6 +583,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
+  // E2E-only protected transport evidence; absent outside a probe-enabled window.
+  const transportEffects = protectedContent ? clientLossEffects(deps.workspaceId) : null;
+  transportEffects?.ownerOpened();
+  let cloudStreamCounted = false;
+  const countCloudStream = () => {
+    if (!transportEffects || cloudStreamCounted) return;
+    cloudStreamCounted = true;
+    transportEffects.streamAttached();
+  };
+  // Removal stays best-effort for its callers; only a confirmed removal ends the count.
+  const removeCloudTransport = () =>
+    repo.removeTransport('cloud', { close: true }).then(
+      () => {
+        if (!cloudStreamCounted) return;
+        cloudStreamCounted = false;
+        transportEffects?.streamRemoved(true);
+      },
+      () => {
+        if (cloudStreamCounted) transportEffects?.streamRemoved(false);
+      }
+    );
   // Liveness invariant: opening a workspace must never wait forever on rebuildable
   // local cache. Loro Streams cursors are checkpoints, not source-of-truth data, so
   // a broken IndexedDB cursor store must fail open and let Streams bootstrap/catch up.
@@ -2037,6 +2060,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const {
+    requestSessionAutomationControl,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,
@@ -2064,6 +2088,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
+    requestAndroidEmulatorControl,
     requestLocalProjectGitState,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
@@ -2476,6 +2501,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ...common,
               action: message.action,
               configId: message.configId,
+              ...(message.methodId ? { methodId: message.methodId } : {}),
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({
@@ -3166,7 +3192,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       if (transportAttached || localLoroTransport) {
         await repo.removeTransport('local', { close: true }).catch(() => undefined);
       }
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
       transportAttached = false;
     }
     localLoroTransport = null;
@@ -3416,6 +3442,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       webCloudAddsInFlight.add(options.generation);
       try {
         await repo.addTransport('cloud', transportAdapter, { ephemeral: true });
+        countCloudStream();
       } finally {
         webCloudAddsInFlight.delete(options.generation);
       }
@@ -3556,8 +3583,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         await repo.addTransport('cloud', createStreamsDurableTransport(provider, streamsBaseUrl), {
           ephemeral: true,
         });
+        countCloudStream();
         if (disposePromise || !authToken || !transportAttached) {
-          await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+          await removeCloudTransport();
           return;
         }
         attachCloudMetaHealthTracker();
@@ -3575,7 +3603,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           machineMonitorTransport.stop(),
           promptSuggestions.stop(),
         ]);
-        await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+        await removeCloudTransport();
         throw error;
       }
     })();
@@ -3607,7 +3635,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     latestCloudPresenceStates = {};
     publishMergedPresence();
     if (transportAttached) {
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
     }
     cloudTransportAttached = false;
     notifyConnectionStateInputsChanged();
@@ -4672,6 +4700,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+          coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
           watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
@@ -5565,6 +5594,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         throw codeCollabFileIndexCacheDisposeError;
       }
     });
+    // A rejected disposal keeps the owner live: it never reports a closed transport.
+    if (transportEffects)
+      void disposePromise.then(
+        () => transportEffects.ownerClosed(true),
+        () => transportEffects.ownerClosed(false)
+      );
 
     return disposePromise;
   };
@@ -5863,6 +5898,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     waitForMachineAcpBinaryInstallResponse,
     subscribeMachineAcpBinaryProgress,
     getMachineAcpBinaryProgress,
+    requestSessionAutomationControl,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,
@@ -5888,6 +5924,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
+    requestAndroidEmulatorControl,
     requestLocalProjectGitState,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,

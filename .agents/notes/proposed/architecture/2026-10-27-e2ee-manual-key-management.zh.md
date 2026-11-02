@@ -32,4 +32,4 @@ Round 只是签名字节之外的计数元数据。原生 history 数据库中�
 
 确定性回归使用真实 SQLite／加密和 SDK 请求、明确的存储失败与信号，覆盖暂存失败后的独立撤销、重开后保留 candidate 与未知 CAS 的恢复、多轮名额满、candidate 损坏、提交后安装失败、终态确认、旧 epoch 发送、仅手动签署、迟到界面结果及账号／工作区通知隔离。新增行为均撤回修复先 RED，再 GREEN；Storybook 展示真实设置组件和恢复状态。本地检查不代表真机／钥匙串、跨平台打包、已部署 Convex／网关或端到端撤销验收。
 
-此实现接续 [MVP 决定](2026-10-27-e2ee-mvp-manual-rotation.zh.md) 留给 20-D 的手动入口，并组合 [不停发的换代接收](2026-10-27-e2ee-epoch-receive-barrier.zh.md)。没有自动换代签署或破坏性 fallback。
+此实现接续 [MVP 决定](2026-10-27-e2ee-mvp-manual-rotation.zh.md) 留给 20-D 的手动入口，并组合 [不停发的换代接收](../../implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.zh.md)。没有自动换代签署或破坏性 fallback。

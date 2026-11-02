@@ -59,6 +59,54 @@ The real-bundler startup tests locate the application by module ownership rather
 
 Same-document navigation keeps its lease. Quit cleanup attempts E2EE and other independent resources together; sign-out proceeds after a failed E2EE close. A failed account Scope stays fenced even though subsequent Scope.close is idempotently successful; cancelled quit resumes admission only for healthy owners.
 
+Terminal quit gives each renderer close and the parallel main-owned resource drain
+fifteen seconds. A pending native call retains its Scope, custody and original
+write receipts; a timeout never clears them or authorizes replacement. Once CLI
+and shell execution owners confirm release, unconfirmed main work is logged and
+main gives a presence-only warning marker at most one second to persist, then
+terminates with exit code 1. No reporting UI runs after resource drain, including updates and
+OS shutdown/logout. Next launch attempts a nonmodal native notification; unavailable
+or failed delivery retains the marker. Startup claims the marker by rename before
+notification delivery, so delayed delivery cannot erase a subsequent quit's marker.
+A parentless `showMessageBox` was rejected: Electron 44.9.3 on macOS runs that
+branch through `NSAlert.runModal`, which blocks the JS deadline despite returning
+a Promise. No modal API or human acknowledgement owns terminal reporting. Process
+termination ends late native work; ordinary Electron quit is reserved for confirmed
+drain. This avoids an endless wait without pretending cancellation released a writer.
+The native custody test creates a link offer, stalls an actual unprotect, crosses
+the quit barrier with a fake clock, then joins the retained close and verifies
+identical committed ledger originals and keys after reopen. It proves neither the
+historical E2E hang's exact resource nor a real OS keychain or packaged close.
+Quit phase/resource diagnostics supply that missing distinction on a later run.
+Fake-clock terminal tests also cover stalled/failed marker I/O, while real filesystem
+tests cover notification failure and a new quit during delayed startup delivery.
+Generic account/runtime failures retain one private main-only cause in the existing
+diagnostic slot; public errors and logs still omit it.
+The bounded terminal drain and its evidence are in [PR #2162](https://github.com/LodyAI/Lody/pull/2162).
+
+The renderer-unload veto has a separate native boundary: a synchronous confirmation
+inside `will-prevent-unload` blocks the JS deadline on macOS even with a visible
+parent. Quit uses an asynchronous parented sheet, keeps the original veto, and
+retries close only after Leave with a single-use approval. Navigation invalidates
+that approval; settlement aborts the sheet and late answers cannot affect a new
+document or quit. Non-quit close/reload keeps its previous confirmation policy.
+The deadline also settles an already destroyed window when its `closed` event is
+missing; previously that callback silently did nothing. Safe phase logs distinguish
+deadline registration, close entry/return, veto and sheet entry/return.
+
+An isolated Electron 44.9.3 macOS reproduction closes once, reopens a synthetic
+invitation page, completes the link action and injects an independent dirty-document
+veto. The old main thread samples in AppKit `runModalForWindow`; the new sheet
+returns control, accepts an explicit injected-clock signal and completes app.close
+without user action. The probe observes CDP dialogs without answering them so
+Electron owns its confirmation; Playwright 1.58.2's default auto-answer independently
+races a dialog already vetoed by Electron. This is not a full product journey.
+The reported run records only `Quit renderer closing`, so it cannot establish
+whether that run hit the veto or the missing-closed case. Neither candidate is
+presented as an observed historical stack. Owning window tests pin both paths and
+late-answer invalidation with fake clocks.
+The renderer veto/deadline correction is [PR #2167](https://github.com/LodyAI/Lody/pull/2167).
+
 Retained origins compact after 64 added records across reopen. Successful, verified rebuilding closes the replaced feed scope and removes only its SQLite file/sidecars; originals, pins and conflicting evidence are preserved. IPC publishes the full ledger at initial local display and at the final page or an upgrade stop, rather than each page.
 
 Machine keyring operations run in a process-owned helper with a 10-second timeout and credentials on stdin. Timeout fallback requires confirmed process termination; mixed failure/release causes retain the recovery owner and prohibit fallback. Existing OS custody never downgrades. Windows validates the directory in one ACL process; initialization lock contention yields and retries for at most 60 seconds instead of blocking the JS owner.

@@ -62,13 +62,25 @@ Renderer `beforeunload` vetoes on product windows (close, reload, quit) surface
 through one native Stay/Leave confirmation (`../renderer-unload.ts`); Leave only
 ignores that document's veto. Quit closes product windows, and so gets unload
 approval, before it destroys relays or stops the CLI; Stay cancels quit with the
-app fully running. A quit close whose renderer hangs or dies is destroyed so quit
+app fully running. Quit veto confirmation uses an asynchronous sheet with a visible
+parent, so its fifteen-second deadline remains runnable. Leave retries only that
+document's close; navigation, timeout or destruction cancels the sheet and invalidates
+late replies. Non-quit close/reload keeps its existing confirmation behavior.
+A quit close whose renderer hangs or dies is destroyed so quit
 cannot wait forever. Never destroy a normally closing window or add a path that
 bypasses unrelated `beforeunload` guards such as unsaved editors.
 A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` only at
 `will-quit`; a quit the barrier cancels settles `cancelled`, and the IPC caller
 withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
 resets. Relaunching quits the embedded CLI: never make it a default recovery step.
+
+Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
+Unconfirmed work keeps its original owner until main exits. Log it, give a
+presence-only warning marker at most one second to persist, then exit nonzero
+without terminal reporting UI. Next launch delivers a nonmodal native notification; failed
+delivery retains the marker. Never replace custody or clear pending writes
+on a waiter deadline. CLI and shell process owners must still confirm release
+before main can terminate. Quit diagnostics name phases, never credentials or causes.
 
 ## Auto-update
 
@@ -124,5 +136,7 @@ denial/I/O failure cannot gate mailbox receipt. Show file protection; socket tim
 Only rotate resumes candidates. Keep errors transport-free.
 
 Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
+Passive cache inspection uses existing entries only; never call openWorkspace or
+readMachineSharing from that path. Counts are diagnostic, not execution authority.
 Policy errors affect dependent execution only. Narrow read/update methods keep keys
 and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

@@ -12,6 +12,11 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
+  /**
+   * Sign-in method the reader picked from the agent's advertised list. Sent only
+   * to Machines that understand it; elsewhere the daemon shows its own picker.
+   */
+  methodId?: string;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
@@ -106,6 +111,7 @@ export function useMachineAcpAuthentication(
             requestId,
             action: 'start',
             configId: args.configId,
+            ...(args.methodId ? { methodId: args.methodId } : {}),
           });
           const response = await responsePromise;
           if (!response) {

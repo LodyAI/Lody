@@ -21,6 +21,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { LoroDoc } from 'loro-crdt';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
@@ -45,6 +46,8 @@ import {
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
+  createStore as createPlatformStore,
+  type PlatformSessionState,
   type CloudApi,
   type PlatformProvider,
 } from '@lody/platform';
@@ -73,7 +76,8 @@ const billingEntitlementState = {
 // its cloud dependencies explicit. Rejected: teaching usePlatform() a test-only
 // implicit default, which would hide missing production assembly as well.
 const testCloudApi = {
-  useQuery: () => billingEntitlementState,
+  useQuery: (operation, args) =>
+    args !== 'skip' && operation.name.startsWith('billing:') ? billingEntitlementState : undefined,
   useMutation: () => recordMyWorkspaceDailyActiveUser,
   useAction: () => vi.fn(async () => undefined),
 } as CloudApi;
@@ -553,6 +557,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      identitySession?: PlatformProvider['identity']['session'];
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -568,11 +573,26 @@ describe('useSessionActions', () => {
       workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
       descriptor: {
         workspaceId: options.workspaceId ?? 'workspace-1',
-        contentMode: 'plaintext',
+        contentMode: runtime.contentMode ?? 'plaintext',
         contentModeVersion: 1,
       },
     });
 
+    const platform =
+      runtime.contentMode === 'e2ee'
+        ? {
+            ...testPlatform,
+            identity: {
+              ...testPlatform.identity,
+              session:
+                options.identitySession ??
+                createStaticStore({
+                  status: 'authenticated' as const,
+                  user: { id: 'synthetic-session-account' },
+                }),
+            },
+          }
+        : testPlatform;
     let actions: SessionActions | null = null;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -582,7 +602,7 @@ describe('useSessionActions', () => {
       root?.render(
         createElement(
           PlatformContext.Provider,
-          { value: testPlatform },
+          { value: platform },
           createElement(
             Provider,
             { store: jotaiStore },
@@ -601,6 +621,307 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it.each([
+    'archive',
+    'restore',
+    'delete',
+    'rename',
+    'pin',
+    'close',
+    'owner',
+    'bulk-delete',
+    'cancel',
+    'activity',
+    'unread',
+    'move',
+    'collaboration',
+  ] as const)(
+    'refuses history-only management through the shared action: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'foreign-history' as SessionId;
+      const childId = 'foreign-child' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'another-member',
+        title: 'History',
+        lastMessageAt: 2,
+        isArchived: operation === 'restore' || operation === 'delete',
+      } as SessionMeta;
+      const childMeta = { ...rootMeta, id: childId, parentSessionId: id };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childId), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      const run = {
+        archive: () => actions.archiveSession(id),
+        restore: () => actions.restoreSession(id),
+        delete: () => actions.deleteArchivedSession(id),
+        rename: () => actions.updateSessionTitle(id, 'Changed'),
+        pin: () => actions.setSessionPinned(id, true),
+        close: () => actions.setSessionTabClosed(id, true),
+        owner: () => actions.transferSessionOwner(id, 'synthetic-session-account'),
+        'bulk-delete': () => actions.deleteSessions([id, childId]),
+        cancel: () => actions.requestSessionCancel(id, 'turn'),
+        activity: () => actions.touchSessionActivity(id),
+        unread: () => actions.markSessionUnread(id),
+        move: () => actions.updateSessionMetadata(id, { projectGroup: { id: 'other-group' } }),
+        collaboration: () => actions.setTreeCollaborationStopped(id, true),
+      }[operation];
+      try {
+        await expect(run()).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childId)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['archive', 'restore', 'delete'] as const)(
+    'preflights a manageable root and denied child before any tree mutation: %s',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'owned-root' as SessionId;
+      const rootMeta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Own root',
+      } as SessionMeta;
+      const childMeta = {
+        ...rootMeta,
+        id: 'foreign-child' as SessionId,
+        userId: 'another-member',
+        parentSessionId: id,
+      };
+      await repo.upsertDocMeta(getSessionRoomId(id), rootMeta);
+      await repo.upsertDocMeta(getSessionRoomId(childMeta.id), childMeta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime);
+      try {
+        await expect(
+          {
+            archive: actions.archiveSession,
+            restore: actions.restoreSession,
+            delete: actions.deleteArchivedSession,
+          }[operation](id)
+        ).rejects.toMatchObject({ code: 'session_management_denied' });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(rootMeta);
+        expect((await repo.getDocMeta(getSessionRoomId(childMeta.id)))?.meta).toEqual(childMeta);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('retains encrypted author management and rejects metadata/project edits based on stale cached ownership', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'owned-history' as SessionId;
+    const meta = {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    } as SessionMeta;
+    const child = { ...meta, id: 'owned-child' as SessionId, parentSessionId: id };
+    await repo.upsertDocMeta(getSessionRoomId(id), meta);
+    await repo.upsertDocMeta(getSessionRoomId(child.id), child);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(id)]: meta },
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Changed');
+      await actions.setSessionPinned(id, true);
+      await actions.archiveSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+        title: 'Changed',
+        isPinned: true,
+        isArchived: true,
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(true);
+      await actions.restoreSession(id);
+      expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(false);
+      // Cache still claims ownership. Current Repo state must decide each new action.
+      await repo.upsertDocMeta(getSessionRoomId(id), { userId: 'different-member' });
+      await expect(
+        actions.updateSessionMetadata(id, { projectGroup: { id: 'another-group' } })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.updateSessionTitle(id, 'Stolen')).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Changed');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.projectGroup).toBeUndefined();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('preflights a mixed exact-ID batch before deleting any owned or history-only session', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'batch-owned' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = { ...own, id: 'batch-foreign' as SessionId, userId: 'different-member' };
+    for (const meta of [own, foreign]) await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(actions.deleteSessions([own.id, foreign.id])).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it.each(['account', 'workspace', 'runtime', 'logout'] as const)(
+    'fences a retained management callback when %s changes during its Repo read',
+    async (changed) => {
+      const repo = await LoroRepo.create({});
+      const id = 'held-rename' as SessionId;
+      const meta = {
+        id,
+        machineId: 'unshared-machine',
+        userId: 'synthetic-session-account',
+        title: 'Original',
+      } as SessionMeta;
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+      const state = createStore();
+      const identity = createPlatformStore<PlatformSessionState>({
+        status: 'authenticated',
+        user: { id: 'synthetic-session-account' },
+      });
+      const actions = await renderActions(runtime, { store: state, identitySession: identity });
+      const reached = createDeferred();
+      const release = createDeferred();
+      const originalRead = repo.getDocMeta.bind(repo);
+      vi.spyOn(repo, 'getDocMeta').mockImplementationOnce(async (room) => {
+        reached.resolve();
+        await release.promise;
+        return originalRead(room);
+      });
+      const refused = expect(
+        actions.updateSessionTitle(id, 'Stale account write')
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      try {
+        await reached.promise;
+        await act(async () => {
+          if (changed === 'account') state.set(userAtom, { id: 'different-account' } as never);
+          else if (changed === 'workspace')
+            state.set(currentWorkspaceIdAtom, 'different-workspace' as WorkspaceId);
+          else if (changed === 'runtime') state.set(runtimeAtom, { ...runtime });
+          else {
+            identity.set({ status: 'unauthenticated' });
+            state.set(userAtom, null);
+          }
+        });
+        release.resolve();
+        await refused;
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+      } finally {
+        release.resolve();
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('preflights related opened conversations and parent activity before changing owned metadata', async () => {
+    const repo = await LoroRepo.create({});
+    const own = {
+      id: 'owned-root-with-relations' as SessionId,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Own',
+    } as SessionMeta;
+    const foreign = {
+      ...own,
+      id: 'foreign-opened' as SessionId,
+      openedBySessionId: own.id,
+      userId: 'different-member',
+    };
+    const child = {
+      ...own,
+      id: 'owned-child-with-foreign-parent' as SessionId,
+      parentSessionId: foreign.id,
+    };
+    for (const meta of [own, foreign, child])
+      await repo.upsertDocMeta(getSessionRoomId(meta.id), meta);
+    const runtime = createRuntime({
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      readSessionOperationTargets: (target, kind) =>
+        readSessionOperationTargets(repo, target, kind),
+    });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime);
+    try {
+      await expect(
+        actions.archiveSession(own.id, { includeOpenedSessions: true })
+      ).rejects.toMatchObject({ code: 'session_management_denied' });
+      await expect(actions.touchSessionActivity(child.id)).rejects.toMatchObject({
+        code: 'session_management_denied',
+      });
+      for (const meta of [own, foreign, child])
+        expect((await repo.getDocMeta(getSessionRoomId(meta.id)))?.meta).toEqual(meta);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('retains management with a bound local identity during uncertain cloud authentication', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'offline-owned-history' as SessionId;
+    await repo.upsertDocMeta(getSessionRoomId(id), {
+      id,
+      machineId: 'unshared-machine',
+      userId: 'synthetic-session-account',
+      title: 'Original',
+    });
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    Object.assign(runtime, { contentMode: 'e2ee', accountId: 'synthetic-session-account' });
+    const actions = await renderActions(runtime, {
+      identitySession: createStaticStore({ status: 'unauthenticated', uncertain: true }),
+    });
+    try {
+      await actions.updateSessionTitle(id, 'Offline edit');
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta?.title).toBe('Offline edit');
+    } finally {
+      await repo.destroy();
+    }
+  });
 
   it('uses released Stop wire fields and turn marker when the target has no Inbox capability', async () => {
     const sessionId = 'legacy-stop' as SessionId;

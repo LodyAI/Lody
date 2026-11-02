@@ -70,6 +70,18 @@ export const operationInboxLegacy = (options: {
       if (Exit.isFailure(exit)) throw new Error(message, { cause: exit.cause });
     });
   return {
+    executionRelease: (scope: InboxScope, executionId: string) =>
+      options.sql.executionRelease(scope, executionId),
+    /** Temporary resource-action bridge; the native Inbox remains the sole admission owner. */
+    guard: <A>(scopes: readonly InboxScope[], body: () => Promise<A>) =>
+      runtime.runPromise(
+        Effect.flatMap(OperationInbox, (inbox) =>
+          inbox.guard(
+            scopes,
+            Effect.tryPromise({ try: body, catch: (cause) => cause }).pipe(Effect.uninterruptible)
+          )
+        )
+      ),
     activeExecution: (w: string, s: string) => Effect.runSync(queries.activeExecution(w, s)),
     preferredHumanInput: (w: string, s: string) =>
       Effect.runSync(queries.preferredHumanInput(w, s)),
@@ -79,6 +91,8 @@ export const operationInboxLegacy = (options: {
     inputCanceled: (w: string, s: string, id: string) =>
       Effect.runSync(queries.inputCanceled(w, s, id)),
     inputKind: (s: InboxScope, id: string) => Effect.runSync(queries.inputKind(s, id)),
+    acceptedAutomationInput: (s: InboxScope, id: string) =>
+      Effect.runSync(queries.acceptedAutomationInput(s, id)),
     pauseTarget: (w: string, s: string, id: string) =>
       Effect.runSync(queries.pauseTarget(w, s, id)),
     abandonInput: (w: string, s: string, id: string, unlessActive?: boolean) =>
@@ -128,8 +142,12 @@ export const operationInboxLegacy = (options: {
         Effect.flatMap(OperationInbox, (i) => i.cancelExecution(scope, id, reason))
       ),
     wake: () => runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.wake)),
-    accept: (input: InboxInput) =>
-      runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.accept(input))),
+    accept: (input: InboxInput, beforeAccept?: () => Promise<boolean>) =>
+      runtime.runPromise(
+        Effect.flatMap(OperationInbox, (i) =>
+          i.accept(input, beforeAccept ? Effect.tryPromise(beforeAccept) : undefined)
+        )
+      ),
     pause: (scope: InboxScope, id: string, ids?: readonly string[], cancelId?: string) =>
       runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.pause(scope, id, ids, cancelId))),
     release: (event: InboxRelease) =>

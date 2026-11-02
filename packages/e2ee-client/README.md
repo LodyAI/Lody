@@ -41,6 +41,13 @@ signing capability.
   credential and database owners. Close/logout/cache cleanup never delete identity.
   The composition creates no timer, document Repo or ordinary transport.
 
+## Sealing epoch
+
+New document/Meta/Flock seals select the current verified epoch inside core.
+An old caller epoch is only a hint; missing current keys fail for retry rather
+than producing new ciphertext at a retained epoch. Already sealed old frames
+and historical reads remain valid. A future epoch hint fails until verified catch-up.
+
 ## Bounded retirement
 
 Owned host and session `close()` fence new work immediately and share a five-second
@@ -160,6 +167,29 @@ An endorsed snapshot without the publication original uses mailbox/history.
 Core retains and verifies receive/report/distribution originals; the shared finite
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.
+
+## Account-wide pairing workflow
+
+`@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing
+workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
+It owns the tag and expiry checks, the single-signature admission journal and local
+terminal states. Hosts supply four things:
+- an `AccountPairingStore` for durable state, which holds no secret and no private key;
+- the relay;
+- the per-workspace ports;
+- optional `diagnostics`.
+
+The pairing secret stays in memory. The desktop uses a SQLite store; a browser store is
+separate work. Identity protection is a per-workspace port decision, never this
+workflow's.
+
+`@lody/e2ee-client/account-pairing/browser` adds the browser pieces:
+- `makeIndexedDbAccountPairingStore` keeps one account database. Each mutation resolves
+  only after its transaction completes, and an abort or quota error advances nothing.
+- `makeAccountPairingTabOwnership` with `withAccountPairingTabOwnership` lets only one
+  tab own the account's pairing, through Web Locks, because the secret lives only in
+  that tab's memory. Other tabs get `pairing-elsewhere`, and a closed tab releases the
+  lock.
 
 ## Verification and limits
 

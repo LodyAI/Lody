@@ -47,6 +47,7 @@ import type { ConversationView } from '@/lib/conversation-view';
 import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
+  getMessageQuoteEditDraft,
   getUserTextRenderSlice,
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
@@ -184,6 +185,8 @@ import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
+import { PendingImageMarkupDialog } from '../sessions/pending-image-markup-dialog';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import { UserMessageEditor, type UserMessageEditorProps } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
@@ -643,6 +646,7 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -1782,6 +1786,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
@@ -2006,15 +2011,6 @@ export const SessionChatStreamView = forwardRef<
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
-     * The gap between the viewport's scroll space and Virtua's item-offset
-     * space — the viewport's top padding (`--conversation-top-inset` plus
-     * `py-6`), which Virtua does not account for. Measured from the DOM rather
-     * than assumed, and only on mount / viewport resize; see
-     * `measureItemOffsetDelta`.
-     */
-    const itemOffsetDeltaRef = useRef(0);
-
-    /**
      * Put a row's top at the viewport's top edge.
      *
      * THE one place that turns a row index into a scroll, so every jump in this
@@ -2028,7 +2024,7 @@ export const SessionChatStreamView = forwardRef<
       (rowIndex: number, smooth = false) => {
         listRef.current?.scrollRowToTop(rowIndex + leadingRowCount, {
           smooth,
-          offset: itemOffsetDeltaRef.current,
+          offset: listRef.current?.contentOffset ?? 0,
         });
       },
       [leadingRowCount]
@@ -2244,18 +2240,6 @@ export const SessionChatStreamView = forwardRef<
     }, [outlineEntries, virtualRows]);
     const [activeOutlineIndex, setActiveOutlineIndex] = useState(-1);
 
-    // Measured, not assumed: the rect difference also absorbs any border or
-    // start spacer, which a `padding-top` read would miss. Never on a scroll
-    // path — `getBoundingClientRect` forces layout.
-    const measureItemOffsetDelta = useCallback(() => {
-      const content = scrollViewportElement?.firstElementChild;
-      if (!scrollViewportElement || !(content instanceof HTMLElement)) return;
-      itemOffsetDeltaRef.current =
-        content.getBoundingClientRect().top -
-        scrollViewportElement.getBoundingClientRect().top +
-        scrollViewportElement.scrollTop;
-    }, [scrollViewportElement]);
-
     const syncActiveOutlineIndex = useCallback(() => {
       const vlist = listRef.current;
       if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
@@ -2271,32 +2255,23 @@ export const SessionChatStreamView = forwardRef<
       const next = resolveActiveOutlineIndex(
         outlineAnchors,
         (rowIndex) => vlist.getItemOffset(rowIndex + leadingRowCount),
-        vlist.scrollOffset - itemOffsetDeltaRef.current,
+        vlist.scrollOffset - vlist.contentOffset,
         isAtEnd
       );
       setActiveOutlineIndex(next);
     }, [initialScrollRestored, leadingRowCount, outlineAnchors]);
 
-    // Read the sync through refs so this effect only re-runs when the viewport
-    // is bound or its one-time initial position restore completes. Depending on
-    // the callback would re-run it on every streamed delta, which is exactly the
-    // forced layout the measurement comment above rules out.
+    // The handle owns the unshifted content origin. Observe viewport resizes
+    // through a stable callback instead of sampling shifted DOM rectangles.
     const syncActiveOutlineIndexRef = useLatestRef(syncActiveOutlineIndex);
-    const measureItemOffsetDeltaRef = useLatestRef(measureItemOffsetDelta);
     useEffect(() => {
       if (!scrollViewportElement) return undefined;
       const remeasure = () => {
-        measureItemOffsetDeltaRef.current();
         syncActiveOutlineIndexRef.current();
       };
       remeasure();
       return observeResizeOnAnimationFrame(scrollViewportElement, remeasure);
-    }, [
-      initialScrollRestored,
-      measureItemOffsetDeltaRef,
-      scrollViewportElement,
-      syncActiveOutlineIndexRef,
-    ]);
+    }, [initialScrollRestored, scrollViewportElement, syncActiveOutlineIndexRef]);
 
     /**
      * Jump to a round. The engine holds the round's row at the top as the rows
@@ -2319,7 +2294,7 @@ export const SessionChatStreamView = forwardRef<
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
 
-    // Which turns are in the viewport, from Virtua's own index math; the only
+    // Which turns are in the viewport, from the engine's item-space offsets; the only
     // input the hydration window has. Read through refs so a report never
     // re-creates the scroll handler, and deduplicated so a settled viewport
     // stops producing updates.
@@ -2333,9 +2308,10 @@ export const SessionChatStreamView = forwardRef<
       const rows = virtualRowsRef.current;
       if (rows.length === 0) return;
       const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
-      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const itemOffset = vlist.scrollOffset - vlist.contentOffset;
+      const startRow = clampRow(vlist.findItemIndex(itemOffset) - leadingRowCount);
       const endRow = clampRow(
-        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+        vlist.findItemIndex(itemOffset + vlist.viewportSize) - leadingRowCount
       );
       // Local rows have no history index. They must not request a bogus
       // hydration range when the viewport contains only accepted inputs.
@@ -2773,6 +2749,7 @@ export const SessionChatStreamView = forwardRef<
                 activeImageKey={activeImageKey}
                 onActiveImageKeyChange={setActiveImageKey}
                 entries={activeGalleryEntries}
+                onAnnotateImage={onAnnotateImage}
                 portalAnchorRef={scrollRootRef}
               />
             </ContainerQueryProvider>
@@ -3946,6 +3923,9 @@ const UserMessageRowView = ({
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
+  const [editQuoteDrafts, setEditQuoteDrafts] = useState(
+    () => getMessageQuoteEditDraft(message.items).drafts
+  );
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
     setDidCopyMessageId(message.id);
@@ -4129,6 +4109,8 @@ const UserMessageRowView = ({
                     <UserMessageEditor
                       value={editText}
                       onChange={setEditText}
+                      quoteDrafts={editQuoteDrafts}
+                      onQuoteDraftsChange={setEditQuoteDrafts}
                       onCancel={() => setIsEditing(false)}
                       onSave={(submission) => void handleSaveEdit(submission)}
                       isSaving={isSavingEdit}
@@ -4190,7 +4172,9 @@ const UserMessageRowView = ({
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
                         onClick={() => {
-                          setEditText(getTextContentFromMessageItems(message.items));
+                          const draft = getMessageQuoteEditDraft(message.items);
+                          setEditText(draft.text);
+                          setEditQuoteDrafts(draft.drafts);
                           setIsEditing(true);
                         }}
                         aria-label={t('sessions.editMessage', 'Edit message')}
@@ -6132,6 +6116,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-native-selection-allow
+          data-message-quote-text={
+            content.kind === 'content' && content.block.entry.content.type === 'text'
+              ? ''
+              : undefined
+          }
         >
           {/* Desktop footer actions rest hidden, so they may sit inside the round
               reserve. Mobile always shows the footer: the reserve goes below it
@@ -6481,7 +6470,11 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
-        encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: entry.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -6516,6 +6509,7 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange,
   entries,
   portalAnchorRef,
+  onAnnotateImage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -6523,7 +6517,20 @@ const ImagePreviewDialog = ({
   onActiveImageKeyChange: (imageKey: string | null) => void;
   entries: ReadonlyArray<SessionImageGalleryEntry>;
   portalAnchorRef?: ImagePreviewPortalAnchorRef;
+  onAnnotateImage?: (selection: DocumentSelection) => boolean;
 }) => {
+  const { t } = useTranslation();
+  const [markupFile, setMarkupFile] = useState<File | null>(null);
+  const markupRequest = useRef(0);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    []
+  );
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [open, activeImageKey]);
   const activeIndex = useMemo(
     () => findSessionImageGalleryEntryIndex(entries, activeImageKey),
     [activeImageKey, entries]
@@ -6542,6 +6549,7 @@ const ImagePreviewDialog = ({
 
   const handleIndexChange = useCallback(
     (index: number) => {
+      markupRequest.current += 1;
       const entry = entries[index];
       if (entry) {
         onActiveImageKeyChange(entry.key);
@@ -6551,18 +6559,62 @@ const ImagePreviewDialog = ({
   );
 
   const handleClose = useCallback(() => {
+    markupRequest.current += 1;
     onOpenChange(false);
   }, [onOpenChange]);
 
   return (
-    <ZoomableImageViewer
-      open={open}
-      onClose={handleClose}
-      images={images}
-      index={activeIndex}
-      onIndexChange={handleIndexChange}
-      {...(portalAnchorRef ? { portalAnchorRef } : {})}
-    />
+    <>
+      <ZoomableImageViewer
+        open={open && !markupFile}
+        onClose={handleClose}
+        images={images}
+        index={activeIndex}
+        onIndexChange={handleIndexChange}
+        onAnnotate={
+          onAnnotateImage
+            ? (item) => {
+                const request = ++markupRequest.current;
+                if (!item.src) return;
+                void fetch(item.src)
+                  .then((response) => {
+                    if (!response.ok) throw new Error('Image unavailable');
+                    return response.blob();
+                  })
+                  .then((blob) => {
+                    if (request !== markupRequest.current) return;
+                    setMarkupFile(
+                      new File([blob], item.fileName || 'image.png', { type: blob.type })
+                    );
+                  })
+                  .catch(() => {
+                    if (request === markupRequest.current)
+                      toast.error(
+                        t(
+                          'sessions.fileViewer.selection.imageFailed',
+                          'Could not open this image for markup. Your attachment is unchanged.'
+                        )
+                      );
+                  });
+              }
+            : undefined
+        }
+        {...(portalAnchorRef ? { portalAnchorRef } : {})}
+      />
+      {markupFile && onAnnotateImage && (
+        <PendingImageMarkupDialog
+          file={markupFile}
+          portalAnchorRef={portalAnchorRef}
+          onClose={() => setMarkupFile(null)}
+          onAdd={(selection) => {
+            if (!onAnnotateImage(selection)) return false;
+            setMarkupFile(null);
+            onOpenChange(false);
+            return true;
+          }}
+        />
+      )}
+    </>
   );
 };
 
@@ -6656,7 +6708,11 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
-      encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+      encryption: entry.encryption,
+      attachmentToken:
+        attachmentRuntime?.workspaceId === workspaceId
+          ? attachmentRuntime.attachmentToken
+          : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6899,7 +6955,7 @@ export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGr
   );
 };
 
-const WorkspaceSessionFileGroup = ({
+export const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6931,7 +6987,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
-        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6969,7 +7029,11 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
-        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
+        encryption: file.encryption,
+        attachmentToken:
+          attachmentRuntime?.workspaceId === workspaceId
+            ? attachmentRuntime.attachmentToken
+            : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })
@@ -7330,6 +7394,7 @@ const UserPlainTextBlock = ({
             ...(isLong && !isFullTextVisible ? userTextCollapsedStyle(fontSize) : {}),
           }}
           data-search-block-id={searchBlockId}
+          data-message-quote-text=""
         >
           {/* Search wins over chips: both want to split the same string, and a
               match that lands inside a chip has nowhere to paint. Chips come

@@ -179,6 +179,7 @@ export function isAcpTransportDisconnectMessage(message: string): boolean {
   return (
     text.includes('connection is disposed') ||
     text.includes('acp connection closed') ||
+    text.includes('write epipe') ||
     text.includes('not ready for writing') ||
     text.includes('processtransport') ||
     (text.includes('process') && text.includes('not ready'))

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -47,6 +48,7 @@ import {
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
+  type MessageQueueItemInput,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
   getReadableAcpCapabilityCacheEntry,
@@ -67,6 +69,7 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type AcpAuthMethodSummary,
   type AcpModelControls,
   type SessionGoalAction,
   type AcpCapabilityCacheEntry,
@@ -3477,7 +3480,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return first;
   }
 
-  async pushMessageQueue(item: Omit<MessageQueueItem, '$cid'>): Promise<void> {
+  async pushMessageQueue(item: MessageQueueItemInput): Promise<void> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3489,6 +3492,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
           ? `queue:${item.userTurnId.trim()}`
           : undefined);
+      const prior = operationId
+        ? mq.find((queued) => queued.operationId === operationId)
+        : undefined;
+      if (prior) {
+        if (
+          prior.userTurnId !== item.userTurnId ||
+          prior.userId !== item.userId ||
+          prior.task !== item.task ||
+          !isDeepStrictEqual(prior.acpSessionConfig, item.acpSessionConfig) ||
+          !isDeepStrictEqual(prior.project, item.project)
+        )
+          throw new Error('Queue operation identity conflict');
+        return prev;
+      }
       // @ts-ignore - mq is read-only in type but writable at runtime
       prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
       return prev;
@@ -3632,6 +3649,13 @@ export type AcpCapabilityWriteOptions = {
    * response carried no declaration; the stored row is then left untouched.
    */
   modelCapabilities?: Record<string, AcpModelControls>;
+  /**
+   * Sign-in methods the probe read from the agent's `initialize` response.
+   * Absent means this probe did not ask (a built-in provider with its own
+   * login command); an empty array records that the agent advertises none, so
+   * the reader stops waiting for a list that will never arrive.
+   */
+  authMethods?: AcpAuthMethodSummary[];
 };
 
 const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry): string =>
@@ -3646,6 +3670,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     configOptions: entry.configOptions,
     modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
+    authMethods: entry.authMethods,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
     sessionTitle: entry.sessionTitle,
@@ -3775,6 +3800,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
       availableCommands,
+      authMethods: options.authMethods,
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
@@ -3795,6 +3821,15 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
+    // A caller that did not ask the agent — session-created capability updates —
+    // must not erase methods an earlier probe recorded for the same launch.
+    if (
+      options.authMethods === undefined &&
+      existing?.authMethods !== undefined &&
+      existing.sourceVersion === entry.sourceVersion
+    ) {
+      entry.authMethods = existing.authMethods;
+    }
     // Only probes replace the preview. Omission preserves the latest same-runtime
     // probe, read beside the write so concurrent session starts cannot roll it back.
     if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {

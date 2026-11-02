@@ -191,6 +191,14 @@ export const ConnectingRemote: Story = {
 };
 export const CheckingRemote: Story = { args: { previewStatus: { ...remote, checking: true } } };
 export const RemoteNotOpen: Story = { args: { previewStatus: remote } };
+export const EncryptedRemote: Story = {
+  args: {
+    page: true,
+    tunnelDisclosure: true,
+    previewStatus: { ...remote, connection: active, hasShareUrl: true },
+    toolbar: { ...toolbar, hasShareUrl: true },
+  },
+};
 export const RemoteConnected: Story = {
   args: {
     page: true,

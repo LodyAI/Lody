@@ -1,3 +1,5 @@
+import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
 import {
   readProjectDefaultMcpIds,
   syncMcpCatalog,
@@ -116,7 +118,7 @@ import {
   deriveDraftSessionTitle,
   NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
-import type { SessionTurn } from '@lody/shared/session-data';
+import { readSessionHistoryMetadata, type SessionTurn } from '@lody/shared/session-data';
 import { AuthClient } from '@/lib/auth';
 import {
   dispatchLocalControl,
@@ -172,7 +174,7 @@ import {
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
 import { acquireSessionObservation } from './session-observe-runtime';
@@ -186,6 +188,29 @@ export type DelegatedSessionRequester = {
 };
 
 /** Delegation without provenance must never be recorded as human input. */
+/**
+ * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
+ * work is unchanged; a shared member's derivation returns the origin to record as
+ * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
+ * daemon cannot verify is refused rather than written as machine-owned work.
+ */
+async function classifyDelegatedEncryptedInput(
+  manager: LoroDocumentManager,
+  delegatedRequester: DelegatedSessionRequester | undefined,
+  targetMachineId: string
+): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
+  const author = delegatedRequester.author;
+  const daemon = getDaemonWorkspace();
+  if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
+    throw new Error('e2ee_derivation_unavailable');
+  const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
+  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
+    'member'
+    ? origin
+    : undefined;
+}
+
 const resolveSessionInputAuthor = (
   userId: string,
   delegatedRequester?: DelegatedSessionRequester
@@ -669,6 +694,46 @@ export function selectSessionTranscriptEntries(
   return selected;
 }
 
+/** Count visible rows and hydrate the requested transcript positions. */
+export async function readSessionTranscript(
+  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
+  options: { all?: boolean; limit?: number; reverse?: boolean }
+): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
+  if (options.all) {
+    const transcript = toSessionTranscriptEntries(await backend.readHistory());
+    return {
+      total: transcript.length,
+      entries: selectSessionTranscriptEntries(transcript, options),
+    };
+  }
+  let total = 0,
+    positions: number[] = [];
+  let selected: SessionHistoryInput[];
+  if (backend.readHistoryTranscript) {
+    const result = await backend.readHistoryTranscript(options);
+    total = result.total;
+    positions = result.positions;
+    selected = result.entries;
+  } else {
+    selected = await backend.readHistorySelection(
+      (rows) => {
+        const result = selectTranscriptHistoryPositions(rows, options);
+        total = result.total;
+        positions = result.positions;
+        return positions;
+      },
+      { transcriptVisibility: true }
+    );
+  }
+  return {
+    total,
+    entries: selected.flatMap((entry, index) => {
+      const formatted = toSessionTranscriptEntry(positions[index]!, entry);
+      return formatted ? [formatted] : [];
+    }),
+  };
+}
+
 export function renderSessionTranscript(entries: SessionTranscriptEntry[]): string {
   if (entries.length === 0) {
     return 'No visible history found.';
@@ -955,7 +1020,19 @@ const billingEntitlementCache = new Map<
   }
 >();
 
-async function getWorkspaceBillingEntitlementBestEffort(
+/**
+ * After a failed or timed-out read, the plan stays unknown (fail open) for this long
+ * without asking again, so a persistently offline machine does not make every
+ * command wait for the read deadline. A failure is never cached as a plan.
+ */
+const BILLING_ENTITLEMENT_RETRY_AFTER_MS = 30_000;
+const billingEntitlementRetryAfter = new Map<
+  string,
+  { port: NonNullable<LoroDocumentManager['cloudBilling']>; until: number }
+>();
+
+/** @internal Exported for the quota fail-open tests. */
+export async function getWorkspaceBillingEntitlementBestEffort(
   manager: LoroDocumentManager,
   workspace: WorkspaceSummary
 ): Promise<WorkspaceBillingEntitlement | null> {
@@ -964,6 +1041,8 @@ async function getWorkspaceBillingEntitlementBestEffort(
     return null;
   }
   const now = getServerNow();
+  const retryAfter = billingEntitlementRetryAfter.get(workspace.id);
+  if (retryAfter?.port === port && retryAfter.until > now) return null;
   let entry = billingEntitlementCache.get(workspace.id);
   if (!entry || entry.port !== port || entry.expiresAt <= now) {
     entry = {
@@ -974,12 +1053,18 @@ async function getWorkspaceBillingEntitlementBestEffort(
     billingEntitlementCache.set(workspace.id, entry);
   }
   try {
-    return await entry.entitlement;
+    const entitlement = await entry.entitlement;
+    billingEntitlementRetryAfter.delete(workspace.id);
+    return entitlement;
   } catch (error) {
     // A failure must not be cached for the rest of the TTL.
     if (billingEntitlementCache.get(workspace.id) === entry) {
       billingEntitlementCache.delete(workspace.id);
     }
+    billingEntitlementRetryAfter.set(workspace.id, {
+      port,
+      until: getServerNow() + BILLING_ENTITLEMENT_RETRY_AFTER_MS,
+    });
     getLogger('session').warn(
       `Billing entitlement unavailable; allowing local operation: ${formatErrorMessage(error)}`
     );
@@ -1022,12 +1107,15 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   workspace: WorkspaceSummary;
   sessionDoc: SessionDocument;
   userTurnId?: string;
-}): Promise<SessionHistory[] | undefined> {
+}): Promise<Awaited<ReturnType<typeof readSessionHistoryMetadata>> | undefined> {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const backend = await createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
-  const [history, queue] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
+  const [history, queue] = await Promise.all([
+    readSessionHistoryMetadata(backend.history),
+    backend.getMessageQueue(),
+  ]);
   if (
     args.userTurnId &&
     (history.some((entry) => entry.id === args.userTurnId) ||
@@ -1363,7 +1451,7 @@ async function resolveRunningAssistantTurnId(
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1379,6 +1467,8 @@ export async function appendUserPromptHistory(args: {
   knownHistory?: readonly SessionHistory[];
   /** Offer the turn to a running turn: write `pending_apply` without activation. */
   steer?: boolean;
+  /** Encrypted shared-member derivation origin; part of the signed input. */
+  derivedFrom?: { sessionId: string; userTurnId: string };
 }): Promise<{
   id: string;
   timestamp: string;
@@ -1389,8 +1479,8 @@ export async function appendUserPromptHistory(args: {
   const historyId = preallocatedId?.trim() || uuidV4();
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await backend.readHistory());
-    const existing = history.find((entry) => entry.id === historyId);
+    const candidate = args.knownHistory?.find((entry) => entry.id === historyId);
+    const existing = candidate ?? (await readHistoryEntry(backend, historyId));
     if (existing) {
       if (
         existing.role !== 'user' ||
@@ -1428,6 +1518,7 @@ export async function appendUserPromptHistory(args: {
     userId,
     items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
+    ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
     fileDiff: [],
     finished: true,
   };
@@ -2171,7 +2262,10 @@ async function resolveSessionTurnDispatchDefaults(
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  return resolveTurnDispatchDefaultsFromHistory(await backend.readHistory(), agentConfig);
+  return resolveTurnDispatchDefaultsFromHistory(
+    await readSessionHistoryMetadata(backend.history),
+    agentConfig
+  );
 }
 
 export function resolveEffectiveSessionChatDispatchConfig(args: {
@@ -3804,10 +3898,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    options.delegatedRequester,
+    targetMachine.id
+  );
   const userTurn: SessionHistoryInput = {
     id: options.userTurnId ?? uuidV4(),
     role: 'user',
     timestamp: meta.createdAt,
+    ...(derivedFrom ? { derivedFrom } : {}),
     // Legacy daemons only understand pending input. Host-owned automation
     // always uses the inert prepared protocol; remote creates negotiate it.
     status:
@@ -4069,7 +4169,7 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
-  const historyForDefaults = quotaHistory ?? (await backend.readHistory());
+  const historyForDefaults = quotaHistory ?? (await readSessionHistoryMetadata(backend.history));
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -4138,11 +4238,19 @@ export async function sendSessionChatResult(
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const environment = getSessionCommandEnvironment();
-  const steerTurnId = orchestration?.steerActiveTurn
-    ? environment?.host.readActiveTurnId(sessionId)
-    : undefined;
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    delegatedRequester,
+    session.machineId
+  );
+  // A shared member's derivation never steers another principal's running turn.
+  const steerTurnId =
+    orchestration?.steerActiveTurn && !derivedFrom
+      ? environment?.host.readActiveTurnId(sessionId)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
+    ...(derivedFrom ? { derivedFrom } : {}),
     inputBlocks,
     sessionDoc,
     prompt,
@@ -4167,7 +4275,6 @@ export async function sendSessionChatResult(
       }),
     },
     preallocatedId: orchestration?.userTurnId,
-    knownHistory: quotaHistory,
   });
   const userTurnId = userTurn.id;
   const result = {
@@ -4475,7 +4582,7 @@ async function buildSessionStatusResult(
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -5460,8 +5567,7 @@ const sessionHistoryCommand = new Command('history')
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
         const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-        const transcript = toSessionTranscriptEntries(await backend.readHistory());
-        const entries = selectSessionTranscriptEntries(transcript, {
+        const { total, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,
           reverse: options.reverse,
@@ -5472,7 +5578,7 @@ const sessionHistoryCommand = new Command('history')
             ok: true,
             workspaceId: workspace.id,
             sessionId,
-            total: transcript.length,
+            total,
             returned: entries.length,
             entries,
           });
@@ -5746,5 +5852,8 @@ export async function readSessionMcpIdsForAuthoring(
   await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
-  return resolveSessionConversationConfig(await backend.readHistory()).mcpServerIds ?? [];
+  return (
+    resolveSessionConversationConfig(await readSessionHistoryMetadata(backend.history))
+      .mcpServerIds ?? []
+  );
 }

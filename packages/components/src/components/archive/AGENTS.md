@@ -14,3 +14,8 @@ Parent `src/components/AGENTS.md` also applies. `CLAUDE.md` is a symlink; edit `
 - Rows do not draw a `:focus-within` ring around focused children. The title,
   checkbox, and actions each show their own keyboard focus; the row keeps its
   separator while one is focused. [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-single-focus-edge-for-nested-editors.md).
+
+- Encrypted history visibility grants no machine access or management actions.
+  Keep automatic Machine Flock readers inside the usable machine/project indexes;
+  unavailable history uses the document-only reader.
+  [Boundary](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).

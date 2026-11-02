@@ -6,13 +6,14 @@ import { desktopWindowId } from '@/lib/desktop-window';
 import { createWorkspaceRuntimeRetirements } from '../../../providers/workspace-runtime-retirements';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
+  e2eeAccessLoss,
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
@@ -20,6 +21,14 @@ import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import {
+  E2eeAccountPairingApprove,
+  E2eeAccountPairingRequest,
+} from '@/components/pages/e2ee-account-pairing';
+import { e2eeAccountPairingFeatureEnabledAtom } from '@/atoms/settings';
+import { isElectronRenderer } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { E2eeDeviceApprovalGuide } from '@/components/pages/e2ee-device-approval-guide';
 import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import {
   E2eeWorkspaceControlPage,
@@ -55,6 +64,7 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 const retiredReaders = createWorkspaceRuntimeRetirements();
 
 function WorkspaceControlRoute() {
+  const accountPairing = useAtomValue(e2eeAccountPairingFeatureEnabledAtom);
   const { workspaceId } = Route.useParams();
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -68,6 +78,8 @@ function WorkspaceControlRoute() {
     clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace]);
   const [generation, setGeneration] = useState(0);
+  // The joining device starts on the approval guide; details reveal the full ledger page.
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
     const reconnect = () => setGeneration((value) => value + 1);
     window.addEventListener('online', reconnect);
@@ -76,7 +88,7 @@ function WorkspaceControlRoute() {
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
   const scopeRef = useRef(scope);
-  const readOwner = useRef<object | null>(null);
+  const readOwner = useRef<{ publish?: () => Promise<void> } | null>(null);
   scopeRef.current = scope;
   const [state, setState] = useState<{
     scope: string;
@@ -96,6 +108,7 @@ function WorkspaceControlRoute() {
     let hostOpened = false;
     let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
     let readerOwner: string | undefined;
+    let readerPreallocated = false;
     let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
@@ -108,7 +121,12 @@ function WorkspaceControlRoute() {
       }),
       async () => {
         // Fence a preallocated cold open before joining its actual settlement.
-        if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+        if (hostOpened) {
+          await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+          // A legacy host counts every settled open once per window; closing it
+          // again would release another reader of this window and workspace.
+          if (!readerPreallocated) hostOpened = false;
+        }
         // Join only actual native acquisition. Public describe/history can stay
         // offline after this reader is confirmed closed; they own no host lease.
         await nativeAcquisition?.then(
@@ -136,7 +154,7 @@ function WorkspaceControlRoute() {
           }
     );
     if (!port || !accountId) return undefined;
-    const owner = {};
+    const owner: NonNullable<typeof readOwner.current> = {};
     readOwner.current = owner;
     void (async () => {
       try {
@@ -177,7 +195,7 @@ function WorkspaceControlRoute() {
               if (disposed) return undefined;
               readerOwner =
                 runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-              if (readerOwner) hostOpened = true;
+              if (readerOwner) hostOpened = readerPreallocated = true;
               const opened = await runtime.open(
                 workspaceId,
                 readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
@@ -217,10 +235,12 @@ function WorkspaceControlRoute() {
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            let publication = 0;
             const publish = async () => {
               if (disposed) return;
+              const revision = ++publication;
               const exported = await runtime.ledgerView(workspaceId);
-              if (disposed) return;
+              if (disposed || revision !== publication) return;
               const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
@@ -235,6 +255,7 @@ function WorkspaceControlRoute() {
                   failure: null,
                 });
             };
+            owner.publish = publish;
             await publish();
             // A saved local view is visible before the first network request.
             try {
@@ -273,7 +294,7 @@ function WorkspaceControlRoute() {
                 try {
                   await runtime.refresh(workspaceId, { installKeys: false });
                 } catch (checked) {
-                  if (isE2eeMemberRemoved(checked)) throw checked;
+                  if (e2eeAccessLoss(checked)) throw checked;
                 }
               }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
@@ -321,18 +342,18 @@ function WorkspaceControlRoute() {
           custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
         });
       } catch (error) {
-        if (!disposed && isE2eeMemberRemoved(error)) {
+        if (!disposed && e2eeAccessLoss(error)) {
           try {
             if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
           try {
-            if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
+            // Unmount joins this same retirement instead of releasing the reader again.
+            if (hostOpened) await closeHost();
           } catch (closeError) {
-            // Preserve the full reader owner and never erase borrowed stores
-            // before the actual host close can finish.
-            void closeHost().catch(reportClose);
+            // The retained retirement keeps the full reader owner and never erases
+            // borrowed stores before the actual host close can finish.
             setState((previous) =>
               previous.scope === scope
                 ? { ...previous, loading: false, failure: classifyE2eeControlFailure(closeError) }
@@ -341,6 +362,12 @@ function WorkspaceControlRoute() {
             return;
           }
           if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          // A revoked device keeps its membership: reopen without this identity,
+          // which lands in the existing re-pairing guidance instead of removal.
+          if (!isE2eeMemberRemoved(error)) {
+            if (!disposed) setGeneration((value) => value + 1);
+            return;
+          }
           if (!disposed)
             setState((previous) =>
               previous.scope === scope
@@ -445,6 +472,27 @@ function WorkspaceControlRoute() {
     }
   };
   const refresh = () => setGeneration((value) => value + 1);
+  const manageMember = async (work: () => Promise<void>) => {
+    const owner = readOwner.current;
+    if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
+    await work();
+    if (scopeRef.current !== scope || readOwner.current !== owner) return;
+    // A management result already advanced the native ledger. Read and verify it
+    // on this reader; rebuilding the effect creates an unnecessary no-reader gap.
+    setState((previous) => ({ ...previous, loading: true, failure: null }));
+    try {
+      await owner.publish();
+    } catch (error) {
+      if (scopeRef.current === scope && readOwner.current === owner)
+        setState((previous) => ({
+          ...previous,
+          loading: false,
+          failure: classifyE2eeControlFailure(error),
+          nativeStatus: undefined,
+        }));
+      throw error;
+    }
+  };
   const diagnostics = () => {
     let localPin: string | null = null;
     let observed: { length: number; headHash: string } | null = null;
@@ -471,6 +519,49 @@ function WorkspaceControlRoute() {
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  // A signed-in device without an approved identity here sees the next step first;
+  // the ledger, diagnostics and failures stay one click away in the full page.
+  const awaitingApproval = Boolean(
+    port?.runtime &&
+    accountId &&
+    current?.scope === scope &&
+    !current.loading &&
+    // Only "this device needs approval" (new, lost or revoked identity); every other
+    // failure keeps the full page with its repair actions.
+    (!current.failure || current.failure.kind === 'approval-required') &&
+    !current.custodyFailure &&
+    !current.history?.locallyPinned &&
+    current.nativeStatus?.deviceKind !== 'personal'
+  );
+  if (awaitingApproval && !showDetails && port?.runtime && accountId)
+    return (
+      <E2eeDeviceApprovalGuide
+        reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
+        onRefresh={refresh}
+        onShowDetails={() => setShowDetails(true)}
+        onBack={() => {
+          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
+        }}
+      >
+        {accountPairing && (
+          <E2eeAccountPairingRequest
+            key={identity + ':account-pairing'}
+            runtime={port.runtime}
+            // Web asks first: a browser is often shared or public.
+            autoStart={isElectronRenderer() || isNativeAppShell()}
+            onJoined={refresh}
+          />
+        )}
+        <E2eePersonalPairing
+          key={identity}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          canApprove={false}
+          approved={false}
+          onJoined={refresh}
+        />
+      </E2eeDeviceApprovalGuide>
+    );
   return (
     <>
       {current?.offline && (
@@ -490,21 +581,21 @@ function WorkspaceControlRoute() {
         )}
       <E2eeWorkspaceControlPage
         memberManagement={
-          current?.nativeStatus?.deviceKind === 'personal' &&
+          current?.scope === scope &&
+          !current.loading &&
+          !current.failure &&
+          current.nativeStatus?.deviceKind === 'personal' &&
+          current.nativeStatus.hasDeviceCredential === true &&
           (current.nativeStatus.memberRole === 'owner' ||
             current.nativeStatus.memberRole === 'admin') &&
           port?.runtime?.removeMember &&
           port.runtime.setMemberRole
             ? {
                 actorRole: current.nativeStatus.memberRole,
-                remove: async (membershipId) => {
-                  await port.runtime!.removeMember!(workspaceId, membershipId);
-                  if (scopeRef.current === scope) refresh();
-                },
-                setRole: async (membershipId, role) => {
-                  await port.runtime!.setMemberRole!(workspaceId, membershipId, role);
-                  if (scopeRef.current === scope) refresh();
-                },
+                remove: (membershipId) =>
+                  manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
+                setRole: (membershipId, role) =>
+                  manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
               }
             : undefined
         }
@@ -559,6 +650,9 @@ function WorkspaceControlRoute() {
               profiles={directory?.scope === scope ? directory.profiles : undefined}
             />
           </>
+        )}
+        {accountPairing && port?.runtime && accountId && current?.history?.locallyPinned && (
+          <E2eeAccountPairingApprove key={identity + ':account-pairing'} runtime={port.runtime} />
         )}
         {port?.runtime && accountId && (
           <E2eePersonalPairing
