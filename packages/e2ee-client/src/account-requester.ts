@@ -52,6 +52,14 @@ export interface AccountPairingIdentityHost {
     readonly membershipId: string;
     readonly pairingSessionId: string;
   }): Effect.Effect<void, unknown>;
+  /** Installs from the complete verified history, for an approval row without an
+   * invitation (a Member approver). */
+  acceptAccountHistory?(input: {
+    readonly genesisRecordHex: string;
+    readonly membershipId: string;
+    readonly pairingSessionId: string;
+    readonly pages: readonly E2eeWorkspaceHistoryPage[];
+  }): Effect.Effect<void, unknown>;
   /** Optional: open, refresh and run one key round right after installing. */
   activate?(): Effect.Effect<void, unknown>;
 }
@@ -61,7 +69,7 @@ export interface AccountPairingIdentityHost {
 export function personalHostAccountPairing(
   host: Pick<
     Effect.Success<ReturnType<typeof makePersonalDeviceHost>>,
-    'scope' | 'prepareAccount' | 'acceptAccount'
+    'scope' | 'prepareAccount' | 'acceptAccount' | 'acceptAccountHistory'
   >
 ): AccountPairingIdentityHost {
   return {
@@ -80,6 +88,12 @@ export function personalHostAccountPairing(
     // Not tracked on portable hosts yet: an unfinished per-workspace join there is
     // not reported as blocked (recorded limit).
     pendingPersonalJoin: () => Effect.succeed(null),
+    acceptAccountHistory: (input) =>
+      host.acceptAccountHistory({
+        genesisRecordHex: input.genesisRecordHex,
+        membershipId: input.membershipId,
+        pages: input.pages,
+      }),
     acceptAccountInvitation: (input) =>
       host.acceptAccount({
         genesisRecordHex: input.genesisRecordHex,
@@ -182,6 +196,39 @@ export function makePortableAccountPairingRequester(input: {
               credentialHash: identity.credentialHash,
             };
           }),
+        acceptHistory: host.acceptAccountHistory
+          ? (admissionRecordHash) =>
+              Effect.gen(function* () {
+                const checked = yield* verified(hint);
+                const found = checked.history
+                  .flatMap((page) => page.recordsHex)
+                  .some(
+                    (recordHex) =>
+                      toHex(hashRecordBytes(fromHex(recordHex)).toBytes()) ===
+                      toHex(admissionRecordHash)
+                  );
+                if (!found) return yield* Effect.fail(fail('missing-binding'));
+                const pairingSessionId = toHex(admissionRecordHash).slice(0, 32);
+                const pending = yield* host.pendingPersonalJoin();
+                if (pending && pending.pairingSessionId !== pairingSessionId)
+                  return yield* Effect.fail(fail('pairing-journal-busy'));
+                yield* host.acceptAccountHistory!({
+                  genesisRecordHex: checked.genesisRecordHex,
+                  membershipId: yield* membership(checked.view),
+                  pairingSessionId,
+                  pages: checked.history,
+                });
+                if (host.activate)
+                  yield* host
+                    .activate()
+                    .pipe(
+                      Effect.catch((error) =>
+                        Effect.sync(() => remember('account-pairing-activate', error))
+                      )
+                    );
+                return undefined;
+              })
+          : undefined,
         accept: (invitation, admissionRecordHash) =>
           Effect.gen(function* () {
             const checked = yield* verified(hint);

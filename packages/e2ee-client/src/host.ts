@@ -505,6 +505,40 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       });
       return approval;
     });
+  /** Account pairing without an invitation (Member approver): verify the complete
+   * signed history and this device's admission, then retain the pages and approval. */
+  const acceptAccountHistory = (input: {
+    genesisRecordHex: string;
+    membershipId: string;
+    pages: unknown;
+  }) =>
+    Effect.gen(function* () {
+      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
+      const pages = yield* Effect.fromResult(captureHistoryPages(input.pages));
+      const descriptor = { kind: 'history' as const };
+      return yield* withIdentity(p, (identity) =>
+        Effect.gen(function* () {
+          const approval = yield* verifyApproval(p, descriptor, pages);
+          const store = yield* evidence(p, identity);
+          yield* store.retain(
+            p.offer.pairingSessionId,
+            pages.map((page) => encode(page))
+          );
+          yield* pairings.compareAndSet(key(p, 'approval'), null, {
+            revision: 1,
+            original: encode({
+              version: 1,
+              offer: p.offer,
+              requestHex: p.requestHex,
+              ...descriptor,
+            }),
+            receipt: null,
+          });
+          return approval;
+        })
+      );
+    });
   return Object.freeze({
     close: () => close,
     /** Account pairing: create or reuse this workspace's identity for a verified
@@ -513,6 +547,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       run(prepare(accountPairingOffer(platform.scope, pin)).pipe(Effect.map(publicPrepared))),
     acceptAccount: (input: Parameters<typeof acceptAccount>[0]) =>
       run(Effect.asVoid(acceptAccount(input))),
+    acceptAccountHistory: (input: Parameters<typeof acceptAccountHistory>[0]) =>
+      run(Effect.asVoid(acceptAccountHistory(input))),
     prepare: (offer: PersonalPairingOffer, replacement = false) =>
       run(prepare(offer, replacement).pipe(Effect.map(publicPrepared))),
     begin: (offer: PersonalPairingOffer, replacement = false) =>
