@@ -191,6 +191,24 @@ workflow's.
   that tab's memory. Other tabs get `pairing-elsewhere`, and a closed tab releases the
   lock.
 
+`@lody/e2ee-client/account-requester` is the portable new-device side:
+- **`AccountPairingIdentityHost`** is the per-workspace host port. It prepares or reuses
+  this workspace's identity for a verified genesis record and membership, reports an
+  unfinished per-workspace join, installs a snapshot invitation for a given endorser,
+  and can optionally activate the workspace.
+- **`makePortableAccountPairingRequester`** turns such hosts into the shared workflow's
+  requester ports:
+  - It verifies the full history and finds this account's single membership.
+  - On accept, it takes the endorser from the signer of the admission record whose
+    ledger hash the approval tag authenticated.
+  - It reports an unrelated pending join as `pairing-journal-busy`, which the workflow
+    shows as `blocked`.
+- **`makeAccountE2eeRuntime`** routes an account's `E2eeWorkspaceRuntime` calls to
+  per-workspace runtimes. Only listed methods exist, so capability-by-presence stays
+  accurate.
+
+Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
+
 ## Verification and limits
 
 `pnpm --filter @lody/e2ee-client test` runs fixed proof/credential-boundary tests.
