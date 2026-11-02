@@ -1,4 +1,5 @@
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import {
   useCallback,
   useEffect,
@@ -1515,6 +1516,28 @@ function resolveInitialTestedCustomKey(
 // =============================================================================
 
 export function AgentConfigDialog(props: AgentConfigDialogProps) {
+  const reason = useMachineRpcFeatureReason(props.machine.id);
+  const { t } = useTranslation();
+  // The header action and retained dialogs must respect the same boundary as
+  // the provider list. Signed file RPC support does not admit provider probes.
+  if (reason) {
+    return (
+      <Dialog.Root
+        open={props.open}
+        onOpenChange={props.onOpenChange}
+        onOpenChangeComplete={props.onOpenChangeComplete}
+      >
+        <Dialog.Content data-machine-id={props.machine.id}>
+          <Dialog.Title>{t('settings.agent.provider.title', 'Agent Provider')}</Dialog.Title>
+          <Dialog.Description>{reason}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+  }
+  return <SupportedAgentConfigDialog {...props} />;
+}
+
+function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const {
     open,
     onOpenChange,
@@ -1587,6 +1610,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
   const unsupportedCodexProfile = !!codexAuth && !supportsCodexProfiles;
   const [submitting, setSubmitting] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
@@ -1650,6 +1674,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   useEffect(() => {
     if (open) {
       setTestingBuiltinSetup(false);
+      setSaveFailed(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1726,8 +1751,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
   // Registry and custom providers authenticate through the standard ACP
-  // exchange, but only the agent knows whether it has anything to sign into —
-  // so their panel appears once a live probe reported that auth is required.
+  // exchange. Their agent publishes the available sign-in methods in its
+  // `initialize` response, so the panel offers them directly: `initialize`
+  // lists every way to sign in whether or not the stored credentials still
+  // work, and switching accounts on purpose is a legitimate reason to open it.
+  // `authRequired` now only describes the account state in the hint text.
   // The exchange runs entirely on the daemon, so a machine that predates it
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
@@ -1745,7 +1773,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           brandId: resolvedBrandId,
           env: formData.env,
         }) ||
-          (authRequired && usesProtocolAuthentication))
+          usesProtocolAuthentication)
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
           usesProtocolAuthentication);
@@ -2491,10 +2519,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const persistConfig = useCallback(async () => {
     try {
       setSubmitting(true);
+      setSaveFailed(false);
       await persistConfigBeforeMachineLaunch();
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save agent config:', error);
+      setSaveFailed(true);
     } finally {
       setSubmitting(false);
     }
@@ -3067,6 +3097,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             </div>
           ) : null}
 
+          {saveFailed && (
+            <div role="alert" {...stylex.props(styles.warning)}>
+              <AlertTriangle aria-hidden="true" {...stylex.props(styles.warningMark)} />
+              <div {...stylex.props(styles.warningBody)}>
+                {mode.kind === 'create'
+                  ? t('agents.createConfigError', 'Failed to create configuration')
+                  : t('agents.updateConfigError', 'Failed to update configuration')}
+              </div>
+            </div>
+          )}
+
           {probeError && !isPreset && (
             <div {...stylex.props(styles.warning)}>
               <AlertTriangle aria-hidden="true" {...stylex.props(styles.warningMark)} />
@@ -3418,6 +3459,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       onOpenChangeComplete={onOpenChangeComplete}
     >
       <Dialog.Content
+        data-testid="agent-config-dialog"
+        data-agent-config-id={agentConfigId}
+        data-machine-id={machine.id}
         // The wide header draws the close beside the capability status so they
         // share a centre line. The dialog cross is pinned to the panel padding
         // and sat above that row. On the narrow layout the back button is the close.

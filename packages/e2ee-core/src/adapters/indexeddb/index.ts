@@ -345,7 +345,48 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
           }
         });
       let pinRevision: number | undefined;
+      const observationKey = 'epoch-write-grace';
+      const observation = (value: unknown): Uint8Array | null => {
+        if (value === undefined) return null;
+        if (!(value instanceof Uint8Array) || value.length > 1024 * 1024)
+          throw failure('EpochWriteObservations', 'corrupt');
+        return new Uint8Array(value);
+      };
       const pins = LedgerPinStore.of({
+        writeGrace: {
+          read: () =>
+            run<Uint8Array | null>('EpochWriteObservations', ['meta'], 'readonly', (tx, done) =>
+              tx.request(tx.store('meta').get(observationKey), (value) => done(observation(value)))
+            ),
+          compareAndSet: (expected, next) =>
+            attempt('EpochWriteObservations', () => {
+              if (!(next instanceof Uint8Array) || next.length > 1024 * 1024)
+                return Effect.fail(failure('EpochWriteObservations', 'corrupt'));
+              const nextObservation = new Uint8Array(next);
+              const before = expected === null ? null : new Uint8Array(expected);
+              return run<boolean>('EpochWriteObservations', ['meta'], 'readwrite', (tx, done) =>
+                tx.request(tx.store('meta').get(observationKey), (value) => {
+                  const current = observation(value);
+                  if (
+                    before === null
+                      ? current !== null
+                      : current === null || !bytesEqual(current, before)
+                  ) {
+                    done(false);
+                    return;
+                  }
+                  tx.request(tx.store('meta').put(nextObservation, observationKey), () =>
+                    tx.request(tx.store('meta').get(observationKey), (saved) => {
+                      const checked = observation(saved);
+                      if (!checked || !bytesEqual(checked, nextObservation))
+                        throw failure('EpochWriteObservations', 'corrupt');
+                      done(true);
+                    })
+                  );
+                })
+              );
+            }),
+        },
         read: () =>
           run<typeof Pin.Type>('LedgerPinStore', ['pin'], 'readonly', (tx, done) =>
             tx.request(tx.store('pin').get(0), (v) => done(pinRow(v)))

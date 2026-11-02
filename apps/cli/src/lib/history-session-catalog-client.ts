@@ -11,6 +11,8 @@ import {
   terminateAcpProcessTree,
 } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
+import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
+import { appendStderrTail, createAcpStartupMonitor } from '@/agent/acp-startup-monitor';
 import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import {
   mergeACPProcessEnv,
@@ -137,7 +139,7 @@ async function createHistoryAcpConnection(args: {
   // minimal PATH, so overlay the login-shell env (+ default fallback dirs) before
   // spawning the history-sync agent binary.
   const loginShellEnv = await getLoginShellEnvLegacy();
-  const env = await prepareAcpProcessEnvironmentLegacy(
+  const preparedEnv = await prepareAcpProcessEnvironmentLegacy(
     launch,
     withDefaultAcpPathEntries(
       mergeLoginShellEnv(launch.env, loginShellEnv),
@@ -145,6 +147,7 @@ async function createHistoryAcpConnection(args: {
     ),
     { logger: args.logger, cwd: args.workdir }
   );
+  const env = withLodyNpmCacheForNpx(launch.command, preparedEnv);
   return await withAcpSessionStartSlot(
     {
       label: `${getProviderLabel(args.provider)}-history-sync`,
@@ -190,9 +193,11 @@ async function createHistoryAcpConnection(args: {
         void release().catch(() => {});
       });
 
+      let stderrTail = '';
       agentProcess.stderr?.setEncoding('utf8');
       agentProcess.stderr?.on('data', (chunk: string) => {
         if (!chunk) return;
+        stderrTail = appendStderrTail(stderrTail, chunk);
         args.logger.debug(
           `[${getProviderLabel(args.provider)}-history-sync] ACP stderr: ${chunk.slice(0, 1200)}`
         );
@@ -210,25 +215,48 @@ async function createHistoryAcpConnection(args: {
       const stream: Stream = ndJsonStream(input, output);
       const collector = new AcpReplayCollectorClient();
       const connection = new acp.ClientSideConnection(() => collector, stream);
+      const monitor = createAcpStartupMonitor(
+        {
+          onExit: (listener) => {
+            agentProcess.on('exit', listener);
+            return () => agentProcess.off('exit', listener);
+          },
+          onError: (listener) => {
+            agentProcess.on('error', listener);
+            return () => agentProcess.off('error', listener);
+          },
+        },
+        {
+          sessionId: 'history-sync',
+          command: launch.command,
+          args: launch.args,
+          getStderrTail: () => stderrTail,
+        }
+      );
 
       try {
         const initResponse = await withTimeout(
-          connection.initialize({
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {
-              terminal: false,
-              fs: {
-                readTextFile: false,
-                writeTextFile: false,
+          Promise.race([
+            monitor.abortPromise,
+            connection.initialize({
+              protocolVersion: acp.PROTOCOL_VERSION,
+              clientCapabilities: {
+                terminal: false,
+                fs: {
+                  readTextFile: false,
+                  writeTextFile: false,
+                },
               },
-            },
-          }),
+            }),
+          ]),
           `${getProviderLabel(args.provider)} ACP initialize`
         );
         return { agentProcess, connection, collector, initResponse };
       } catch (error) {
         await terminateHistoryAcpProcess(agentProcess, args.logger, args.provider);
-        throw error;
+        throw monitor.resolveError(error);
+      } finally {
+        monitor.dispose();
       }
     }
   );

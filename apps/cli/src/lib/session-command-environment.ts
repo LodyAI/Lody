@@ -88,6 +88,16 @@ export interface DaemonWorkspace {
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readAccess?(): DaemonWorkspaceAccess;
+  /**
+   * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
+   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
+   * may target only this machine. Rejects when the origin cannot be verified, is
+   * itself derived, has exhausted its derivations or targets another machine.
+   */
+  classifyEncryptedDerivation?(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string }
+  ): Promise<'owner' | 'member'>;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

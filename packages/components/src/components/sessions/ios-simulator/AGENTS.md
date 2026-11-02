@@ -59,3 +59,13 @@ Decision and rationale:
   Optional viewer diagnostics are allowlisted and accepted only after the existing
   source/origin/operation checks. Copy diagnostics appears only for current errors;
   healthy fallback is not an error. Never include SDP, ICE addresses or credentials.
+
+- `SessionDevicePreviewPanel` also serves Android through `android-emulator/control`
+  and the independent `androidEmulator: 1` capability. Keep its state/preferences
+  separate from iOS, never request iOS exterior assets for it, and expose only
+  supported controls. Android IDs are exact AVD names on the wire.
+
+- Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
+  the current operation. Android starts Balanced and exposes quality switching while ready, inside the controls' More menu; switching
+  replaces the capture operation, not the AVD. Send quality only to hosts advertising
+  `androidEmulatorQuality: 1`; old hosts receive no new field.

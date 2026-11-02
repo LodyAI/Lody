@@ -23,6 +23,7 @@ import {
 } from './github-credential-resolver';
 import type { AliveSessionMeta } from './pr-poll-targets';
 import type { CloudGithubTokenPort, CloudPrAssociationPort } from '@lody/platform';
+import type { PrObservation } from './github-graphql-client';
 
 /**
  * Per-workspace adapter between the poller scheduler and a live workspace
@@ -47,6 +48,21 @@ export type PrPollMetaPatch = {
 };
 
 export interface PrPollerWorkspaceHandle {
+  wantsWorkflowObservations?(sessionId: string): boolean;
+  recordWorkflowObservations?(
+    meta: SessionMeta,
+    repository: string,
+    headSha: string,
+    runs: readonly import('./workflow-runs').WorkflowRunObservation[],
+    gap: boolean,
+    observedAt: number
+  ): Promise<void>;
+  recordObservations?(
+    meta: SessionMeta,
+    repoFullName: string,
+    observations: readonly PrObservation[],
+    observedAt: number
+  ): Promise<void>;
   readonly workspaceId: string;
   /** Local machine identity — the pre-write ownership revalidation predicate. */
   readonly machineId: MachineId;
@@ -73,6 +89,9 @@ export interface PrPollerWorkspaceHandle {
 const ASSOCIATE_TIMEOUT_MS = 15_000;
 
 export function createLodyPrPollerWorkspace(options: {
+  recordObservations?: PrPollerWorkspaceHandle['recordObservations'];
+  wantsWorkflowObservations?: PrPollerWorkspaceHandle['wantsWorkflowObservations'];
+  recordWorkflowObservations?: PrPollerWorkspaceHandle['recordWorkflowObservations'];
   documentManager: LoroDocumentManager;
   workspaceId: string;
   userId: string;
@@ -97,6 +116,9 @@ export function createLodyPrPollerWorkspace(options: {
   return {
     workspaceId,
     machineId,
+    recordObservations: options.recordObservations,
+    wantsWorkflowObservations: options.wantsWorkflowObservations,
+    recordWorkflowObservations: options.recordWorkflowObservations,
 
     async listAliveSessionMetas(): Promise<AliveSessionMeta[]> {
       const rows = await listAliveSessionMetas(documentManager);

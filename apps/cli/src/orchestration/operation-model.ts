@@ -6,7 +6,8 @@ export type InboxModel = {
   pending: number[];
   paused: boolean;
   human: boolean;
-  active: 'none' | 'human' | 'automatic';
+  automation: boolean;
+  active: 'none' | 'human' | 'automatic' | 'automation';
   batch: number[];
   submitted: boolean;
   receipts: number[][];
@@ -15,6 +16,7 @@ export type InboxModel = {
 export type InboxEvent =
   | 'result'
   | 'human'
+  | 'automation'
   | 'schedule'
   | 'submit'
   | 'normal'
@@ -30,6 +32,7 @@ export const initialOrchestrationModelState = (): InboxModel => ({
   pending: [],
   paused: false,
   human: false,
+  automation: false,
   active: 'none',
   batch: [],
   submitted: false,
@@ -61,11 +64,20 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       s.paused = false;
       s.pending = [];
       break;
+    case 'automation':
+      if (!s.paused) s.automation = true;
+      break;
     case 'schedule':
       if (s.active !== 'none' || s.paused) break;
       if (s.human) {
         s.active = 'human';
         s.human = false;
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+      } else if (s.automation) {
+        s.active = 'automation';
+        s.automation = false;
         s.batch = [...s.queue];
         s.pending = [];
         s.boundary = undefined;
@@ -79,7 +91,8 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       break;
     case 'submit':
       if (s.active === 'none' || s.submitted || s.paused) break;
-      if (s.active === 'automatic' && (!s.batch.length || s.human)) break;
+      if ((s.active === 'automatic' || s.active === 'automation') && s.human) break;
+      if (s.active === 'automatic' && !s.batch.length) break;
       if (s.batch.length) s.receipts.push([...s.batch]);
       s.submitted = true;
       break;
@@ -93,6 +106,7 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
     case 'stop':
       s.paused = true;
       s.human = false;
+      s.automation = false;
       s.pending = [];
       consume();
       release();
@@ -136,6 +150,7 @@ export function enumerateOrchestrationModel(depth = 8) {
   const actions: InboxEvent[] = [
     'result',
     'human',
+    'automation',
     'schedule',
     'submit',
     'normal',

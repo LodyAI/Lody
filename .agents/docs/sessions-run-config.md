@@ -280,8 +280,10 @@ this page is the full text of the rules summarised there.
   its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
   or queued Turn. ACP `config_option_update`/`current_mode_update` events update
   the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
-  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
-  an older runtime event. Apply that shared baseline only to composer fields the
+  the driving `userTurnId`. The composer checks that identity against indexed
+  configuration sources, so unloaded message bodies cannot discard a valid runtime
+  baseline and revive an older Plan request. A queued Turn and a newer accepted Turn
+  always beat an older runtime event. Apply that shared baseline only to composer fields the
   local user has not edited; local unsent choices remain a private draft until
   send freezes them into a Turn. Never infer runtime config from a permission
   click or its history outcome: consent is not proof that the agent applied the

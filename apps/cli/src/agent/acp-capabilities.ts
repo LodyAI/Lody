@@ -4,6 +4,7 @@ import {
   type CustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
+import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { shutdownLocalAcpAgent, startLocalAcpAgent } from '@/agent/acp-runner';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
 import type { ManagedRuntimeProgressCallback } from '@/agent/managed-agent-runtime';
@@ -33,6 +34,15 @@ export type FetchAcpCapabilitiesOptions = {
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
+  /**
+   * Sign-in methods the agent advertised during `initialize`.
+   *
+   * Reading them here is what lets the account panel offer the agent's own
+   * methods before anyone starts an authentication attempt. Empty means the
+   * agent was asked and advertised none; absent means the caller did not ask
+   * (older test doubles and adapters that cannot report them).
+   */
+  authMethods?: readonly AuthMethod[];
 };
 
 /**
@@ -187,6 +197,7 @@ export async function fetchAcpCapabilities(
           agent: { cliType, agentType },
         }),
         capabilitySourceVersion,
+        authMethods: client.getAuthMethods(),
       };
     } finally {
       await shutdownLocalAcpAgent({

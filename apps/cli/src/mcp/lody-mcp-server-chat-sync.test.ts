@@ -92,7 +92,10 @@ vi.mock('@/session/session-backend', async (importOriginal) => {
     createSessionBackend: vi.fn(async (doc, meta) =>
       doc?.sessionData
         ? actual.createSessionBackend(doc, meta)
-        : { history: { readTurn: mocks.readTurn }, readHistory: async () => [] }
+        : {
+            history: { readTurn: mocks.readTurn, readMetadata: async () => [] },
+            readHistory: async () => [],
+          }
     ),
   };
 });
@@ -491,7 +494,8 @@ describe('turn-scoped reverse chat rejection', () => {
             machineName: 'Local',
           } as never,
           { id: 'workspace-id', name: 'Workspace', slug: 'workspace', role: 'owner' },
-          {} as never,
+          // An ordinary workspace: recovery keeps its existing, unencrypted path.
+          { isEncryptedWorkspace: () => false } as never,
           'Recovered work',
           {
             workspaceMetaPrewriteSatisfied: true,

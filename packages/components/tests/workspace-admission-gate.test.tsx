@@ -22,7 +22,16 @@ import type {
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { createStaticStore } from '@lody/platform';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const navigation = vi.hoisted(() => ({ calls: [] as unknown[] }));
+vi.mock('@tanstack/react-router', async (original) => ({
+  ...(await original<typeof import('@tanstack/react-router')>()),
+  useNavigate: () => (options: unknown) => {
+    navigation.calls.push(options);
+    return Promise.resolve();
+  },
+}));
 
 import { WorkspaceAdmissionGate } from '../src/components/workspace-admission-gate';
 import { userAtom } from '../src/atoms';
@@ -157,6 +166,21 @@ describe('WorkspaceAdmissionGate', () => {
     expect(text()).toContain('Rejoining requires a new invitation');
     expect(text()).not.toContain('workspace content');
     expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('explains a revoked device and offers to pair it again from the workspace control page', async () => {
+    navigation.calls.length = 0;
+    fail({ errorType: 'e2ee_device_revoked', workspaceId: 'workspace-1' });
+    await render();
+    expect(text()).toContain('This device was removed from the workspace');
+    expect(text()).not.toContain('Rejoining requires a new invitation');
+    expect(text()).not.toContain('workspace content');
+    const button = container.querySelector('button');
+    expect(button?.textContent).toBe('Pair this device again');
+    await act(async () => button!.click());
+    expect(navigation.calls).toEqual([
+      { to: '/workspace/e2ee/$workspaceId', params: { workspaceId: 'workspace-1' } },
+    ]);
   });
 
   it('renders an ordinary workspace under a provisional verdict without mentioning encryption', async () => {

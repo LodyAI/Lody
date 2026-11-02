@@ -48,6 +48,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleArchivedSessionMetas } from '@/hooks/use-visible-session-metas';
+import { availableLocalHistoryMachineIds } from '@/lib/session-visibility';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import { UserAvatar } from '@/components/user-avatar';
@@ -1716,7 +1717,22 @@ export function ArchiveView() {
   const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-  const { archivedSessions } = useVisibleArchivedSessionMetas();
+  const {
+    archivedSessions,
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+  } = useVisibleArchivedSessionMetas();
+  const rejectHistoryWrite = useCallback(
+    (ids: string[]) => {
+      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
+        return false;
+      toast.info(t('sessions.historyMachineUnavailable'));
+      return true;
+    },
+    [historyOnlySessionIds, workspaceHistoryReadable, t]
+  );
   const { restoreSession, deleteArchivedSession } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const [deleteConfirmSession, setDeleteConfirmSession] = useState<SessionMeta | null>(null);
@@ -1729,14 +1745,20 @@ export function ArchiveView() {
   const localMachineId = useAtomValue(localMachineIdAtom);
   const archivedLocalSessionMachineIds = useMemo(
     () =>
-      Array.from(
-        new Set(
-          archivedSessions
-            .filter((session) => session.project?.kind === 'local')
-            .map((session) => session.machineId as MachineId)
-        )
-      ),
-    [archivedSessions]
+      workspaceHistoryReadable
+        ? availableLocalHistoryMachineIds(
+            archivedSessions,
+            visibleMachineIds,
+            visibleLocalProjectKeys
+          )
+        : Array.from(
+            new Set(
+              archivedSessions
+                .filter((session) => session.project?.kind === 'local')
+                .map((session) => session.machineId as MachineId)
+            )
+          ),
+    [archivedSessions, workspaceHistoryReadable, visibleMachineIds, visibleLocalProjectKeys]
   );
   const machineFlockRowsByMachineId = useMachineFlockRowsByMachineIds(
     archivedLocalSessionMachineIds,
@@ -1778,7 +1800,10 @@ export function ArchiveView() {
           : []
         : archivedSessions;
 
-    // Local projects are private per-user: never show other users' local sessions.
+    // Encrypted history is workspace-readable; the My/Team choice still applies.
+    if (workspaceHistoryReadable) return base;
+
+    // Ordinary local projects remain private per-user.
     if (!userId) {
       return base.filter((session) => session.project?.kind !== 'local');
     }
@@ -1797,7 +1822,14 @@ export function ArchiveView() {
 
       return false;
     });
-  }, [archivedSessions, archiveScope, localMachineId, machineMetaMap, user?.id]);
+  }, [
+    archivedSessions,
+    archiveScope,
+    localMachineId,
+    machineMetaMap,
+    user?.id,
+    workspaceHistoryReadable,
+  ]);
 
   const localProjectLabelByKey = useMemo(() => {
     const map = new Map<
@@ -1847,12 +1879,13 @@ export function ArchiveView() {
 
   const canRestoreArchivedSession = useCallback(
     (session: SessionMeta): boolean => {
+      if (workspaceHistoryReadable && historyOnlySessionIds.has(session.id)) return false;
       const project = session.project;
       if (project?.kind !== 'local') return true;
       const key = `local:${session.machineId}:${project.localProjectId}`;
       return localProjectLabelByKey.get(key)?.available === true;
     },
-    [localProjectLabelByKey]
+    [localProjectLabelByKey, workspaceHistoryReadable, historyOnlySessionIds]
   );
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
@@ -1896,6 +1929,7 @@ export function ArchiveView() {
   };
 
   const handleRestore = (sessionId: SessionId) => {
+    if (rejectHistoryWrite([sessionId])) return;
     const session = scopedArchivedSessions.find((candidate) => candidate.id === sessionId);
     if (!session || !canRestoreArchivedSession(session)) {
       toast.info(restoreUnavailableLabel);
@@ -1912,6 +1946,7 @@ export function ArchiveView() {
   };
 
   const handleDelete = (session: SessionMeta) => {
+    if (rejectHistoryWrite([session.id])) return;
     setDeleteConfirmSession(session);
   };
 
@@ -1927,12 +1962,18 @@ export function ArchiveView() {
     const sessionId = deleteConfirmSession?.id;
     setDeleteConfirmSession(null);
     if (!sessionId) return;
+    if (rejectHistoryWrite([sessionId])) return;
     try {
       await deleteArchivedSession(sessionId);
     } catch (error) {
       showPermanentDeleteError(error);
     }
-  }, [deleteArchivedSession, deleteConfirmSession?.id, showPermanentDeleteError]);
+  }, [
+    deleteArchivedSession,
+    deleteConfirmSession?.id,
+    rejectHistoryWrite,
+    showPermanentDeleteError,
+  ]);
 
   const handleNavigateToSession = useCallback(
     (sessionId: SessionId) => {
@@ -2020,6 +2061,7 @@ export function ArchiveView() {
     if (isBulkActionBusy || hasUnrestorableSessionInSelection) return;
     const sessionIds = Array.from(selectedIds);
     if (sessionIds.length === 0) return;
+    if (rejectHistoryWrite(sessionIds)) return;
 
     setBulkActionInFlight('restore');
     try {
@@ -2048,6 +2090,7 @@ export function ArchiveView() {
     hasUnrestorableSessionInSelection,
     isBulkActionBusy,
     restoreSession,
+    rejectHistoryWrite,
     selectedIds,
   ]);
 
@@ -2055,6 +2098,7 @@ export function ArchiveView() {
     if (isBulkActionBusy) return;
     const sessionIds = Array.from(selectedIds);
     if (sessionIds.length === 0) return;
+    if (rejectHistoryWrite(sessionIds)) return;
 
     setBulkActionInFlight('delete');
     try {
@@ -2087,6 +2131,7 @@ export function ArchiveView() {
     isBulkActionBusy,
     selectedIds,
     deleteArchivedSession,
+    rejectHistoryWrite,
     exitMultiSelect,
     showPermanentDeleteError,
   ]);

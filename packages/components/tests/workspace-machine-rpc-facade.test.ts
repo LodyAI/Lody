@@ -11,6 +11,7 @@ import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 
 vi.mock('../src/lib/preview-control-api', () => ({ mintPreviewControlProof: vi.fn() }));
 
@@ -25,6 +26,131 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('retrieves every remote wait page using a separately authorized cursor', async () => {
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent) => {
+        claims.push(intent.operation);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'user-token',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({
+            success: true,
+            runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
+          requestSessionAutomationControl: async ({
+            operation,
+          }: {
+            operation: { after?: string };
+          }) => ({
+            type: 'session/automation-control_response',
+            sessionId,
+            success: true,
+            result: operation.after
+              ? { type: 'list', waits: [{ id: 'second' }] }
+              : { type: 'list', waits: [{ id: 'first' }], next: 'first' },
+          }),
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'list',
+        })
+      ).toEqual({ type: 'list', waits: [{ id: 'first' }, { id: 'second' }] });
+      expect(claims).toEqual([{ type: 'list' }, { type: 'list', after: 'first' }]);
+    } finally {
+      uninstall();
+    }
+  });
+  it('sends the exact authenticated remote automation operation to the owning machine', async () => {
+    const nonce = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent, token) => {
+        expect(token).toBe('signed-in-user');
+        claims.push(intent);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'synthetic-proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'signed-in-user',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({ success: true, runtimeNonce: nonce }),
+          requestSessionAutomationControl: async (request: {
+            sessionId: string;
+            ownerSessionId: string;
+            requesterUserId: string;
+            operation: unknown;
+            proof: { requestId: string };
+            responseRecipient: { publicKey: unknown };
+          }) => {
+            expect(request).toMatchObject({
+              sessionId,
+              ownerSessionId: sessionId,
+              requesterUserId: 'user',
+              operation: { type: 'configure', settings: { recoverCapacity: true } },
+            });
+            expect(claims[0]).toMatchObject({
+              workspaceId,
+              machineId: remoteMachineId,
+              sessionId,
+              requesterUserId: 'user',
+              operation: request.operation,
+              runtimeNonce: nonce,
+              requestId: request.proof.requestId,
+              responseKey: request.responseRecipient.publicKey,
+            });
+            return {
+              type: 'session/automation-control_response',
+              sessionId,
+              success: true,
+              result: { type: 'settings', settings: { recoverCapacity: true } },
+            };
+          },
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'configure',
+          settings: { recoverCapacity: true },
+        })
+      ).toEqual({ type: 'settings', settings: { recoverCapacity: true } });
+    } finally {
+      uninstall();
+    }
+  });
+
   it('requires fileDownload capability before requesting paid download bytes', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -371,6 +497,56 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(requests).toMatchObject([
       {
         method: 'ios-simulator/control',
+        params: { sessionId, requestedByUserId: 'local-owner', command: { action: 'list' } },
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it('sends Android Emulator control to this machine without a login token, proof or cloud', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    const requests: unknown[] = [];
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          requests.push(request);
+          return {
+            ok: true,
+            result: {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              devices: [],
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestAndroidEmulatorControl({
+        machineId: localMachineId,
+        sessionId,
+        requestedByUserId: 'local-owner',
+        command: { action: 'list' },
+      })
+    ).resolves.toMatchObject({ success: true, devices: [] });
+    expect(requests).toMatchObject([
+      {
+        method: 'android-emulator/control',
         params: { sessionId, requestedByUserId: 'local-owner', command: { action: 'list' } },
       },
     ]);
@@ -1222,6 +1398,163 @@ it.each([{ operationInbox: 1 }, {}])(
 );
 
 describe('encrypted file and preview routing', () => {
+  it('creates, observes, renews and revokes the protected preview with no local agent or ordinary proof', async () => {
+    let connection: import('@lody/shared').PreviewConnection | undefined;
+    let role: 'read' | 'write' = 'write';
+    const target = {
+      protocol: 'http' as const,
+      host: '127.0.0.1',
+      port: 5173,
+      path: '/selected?tab=1',
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: () => role,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('ordinary RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        expect(request.workspaceId).toBe(workspaceId);
+        expect(request.machineId).toBe(remoteMachineId);
+        expect(request.params).toMatchObject({ sessionId, requestedByUserId: 'owner' });
+        expect(request.params).not.toHaveProperty('proof');
+        if (request.method === 'session/preview-create') {
+          expect(request.params).toMatchObject({
+            target,
+            approval: { confirmedByUserId: 'owner', target },
+          });
+          connection = {
+            status: 'active',
+            endpointId: 'protected-preview',
+            target,
+            updatedAt: 1,
+            publicUrl: 'https://protected.trycloudflare.com/?__lody_preview_token=synthetic',
+          };
+        } else if (request.method === 'session/preview-revoke')
+          connection = { status: 'closed', target, updatedAt: 3, closedReason: 'revoked' };
+        else if (request.method === 'session/preview-status' && request.params.renewEndpointId) {
+          expect(request.params.renewEndpointId).toBe('protected-preview');
+          connection = { ...connection!, updatedAt: 2 };
+        }
+        return {
+          ok: true,
+          result: { type: request.method + '_response', sessionId, success: true, connection },
+        } as never;
+      },
+    });
+    const approval = {
+      target,
+      targetClass: 'loopback' as const,
+      source: 'share_action' as const,
+      confirmedByUserId: 'owner',
+      confirmedAt: 1,
+    };
+    expect(
+      await facade.requestSessionPreviewCreate(
+        remoteMachineId,
+        sessionId,
+        'owner',
+        target,
+        approval
+      )
+    ).toMatchObject({ success: true, connection: { status: 'active', target } });
+    expect(
+      await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner', {
+        renewEndpointId: 'protected-preview',
+      })
+    ).toMatchObject({ success: true, connection: { updatedAt: 2 } });
+    role = 'read';
+    expect(
+      await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
+    ).toMatchObject({ success: false });
+    expect(connection?.status).toBe('active');
+    role = 'write';
+    expect(
+      await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
+    ).toMatchObject({ success: true, connection: { status: 'closed', closedReason: 'revoked' } });
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it.each(['create', 'status', 'revoke'] as const)(
+    'never falls back to ordinary preview proof without a protected host: %s',
+    async (operation) => {
+      const ordinary: string[] = [];
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        protectedCodeCollabRole: () => 'write',
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          ordinary.push('opened');
+          throw new Error('ordinary preview opened');
+        },
+      });
+      const target = { protocol: 'http' as const, host: '127.0.0.1', port: 5173, path: '/' };
+      const response =
+        operation === 'create'
+          ? await facade.requestSessionPreviewCreate(remoteMachineId, sessionId, 'owner', target, {
+              target,
+              targetClass: 'loopback',
+              source: 'share_action',
+              confirmedByUserId: 'owner',
+              confirmedAt: 1,
+            })
+          : operation === 'status'
+            ? await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner')
+            : await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner');
+      expect(response).toMatchObject({ success: false });
+      expect(ordinary).toEqual([]);
+    }
+  );
+  it.each(['create', 'status', 'revoke'] as const)(
+    'refuses a verified non-writer before signing preview control: %s',
+    async (operation) => {
+      const transmitted: unknown[] = [];
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        protectedCodeCollabRole: () => 'read',
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('ordinary preview must stay closed');
+        },
+        requestEncryptedFeature: async (request) => {
+          transmitted.push(request);
+          return { ok: true, result: { success: true } } as never;
+        },
+      });
+      const target = { protocol: 'http' as const, host: '127.0.0.1', port: 5173, path: '/' };
+      const response =
+        operation === 'create'
+          ? await facade.requestSessionPreviewCreate(remoteMachineId, sessionId, 'guest', target, {
+              target,
+              targetClass: 'loopback',
+              source: 'share_action',
+              confirmedByUserId: 'guest',
+              confirmedAt: 1,
+            })
+          : operation === 'status'
+            ? await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'guest')
+            : await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'guest');
+      expect(response).toMatchObject({ success: false });
+      expect(transmitted).toEqual([]);
+    }
+  );
+
   it('uses protected RPC for file contents and preview control without opening the ordinary RPC client', async () => {
     const results = new Map<string, unknown>();
     const facade = createWorkspaceMachineRpcFacade({

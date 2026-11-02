@@ -1,6 +1,6 @@
 # 恢复 vault
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)
 Translation: current
 
 [English](recovery-vault.md)
@@ -9,7 +9,7 @@ Translation: current
 
 2026-10-28，owner Zixuan Chen（zxch3n）仅批准以下边界，见[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)（[批准记录更新 #2032](https://github.com/LodyAI/Lody/pull/2032)）：恢复设备登记保留现有账本 tag 4 和 `lody-e2ee/possess/v2\0` 字节，genesis 不变。加密恢复包使用 `formatVersion: 1`，保存恢复 generation 和可信账本材料；可信锚须由外部独立确认。加密包、其来源定位符或服务端响应本身不能建立可信锚，也不能证明账本最新。
 
-恢复验收前须导入 R 的密钥、独立确认可信锚、实际解密发给 R 的当前代信封，并根据账本承诺核对恢复出的代钥。R 的签名绑定加密公钥，但单凭签名不能证明加密私钥持有。包版本和上述边界已批准；保险库的其余设计及本 Spec 整体仍为 **draft**，恢复保险库不在 MVP 内。当前实现尚未加入包版本字段；批准不代表已部署或真机行为已通过验收。
+恢复验收前须导入 R 的密钥、独立确认可信锚、实际解密发给 R 的当前代信封，并根据账本承诺核对恢复出的代钥。R 的签名绑定加密公钥，但单凭签名不能证明加密私钥持有。包版本和上述边界于 2026-10-28 获批；2026-10-31 owner 批准了本 Spec 整体（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库桌面接入)）。恢复保险库仍不在 MVP 内。core 恢复包已携带 `formatVersion: 1`，拒绝缺失或其他版本；私钥必须是 Ed25519 与 X25519 的 48 字节 RFC 8410 PKCS#8 精确编码（owner 已于 2026-10-31 接受，见批准记录）。批准不代表已部署或真机行为已通过验收。
 
 ## 恢复材料与密文
 
@@ -79,6 +79,56 @@ WebCrypto 没有原生句柄清零 API，适配器不得保留这些句柄或把
 回收 API。本地日志无法证明其他会话没有待定引用。已退役索引条目的清理仍是
 独立操作，要求最新索引 CAS 和用户明确确认恢复途径丢失的风险。
 
+## 桌面产品接入
+
+2026-10-31，owner 经 E2EE 总调度对六个接入问题作出决定，并随本 Spec 其余部分一并批准本节。调研、被否决选项与依据见
+[桌面接入 note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.zh.md)。
+本节不改变 MVP 行为：所有能力都在默认关闭的开关之后，现有加密工作区、配对和账本行为不变。
+
+**场景。** 用户丢失全部已配对设备后，在新桌面登录，用离线恢复文件找回加密工作区。
+与幸存设备配对仍是首选路径；保险库只覆盖没有设备幸存的情况。既无保险库也无幸存设备时，内容丢失。
+
+**每账号一个保险库。** 一个账号一个保险库、一个恢复文件；保险库索引按工作区成员身份各存一个条目。
+在桌面安全设置中创建保险库，恢复文件只写到用户选择的位置；Lody 从不上传或同步该文件。
+用户逐个工作区显式启用恢复。设置时由用户当前活跃的个人设备接纳该工作区的 R，并执行真实信封测试。
+状态按工作区和代显示；新代需要重新测试。
+
+**桌面保存 V 时每次使用都须用户在场。** 个人桌面只能把 V 保存在每次使用都要求用户在场的
+OS 密钥之下：macOS 用带用户在场访问控制的钥匙串项（Touch ID 或账户密码），Windows 用
+Windows Hello 或凭据提示。这是对"个人设备密钥无需每次批准"规则的有意例外，仅适用于 V。
+平台无法强制用户在场时不保存 V，需要 V 时由用户选择恢复文件。不允许无感保存 V。保存 V
+后，新工作区的设置和每代测试无需再提供文件。
+
+**恢复设备认证。** R 的服务访问凭据用 HKDF-SHA256 从 R 的 32 字节 Ed25519 私钥种子派生，
+salt 为 genesis 哈希，info 为 `lody-e2ee/recovery-credential/v1\0` 后接 R 的签名公钥。
+个人设备追加 R 的接纳记录时，通过现有 `credentialHash` 字段登记派生凭据的 SHA-256。
+恢复时，新设备从解密后的恢复包派生同一凭据，用于 R 的邮箱读取和 C 的接纳追加，随后丢弃。
+恢复包格式不变；持有 R 私钥本就具备 R 的账本权限，凭据不带来新能力。
+
+**恢复与通知。** 设备上没有某工作区身份时，"从恢复文件恢复"与配对并列。流程打开保险库，
+要求用户独立确认可信锚，解密 R 的当前代信封并核对承诺，再由 R 接纳新的个人设备 C。C 的
+接纳提交后，服务端通知该账号所有在用设备及账号邮箱：工作区 X 已在新设备上通过恢复文件恢复。
+不强制更换 R，不加 owner 审批，也不设冷却期。通知只是告知用户，不是安全控制，恶意服务端可以
+扣下它；R 签署的接纳记录仍可在已验证账本中看到。
+
+**Passkey PRF。** PRF 包装使用 macOS 15 及以上的原生 AuthenticationServices 模块。前置条件：
+提供 apple-app-site-association 文件的 Lody RP 域名、`webcredentials:` 关联域 entitlement、
+内嵌于已签名应用的 provisioning profile，以及对该原生依赖的审查。只有真实 ceremony 报告
+PRF `enabled: true` 且 `results.first` 为 32 字节时，才能包装或解锁 V；没有降级。其他平台和版本使用恢复文件。
+
+**恢复包私钥。** owner 已接受两个私钥均为 48 字节 RFC 8410 PKCS#8 精确编码
+（[#2124](https://github.com/LodyAI/Lody/pull/2124)）。
+
+**服务端与当前缺口。** 服务端只保存 `packages/cloud-api` 已声明的不透明不可变条目与索引 CAS，
+按账号隔离；CAS 在同一事务内检查所有被引用条目都存在。私有后端已有 `recovery` 设备类型，
+但还没有任何 `e2eeRecoveryVault` 函数、Recovery 凭据登记、以 R 身份认证的邮箱读取与追加，
+也没有恢复通知。这些就绪前，桌面闭环无法对接真实服务端。
+
+**威胁模型。** 账号访问控制读取，文件控制解密。同时持有两者的人可读取所有已恢复工作区，并在 R
+被撤销前接纳设备；服务运营者加文件等同于此。单独的文件在没有账号密文时不授予任何能力。丢失文件
+只失去这条恢复路径。在保存了 V 的桌面上，能取得用户在场批准的恶意软件可以解锁 V。服务端可以扣留
+或回滚密文；本地 pin 只在见过更新版本的设备上能发现回滚。
+
 ## 边界与验证
 
 core 定义平台中立的加密存储及本地日志端口，拥有密码学、索引选择、设置和恢复。
@@ -87,5 +137,5 @@ Lab SQLite 实现不可变条目、索引 CAS 和事务内精确读回。桌面�
 Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控制解密，不是密码学双因素。
 
 外围约束见[白皮书](whitepaper.zh.md)、[权限账本](permission-ledger.zh.md)及
-[保护边界](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。本修订保持 draft
-供用户审批，测试通过及翻译完成都不批准 Spec，也不启用产品 E2EE。
+[保护边界](../../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。批准本修订不代表
+已实现、已部署或真机验收；测试通过及翻译完成都不启用产品 E2EE。

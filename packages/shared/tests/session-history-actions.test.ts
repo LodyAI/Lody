@@ -887,6 +887,29 @@ describe('user status on duplicate turn copies', () => {
       ['pending', null],
     ]);
   });
+
+  it('settles unclaimed input only while every copy still awaits a start', async () => {
+    const settle = {
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'canceled',
+      onlyAwaitingStart: true,
+    } as const;
+    const unclaimed = await withCopies('pending', 'seen');
+    expect((await unclaimed.data.commands.applyHistoryAction(settle)).matched).toBe(true);
+    expect(await unclaimed.copies()).toEqual([
+      ['canceled', null],
+      ['canceled', null],
+    ]);
+    for (const claimed of ['processing', 'handled', 'pending_apply'] as const) {
+      const { data, copies } = await withCopies(claimed, 'pending');
+      expect((await data.commands.applyHistoryAction(settle)).matched).toBe(false);
+      expect(await copies()).toEqual([
+        [claimed, null],
+        ['pending', null],
+      ]);
+    }
+  });
 });
 
 it('business full reads preserve normalization without rewriting opaque stored history', async () => {

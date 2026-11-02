@@ -18,6 +18,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   The closed pure-read list uses fresh read authority, never execution journals; other admitted
   Code Collab/preview actions require write authority and execution claims. Keep same-member
   machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+- Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
+  returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
+  senders withhold input only for a known withdrawal.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:
@@ -65,6 +68,7 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
+  Automation controls require target-verified operation-bound proof.
   `session/live-status` reads the target
   daemon's active-presence controller and must not infer liveness from durable
   `SessionMeta.status` or message pointers.

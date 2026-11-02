@@ -1,4 +1,7 @@
-import { createStore } from 'jotai';
+import { createStore, Provider } from 'jotai';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { SessionMetaIdentityMarker } from '../src/components/sessions/automation/session-meta-identity-marker';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import {
@@ -18,6 +21,8 @@ import {
   archivedSessionListAtom,
   docMetaCacheReadyAtom,
   sessionMetaCacheSettledAtomFamily,
+  sessionMetaIdentityAtomFamily,
+  pendingSendSessionMetasAtom,
   docMetaCacheScopeAtom,
   docMetaSubscriptionAtom,
   readReadyDocMetaCache,
@@ -861,6 +866,129 @@ describe('docMetaSubscriptionAtom', () => {
       expect(store.get(agentConfigMetaCacheAtom)[docId]).toEqual(fullMeta);
     } finally {
       unmount();
+    }
+  });
+});
+
+describe('session metadata identity projection', () => {
+  it('renders actual repo metadata identity without reading the session body or pending-send overlay', async () => {
+    const repo = await LoroRepo.create({});
+    const store = createStore();
+    const sessionId = 'identity-session' as SessionId;
+    const room = getSessionRoomId(sessionId);
+    const identity = sessionMetaIdentityAtomFamily(sessionId);
+    await repo.upsertDocMeta(room, {
+      id: sessionId,
+      machineId: 'actual-machine',
+      title: 'Synthetic',
+    });
+    const ready = new Promise<void>((resolve) => {
+      const stop = store.sub(identity, () => {
+        if (store.get(identity)) {
+          stop();
+          resolve();
+        }
+      });
+    });
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    const markup = (isVisible = true) =>
+      renderToStaticMarkup(
+        createElement(
+          Provider,
+          { store },
+          createElement(SessionMetaIdentityMarker, { sessionId, isVisible })
+        )
+      );
+    try {
+      store.set(runtimeAtom, createRuntime(repo));
+      await ready;
+      expect(markup()).toContain('data-machine-id="actual-machine"');
+      expect(markup()).toContain(`data-session-id="${sessionId}"`);
+      expect(markup()).toContain('data-workspace-id="workspace-id"');
+      expect(markup()).toContain('data-source="repo-cache"');
+      store.set(pendingSendSessionMetasAtom, {
+        [room]: {
+          ...store.get(sessionMetaCacheAtom)[room]!,
+          machineId: 'pending-machine' as MachineId,
+        },
+      });
+      expect(markup()).toContain('data-machine-id="actual-machine"');
+      expect(markup()).not.toContain('pending-machine');
+      expect(markup(false)).toBe('');
+    } finally {
+      unmount();
+      await repo.destroy();
+    }
+  });
+
+  it('withholds an existing cached target during queued remote projection and deletion', async () => {
+    vi.useFakeTimers();
+    const sessionId = 'projection-session' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    const repo = new CompatRepoDouble([
+      { docId, exists: true, meta: { id: sessionId, machineId: 'old-machine' } },
+    ]);
+    const store = createStore();
+    const identity = sessionMetaIdentityAtomFamily(sessionId);
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.runAllTimersAsync();
+      expect(store.get(identity)?.machineId).toBe('old-machine');
+      repo.emit({ kind: 'doc-metadata', docId, patch: { machineId: 'new-machine' }, by: 'live' });
+      // The older settled helper regards an existing row as settled; identity must not.
+      expect(store.get(sessionMetaCacheSettledAtomFamily(sessionId))).toBe(true);
+      expect(store.get(identity)).toBeNull();
+      await vi.runAllTimersAsync();
+      expect(store.get(identity)?.machineId).toBe('new-machine');
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId,
+        from: 'active',
+        to: 'deleted',
+        by: 'live',
+      });
+      expect(store.get(identity)).toBeNull();
+      await vi.runAllTimersAsync();
+      expect(store.get(identity)).toBeNull();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects foreign runtime scope, absent metadata and pending-only targets', async () => {
+    vi.useFakeTimers();
+    const sessionId = 'scope-session' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    const repo = new CompatRepoDouble([
+      { docId, exists: true, meta: { id: sessionId, machineId: 'machine' } },
+    ]);
+    const store = createStore();
+    const runtime = createRuntime(repo as unknown as LoroRepo);
+    const identity = sessionMetaIdentityAtomFamily(sessionId);
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, runtime);
+      await vi.runAllTimersAsync();
+      expect(store.get(identity)?.sessionId).toBe(sessionId);
+      const scope = store.get(docMetaCacheScopeAtom)!;
+      store.set(docMetaCacheScopeAtom, {
+        ...scope,
+        runtime: createRuntime(repo as unknown as LoroRepo),
+      });
+      expect(store.get(identity)).toBeNull();
+      store.set(docMetaCacheScopeAtom, { ...scope, workspaceId: 'foreign-workspace' });
+      expect(store.get(identity)).toBeNull();
+      store.set(docMetaCacheScopeAtom, { ...scope, ready: false });
+      expect(store.get(identity)).toBeNull();
+      store.set(docMetaCacheScopeAtom, scope);
+      store.set(pendingSendSessionMetasAtom, store.get(sessionMetaCacheAtom));
+      store.set(sessionMetaCacheAtom, {});
+      expect(store.get(identity)).toBeNull();
+    } finally {
+      unmount();
+      vi.useRealTimers();
     }
   });
 });

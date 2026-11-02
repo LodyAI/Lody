@@ -305,6 +305,8 @@ WebKit tests do not replace iOS 16.4 real-device or power-loss acceptance. There
 guarantee against user/browser eviction; loss of persistent identity protection
 must be handled by the host under the approved custody contract.
 
+`LedgerPinStore.writeGrace` optionally stores bounded timing-only bytes with atomic compare-and-set and durable readback. SQLite and IndexedDB implement it beside their bound pins; reads return owned copies. Conflicts never mutate the row. Missing/corrupt observations or clock continuity cannot start a new grace on pinned reopen. This journal is neither key material nor ledger/write authority; omission disables retained-key grace.
+
 ## Browser custody and installation
 
 `browserClientWriter({ accountId, workspaceId })` provides `ClientCustodyWriter`

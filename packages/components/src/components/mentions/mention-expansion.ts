@@ -86,6 +86,7 @@ const REWRITTEN_SPAN_KINDS = [
   'session',
   'agent_role',
   'pasted_text',
+  'message_quote',
 ] satisfies MessageTextSpanKind[];
 
 /** Kinds whose composer text is already what the agent should read. */
@@ -141,7 +142,7 @@ export function buildMentionPromptRewrites({
   agentRoleItems: readonly AgentRoleMentionItem[];
 }): TextRewrite[] {
   return [
-    ...buildPastedTextRewrites(pastedTextDrafts),
+    ...buildPastedTextRewrites(pastedTextDrafts, text),
     ...skillRewrites(text),
     ...buildSessionMentionRewrites(text, mentions, { items: sessionItems, workspaceId }),
     ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),

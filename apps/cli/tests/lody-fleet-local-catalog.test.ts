@@ -26,6 +26,7 @@ import { RemoteBridge, type RemoteBridgeRuntime } from '../src/lib/remote-bridge
 import { fileLocksLegacy } from '../src/utils/file-lock';
 import * as projectMeta from '../src/lib/local-project-meta';
 import * as scheduleWorkspace from '../src/lib/schedules/schedule-workspace';
+import * as automationWorkspace from '../src/automations/workspace-legacy';
 import { createCloudPrAssociationPort } from '../src/lib/cloud-pr-association';
 import type { PrPollerWorkspaceHandle } from '../src/lib/pr-poller/pr-poller-workspace';
 import type { Logger } from '../src/utils/logger';
@@ -728,6 +729,90 @@ describe('LodyFleet local E2EE pairing during startup', () => {
   });
 });
 
+describe('LodyFleet shutdown ordering', () => {
+  it('keeps the process Local Loro writer until workspace runtimes have released their writer owners', async () => {
+    const { getProcessLocalLoroWriterLegacy } =
+      await import('@lody/shared/local-loro-writer/legacy');
+    const { makeLocalLoroWriterOwner } = await import('@lody/shared/local-loro-writer');
+    const writer = getProcessLocalLoroWriterLegacy();
+    const owner = makeLocalLoroWriterOwner();
+    let releaseSessions: () => void = () => {};
+    const sessionsReleased = new Promise<void>((resolve) => {
+      releaseSessions = resolve;
+    });
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = harness as unknown as typeof harness & {
+      runtimes: Map<string, unknown>;
+      shutdown: () => Promise<void>;
+    };
+    fleet.runtimes.set('ws-1', {
+      workspace: { id: 'ws-1', name: 'One', slug: 'one', role: 'member' },
+      lody: {
+        // SessionManager.cleanUp: sessions settle first, then the workspace
+        // data-plane server releases its owner through the shared writer.
+        cleanup: async () => {
+          await sessionsReleased;
+          await writer.executeEffect(writer.writer.closeOwner(owner));
+        },
+      },
+      unsubscribeTerminalCleanup: () => {},
+      schedules: { dispose: async () => {} },
+      prPollerWorkspace: null,
+    });
+
+    const shutdown = fleet.shutdown();
+    // Local endpoints stop concurrently; let that teardown run as far as it can.
+    for (let turn = 0; turn < 50 && !writer.isReleased(); turn += 1)
+      await new Promise((resolve) => setImmediate(resolve));
+    expect(writer.isReleased()).toBe(false);
+
+    releaseSessions();
+
+    await expect(shutdown).resolves.toBeUndefined();
+    expect(writer.isReleased()).toBe(true);
+  });
+
+  it('retains the writer for a failed workspace release and releases it after recovery', async () => {
+    const { getProcessLocalLoroWriterLegacy } = await import('@lody/shared/local-loro-writer/legacy');
+    const { makeLocalLoroWriterOwner } = await import('@lody/shared/local-loro-writer');
+    const writer = getProcessLocalLoroWriterLegacy();
+    const owner = makeLocalLoroWriterOwner();
+    let attempts = 0;
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = harness as unknown as typeof harness & {
+      runtimes: Map<string, unknown>;
+      shutdown: () => Promise<void>;
+      recoverShutdown: () => Promise<void>;
+    };
+    fleet.runtimes.set('ws-1', {
+      workspace: { id: 'ws-1', name: 'One', slug: 'one', role: 'member' },
+      lody: {
+        cleanup: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('Synthetic session release failure');
+          await writer.executeEffect(writer.writer.closeOwner(owner));
+        },
+      },
+      unsubscribeTerminalCleanup: () => {},
+      schedules: { dispose: async () => {} },
+      prPollerWorkspace: null,
+    });
+
+    await expect(fleet.shutdown()).rejects.toThrow(
+      'Fleet shutdown retains unresolved workspace resources'
+    );
+    expect(writer.isReleased()).toBe(false);
+
+    await expect(fleet.recoverShutdown()).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(writer.isReleased()).toBe(true);
+  });
+});
+
 describe('LodyFleet local session control streaming', () => {
   type FleetControlInternals = {
     runtimes: Map<
@@ -1163,6 +1248,10 @@ describe('Fleet PR observation composition', () => {
       const schedules = vi
         .spyOn(scheduleWorkspace, 'createScheduleWorkspace')
         .mockResolvedValue(scheduleHandle);
+      const automationHandle = { dispose: async () => {} };
+      const automations = vi
+        .spyOn(automationWorkspace, 'createAutomationWorkspaceLegacy')
+        .mockResolvedValue(automationHandle as never);
       const fleet = createFleetHarness(
         createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
         cloud
@@ -1172,9 +1261,12 @@ describe('Fleet PR observation composition', () => {
           string,
           {
             prPollerWorkspace: PrPollerWorkspaceHandle | null;
+            automations?: unknown;
+            automationsRetryAt?: number;
             schedules: scheduleWorkspace.ScheduleWorkspaceHandle;
           }
         >;
+        ensureAutomations(state: unknown): Promise<unknown>;
         retryTimers: Map<string, ReturnType<typeof setTimeout>>;
         startWorkspace(workspace: never): Promise<void>;
         stopWorkspace(id: string): Promise<void>;
@@ -1200,8 +1292,15 @@ describe('Fleet PR observation composition', () => {
         expect(runtime?.schedules).toBe(scheduleHandle);
         if (encrypted) {
           expect(runtime?.prPollerWorkspace).toBeNull();
+          expect(runtime?.automations).toBeUndefined();
+          expect(runtime?.automationsRetryAt).toBeUndefined();
+          await expect(fleet.ensureAutomations(runtime)).rejects.toThrow(
+            'AUTOMATIONS_UNSUPPORTED_FOR_ENCRYPTED_WORKSPACE'
+          );
+          expect(runtime?.automations).toBeUndefined();
           expect(requests).toEqual([]);
         } else {
+          expect(runtime?.automations).toBe(automationHandle);
           expect(
             await runtime?.prPollerWorkspace?.associatePullRequest?.({
               repoFullName: 'synthetic/repo',
@@ -1231,6 +1330,7 @@ describe('Fleet PR observation composition', () => {
         create.mockRestore();
         reconcile.mockRestore();
         schedules.mockRestore();
+        automations.mockRestore();
       }
     }
   );

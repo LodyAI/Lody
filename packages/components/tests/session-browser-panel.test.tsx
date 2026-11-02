@@ -519,6 +519,35 @@ describe('SessionBrowserPanel controller', () => {
     });
   };
 
+  it.each([
+    { publicUrl: 'https://app.example.test/?__lody_preview_token=synthetic' },
+    {
+      publicUrl:
+        'https://user:secret@browser-preview.trycloudflare.com/?__lody_preview_token=synthetic',
+    },
+    { publicUrl: 'http://browser-preview.trycloudflare.com/?__lody_preview_token=synthetic' },
+    { target: { ...localTarget, port: 9000 } },
+  ])(
+    'rejects an untrusted encrypted preview endpoint before loading page bytes: %j',
+    async (replacement) => {
+      const test = createRuntime({ connection: { ...remoteConnection, ...replacement } });
+      Object.assign(test.runtime, { contentMode: 'e2ee' });
+      const rendered = await renderPanel(test.runtime);
+      await enterAddress(rendered, 'http://127.0.0.1:5173/dashboard?mode=dev');
+      expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+      expect(rendered.textContent).toContain('Remote preview returned no trusted viewer URL.');
+    }
+  );
+  it('explains the plaintext tunnel boundary for an encrypted remote preview without a local agent', async () => {
+    const test = createRuntime();
+    Object.assign(test.runtime, { contentMode: 'e2ee' });
+    const rendered = await renderPanel(test.runtime);
+    expect(rendered.textContent).toContain(
+      'Page content passes through the tunnel service as plaintext'
+    );
+    await enterAddress(rendered, 'http://127.0.0.1:5173/dashboard?mode=dev');
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
+  });
   it('keeps the persisted target but never loads its old URL when status cannot be verified', async () => {
     const testRuntime = createRuntime({ preview: { connection: remoteConnection } });
     testRuntime.requestSessionPreviewStatus.mockRejectedValue(

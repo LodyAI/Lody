@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+test('markup starts with the selected image in the gallery', async ({ page }) => {
+  await page.goto('/iframe.html?id=shared-zoomableimageviewer--annotate-gallery&viewMode=story');
+  const dialog = page.getByRole('dialog', { name: 'Image preview' });
+  await dialog.getByRole('button', { name: 'Next image' }).click();
+  await dialog.getByRole('button', { name: 'Mark up image' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('Annotating shot-2')).toBeVisible();
+});
+
 for (const viewport of [
   { width: 1280, height: 800 },
   { width: 390, height: 844 },

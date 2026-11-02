@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Add a dedicated iOS simulator panel to sessions assigned to a macOS machine. Machine RPC lists devices and manages preview preparation, while existing Quick Tunnels carry remote frames. The panel replaces browser navigation and annotation with device selection, connection status, and a small Lody-owned viewer, with Lody-owned device controls and a hardware shell. Browser and simulator require independent endpoint ownership. The first implementation uses MJPEG and a restricted Lody viewer, with no new frontend dependency. A real local service smoke test receives frames and stops cleanly; full remote/mobile acceptance and H.264 remain outside the verified scope.
+Add a dedicated iOS simulator panel to sessions assigned to a macOS machine. Machine RPC lists devices and manages preview preparation, while existing Quick Tunnels carry remote frames. The panel replaces browser navigation and annotation with device selection, connection status, and a small Lody-owned viewer, with Lody-owned device controls and a hardware shell. Browser and simulator require independent endpoint ownership. The shared device-preview core carries H.264 through WebSocket or WebRTC DataChannels into WebCodecs, retaining MJPEG fallback for iOS. Android uses an isolated ADB/scrcpy adapter with the same lifecycle and viewer. Local Android H.264 and shutdown are verified; deployment of the Android managed artifact, external proof signer, and remote/mobile acceptance remain separate release requirements.
 
 ## Requirements and implemented defaults
 
@@ -606,3 +606,35 @@ Static security/correctness/scope review and fresh refutation covered this incre
 Physical mobile interaction is not part of this validation.
 
 Validation: standalone public full check passed (CLI 3,453 tests plus four skipped; components 4,709 tests), CLI build and formatting passed, docs check passed. Outer affected checking remains blocked by existing ACP adapter type/dependency errors. No native runtime or Cloud deployment change is required; update the frontend and simulator-host CLI.
+
+## Shared Android adapter boundary
+
+The common lifecycle, gateway, WebRTC DataChannels, flow credits and WebCodecs
+viewer now live in `apps/cli/src/device-preview`. Platform adapters retain native
+capture, discovery and controls. This avoids a second transport/lease owner from
+serve-avd; official scrcpy-server plus Tango provides H.264 and explicit device
+control without running a separate general-purpose web/ADB service. Android IDs
+are case-sensitive AVD names and use `android-emulator/control` with a dedicated
+signed operation, encrypted response context and `androidEmulator: 1` capability.
+Legacy iOS DTOs and viewer message names remain compatible.
+
+One session can own one preview per platform. Encoder conversion is at the adapter:
+Baguette's VideoToolbox reference validation is not applied to scrcpy's Annex-B
+stream. Android uses a single fixed encoder budget with per-viewer flow control;
+this avoids competing viewer requests changing a shared encoder, at the cost of
+not adapting Android source resolution to each viewer. Android requires H.264;
+there is no silent JPEG fallback.
+
+Tango's TCP connector did not settle pending reads on socket destruction. Lody's
+owned connector makes close/error/abort settle those reads. Native control ACKs
+are bounded and cancellation ends their socket owner before joining commands,
+preventing gateway shutdown from waiting on a device it has not yet stopped.
+An unconfirmed capture shutdown fences only that exact device until worker
+restart; revoked endpoint cleanup alone does not block safe device reuse.
+
+The React panel shares lifecycle polling, media, input and screenshot handling.
+Android has separate platform state/preferences and only supported controls;
+its rotation control toggles native orientation rather than promising a signed
+quarter-turn. SDK/AVD installation remains user-owned. The verified server is
+prepared for the public runtime channel; public source cannot deploy the external
+channel or authorize a new operation in the external proof signer.

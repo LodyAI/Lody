@@ -22,6 +22,7 @@ const persistedProviderFileState: PersistedLastActiveTabState = {
     tab: 'browser',
     tabs: ['files', 'browser'],
     sideSessionId: 'side-session-1',
+    split: null,
   },
 };
 
@@ -43,6 +44,7 @@ describe('getSessionDetailInitialTabState', () => {
         tab: 'browser',
         tabs: ['files', 'browser'],
         sideSessionId: 'side-session-1',
+        split: null,
       },
     });
   });
@@ -98,6 +100,7 @@ describe('getSessionDetailInitialTabState', () => {
         tab: null,
         tabs: [],
         sideSessionId: null,
+        split: null,
       },
     });
   });
@@ -118,6 +121,7 @@ describe('getSessionDetailInitialTabState', () => {
         tab: null,
         tabs: [],
         sideSessionId: null,
+        split: null,
       },
     });
   });

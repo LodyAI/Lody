@@ -71,10 +71,13 @@ export const supportsBuiltinAuthentication = (input: {
 /**
  * True when the config uses agent-driven authentication (registry, custom, or
  * builtin Devin), which authenticates
- * through the standard ACP `initialize` → `authenticate` exchange. The methods
- * are advertised by the agent itself, so support cannot be known for certain
- * until it is asked — callers pair this with a live `authRequired` signal rather
- * than offering a sign-in nothing asked for.
+ * through the standard ACP `initialize` → `authenticate` exchange.
+ *
+ * The methods are advertised by the agent itself, so the list cannot be known
+ * before the daemon has initialized it once. Callers show the advertised
+ * methods themselves rather than waiting for a live `authRequired` signal:
+ * `initialize` lists every way to sign in, whether or not the current
+ * credentials still work, and a reader may want to switch accounts on purpose.
  */
 export const usesAcpProtocolAuthentication = (
   cliType: AgentConfigCliType | null | undefined,

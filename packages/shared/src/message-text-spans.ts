@@ -27,6 +27,8 @@
  * way to read them, and every boundary that touches a text item runs it.
  */
 
+import { readMessageQuote } from './message-quote';
+
 /** Mention categories a span can stand for. Mirrors the composer's kinds. */
 export const MESSAGE_TEXT_SPAN_KINDS = [
   'file',
@@ -38,6 +40,7 @@ export const MESSAGE_TEXT_SPAN_KINDS = [
   'command',
   'agent_role',
   'pasted_text',
+  'message_quote',
 ] as const;
 
 export type MessageTextSpanKind = (typeof MESSAGE_TEXT_SPAN_KINDS)[number];
@@ -64,6 +67,8 @@ export type MessageTextSpan = {
    * mutable catalog being loaded.
    */
   mark?: string;
+  /** Version of the quote formatter/decoder; absent on other span kinds. */
+  quoteVersion?: 1;
 };
 
 /**
@@ -133,12 +138,17 @@ export const sanitizeMessageTextSpans = (
   const candidates: MessageTextSpan[] = [];
   for (const span of spans) {
     if (!isRecord(span)) continue;
-    const { start, end, kind, label, target, mark } = span;
+    const { start, end, kind, label, target, mark, quoteVersion } = span;
     if (!isOffset(start) || !isOffset(end)) continue;
     if (end <= start || end > text.length) continue;
     if (typeof kind !== 'string' || !SPAN_KINDS.has(kind)) continue;
     if (typeof label !== 'string' || label.length === 0) continue;
     if (target !== undefined && typeof target !== 'string') continue;
+    if (
+      kind === 'message_quote' &&
+      readMessageQuote(text.slice(start, end), quoteVersion) === undefined
+    )
+      continue;
     const keptMark =
       typeof mark === 'string' &&
       mark.length > 0 &&
@@ -153,6 +163,7 @@ export const sanitizeMessageTextSpans = (
       label,
       ...(target === undefined ? {} : { target }),
       ...(keptMark === undefined ? {} : { mark: keptMark }),
+      ...(kind === 'message_quote' ? { quoteVersion: 1 as const } : {}),
     });
   }
 
@@ -176,7 +187,7 @@ export type TextRewrite = {
   /** Replaces `[start, end)` in the output. Defaults to the source slice. */
   replacement?: string;
   /** Marks the replaced region as a mention in the output. */
-  span?: { kind: MessageTextSpanKind; label: string; target?: string; mark?: string };
+  span?: Omit<MessageTextSpan, 'start' | 'end'>;
 };
 
 /**

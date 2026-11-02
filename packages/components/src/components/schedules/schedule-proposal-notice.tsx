@@ -1,3 +1,4 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -235,7 +236,7 @@ export function ScheduleProposalNotice({
     if (!runtime) return undefined;
     let cancelled = false;
     void runtime
-      .withSessionStore(sessionId, (store) => store.sessionData.history.readAll())
+      .withSessionStore(sessionId, (store) => readSessionHistoryMetadata(store.sessionData.history))
       .then((history) => {
         if (cancelled) return;
         const config = resolveSessionConversationConfig(history);
@@ -377,7 +378,7 @@ export function ScheduleProposalNotice({
         // Re-resolve from history at click time, so a mode changed since the
         // card rendered is the one that gets persisted.
         const history = await runtime.withSessionStore(sessionId, (store) =>
-          store.sessionData.history.readAll()
+          readSessionHistoryMetadata(store.sessionData.history)
         );
         const latest = resolveSessionConversationConfig(history);
         const final = resolveScheduleProposalTarget({

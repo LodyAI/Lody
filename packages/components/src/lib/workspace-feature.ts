@@ -15,6 +15,9 @@ export function workspaceFeatureUnavailableMessage(
     case 'schedules':
       message = 'Encrypted workspaces do not yet support scheduled messages.';
       break;
+    case 'automations':
+      message = 'Encrypted workspaces do not yet support automations.';
+      break;
     case 'preview-comments':
       message = 'Encrypted workspaces do not yet support preview comments.';
       break;
@@ -57,6 +60,12 @@ export function protectedFileWriteDeniedMessage(t: TFunction = i18next.t): strin
   const message =
     'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.';
   return t('e2ee.unavailable.guest-file-write', { defaultValue: message }) || message;
+}
+
+/** Preview controls create/renew/revoke capabilities and require a verified writer. */
+export function protectedPreviewControlDeniedMessage(t: TFunction = i18next.t): string {
+  const message = 'Your workspace role cannot create, renew or revoke remote previews.';
+  return t('e2ee.unavailable.preview-control-write', { defaultValue: message }) || message;
 }
 
 export class WorkspaceFeatureUnavailableError extends Error {

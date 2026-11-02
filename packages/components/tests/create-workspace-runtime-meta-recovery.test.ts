@@ -2980,6 +2980,76 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     }
   );
 
+  it.each([true, false])(
+    'reports the E2E protected transport owner closed only after a confirmed removal (%s)',
+    async (removed) => {
+      const reports: { workspaceId: string; effects: Record<string, unknown> }[] = [];
+      const probe = window as unknown as Record<string, unknown>;
+      const previous = { flag: probe.__LODY_E2E_CLIENT_LOSS__, ipc: probe.ipc };
+      probe.__LODY_E2E_CLIENT_LOSS__ = true;
+      probe.ipc = {
+        send: (_channel: string, payload: (typeof reports)[number]) => reports.push(payload),
+      };
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      vi.spyOn(repo, 'addTransport').mockImplementation(mocks.addTransport as never);
+      vi.spyOn(repo, 'joinMetaRoom').mockImplementation(mocks.joinMetaRoom as never);
+      vi.spyOn(repo, 'removeTransport').mockImplementation((async (id: string) => {
+        if (id === 'cloud' && !removed) throw new Error('teardown failed');
+      }) as never);
+      const runtime = await createWorkspaceRuntime({
+        content: {
+          mode: 'protected' as const,
+          namespace: 'synthetic-genesis',
+          resolve: () => {
+            throw new Error('unused until protected transport attaches');
+          },
+          snapshotUpload: { canUpload: () => false },
+        },
+        e2ee: {
+          bucketId: () => 'synthetic-encrypted-content',
+          createTokenProvider: () =>
+            createLoroStreamsTokenProviderLegacy({
+              endpoint: 'https://encrypted.example.test/token',
+              workspaceId: 'workspace-1',
+              authToken: () => 'synthetic',
+            }),
+        },
+        accountId: 'synthetic-account',
+        e2eeLocalIdentity: {
+          accountId: 'synthetic-account',
+          workspaceId: 'workspace-1',
+          genesisHash: '11'.repeat(32),
+          signingPublicKey: '22'.repeat(32),
+        },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode: 'dual',
+      });
+      try {
+        mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+        await runtime.setAuthToken('synthetic');
+        expect(cloudAttachCalls()).toHaveLength(1);
+        expect(reports.at(-1)).toMatchObject({
+          workspaceId: 'workspace-1',
+          effects: { activeContentStreams: 1, transportOwnerClosed: false },
+        });
+        await runtime.dispose();
+        expect(reports.at(-1)?.effects).toMatchObject(
+          removed
+            ? { activeContentStreams: 0, transportOwnerClosed: true }
+            : { activeContentStreams: 1, transportOwnerClosed: false }
+        );
+      } finally {
+        await runtime.dispose();
+        probe.__LODY_E2E_CLIENT_LOSS__ = previous.flag;
+        probe.ipc = previous.ipc;
+      }
+    }
+  );
+
   it('opens protected schedules offline through the production store cache and retains encrypted transport assembly', async () => {
     const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
     const repo = await RealRepo.create({});

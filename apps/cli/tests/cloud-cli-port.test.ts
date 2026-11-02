@@ -387,6 +387,123 @@ describe('shared Streams kernel after a failed response-body release', () => {
   });
 });
 
+it('applies the shared session and turn quotas on a paired machine from its device credential', async () => {
+  const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+  const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
+  const {
+    evaluateSessionCreateQuota,
+    evaluateBillingQuota,
+    isBillingQuotaExempt,
+    FREE_SESSION_TURN_LIMIT,
+  } = await import('@lody/shared');
+  type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  const workspaceId = 'synthetic-workspace',
+    credential = 'a2'.repeat(32);
+  let answer: unknown = { valid: true, effectivePlanTier: 'free', checkoutPending: false };
+  const asked: unknown[] = [];
+  const client: Client = {
+    // A connected client answers the one-shot subscription immediately.
+    onUpdate: ((_ref: unknown, args: unknown, listener: (value: unknown) => void) => {
+      asked.push(args);
+      listener(answer);
+      return () => {};
+    }) as unknown as Client['onUpdate'],
+    query: (() => new Promise(() => {})) as Client['query'],
+    close: async () => {},
+  };
+  const port = createCloudE2eeMachinePort({
+    accountId: 'synthetic-machine-owner',
+    workspaceId,
+    genesisHash: 'ab'.repeat(32),
+    machineId: 'machine',
+    credential,
+    authBaseUrl: 'https://synthetic.convex.cloud',
+    serverBaseUrl: 'https://relay.synthetic.test',
+    logger: { debug() {}, info() {}, warn() {}, error() {}, trace() {} } as unknown as Logger,
+    client,
+  });
+  try {
+    const billing = port.billing;
+    if (!billing) throw new Error('expected a paired machine billing port');
+    const free = await billing.getWorkspaceEntitlement(workspaceId);
+    // The device credential, never an account API key, authenticates the read.
+    expect(asked).toEqual([{ workspaceId, credential, machineId: 'machine' }]);
+    expect(evaluateSessionCreateQuota({ ...free, sessionCount: 199 }).allowed).toBe(true);
+    expect(evaluateSessionCreateQuota({ ...free, sessionCount: 200 })).toMatchObject({
+      allowed: false,
+      reason: 'limit_reached',
+    });
+    const turns = (current: number) =>
+      evaluateBillingQuota({ ...free, current, limit: FREE_SESSION_TURN_LIMIT });
+    expect(turns(29).allowed).toBe(true);
+    expect(turns(30)).toMatchObject({ allowed: false, reason: 'limit_reached' });
+    answer = { valid: true, effectivePlanTier: 'plus', checkoutPending: false };
+    expect(isBillingQuotaExempt(await billing.getWorkspaceEntitlement(workspaceId))).toBe(true);
+    // A revoked device credential gets no plan.
+    answer = { valid: false, reason: 'e2ee_device_revoked' };
+    await expect(billing.getWorkspaceEntitlement(workspaceId)).rejects.toBeInstanceOf(
+      CloudE2eeDeviceRevoked
+    );
+    answer = { valid: false, reason: 'e2ee_machine_pairing_unauthorized' };
+    await expect(billing.getWorkspaceEntitlement(workspaceId)).rejects.toThrow(
+      'e2ee_machine_service_revoked_pair_again'
+    );
+    // Only the paired workspace is ever asked about.
+    asked.length = 0;
+    await expect(billing.getWorkspaceEntitlement('other-workspace')).rejects.toThrow(
+      'e2ee_binding_conflict'
+    );
+    expect(asked).toEqual([]);
+  } finally {
+    await port.dispose?.();
+    vi.unstubAllEnvs();
+  }
+});
+
+it('bounds a paired machine entitlement read while disconnected so the quota can fail open', async () => {
+  const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+  type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const subscriptions = { opened: 0, released: 0 };
+  // A disconnected WebSocket: neither a one-shot query nor a subscription ever answers.
+  const client: Client = {
+    onUpdate: (() => {
+      subscriptions.opened += 1;
+      return () => {
+        subscriptions.released += 1;
+      };
+    }) as unknown as Client['onUpdate'],
+    query: (() => new Promise(() => {})) as Client['query'],
+    close: async () => {},
+  };
+  const port = createCloudE2eeMachinePort({
+    accountId: 'synthetic-machine-owner',
+    workspaceId: 'synthetic-workspace',
+    genesisHash: 'ab'.repeat(32),
+    machineId: 'machine',
+    credential: 'a3'.repeat(32),
+    authBaseUrl: 'https://synthetic.convex.cloud',
+    serverBaseUrl: 'https://relay.synthetic.test',
+    logger: { debug() {}, info() {}, warn() {}, error() {}, trace() {} } as unknown as Logger,
+    client,
+  });
+  try {
+    const billing = port.billing;
+    if (!billing) throw new Error('expected a paired machine billing port');
+    const read = billing.getWorkspaceEntitlement('synthetic-workspace');
+    const settled = expect(read).rejects.toThrow('e2ee_billing_entitlement_timeout');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settled;
+    // Only this read's subscription is released; the shared client stays open.
+    expect(subscriptions).toEqual({ opened: 1, released: 1 });
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  }
+});
+
 it('runs the paired machine port with only one encrypted workspace and a revocable service credential', async () => {
   const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
   type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
@@ -519,7 +636,6 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       'streamsTokens',
       'notifications',
       'usage',
-      'billing',
       'githubTokens',
       'bugReports',
       'sessionSharing',
@@ -557,7 +673,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       key: {
         genesis: 'ab'.repeat(32),
         epoch: 1,
-        publisher: 'cd'.repeat(32),
+        recordHash: 'cd'.repeat(32),
         commitment: 'ef'.repeat(32),
       },
     });
@@ -572,7 +688,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
         key: {
           genesis: 'ab'.repeat(32),
           epoch: 1,
-          publisher: 'cd'.repeat(32),
+          recordHash: 'cd'.repeat(32),
           commitment: 'ef'.repeat(32),
         },
       })

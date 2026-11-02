@@ -90,8 +90,15 @@ const projection = (map: LoroMap) => {
     inputConfig: read('inputConfig'),
     items: read('items'),
     scheduleRun: read('scheduleRun'),
+    derivedFrom: read('derivedFrom'),
   };
 };
+const derivedFromSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).max(256),
+    userTurnId: z.string().trim().min(1).max(256),
+  })
+  .strict();
 
 type Opened = {
   plaintext: Uint8Array;
@@ -265,7 +272,9 @@ export class ExecutionOrigins {
       docId: string,
       id: OpId,
       open: (request: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>
-    ) => Effect.Effect<void, unknown, Scope.Scope>
+    ) => Effect.Effect<void, unknown, Scope.Scope>,
+    /** Origin lookups name only a session/turn; the signed row supplies its config. */
+    lookup: { readonly origin?: boolean } = {}
   ): Effect.fn.Return<
     VerifiedExecutionOriginal | PendingExecutionOriginal | undefined,
     unknown,
@@ -274,7 +283,13 @@ export class ExecutionOrigins {
     const selected = findTurn(doc, intent.userTurnId);
     if (!selected) return undefined;
     const current = projection(selected.map);
-    if (!isDeepStrictEqual(current.inputConfig ?? {}, intent.inputConfig ?? {})) return undefined;
+    if (!lookup.origin && !isDeepStrictEqual(current.inputConfig ?? {}, intent.inputConfig ?? {}))
+      return undefined;
+    const derivedFrom =
+      current.derivedFrom === undefined
+        ? undefined
+        : derivedFromSchema.safeParse(current.derivedFrom);
+    if (derivedFrom && !derivedFrom.success) return undefined;
     const schedule =
       current.scheduleRun === undefined
         ? undefined
@@ -346,6 +361,7 @@ export class ExecutionOrigins {
               requesterCryptoUserId: Buffer.from(opened.author.actor.toBytes()).toString('hex'),
               expiresAt: timestamp + windowMs,
               ...(schedule?.success ? { schedule: schedule.data } : {}),
+              ...(derivedFrom?.success ? { derivedFrom: derivedFrom.data } : {}),
             };
             // Imported/forwarded operations cannot replace an earlier signer with
             // another device's authorization. Conflicting provenance is unknown.

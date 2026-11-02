@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
@@ -173,6 +174,92 @@ const listPublishedToolNames = async (): Promise<string[]> => {
 };
 
 describe('Lody MCP tool catalog', () => {
+  it('serves Skills discovery and on-demand content through the App modern HTTP handler', async () => {
+    const handler = createMcpHandler(buildLodyMcpServer);
+    const request = async (method: string, params: Record<string, unknown> = {}) => {
+      const response = await handler.fetch(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            'mcp-method': method,
+            'mcp-protocol-version': '2026-07-28',
+            ...(typeof params.name === 'string' ? { 'mcp-name': params.name } : {}),
+            ...(method === 'resources/read' && typeof params.uri === 'string'
+              ? { 'mcp-name': params.uri }
+              : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method,
+            params: {
+              ...params,
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientInfo': { name: 'lody-test', version: '1' },
+                'io.modelcontextprotocol/clientCapabilities': {},
+              },
+            },
+          }),
+        })
+      );
+      const body: unknown = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      return body;
+    };
+    try {
+      expect(await request('server/discover')).toMatchObject({
+        result: {
+          capabilities: { resources: {}, extensions: { 'io.modelcontextprotocol/skills': {} } },
+        },
+      });
+      expect(await request('skills/list')).toMatchObject({
+        result: {
+          resultType: 'complete',
+          cacheScope: 'public',
+          ttlMs: 300_000,
+          skills: [
+            {
+              uri: 'skill://lody-automations/SKILL.md',
+              frontmatter: { name: 'lody-automations' },
+              resources: expect.any(Array),
+            },
+          ],
+        },
+      });
+      expect(
+        await request('skills/get', { uri: 'skill://lody-automations/SKILL.md' })
+      ).toMatchObject({
+        result: {
+          resultType: 'complete',
+          skill: { uri: 'skill://lody-automations/SKILL.md' },
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/references/commands.schema.json',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'application/json', text: expect.any(String) }],
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/SKILL.md',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'text/markdown', text: expect.any(String) }],
+        },
+      });
+    } finally {
+      await handler.close();
+    }
+  });
+
   it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
     const server = buildLodyMcpServer();
     const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });

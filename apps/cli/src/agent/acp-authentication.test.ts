@@ -724,6 +724,95 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
+  it('uses a method picked before sign-in started without asking again', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const authenticatedWith = createDeferred<string>();
+    const agent = acp
+      .agent({ name: 'test-preselected-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [
+          { id: 'oauth', name: 'OAuth' },
+          { id: 'api-key', name: 'API key' },
+        ],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
+        authenticatedWith.resolve(params.methodId);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const progressStatuses: string[] = [];
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-preselected',
+      cliType: 'custom',
+      agentType: 'custom-preselected',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      methodId: 'api-key',
+      onProgress: (event) => progressStatuses.push(event.status),
+    });
+
+    await expect(authenticatedWith.promise).resolves.toBe('api-key');
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+    });
+    expect(progressStatuses).not.toContain('auth-methods');
+  });
+
+  it('falls back to the advertised method when a cached pick is stale', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const authenticatedWith = createDeferred<string>();
+    const agent = acp
+      .agent({ name: 'test-stale-method-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'api-key', name: 'API key' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
+        authenticatedWith.resolve(params.methodId);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const progressStatuses: string[] = [];
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-stale-pick',
+      cliType: 'custom',
+      agentType: 'custom-stale-pick',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      methodId: 'oauth',
+      onProgress: (event) => progressStatuses.push(event.status),
+    });
+
+    await expect(authenticatedWith.promise).resolves.toBe('api-key');
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+    });
+    expect(progressStatuses).not.toContain('auth-methods');
+  });
+
   it('cancels a pending custom ACP elicitation and terminates its process', async () => {
     const child = createFakeChild();
     const stdin = new PassThrough();

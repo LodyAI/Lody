@@ -112,3 +112,17 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
+
+
+## Automation markers
+
+- Key workspace, machine, invitation, membership and composer controls expose
+  stable `data-testid` values independent of translated labels. Repeated rows keep
+  the existing full identity attribute (`data-settings-machine-id`,
+  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
+  `data-agent-config-id`).
+  These are public identifiers, never invitation tokens, credentials or key bytes.
+- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
+  it is not execution permission. Tests must still bind the workspace and observe
+  the required content or control surface. Preserve existing semantic/identity
+  attributes so older harnesses continue to work.
