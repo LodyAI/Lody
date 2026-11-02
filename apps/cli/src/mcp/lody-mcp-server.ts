@@ -178,6 +178,16 @@ const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
 const FILE_UPLOAD_TOOL_NAME = 'lody_upload_files';
 const FEEDBACK_TOOL_NAME = 'lody_feedback';
 const MCP_CONFIGURE_TOOL_NAME = 'lody_mcp_configure';
+const SessionShareToolInputSchema = z
+  .object({
+    requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    purpose: z.string().trim().min(1).max(280),
+    sessionIds: z
+      .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
+      .max(31)
+      .optional(),
+  })
+  .strict();
 const SESSION_CREATE_OPTIONS_TOOL_NAME = 'lody_session_create_options';
 const SESSION_CREATE_TOOL_NAME = 'lody_session_create';
 const SESSION_CHAT_TOOL_NAME = 'lody_session_chat';
@@ -833,6 +843,13 @@ const SessionChatManyToolInputSchema = z
 
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
+const OperationBatchGetToolInputSchema = z
+  .object({
+    batchId: z.string().uuid(),
+    cursor: z.string().max(2048).optional(),
+    limit: z.number().int().min(1).max(50).default(20),
+  })
+  .strict();
 
 const SessionArchiveToolInputSchema = z.object({ sessionId: z.string().trim().min(1) }).strict();
 
@@ -4148,16 +4165,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       title: 'Request a conversation share',
       description:
         'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
-      inputSchema: z
-        .object({
-          requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
-          purpose: z.string().trim().min(1).max(280),
-          sessionIds: z
-            .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
-            .max(31)
-            .optional(),
-        })
-        .strict(),
+      inputSchema: SessionShareToolInputSchema,
     },
     async (args, extra) => {
       try {
@@ -4710,13 +4718,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       description:
         'Read a fixed batch of completed Operation results for the invoking Session and user. Page omitted results without starting another task. Oversized members are returned as member-json fragments; concatenate jsonChunk in offset order and parse once complete.',
       annotations: { readOnlyHint: true },
-      inputSchema: z
-        .object({
-          batchId: z.string().uuid(),
-          cursor: z.string().max(2048).optional(),
-          limit: z.number().int().min(1).max(50).default(20),
-        })
-        .strict(),
+      inputSchema: OperationBatchGetToolInputSchema,
     },
     async (args) => {
       try {
