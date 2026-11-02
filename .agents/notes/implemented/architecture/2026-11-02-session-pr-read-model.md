@@ -27,10 +27,10 @@ client's 15 s poll to the reconciler's 20 s high lane; this is not measured.
   context chip, and in action gating (`liveCiFailed`). None of these overrides
   took part in the provider-revision comparison that metadata readers use.
 - Invalidation-driven and mount rereads in `use-github-pr-details.ts` used the
-  default fetch cache mode. GitHub answers `Cache-Control: private,
-  max-age=60`, so a reread could return the stale response. It was still
-  recorded as a fresh read, so that server version bump never refetched; only
-  the 15 s fallback poll bypassed the cache.
+  default fetch cache mode. GitHub answers
+  `Cache-Control: private, max-age=60`, so a reread could return the stale
+  response. It was still recorded as a fresh read, so that server version bump
+  never refetched; only the 15 s fallback poll bypassed the cache.
 - Current-PR selection lived in `session-list-rows.ts`,
   `session-tasklist-mapping.ts`, `session-github-state.ts` and
   `archive-view.tsx`. Only `session-github-state.ts` restricted Project groups
