@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
+import { useTranslation } from 'react-i18next';
+import { toast } from '@/lib/toast';
 import { MACHINE_PROTOCOL_CAPABILITIES, machineSupportsProtocolCapability } from '@lody/shared';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -62,8 +64,11 @@ type Snapshot = {
   key: string;
   views: SessionContinuationView[];
   settings: AutomationSettings | null;
+  listError: boolean;
+  settingsUnavailable: boolean;
 };
 export function useLocalSessionContinuation(requestedTarget: Target | null, visible: boolean) {
+  const { t } = useTranslation();
   const machine = useAtomValue(
     getMachineMetaByIdAtomFamily(requestedTarget?.machineId as MachineId | undefined)
   );
@@ -75,10 +80,16 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
   );
   const target = supported ? requestedTarget : null;
   const key = target
-    ? `${target.workspaceId}:${target.machineId}:${target.sessionId}:${target.remote?.requesterUserId ?? ''}`
+    ? JSON.stringify([
+        target.workspaceId,
+        target.machineId,
+        target.sessionId,
+        target.remote?.requesterUserId ?? null,
+      ])
     : '';
+  const currentKey = useRef(key);
+  currentKey.current = key;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [errorKey, setErrorKey] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
@@ -112,35 +123,30 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
   useEffect(() => {
     if (!workspaceId || !machineId || !sessionId) {
       setSnapshot(null);
-      setErrorKey(null);
       return undefined;
     }
     if (!visible) return undefined;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
-      try {
-        const [waits, settings] = await Promise.allSettled([
-          execute({ type: 'list' }),
-          execute({ type: 'settings' }),
-        ]);
-        if (waits.status !== 'fulfilled' || waits.value.type !== 'list')
-          throw new Error('invalid response');
-        if (active) {
-          setSnapshot({
+      const [waits, settings] = await Promise.allSettled([
+        execute({ type: 'list' }),
+        execute({ type: 'settings' }),
+      ]);
+      if (active) {
+        const listOk = waits.status === 'fulfilled' && waits.value.type === 'list';
+        const settingsOk = settings.status === 'fulfilled' && settings.value.type === 'settings';
+        setSnapshot((previous) => {
+          const sameTarget = previous?.key === key ? previous : null;
+          return {
             key,
-            views: waits.value.waits.map(toView),
-            settings:
-              settings.status === 'fulfilled' && settings.value.type === 'settings'
-                ? settings.value.settings
-                : null,
-          });
-          setErrorKey(null);
-        }
-      } catch {
-        if (active) setErrorKey(key);
-      } finally {
-        if (active) timer = setTimeout(() => void read(), 15_000);
+            views: listOk ? waits.value.waits.map(toView) : (sameTarget?.views ?? []),
+            settings: settingsOk ? settings.value.settings : (sameTarget?.settings ?? null),
+            listError: !listOk,
+            settingsUnavailable: !settingsOk,
+          };
+        });
+        timer = setTimeout(() => void read(), 15_000);
       }
     };
     void read();
@@ -158,16 +164,40 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
       if (!target || busy) return;
       setBusy(true);
       try {
-        await execute(command);
-        setErrorKey(null);
-        refresh();
+        const result = await execute(command);
+        if (result.type !== (command.type === 'cancel' ? 'cancel' : 'settings')) {
+          throw new Error('Invalid automation response');
+        }
       } catch {
-        setErrorKey(key);
+        if (currentKey.current === key) {
+          setSnapshot((previous) =>
+            previous?.key === key
+              ? {
+                  ...previous,
+                  ...(command.type === 'cancel'
+                    ? { listError: true }
+                    : { settingsUnavailable: true }),
+                }
+              : previous
+          );
+          toast.error(
+            command.type === 'cancel'
+              ? t(
+                  'sessions.continuation.cancelUnknown',
+                  'Could not confirm whether the wait was cancelled. Checking again…'
+                )
+              : t(
+                  'sessions.continuation.settingsUnknown',
+                  'Could not confirm whether the setting was saved. Checking again…'
+                )
+          );
+        }
       } finally {
+        if (currentKey.current === key) refresh();
         setBusy(false);
       }
     },
-    [target, busy, refresh, key, execute]
+    [target, busy, refresh, execute, t, key]
   );
   const value: SessionContinuationTweaksValue | null = current?.settings
     ? {
@@ -194,7 +224,8 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
     views: current?.views ?? [],
     value,
     recoveryEnabled: current?.settings ? current.settings.recoverCapacity === true : null,
-    error: !!target && errorKey === key,
+    error: current?.listError ?? false,
+    settingsUnavailable: current?.settingsUnavailable ?? false,
     busy,
     refresh,
     setTweak,

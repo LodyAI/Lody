@@ -131,6 +131,22 @@ describe('SessionContinuationNote', () => {
     expect(container.textContent).not.toContain('取消等待');
   });
 
+  it('shows an unavailable status on the phone without a stale countdown', () => {
+    act(() => {
+      root.render(
+        <SessionContinuationNote
+          view={view({ block: 'unavailable' })}
+          now={NOW}
+          compact
+          statusUnavailable
+          onCancel={() => {}}
+        />
+      );
+    });
+    expect(container.textContent).toContain('Status temporarily unavailable. Retrying…');
+    expect(container.textContent).not.toContain('20');
+  });
+
   it('never announces an uncertain delivery as success', () => {
     act(() => {
       root.render(

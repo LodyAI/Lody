@@ -53,6 +53,18 @@ describe('SessionContinuationTweaks', () => {
     expect(onChange).toHaveBeenCalledWith('recoverCapacity', true);
   });
 
+  it('keeps the last settings visible but disabled while unavailable', () => {
+    act(() => {
+      root.render(
+        <SessionContinuationTweaks value={VALUE} onChange={() => {}} disabled unavailable />
+      );
+    });
+    const switches = container.querySelectorAll('button[role="switch"]');
+    expect(switches.length).toBe(3);
+    expect(Array.from(switches).every((item) => item.hasAttribute('disabled'))).toBe(true);
+    expect(container.textContent).toContain('Settings are temporarily unavailable. Retrying…');
+  });
+
   it('disables an unsupported behavior and states the reason', () => {
     act(() => {
       root.render(

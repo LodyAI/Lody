@@ -7140,11 +7140,12 @@ export const SessionChatInterface = memo(
         }
         session={session}
         continuationTweaks={
-          continuation.value && !continuation.error ? (
+          continuation.value ? (
             <SessionContinuationTweaks
               value={continuation.value}
               onChange={continuation.setTweak}
-              disabled={continuation.busy}
+              disabled={continuation.busy || continuation.settingsUnavailable}
+              unavailable={continuation.settingsUnavailable}
               capabilities={{
                 recoverCapacity: {
                   supported:
@@ -7478,6 +7479,7 @@ export const SessionChatInterface = memo(
                                               }
                                               now={continuationNow}
                                               compact={isMobile}
+                                              statusUnavailable={continuation.error}
                                               onCancel={continuation.cancel}
                                               onResume={() => {
                                                 void setTreeCollaborationStopped(session.id, false)
@@ -7492,14 +7494,6 @@ export const SessionChatInterface = memo(
                                           ))}
                                         </ConversationColumn>
                                       ) : null}
-                                      {continuation.error && (
-                                        <ConversationColumn>
-                                          {t(
-                                            'sessions.continuation.connectionError',
-                                            'Unable to reach the local automation service.'
-                                          )}
-                                        </ConversationColumn>
-                                      )}
                                     </>
                                   )
                                 }
