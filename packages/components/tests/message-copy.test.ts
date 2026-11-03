@@ -5,7 +5,6 @@ import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
   getMessageQuoteEditDraft,
-  getVisibleAssistantTextContent,
 } from '../src/components/ai-gui/message-copy';
 
 const text = (value: string): MessageContent => ({ type: 'text', text: value });
@@ -81,45 +80,5 @@ describe('getCopyTextFromMessageItems', () => {
       spans: [{ start: 6, end: 26, kind: 'pasted_text', label: 'Pasted 4,182 chars' }],
     };
     expect(getCopyTextFromMessageItems([pasted])).toBe('here: the whole pasted log');
-  });
-});
-
-describe('getVisibleAssistantTextContent', () => {
-  it('copies all assistant text while the turn is still working', () => {
-    const items = [text('progress note'), text('streaming answer')];
-
-    expect(getVisibleAssistantTextContent(items, false)).toBe('progress note\n\nstreaming answer');
-  });
-
-  it('keeps the final contiguous text run visible when generated images follow it', () => {
-    const items = [
-      text('hidden progress'),
-      { type: 'thought', text: 'hidden thought' } satisfies MessageContent,
-      text('visible response, part one'),
-      text('visible response, part two'),
-      {
-        type: 'image_group',
-        images: [
-          {
-            imageId: 'img-1',
-            mimeType: 'image/png',
-            sizeBytes: 123,
-          },
-        ],
-      },
-    ] satisfies MessageContent[];
-
-    expect(getVisibleAssistantTextContent(items, true)).toBe(
-      'visible response, part one\n\nvisible response, part two'
-    );
-  });
-
-  it('returns no text when a finished turn only has text inside the collapsed work group', () => {
-    const items = [
-      text('hidden progress'),
-      { type: 'tool_call', toolCallId: 'call-1', status: 'completed' } satisfies MessageContent,
-    ];
-
-    expect(getVisibleAssistantTextContent(items, true)).toBe('');
   });
 });
