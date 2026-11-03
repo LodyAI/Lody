@@ -599,6 +599,16 @@ export const EditorEveryFewHours: Story = editor({
     overlap: 'skip',
   },
 });
+/** A typed step the menu does not offer: the "Every" row shows the custom field. */
+export const EditorCustomInterval: Story = editor({
+  initial: {
+    title: 'Queue drain check',
+    prompt: 'Check whether the review queue has drained.',
+    trigger: { kind: 'interval', everyMs: 45 * 60_000, anchorAt: '2026-09-06T00:00:00Z' },
+    misfire: 'skip',
+    overlap: 'skip',
+  },
+});
 export const EditorMonthly: Story = editor({
   initial: {
     title: 'Invoice reminder',
