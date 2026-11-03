@@ -11,7 +11,14 @@ import type { SessionTurn } from './domain';
 
 export type VisibleTranscriptRequest = {
   readonly limit: number;
-  /** Raw position from a previous page; omit for the newest page. */
+  /**
+   * `backward` (default) pages newest-first: the cursor is the raw position the
+   * next older page ends before. `forward` pages oldest-first: the cursor is the
+   * raw position the next page starts at, and is returned even at the end so a
+   * caller can resume after later turns are appended.
+   */
+  readonly direction?: 'backward' | 'forward';
+  /** Raw position from a previous page; omit for the newest (or oldest) page. */
   readonly cursor?: string;
   /** Decides whether a raw turn is part of the displayable transcript. */
   readonly isVisible: (turn: SessionTurn) => boolean;
@@ -25,8 +32,8 @@ export type VisibleTranscriptPage = {
   readonly hasMore: boolean;
 };
 
-const parseCursor = (cursor: string | undefined, total: number): number => {
-  if (cursor === undefined) return total;
+const parseCursor = (cursor: string | undefined, total: number, fallback = total): number => {
+  if (cursor === undefined) return fallback;
   const parsed = Number.parseInt(cursor, 10);
   if (!Number.isFinite(parsed)) return total;
   return Math.max(0, Math.min(total, parsed));
@@ -39,6 +46,7 @@ export async function pageVisibleTranscript(
   const limit = Math.max(0, Math.floor(request.limit));
   if (limit === 0) return { turns: [], positions: [], hasMore: false };
   const total = await reader.count();
+  if (request.direction === 'forward') return pageForward(reader, request, limit, total);
   let index = parseCursor(request.cursor, total) - 1;
   const page: Array<{ index: number; turn: SessionTurn }> = [];
   let hasMore = false;
@@ -59,4 +67,27 @@ export async function pageVisibleTranscript(
     ...(nextCursor !== undefined ? { nextCursor } : {}),
     hasMore: hasMore && nextCursor !== undefined,
   };
+}
+
+async function pageForward(
+  reader: SessionHistoryReader,
+  request: VisibleTranscriptRequest,
+  limit: number,
+  total: number
+): Promise<VisibleTranscriptPage> {
+  let index = parseCursor(request.cursor, total, 0);
+  const turns: SessionTurn[] = [];
+  const positions: number[] = [];
+  let hasMore = false;
+  for (; index < total; index += 1) {
+    const read = await reader.readAt(index);
+    if (read.state !== 'ready' || !request.isVisible(read.turn)) continue;
+    if (turns.length >= limit) {
+      hasMore = true;
+      break;
+    }
+    turns.push(read.turn);
+    positions.push(index);
+  }
+  return { turns, positions, nextCursor: String(index), hasMore };
 }

@@ -5,6 +5,7 @@ import {
 } from '@lody/shared';
 import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
 import { LoroStreamsRpcResponseSchema } from './rpc';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import { isE2eeReadQuery, type E2eeQueryInput, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   FileDownloadRequestSchema,
@@ -177,6 +178,7 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/acp-capabilities-refresh-cancel',
   'session/cancel',
   'session/live-status',
+  'session/withdraw-input',
   'session/steer',
   'session/goal',
   'session/terminate',
@@ -386,7 +388,7 @@ type RpcServerDeps = {
   maxPendingRequests?: number;
   /** Required for history writes; retain a refusal until the original request expires. */
   historyRequestRejections?: SessionHistoryRpcRejectionStore;
-  getMachineStatus: () => Promise<MachineStatusResponse>;
+  getMachineStatus: (args?: { includeDisk?: boolean }) => Promise<MachineStatusResponse>;
   getPreviewControl?: () => Promise<MachinePreviewControlResponse>;
   getAutomationControl?: () => Promise<RemoteAutomationHandshake>;
   controlAutomation?: (args: {
@@ -469,7 +471,14 @@ type RpcServerDeps = {
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
+    includeActivity?: boolean;
   }) => Promise<LoroSessionLiveStatusRpcResponse>;
+  withdrawSessionInput?: (args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+    userId: string;
+  }) => Promise<SessionWithdrawInputResponse>;
   steerSession?: (args: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -1172,7 +1181,9 @@ export class LoroStreamsMachineRpcServer {
       }
       switch (request.method) {
         case 'machine/status': {
-          const response = await this.deps.getMachineStatus();
+          const response = await this.deps.getMachineStatus(
+            request.params.includeDisk ? { includeDisk: true } : undefined
+          );
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
@@ -1544,6 +1555,23 @@ export class LoroStreamsMachineRpcServer {
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'session/withdraw-input': {
+          if (!this.deps.withdrawSessionInput) {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Queued input withdrawal is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.withdrawSessionInput({
+            sessionId: request.params.sessionId as SessionId,
+            userTurnId: request.params.userTurnId,
+            requesterSessionId: request.params.requesterSessionId as SessionId,
+            userId: request.params.userId,
+          });
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'session/cancel': {
           if (!this.deps.cancelSession) {
             await appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1574,6 +1602,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const response = await this.deps.getSessionLiveStatus({
             sessionId: request.params.sessionId as SessionId,
+            ...(request.params.includeActivity ? { includeActivity: true } : {}),
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -2385,6 +2414,7 @@ export class LoroStreamsMachineRpcServer {
       | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
+      | SessionWithdrawInputResponse
       | SessionSteerResponse
       | SessionGoalResponse
       | SessionTerminateResponse
