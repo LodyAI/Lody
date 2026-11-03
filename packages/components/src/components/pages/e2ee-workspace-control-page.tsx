@@ -29,7 +29,10 @@ const styles = stylex.create({
     overflowY: 'auto',
     backgroundColor: colors.background,
     color: colors.label,
-    paddingBlock: space[6],
+    // Native shells draw under the status bar (`viewport-fit=cover`); without
+    // the inset the back button sits under it in portrait and cannot be tapped.
+    paddingTop: `max(${space[6]}, env(safe-area-inset-top))`,
+    paddingBottom: `max(${space[6]}, env(safe-area-inset-bottom))`,
     paddingInline: { default: space[6], '@media (max-width: 520px)': space[4] },
     fontSize: type.bodySize,
     lineHeight: 1.45,
