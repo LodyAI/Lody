@@ -53,6 +53,31 @@ export const assistantOutputPreview = (
   return text.length > 0 ? truncateTargetOutput(text) : undefined;
 };
 
+const MAX_FAILURE_DETAIL_CHARS = 500;
+
+/**
+ * Explains a failed target from the durable `chat_failed` notice recorded after
+ * its user turn. The reason and original message travel in the error message so
+ * older readers of the strict Operation result schema keep working. Without a
+ * notice the generic text stands; a cause is never guessed.
+ */
+export const targetFailureMessage = (output: readonly SessionHistoryInput[]): string => {
+  for (const entry of output) {
+    if (entry.role !== 'system') continue;
+    for (const item of entry.items ?? []) {
+      if (item.type !== 'system_notice' || item.name !== 'chat_failed') continue;
+      const meta = (item.meta ?? {}) as { reason?: unknown; message?: unknown };
+      const reason = typeof meta.reason === 'string' ? meta.reason : 'unknown';
+      const detail =
+        typeof meta.message === 'string' && meta.message.trim()
+          ? `: ${Array.from(meta.message.trim()).slice(0, MAX_FAILURE_DETAIL_CHARS).join('')}`
+          : '';
+      return `Target Turn failed (${reason})${detail}`;
+    }
+  }
+  return 'Target Turn failed.';
+};
+
 export const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
 export function progressIsSettled(

@@ -21,6 +21,7 @@ import {
   assistantOutputPreview,
   isTerminalAssistantEntry,
   progressIsSettled,
+  targetFailureMessage,
 } from './coordinator-model';
 import { CoordinatorPorts, type CoordinatorHistory } from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
@@ -435,7 +436,7 @@ export class CoordinatorWorkflow {
           status: 'failed',
           ...(item.label ? { label: item.label } : {}),
           target: item.target,
-          error: makeLodyError('TARGET_FAILED', 'Target Turn failed.', false),
+          error: makeLodyError('TARGET_FAILED', targetFailureMessage(targetOutput), false),
         };
       }
       if (userTurn?.status === 'delivery_unknown') {
