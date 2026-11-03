@@ -8,14 +8,12 @@ import { spawnSync } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { setImmediate as nextTurn } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ZSTD_INITIALIZATION_TIMEOUT_MS = 10000;
-// Hang guard only. The predicate can wait on reading zstd.wasm, and that read
-// can outlast a fixed number of event-loop turns. The product's 10 second
-// timeout stays the captured fake timer and is not a real sleep.
-const CONDITION_DEADLINE_MS = 15000;
+// Only the child process hang guard uses wall time. Every test transition below
+// waits for a published signal or the operation's result.
+const PROCESS_TIMEOUT_MS = 20000;
 
 const scriptPath = fileURLToPath(import.meta.url);
 
@@ -23,10 +21,14 @@ export async function verifyRelocatedZstdRuntime(sourceEntry) {
   if (typeof global.gc !== 'function') {
     const result = spawnSync(process.execPath, ['--expose-gc', scriptPath, sourceEntry], {
       encoding: 'utf8',
+      timeout: PROCESS_TIMEOUT_MS,
     });
     if (result.status !== 0) {
       throw new Error(
-        result.stderr || result.stdout || `zstd runtime check exited ${result.status}`
+        result.stderr ||
+          result.stdout ||
+          result.error?.message ||
+          `zstd runtime check exited ${result.status}`
       );
     }
     return;
@@ -86,24 +88,33 @@ function errorText(error) {
   return String(error);
 }
 
-async function until(predicate, label) {
-  const deadline = Date.now() + CONDITION_DEADLINE_MS;
-  while (!predicate()) {
-    if (Date.now() >= deadline) {
-      throw new Error(`condition was not reached: ${label}`);
-    }
-    await nextTurn();
-  }
+function signal() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+// An indexed signal also works when the event happens before its waiter starts.
+function events() {
+  const values = [];
+  const waiting = [];
+  return {
+    publish(value) {
+      const index = values.push(value) - 1;
+      waiting[index]?.resolve(value);
+    },
+    at(index) {
+      if (index < values.length) return Promise.resolve(values[index]);
+      return (waiting[index] ??= signal()).promise;
+    },
+  };
 }
 
 function track(promise) {
-  const state = {
-    settled: false,
-    status: 'pending',
-    value: undefined,
-    reason: undefined,
-  };
-  promise.then(
+  const state = { settled: false, status: 'pending', value: undefined, reason: undefined };
+  state.done = promise.then(
     (value) => {
       state.settled = true;
       state.status = 'fulfilled';
@@ -122,20 +133,24 @@ function installRuntimeControls() {
   const realSetTimeout = globalThis.setTimeout;
   const realClearTimeout = globalThis.clearTimeout;
   const realInstantiate = WebAssembly.instantiate;
-  const timers = [];
-  const gates = [];
+  const timers = events();
+  const gates = events();
   let instantiateCalls = 0;
 
   globalThis.setTimeout = (callback, delay, ...args) => {
     if (delay === ZSTD_INITIALIZATION_TIMEOUT_MS) {
       const timer = { callback, args, delay, cleared: false };
-      timers.push(timer);
+      timers.publish(timer);
       return timer;
     }
     return realSetTimeout(callback, delay, ...args);
   };
   globalThis.clearTimeout = (timer) => {
-    if (timer != null && typeof timer === 'object' && timer.delay === ZSTD_INITIALIZATION_TIMEOUT_MS) {
+    if (
+      timer != null &&
+      typeof timer === 'object' &&
+      timer.delay === ZSTD_INITIALIZATION_TIMEOUT_MS
+    ) {
       timer.cleared = true;
       return;
     }
@@ -143,9 +158,8 @@ function installRuntimeControls() {
   };
   WebAssembly.instantiate = (...args) => {
     instantiateCalls += 1;
-    // Register the gate before compilation finishes. release() waits for the
-    // real compile; fail() does not. The caller keeps polling until this gate
-    // exists, so a slow wasm read or compile does not end the check early.
+    // Publish before compilation finishes. Tests await this signal, while
+    // release() waits for real compilation and fail() injects a failure.
     let compiled;
     try {
       compiled = Promise.resolve(realInstantiate(...args));
@@ -157,7 +171,7 @@ function installRuntimeControls() {
       () => {}
     );
     return new Promise((resolve, reject) => {
-      gates.push({
+      gates.publish({
         release: () =>
           compiled.then(
             (value) => {
@@ -217,11 +231,7 @@ async function checkLateSuccessReusesStartedRuntime(sourceEntry) {
       return held;
     })(document);
     document = null;
-    await until(
-      () => controls.gates.length === 1 && controls.timers.length === 1,
-      'first instantiate and its timeout'
-    );
-    const firstTimer = controls.timers[0];
+    const [gate, firstTimer] = await Promise.all([controls.gates.at(0), controls.timers.at(0)]);
     firstTimer.callback();
     let rejection = null;
     try {
@@ -232,46 +242,35 @@ async function checkLateSuccessReusesStartedRuntime(sourceEntry) {
     assert(rejection != null, 'timed-out compression resolved');
     assert(
       errorText(rejection).includes('timed out'),
-      `timed-out compression rejected with ${errorText(rejection)}`
+      `unexpected rejection: ${errorText(rejection)}`
     );
     global.gc();
     assert(retained.deref() === undefined, 'timed-out compression kept the caller document');
 
     const joined = track(runtime.compress(payload));
-    await until(
-      () => joined.settled || controls.timers.length >= 2 || controls.instantiateCount() >= 2,
-      'later compress joining the timed-out initialization'
-    );
+    // A new waiter must register its own deadline. Early settlement is also an
+    // explicit result, so regressions fail rather than wait for the hang guard.
+    await Promise.race([controls.timers.at(1), joined.done]);
     assert(
       controls.instantiateCount() === 1,
       `timed-out initialization started ${controls.instantiateCount()} instantiates`
     );
-    assert(!joined.settled, `later compress settled while the original instantiate was still held (${joined.status})`);
+    assert(!joined.settled, `later compress settled before release (${joined.status})`);
     firstTimer.callback();
-    await nextTurn();
-    await nextTurn();
-    assert(
-      !joined.settled,
-      `replaying the first timeout settled a later compress (${joined.status}: ${errorText(joined.reason)})`
-    );
-
-    await controls.gates[0].release();
-    await until(() => joined.settled, 'later compress after the original instantiate succeeded');
+    await gate.release();
+    await joined.done;
+    // A stale callback must not reject the waiter. Its eventual successful
+    // result proves that without guessing how many microtasks rejection needs.
     assert(
       joined.status === 'fulfilled',
       `late instantiate success left compress ${joined.status}: ${errorText(joined.reason)}`
     );
-    const restored = await runtime.decompress(joined.value);
     assert(
-      Buffer.from(restored).equals(Buffer.from(payload)),
+      Buffer.from(await runtime.decompress(joined.value)).equals(Buffer.from(payload)),
       'late instantiate success did not round-trip'
     );
-
-    await roundTrip(runtime, payload, 'compress after the runtime had already started did not round-trip');
-    assert(
-      controls.instantiateCount() === 1,
-      `an already-started runtime was instantiated again (${controls.instantiateCount()})`
-    );
+    await roundTrip(runtime, payload, 'already-started runtime did not round-trip');
+    assert(controls.instantiateCount() === 1, 'an already-started runtime was instantiated again');
     let firstStillRejected = false;
     try {
       await pending;
@@ -286,42 +285,29 @@ async function checkStaleAttemptDoesNotSettleReplacement(sourceEntry) {
   await withWasmRuntime(sourceEntry, 'stale-attempt', async (runtime, controls) => {
     const payload = new TextEncoder().encode('replacement attempt');
     const first = track(runtime.compress(payload));
-    await until(
-      () => controls.gates.length === 1 && controls.timers.length === 1,
-      'first attempt'
-    );
-    const staleTimer = controls.timers[0];
-    controls.gates[0].fail(new Error('instantiate failed on purpose'));
-    await until(() => first.settled, 'failed instantiate rejection');
+    const [firstGate, staleTimer] = await Promise.all([
+      controls.gates.at(0),
+      controls.timers.at(0),
+    ]);
+    firstGate.fail(new Error('instantiate failed on purpose'));
+    await first.done;
     assert(first.status === 'rejected', 'a failed instantiate resolved compress');
     assert(controls.instantiateCount() === 1, 'the failed attempt instantiated more than once');
 
     const replacement = track(runtime.compress(payload));
-    await until(
-      () => controls.gates.length === 2 && controls.timers.length >= 2,
-      'replacement instantiate'
-    );
+    const [replacementGate] = await Promise.all([controls.gates.at(1), controls.timers.at(1)]);
     staleTimer.callback();
-    await nextTurn();
-    await nextTurn();
-    assert(
-      !replacement.settled,
-      `a stale timeout from the failed attempt settled the replacement (${replacement.status}: ${errorText(replacement.reason)})`
-    );
-
-    await controls.gates[1].release();
-    await until(() => replacement.settled, 'replacement compress');
+    await replacementGate.release();
+    await replacement.done;
     assert(
       replacement.status === 'fulfilled',
-      `replacement compress rejected: ${errorText(replacement.reason)}`
+      `stale timeout rejected replacement: ${errorText(replacement.reason)}`
     );
-    const restored = await runtime.decompress(replacement.value);
     assert(
-      Buffer.from(restored).equals(Buffer.from(payload)),
+      Buffer.from(await runtime.decompress(replacement.value)).equals(Buffer.from(payload)),
       'replacement runtime did not round-trip'
     );
     staleTimer.callback();
-    await nextTurn();
     await roundTrip(runtime, payload, 'stale timeout broke the ready runtime');
     assert(controls.instantiateCount() === 2, 'replacement did not keep its own instantiate');
   });
@@ -331,36 +317,41 @@ async function checkLateFailureStillAllowsReplacement(sourceEntry) {
   await withWasmRuntime(sourceEntry, 'late-failure', async (runtime, controls) => {
     const payload = new TextEncoder().encode('late failure');
     const first = track(runtime.compress(payload));
-    await until(
-      () => controls.gates.length === 1 && controls.timers.length === 1,
-      'instantiate held before a late failure'
+    const [firstGate, firstTimer] = await Promise.all([
+      controls.gates.at(0),
+      controls.timers.at(0),
+    ]);
+    firstTimer.callback();
+    await first.done;
+    assert(first.status === 'rejected', 'timed-out compress resolved before instantiate failed');
+
+    // Join the still-running attempt before failing it. This caller's rejection
+    // signals that the failure propagated through the loader and cache cleanup;
+    // it replaces the old assumption that two event-loop turns were enough.
+    const joiningFailure = track(runtime.compress(payload));
+    await Promise.race([controls.timers.at(1), joiningFailure.done]);
+    assert(!joiningFailure.settled, 'late-failure waiter did not join the held instantiate');
+    assert(controls.instantiateCount() === 1, 'late-failure waiter started another instantiate');
+    firstGate.fail(new Error('late instantiate failure'));
+    await joiningFailure.done;
+    assert(joiningFailure.status === 'rejected', 'late instantiate failure resolved compress');
+    assert(
+      errorText(joiningFailure.reason).includes('late instantiate failure'),
+      `wrong late failure: ${errorText(joiningFailure.reason)}`
     );
-    controls.timers[0].callback();
-    await until(() => first.settled, 'timeout before the late failure');
-    assert(first.status === 'rejected', 'timed-out compress resolved before the instantiate failed');
-    controls.gates[0].fail(new Error('late instantiate failure'));
-    await nextTurn();
-    await nextTurn();
 
     const replacement = track(runtime.compress(payload));
-    await until(() => controls.gates.length === 2 && controls.timers.length >= 2, 'replacement after a late failure');
-    controls.timers[0].callback();
-    await nextTurn();
-    await nextTurn();
-    assert(
-      !replacement.settled,
-      `the timed-out attempt settled the replacement after a late failure (${replacement.status}: ${errorText(replacement.reason)})`
-    );
-    await controls.gates[1].release();
-    await until(() => replacement.settled, 'replacement compress after a late failure');
+    const [replacementGate] = await Promise.all([controls.gates.at(1), controls.timers.at(2)]);
+    firstTimer.callback();
+    await replacementGate.release();
+    await replacement.done;
     assert(
       replacement.status === 'fulfilled',
-      `replacement after a late failure rejected: ${errorText(replacement.reason)}`
+      `replacement after late failure rejected: ${errorText(replacement.reason)}`
     );
-    const restored = await runtime.decompress(replacement.value);
     assert(
-      Buffer.from(restored).equals(Buffer.from(payload)),
-      'replacement after a late failure did not round-trip'
+      Buffer.from(await runtime.decompress(replacement.value)).equals(Buffer.from(payload)),
+      'replacement after late failure did not round-trip'
     );
   });
 }
@@ -371,21 +362,18 @@ async function checkOverlappingInstantiationSharesRuntime(sourceEntry) {
     const secondPayload = new TextEncoder().encode('beta payload !!');
     const first = track(runtime.compress(firstPayload));
     const second = track(runtime.compress(secondPayload));
-    await until(
-      () => controls.gates.length === 1 && (first.settled || second.settled || controls.instantiateCount() >= 1),
-      'overlapping compress'
-    );
-    await nextTurn();
-    await nextTurn();
+    const gate = await controls.gates.at(0);
+    assert(!first.settled && !second.settled, 'compress settled before instantiate finished');
+    await gate.release();
+    await Promise.all([first.done, second.done]);
     assert(
-      controls.instantiateCount() === 1,
-      `overlapping compress started ${controls.instantiateCount()} instantiates`
+      first.status === 'fulfilled',
+      `first overlapping compress rejected: ${errorText(first.reason)}`
     );
-    assert(!first.settled && !second.settled, 'overlapping compress settled before instantiate finished');
-    await controls.gates[0].release();
-    await until(() => first.settled && second.settled, 'overlapping compress after instantiate');
-    assert(first.status === 'fulfilled', `first overlapping compress rejected: ${errorText(first.reason)}`);
-    assert(second.status === 'fulfilled', `second overlapping compress rejected: ${errorText(second.reason)}`);
+    assert(
+      second.status === 'fulfilled',
+      `second overlapping compress rejected: ${errorText(second.reason)}`
+    );
     assert(
       Buffer.from(await runtime.decompress(first.value)).equals(Buffer.from(firstPayload)),
       'overlapping instantiation changed the first payload'
@@ -394,10 +382,10 @@ async function checkOverlappingInstantiationSharesRuntime(sourceEntry) {
       Buffer.from(await runtime.decompress(second.value)).equals(Buffer.from(secondPayload)),
       'overlapping instantiation changed the second payload'
     );
-    await roundTrip(runtime, firstPayload, 'compress after a shared instantiate did not round-trip');
+    await roundTrip(runtime, firstPayload, 'compress after shared instantiate did not round-trip');
     assert(
       controls.instantiateCount() === 1,
-      `a shared runtime was instantiated again (${controls.instantiateCount()})`
+      `overlapping compress started ${controls.instantiateCount()} instantiates`
     );
   });
 }
@@ -472,22 +460,29 @@ async function runChecks(sourceEntry) {
     process.off('unhandledRejection', onUnhandled);
   }
   if (unhandled.length > 0) {
-    throw new Error(`unhandled zstd rejections: ${unhandled.join(' | ')}`, { cause: failure ?? undefined });
+    throw new Error(`unhandled zstd rejections: ${unhandled.join(' | ')}`, {
+      cause: failure ?? undefined,
+    });
   }
   if (failure != null) throw failure;
 }
 
-const invokedDirectly =
-  process.argv[1] != null && path.resolve(process.argv[1]) === scriptPath;
+const invokedDirectly = process.argv[1] != null && path.resolve(process.argv[1]) === scriptPath;
 if (invokedDirectly) {
   const entry = process.argv[2];
   if (entry == null || entry.length === 0) {
     console.error('usage: verify-zstd-wasm-runtime.mjs <zstd-entry>');
     process.exitCode = 1;
   } else {
-    verifyRelocatedZstdRuntime(entry).catch((error) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+    const watchdog = setTimeout(() => {
+      console.error('zstd runtime check exceeded its process hang guard');
+      process.exit(1);
+    }, PROCESS_TIMEOUT_MS);
+    verifyRelocatedZstdRuntime(entry)
+      .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      })
+      .finally(() => clearTimeout(watchdog));
   }
 }
