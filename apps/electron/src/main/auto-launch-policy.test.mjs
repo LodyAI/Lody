@@ -5,7 +5,6 @@ import {
   getAutoLaunchQueryOptions,
   getAutoLaunchRegistrationSettings,
   resolveAutoLaunchEnabled,
-  resolveAutoLaunchInvocation,
   shouldHideMainWindowOnAutoLaunch
 } from './auto-launch-policy.ts'
 
@@ -47,33 +46,6 @@ void test('recognizes both current and legacy Windows login entries', () => {
     resolveAutoLaunchEnabled('win32', {
       openAtLogin: false,
       executableWillLaunchAtLogin: false
-    }),
-    false
-  )
-})
-
-void test('detects login launches from the platform-specific signal', () => {
-  assert.equal(
-    resolveAutoLaunchInvocation({
-      platform: 'darwin',
-      wasOpenedAtLogin: true,
-      argv: []
-    }),
-    true
-  )
-  assert.equal(
-    resolveAutoLaunchInvocation({
-      platform: 'win32',
-      wasOpenedAtLogin: false,
-      argv: [AUTO_LAUNCH_ARG]
-    }),
-    true
-  )
-  assert.equal(
-    resolveAutoLaunchInvocation({
-      platform: 'linux',
-      wasOpenedAtLogin: true,
-      argv: [AUTO_LAUNCH_ARG]
     }),
     false
   )

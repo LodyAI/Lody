@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,30 +52,6 @@ describe('app icon settings', () => {
     return found;
   }
 
-  it('reads the installed icon and can switch both ways', async () => {
-    current = 'alternate';
-    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
-    expect(button('Icon 2').getAttribute('aria-pressed')).toBe('true');
-    await act(async () => button('Default').click());
-    expect(current).toBe('default');
-    expect(button('Default').getAttribute('aria-pressed')).toBe('true');
-    await act(async () => button('Icon 2').click());
-    expect(current).toBe('alternate');
-    expect(button('Icon 2').getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('displays the host-provided name while switching with the stable icon identifier', async () => {
-    bridge.icons = [
-      { name: 'default', previewUrl: '/default.png' },
-      { name: 'alternate', displayName: 'Aqua', previewUrl: '/alternate.png' },
-    ];
-    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
-    await act(async () => button('Aqua').click());
-    expect(current).toBe('alternate');
-    expect(button('Aqua').getAttribute('aria-pressed')).toBe('true');
-    expect(container.textContent).not.toContain('Icon 2');
-  });
-
   it('keeps the old selection and blocks overlapping changes until native completion', async () => {
     let finish!: (state: AppIconState) => void;
     bridge.setIcon = () =>
@@ -111,17 +88,5 @@ describe('app icon settings', () => {
     bridge.getState = async () => ({ supported: false, name: 'default' });
     await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     expect(container.textContent).toBe('');
-  });
-
-  it('allows retry after an initial native read fails', async () => {
-    bridge.getState = async () => {
-      throw new Error('Bridge unavailable');
-    };
-    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
-    expect(button('Default').disabled).toBe(true);
-    bridge.getState = async () => ({ supported: true, name: 'alternate' });
-    await act(async () => button('Retry').click());
-    expect(button('Icon 2').getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 });

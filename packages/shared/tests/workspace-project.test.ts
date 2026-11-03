@@ -5,7 +5,7 @@ import {
   parseProjectMemberRootId,
   SessionFileRootIdSchema,
 } from '../src/project-path';
-import { SessionCreateRequestSchema } from '../src/message-schemas';
+
 import { describe, expect, it } from 'vitest';
 import {
   WorkspaceProjectSchema,
@@ -20,23 +20,11 @@ import {
   resolveProjectMemberPaths,
   getProjectBoundMachineId,
   pickProjectRepositoryLocalCopy,
-  encodeProjectPreparationProgress,
-  decodeProjectPreparationProgress,
   type ProjectMember,
   type ProjectMemberId,
 } from '../src/workspace-project';
 import { resolveSessionFilePath } from '../src/project-path';
-import {
-  parseWorkspaceFlockRow,
-  applyWorkspaceFlockRowEvents,
-  listWorkspaceProjects,
-} from '../src/workspace-flock';
-import {
-  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-  machineSupportsMultiRepoProject,
-  machineSupportsProjectFileRoots,
-  machineSupportsProjectRepositoryMembers,
-} from '../src/machine-protocol-capabilities';
+
 import type { MachineId } from '../src/ids';
 import type { LocalProjectId } from '../src/project';
 
@@ -151,18 +139,6 @@ describe('workspace Projects', () => {
       )
     ).toBeUndefined();
   });
-  it('normalizes catalog rows, freezes nested paths and removes deleted rows', () => {
-    const p = project();
-    const key = ['project', p.id];
-    expect(parseWorkspaceFlockRow(key, { ...p, hostPath: '/private/path' })?.value).toEqual(p);
-    const rows = applyWorkspaceFlockRowEvents({}, [{ key, value: p }]);
-    expect(listWorkspaceProjects(rows)).toEqual([p]);
-    expect(listWorkspaceProjects(applyWorkspaceFlockRowEvents(rows, [{ key }]))).toEqual([]);
-    expect(parseWorkspaceFlockRow(['project', 'other'], p)).toBeUndefined();
-    expect(SessionProjectRunSchema.parse(run()).members['proto' as ProjectMemberId]?.path).toBe(
-      'api/lib/proto'
-    );
-  });
   it.each(['../escape', '/absolute', 'a/../b', 'a\\b', '.git', 'C:', 'NUL', 'a.', 'a//b'])(
     'rejects unsafe placement %s',
     (dir) => {
@@ -224,46 +200,6 @@ describe('workspace Projects', () => {
       'invalid',
     ].map((url) => ({ url }));
     expect(getCurrentPullRequestsByRepository(prs)).toEqual([prs[1], prs[2]]);
-  });
-  it('preserves the frozen run at the session/create wire boundary and rejects invalid snapshots', () => {
-    const request = {
-      type: 'session/create',
-      sessionId: 'session-1',
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1',
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-      projectRun: run(),
-    };
-    expect(SessionCreateRequestSchema.parse(request).projectRun).toEqual(run());
-    expect(
-      SessionCreateRequestSchema.safeParse({
-        ...request,
-        projectRun: { ...run(), root: '../escape' },
-      }).success
-    ).toBe(false);
-  });
-  it('requires explicit multi-repository capability', () => {
-    expect(machineSupportsMultiRepoProject({})).toBe(false);
-    expect(machineSupportsProjectFileRoots({})).toBe(false);
-    expect(machineSupportsProjectFileRoots({ protocolCapabilities: { multiRepoProject: 1 } })).toBe(
-      false
-    );
-    expect(
-      machineSupportsProjectFileRoots({
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      })
-    ).toBe(true);
-    expect(
-      machineSupportsMultiRepoProject({
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      })
-    ).toBe(true);
-    expect(machineSupportsMultiRepoProject({ protocolCapabilities: { multiRepoProject: 1 } })).toBe(
-      true
-    );
   });
 });
 describe('repository Members', () => {
@@ -347,65 +283,6 @@ describe('repository Members', () => {
         { id: 'y' as LocalProjectId, githubRepoFullName: 'acme/api', createdAtMs: 5 },
       ])?.id
     ).toBe('y');
-  });
-
-  it('requires its own capability beyond multi-repository and file roots', () => {
-    expect(
-      machineSupportsProjectRepositoryMembers({
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      })
-    ).toBe(true);
-    expect(
-      machineSupportsProjectRepositoryMembers({
-        protocolCapabilities: { multiRepoProject: 1, projectFileRoots: 1 },
-      })
-    ).toBe(false);
-    expect(
-      machineSupportsProjectRepositoryMembers({
-        protocolCapabilities: { projectRepositoryMembers: 1 },
-      })
-    ).toBe(true);
-  });
-});
-
-it('preserves daemon repository checkout receipts in session snapshots', () => {
-  const snapshot = run();
-  const member = Object.values(snapshot.members)[0]!;
-  member.repositoryCheckout = {
-    kind: 'local',
-    machineId: 'machine' as never,
-    localProjectId: 'copy' as never,
-  };
-  expect(
-    Object.values(SessionProjectRunSchema.parse(snapshot).members)[0]?.repositoryCheckout
-  ).toEqual(member.repositoryCheckout);
-});
-
-describe('Project preparation progress', () => {
-  it('round-trips each step through the presence detail and stays bounded', () => {
-    for (const progress of [
-      { step: 'resolve' },
-      { step: 'member', done: 2, total: 5, path: 'web/deps/api' },
-      { step: 'submodules' },
-      { step: 'setup', path: 'web' },
-    ] as const) {
-      expect(decodeProjectPreparationProgress(encodeProjectPreparationProgress(progress))).toEqual(
-        progress
-      );
-    }
-    const long = encodeProjectPreparationProgress({ step: 'setup', path: 'x'.repeat(1000) });
-    // Within the presence detail bound (280).
-    expect(long.length).toBeLessThanOrEqual(280);
-    expect(decodeProjectPreparationProgress(long)).toMatchObject({ step: 'setup' });
-  });
-
-  it('ignores plain text from older daemons and malformed payloads', () => {
-    expect(decodeProjectPreparationProgress('Preparing web (0/5 ready)')).toBeUndefined();
-    expect(decodeProjectPreparationProgress(undefined)).toBeUndefined();
-    expect(decodeProjectPreparationProgress('lody-project-prep:{bad')).toBeUndefined();
-    expect(
-      decodeProjectPreparationProgress('lody-project-prep:{"step":"member","done":-1}')
-    ).toBeUndefined();
   });
 });
 

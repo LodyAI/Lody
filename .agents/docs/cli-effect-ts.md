@@ -30,30 +30,11 @@ than repeatedly loading the entire migration roadmap.
 
 ## Effect lint
 
-`pnpm lint:effect` runs five official correctness rules and the community
-`effect/prefer-effect-fn` rule with visible warnings. It is included in
-`check:quick` and `check`; ordinary `lint` and `lint:fast` retain their existing
-rule configuration. Use `pnpm lint:effect -- apps/cli/src/lib` to narrow a run.
-The dedicated config disables nested configs so vendor or embedded workspace
-configs cannot replace this rule set. Generated code and ACP extension workspaces
-are excluded.
-
-The installing workspace includes the unpublished tooling package at
-`scripts/effect-lint`, which pins its own compatible Oxlint and Effect integration.
-The root `prepare` hook patches only those tool binaries; each invocation repeats
-that idempotent patch to support installs with `--ignore-scripts`. The runner
-explicitly selects the matching type-aware engine. Ordinary lint keeps its
-original Oxlint and oxlint-tsgolint versions and does not acquire newly introduced
-React Compiler rules. TypeScript and Effect runtime installations are unchanged.
-For an embedded checkout, run the installing parent workspace's `lint:effect`
-command; do not install a second virtual store in the public checkout.
-
-Warnings are initially advisory. After reviewing and fixing the baseline,
-correctness rules can become errors; `--deny-warnings` is available for a strict
-manual run. The checks do not prove lifecycle ownership, cancellation, or that
-`runSync` only receives synchronous programs. The
-[decision record](../notes/implemented/process/2026-10-13-effect-lint-integration.md)
-records the version selection and validation boundary.
+Generic Effect lint and its diagnostic fixtures have been removed. Retained
+checks must prove a Lody product/domain assumption or a build/release guarantee;
+lifecycle behavior belongs in the owning behavioral suite. Typechecking remains
+part of compilation validation. The previous toolchain selection is retained as
+[historical rationale](../notes/archived/process/2026-10-13-effect-lint-integration.md).
 
 ## When to use Effect
 

@@ -119,11 +119,20 @@ export function collectHydratedRange(
   return turns;
 }
 
+type ConversationConfigSource = { id: string; role: unknown; inputConfig?: unknown };
+
 /** Last result per view, so an unchanged conversation reuses its array. */
-const previousConfigSources = new WeakMap<
-  object,
-  { id: string; role: unknown; inputConfig?: unknown }[]
->();
+const previousConfigSources = new WeakMap<object, ConversationConfigSource[]>();
+const hydratedConfigSources = new WeakMap<SessionHistory, ConversationConfigSource>();
+
+/** Reuse source identity without keeping the hydrated turn and its items alive. */
+function configSourceFromTurn(turn: SessionHistory): ConversationConfigSource {
+  const previous = hydratedConfigSources.get(turn);
+  if (previous) return previous;
+  const source = { id: turn.id, role: turn.role, inputConfig: turn.inputConfig };
+  hydratedConfigSources.set(turn, source);
+  return source;
+}
 
 /**
  * Source rows for `resolveSessionConversationConfig` and the source fence: the
@@ -133,8 +142,8 @@ const previousConfigSources = new WeakMap<
 export function collectConversationConfigSources(
   view: Pick<ConversationView, 'turnCount' | 'index' | 'turn'>,
   tailFrom: number
-): { id: string; role: unknown; inputConfig?: unknown }[] {
-  const sources: { id: string; role: unknown; inputConfig?: unknown }[] = [];
+): ConversationConfigSource[] {
+  const sources: ConversationConfigSource[] = [];
   for (let i = 0; i < tailFrom; i += 1) {
     const row = view.index(i);
     if (!row || row.role !== 'user') continue;
@@ -146,9 +155,10 @@ export function collectConversationConfigSources(
     sources.push(row);
   }
   for (let i = tailFrom; i < view.turnCount; i += 1) {
-    const turn = view.turn(i) ?? view.index(i);
+    const hydrated = view.turn(i);
+    const turn = hydrated ?? view.index(i);
     if (turn && !isUnloadedTurnId(turn.id)) {
-      sources.push(turn as { id: string; role: unknown; inputConfig?: unknown });
+      sources.push(hydrated ? configSourceFromTurn(hydrated) : turn);
     }
   }
   // Callers memoize the resolved configuration on this array's identity, so an

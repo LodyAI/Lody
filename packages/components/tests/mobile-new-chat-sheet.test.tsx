@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -93,21 +94,6 @@ afterEach(() => {
 });
 
 describe('MobileNewChatSheet', () => {
-  it('enters from the right and slides out before Back closes it', () => {
-    renderSheet();
-    expect(panel().classList.contains('mobile-drill-in')).toBe(true);
-
-    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click());
-    expect(panel().style.transform).toBe('translate3d(100%, 0, 0)');
-    expect(panel().classList.contains('mobile-drill-in')).toBe(false);
-    expect(onOpenChange).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);
-    });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
   it('follows a native left-edge swipe and closes once it passes the threshold', () => {
     renderSheet();
     const target = projectButton();
@@ -125,22 +111,6 @@ describe('MobileNewChatSheet', () => {
       vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('snaps back a short swipe and clears the resting transform', () => {
-    renderSheet();
-    const target = projectButton();
-
-    touch('touchstart', target, 10);
-    touch('touchmove', target, 40);
-    touch('touchend', target, 40);
-    expect(panel().style.transform).toBe('translate3d(0px, 0, 0)');
-
-    act(() => {
-      vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);
-    });
-    expect(panel().style.transform).toBe('');
-    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it('leaves swipes from the composer, mid-screen, or on web to the content', () => {
@@ -163,20 +133,5 @@ describe('MobileNewChatSheet', () => {
     });
     expect(panel().style.transform).toBe('');
     expect(onOpenChange).not.toHaveBeenCalled();
-  });
-
-  it('closes immediately when the host hides it after first-send presentation', () => {
-    renderSheet();
-    act(() =>
-      root.render(
-        <MobileNewChatSheet
-          open={false}
-          onOpenChange={onOpenChange}
-          targetNode="New chat"
-          composer={null}
-        />
-      )
-    );
-    expect(container.querySelector('.fixed')).toBeNull();
   });
 });

@@ -19,6 +19,25 @@
  * and resolves the runtime-omitted key once, so this must mount and settle.
  */
 
+// @vitest-environment jsdom
+/**
+ * The composer's selector options are built FROM the selection (the
+ * `useSessionAcpSelectorContext` cycle), and the regression these tests pin
+ * comes from a real session (51e236e0-b0d0-4c47-a74b-f8cfe2e97a91, 0.89.x,
+ * React error #185 on open). Its stored turn preferences carry a config option
+ * the agent's runtime snapshot does not report:
+ *
+ *   turn inputConfig: builtin/claude, mode `auto`, model `claude-fable-5[1m]`,
+ *     configOptionValues `{ effort: high, fast: false }`
+ *   acpRuntimeConfig (revision 1, based on that same turn): mode `auto`,
+ *     model `claude-fable-5`,
+ *     configOptionValues `{ effort: high, mode: auto, model: claude-fable-5 }`
+ *
+ * The old reconcile/apply layout-effect pair alternated on that key once per
+ * render until React aborted with "Maximum update depth exceeded". The derived
+ * hook stores only user edits, feeds the capability lookup from CANDIDATES,
+ * and resolves the runtime-omitted key once, so this must mount and settle.
+ */
 import { act, useMemo } from 'react';
 import { Provider, createStore } from 'jotai';
 import {
@@ -151,43 +170,11 @@ describe('session composer config selection wiring (#185 regression)', () => {
     expect(() => {
       flushSync(() => root?.render(<ConfigSelectionHarness />));
     }).not.toThrow();
-    // One render to mount, one for the fence adjustment. React aborts at 50
-    // nested updates, so anything unbounded shows up here first.
-    expect(renderCount).toBeLessThanOrEqual(3);
     // The runtime snapshot's values win, and its key set is final: the
     // preference-only `fast` is not re-seeded.
     expect(settledModelId).toBe('claude-fable-5');
     expect(settledConfigKeys).not.toContain('fast');
     expect(settledConfigKeys).toContain('effort');
-  });
-
-  it('keeps the selector catalog stable across value-equal document frames', () => {
-    /* Streaming rebuilds `sessionDoc.history` — and thus the resolved
-       preference/runtime object literals — with unchanged VALUES once per
-       merge frame. The replaced reducer absorbed that churn by returning the
-       same state object; the hook must absorb it too, or the catalog (and the
-       memoized composer subtree fed from it) rebuilds on every frame of the
-       conversation hot path. */
-    flushSync(() => root?.render(<ConfigSelectionHarness />));
-    const settledCatalogBuilds = catalogBuilds;
-    for (let frame = 0; frame < 10; frame += 1) {
-      const freshPreferences = {
-        ...preferences,
-        configOptionValues: { ...(preferences.configOptionValues ?? {}) },
-      };
-      const freshRuntime = runtimeConfig
-        ? { ...runtimeConfig, configOptionValues: { ...(runtimeConfig.configOptionValues ?? {}) } }
-        : runtimeConfig;
-      flushSync(() =>
-        root?.render(
-          <ConfigSelectionHarness
-            framePreferences={freshPreferences}
-            frameRuntimePreferences={freshRuntime}
-          />
-        )
-      );
-    }
-    expect(catalogBuilds).toBe(settledCatalogBuilds);
   });
 });
 

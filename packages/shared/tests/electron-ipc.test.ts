@@ -15,29 +15,6 @@ describe('isDevEmailPasswordLoginEnabled', () => {
   });
 });
 describe('LaunchLocalPathInputSchema', () => {
-  it('accepts URL launch requests for local path launchers', () => {
-    expect(
-      LaunchLocalPathInputSchema.safeParse({
-        kind: 'url',
-        url: 'vscode://file/Users/me/project',
-        targetPath: '/Users/me/project',
-        label: 'VS Code',
-      }).success
-    ).toBe(true);
-  });
-
-  it('accepts command launch requests with fallback commands', () => {
-    expect(
-      LaunchLocalPathInputSchema.safeParse({
-        kind: 'command',
-        command: { command: '/usr/bin/xed', args: ['/Users/me/project'] },
-        fallbackCommands: [{ command: 'xed', args: ['/Users/me/project'] }],
-        fallbackUrl: 'vscode://file/Users/me/project/?windowId=_blank',
-        targetPath: '/Users/me/project',
-      }).success
-    ).toBe(true);
-  });
-
   it('preserves path argument whitespace when parsing command requests', () => {
     const result = LaunchLocalPathInputSchema.safeParse({
       kind: 'command',

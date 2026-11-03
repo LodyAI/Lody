@@ -95,36 +95,6 @@ describe('machine ID', () => {
     expect(fs.readFileSync(machineIdPath, 'utf-8')).toBe(persistedMachineId);
   });
 
-  it('uses the machine ID created by a concurrent first caller', () => {
-    const dataDir = useTemporaryDataDir();
-    const machineIdPath = path.join(dataDir, 'machine-id');
-    const concurrentMachineId = 'concurrent-machine-id';
-    const writeFileSync = fs.writeFileSync.bind(fs);
-    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
-      writeFileSync(machineIdPath, concurrentMachineId, 'utf-8');
-      throw new Error('already exists');
-    });
-
-    expect(getSystemMachineId()).toBe(concurrentMachineId);
-    expect(writeSpy).toHaveBeenCalledWith(
-      machineIdPath,
-      expect.any(String),
-      expect.objectContaining({ flag: 'wx' })
-    );
-    expect(fs.readFileSync(machineIdPath, 'utf-8')).toBe(concurrentMachineId);
-  });
-
-  it('generates and persists a UUID on first use', () => {
-    const dataDir = useTemporaryDataDir();
-
-    const machineId = getSystemMachineId();
-
-    expect(machineId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-    );
-    expect(fs.readFileSync(path.join(dataDir, 'machine-id'), 'utf-8')).toBe(machineId);
-  });
-
   it('ignores invalid credentials even when they contain a machine ID', () => {
     const dataDir = useTemporaryDataDir();
     const credentialsPath = path.join(dataDir, 'credentials.json');

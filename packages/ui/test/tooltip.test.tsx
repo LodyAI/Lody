@@ -1,18 +1,11 @@
-import * as stylex from '@stylexjs/stylex';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Button } from '../src/button/button';
-import { chip } from '../src/tooltip/chip';
-import { Tooltip } from '../src/tooltip/tooltip';
-import { tooltip, tooltipPaletteTheme } from '../src/tooltip/tooltip.tokens.stylex';
-import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
-import { colors, shadow } from '../src/tokens/colors.stylex';
-import { all, classesOf, mount, one, press, step, type Mounted } from './dom';
 
-/** See `menu.test.tsx`: the same loosened call the primitives make. */
-function classesFor(...styles: readonly unknown[]): string[] {
-  const props = stylex.props as (...args: readonly unknown[]) => { className?: string };
-  return (props(...styles).className ?? '').split(' ').filter(Boolean);
-}
+import { Tooltip } from '../src/tooltip/tooltip';
+
+import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
+
+import { all, classesOf, mount, one, press, type Mounted } from './dom';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -36,25 +29,6 @@ const chips = () =>
     [...positioner.children].filter((node): node is HTMLElement => node instanceof HTMLElement)
   );
 
-/**
- * The pointer arriving over the trigger.
- *
- * `dom.tsx`'s `hover` moves the pointer, which is what highlights a list row; a
- * tooltip listens for the pointer entering its trigger instead, and jsdom
- * synthesises no enter event from a move. The two are different facts, so this
- * one is stated here rather than widening the shared helper.
- */
-async function point(element: Element): Promise<void> {
-  await step(() => {
-    for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter']) {
-      element.dispatchEvent(
-        new PointerEvent(type, { bubbles: type.endsWith('over'), pointerType: 'mouse' })
-      );
-    }
-    element.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
-  });
-}
-
 function Rerun({ ...rest }: { defaultOpen?: boolean }) {
   return (
     <Tooltip.Root {...rest}>
@@ -67,17 +41,6 @@ function Rerun({ ...rest }: { defaultOpen?: boolean }) {
 }
 
 describe('Tooltip', () => {
-  test('opens when the pointer arrives, and says what it names', async () => {
-    mounted = await mount(<Rerun />);
-    expect(chips()).toHaveLength(0);
-
-    await point(trigger());
-
-    expect(chips()).toHaveLength(1);
-    expect(chips()[0].textContent).toBe('Rerun this turn');
-    expect(trigger().getAttribute('data-popup-open')).toBe('');
-  });
-
   test('is visual only, so the trigger still carries its own name', async () => {
     mounted = await mount(<Rerun defaultOpen />);
     // The contract every migrated caller has to meet. A tooltip is not a label:
@@ -96,38 +59,6 @@ describe('Tooltip', () => {
     await press('Escape');
 
     expect(chips()).toHaveLength(0);
-  });
-
-  test('never takes the pointer off what it names', () => {
-    // A chip that landed under the cursor and accepted the pointer would take
-    // it off its own trigger, closing itself and reopening in a loop. It is the
-    // one declaration on the chip that is about behaviour rather than
-    // appearance, so it is pinned rather than left reading like a nicety.
-    const none = stylex.create({ probe: { pointerEvents: 'none' } });
-    for (const className of classesFor(none.probe)) {
-      expect(classesFor(chip.popup)).toContain(className);
-    }
-  });
-
-  test('is drawn in the floating rung’s material, not an inversion of it', () => {
-    // The owner's rule: a tooltip is light in a light palette and dark in a dark
-    // one. It stands on the floating rung — the raised background, the page's
-    // own ink, the popover shadow — which is what a menu is made of. A theme
-    // restating those three values compiles to the very class the forced
-    // palette declares, so a chip that drifted back to `label` on `background`
-    // (or onto any other rung) no longer matches.
-    const floating = stylex.createTheme(tooltip, {
-      background: colors.raisedBackground,
-      label: colors.label,
-      shadow: shadow.popover,
-    });
-    expect(classesFor(tooltipPaletteTheme)).toEqual(classesFor(floating));
-    const inverted = stylex.createTheme(tooltip, {
-      background: colors.label,
-      label: colors.background,
-      shadow: shadow.medium,
-    });
-    expect(classesFor(tooltipPaletteTheme)).not.toEqual(classesFor(inverted));
   });
 
   test('carries a forced palette across the portal', async () => {

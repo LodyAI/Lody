@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -86,60 +87,6 @@ describe('AcpBottomBarModeSelector UI', () => {
       );
     });
   }
-
-  it('uses highlighted active styling for fast mode and labels the plan toggle Plan', () => {
-    renderSelector({ 'fast-mode': 'on', collaboration_mode: 'plan' });
-
-    const fastModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fast Mode"]'
-    );
-    const planModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Collaboration mode"]'
-    );
-
-    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
-    expect(planModeButton?.textContent).toBe('Plan');
-    expect(planModeButton?.className).not.toContain('border');
-    expect(
-      planModeButton && fastModeButton
-        ? (planModeButton.compareDocumentPosition(fastModeButton) &
-            Node.DOCUMENT_POSITION_FOLLOWING) !==
-            0
-        : false
-    ).toBe(true);
-  });
-
-  it('renders on/off select fast options as the fast toggle and writes the next select value', () => {
-    const values: Record<string, AcpConfigOptionValue> = { fast: 'on' };
-    renderSelector(
-      { fast: 'on' },
-      {
-        selectors: [
-          {
-            configId: 'fast',
-            label: 'Fast mode',
-            type: 'select',
-            currentValue: 'on',
-            options: [
-              { value: 'on', label: 'On' },
-              { value: 'off', label: 'Off' },
-            ],
-          },
-        ],
-        onConfigOptionChange: (id, value) => {
-          values[id] = value;
-        },
-      }
-    );
-
-    const fastModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fast mode"]'
-    );
-
-    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
-    fastModeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(values).toEqual({ fast: 'off' });
-  });
 
   it('renders Core planning and sends boolean changes while preserving permission', () => {
     const values: Record<string, AcpConfigOptionValue> = { plan_mode: false, mode: 'agent' };

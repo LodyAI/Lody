@@ -67,10 +67,8 @@ maintenance commands here.
 
 ## Install ownership
 
-- Effect lint uses the installing workspace's pinned tools. Patch Oxlint only
-  (`--no-typescript --oxlint`); never install a second store in an embedded
-  checkout. `lint:effect` must show warnings and disable nested config discovery;
-  keep `lint:fast` free of type-aware rules.
+- Root lint retains explicit product/build boundary rules only. Generic correctness
+  rules and the Effect lint patch toolchain are removed.
 
 - `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including
   all supported optional platform packages. Windows Job binaries must be supplied

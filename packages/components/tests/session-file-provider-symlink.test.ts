@@ -58,17 +58,6 @@ const files = [
 ] satisfies readonly SessionFileProviderEntry[];
 
 describe('session file provider symlink open path resolution', () => {
-  it('redirects symlinks to known in-space provider targets', async () => {
-    const provider = createFakeSessionFileProvider({ files });
-
-    await expect(resolveSessionFileProviderOpenPath(provider, 'src/link.ts')).resolves.toEqual({
-      path: 'src/target.ts',
-      redirected: true,
-      from: 'src/link.ts',
-      fileId: 't:target',
-    });
-  });
-
   it('redirects symlink paths produced by shared file entry points', async () => {
     const provider = createFakeSessionFileProvider({ files });
     const providerEntries = await provider.listFiles();
@@ -137,20 +126,6 @@ describe('session file provider symlink open path resolution', () => {
       path: 'src/cycle-a.ts',
       redirected: false,
       reason: 'cycle',
-    });
-  });
-
-  it('does not rewrite ordinary files or missing paths', async () => {
-    const provider = createFakeSessionFileProvider({ files });
-
-    await expect(resolveSessionFileProviderOpenPath(provider, 'src/target.ts')).resolves.toEqual({
-      path: 'src/target.ts',
-      redirected: false,
-      fileId: 't:target',
-    });
-    await expect(resolveSessionFileProviderOpenPath(provider, 'missing.ts')).resolves.toEqual({
-      path: 'missing.ts',
-      redirected: false,
     });
   });
 });

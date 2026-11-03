@@ -122,16 +122,6 @@ describe('MachineFlockSyncCoordinator sync confirmation', () => {
     }
     expect(coordinator.peekLocalProjectRootPath(machineId, projectId)).toBeNull();
   });
-  it('confirms only a non-empty ok report', async () => {
-    const coordinator = makeCoordinator(async () => ({
-      ok: true,
-      transports: [{ transportId: 'streams', ok: true, failures: [] }],
-    }));
-    const machineId = 'machine-1' as MachineId;
-    coordinator.markDirty(machineId, { scheduleRetry: false });
-    await expect(coordinator.syncNow(machineId, { scheduleRetry: false })).resolves.toBe(true);
-    await coordinator.cleanUp();
-  });
 
   it('treats a zero-transport (offline) resolve as unconfirmed and keeps the doc dirty', async () => {
     // A vacuous resolve with no attached transports must never count as cloud

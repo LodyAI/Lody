@@ -689,8 +689,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         !nativeHasUsableKey &&
         workspaceRuntime === null &&
         (status.hasCurrentKey || status.writeEpoch != null)
-      )
+      ) {
+        nativeHasUsableKey = true;
         retryAdmission((value) => value + 1);
+      }
     };
     const refreshNative = (): void => {
       if (disposed || !nativeLease) return;
@@ -726,6 +728,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           nativeRefreshAgain = false;
           refreshNative();
         }
+        if (
+          !disposed &&
+          !retired &&
+          !nativeRefresh &&
+          !nativeHasUsableKey &&
+          workspaceRuntime === null
+        )
+          setRuntimeInitializing(false);
       });
     };
     retryKeyUpdateRef.current = refreshNative;
@@ -992,9 +1002,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             refreshNative();
             if (!status.hasCurrentKey && status.writeEpoch == null) {
               setRuntime(null);
-              setRuntimeInitializing(false);
               clearDocMetaCache();
               clearPresenceStates();
+              // First reception owns initialization until its pending work settles.
+              // Ending it here would redirect the route and retire that same reader.
               return;
             }
             encryptedAccess = createE2eeContent({

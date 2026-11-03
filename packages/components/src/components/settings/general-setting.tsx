@@ -15,6 +15,7 @@ import { toast } from '@/lib/toast';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
   mobileKeyboardActionAtom,
+  prRemoteImagesEnabledAtom,
   queuedMessageBehaviorAtom,
   sessionSidebarCodeChangesOnlyAtom,
   userAtom,
@@ -127,6 +128,8 @@ export function GeneralSettingsComponent() {
   const preferenceId = useId();
   const codeChangesLabelId = `${preferenceId}-code-changes-label`;
   const codeChangesHelperId = `${preferenceId}-code-changes-helper`;
+  const prImagesLabelId = `${preferenceId}-pr-images-label`;
+  const prImagesHelperId = `${preferenceId}-pr-images-helper`;
   const notificationLabelId = `${preferenceId}-notification-label`;
   const notificationHelperId = `${preferenceId}-notification-helper`;
   const postHog = usePostHog();
@@ -138,6 +141,7 @@ export function GeneralSettingsComponent() {
     sessionSidebarCodeChangesOnlyAtom
   );
   const [queuedMessageBehavior, setQueuedMessageBehavior] = useAtom(queuedMessageBehaviorAtom);
+  const [prImagesEnabled, setPrImagesEnabled] = useAtom(prRemoteImagesEnabledAtom);
   const [preventSleepEnabled, setPreventSleepEnabled] = useState(true);
   const [cliAutoStartEnabled, setCliAutoStartEnabled] = useState(true);
   const [cliAutoStartLoading, setCliAutoStartLoading] = useState(false);
@@ -809,6 +813,22 @@ export function GeneralSettingsComponent() {
                 />
               </CompactRow>
             </div>
+            <CompactRow
+              labelId={prImagesLabelId}
+              helperId={prImagesHelperId}
+              label={t('settings.general.prImages.label', 'Automatically load PR images')}
+              helper={t(
+                'settings.general.prImages.helper',
+                'When off, load images individually. Image websites can see your IP address.'
+              )}
+            >
+              <Switch
+                aria-labelledby={prImagesLabelId}
+                aria-describedby={prImagesHelperId}
+                checked={prImagesEnabled === true}
+                onCheckedChange={setPrImagesEnabled}
+              />
+            </CompactRow>
           </CompactSection>
         )}
 

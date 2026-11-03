@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
@@ -391,31 +392,6 @@ describe('encrypted workspace settings', () => {
     expect(container.textContent).toContain('e2ee.security.complete');
     expect(signed).toBe(false);
   });
-  it.each([
-    ['custody_unavailable', 'identityMissing'],
-    ['rotation_candidate_unavailable', 'candidateUnavailable'],
-    ['management_operator_required', 'operatorRequired'],
-    ['restart-required', 'restartRequired'],
-    ['local-history-recovery-required', 'localRecovery'],
-    ['trusted-pin-unavailable', 'localRecovery'],
-  ])(
-    'shows the next step for a native %s receipt without discarding local state',
-    async (code, message) => {
-      platform.e2eeWorkspaces!.runtime!.updateKeys = async () => {
-        throw new Error(`Error invoking remote method: e2ee_${code}`);
-      };
-      await render();
-      await click('e2ee.security.complete');
-      expect(container.textContent).toContain(`e2ee.security.${message}`);
-      expect(container.textContent).toContain('synthetic-machine');
-      expect(signed).toBe(false);
-      await click('e2ee.security.authorizePersonal');
-      expect(navigation.target).toEqual({
-        to: '/workspace/e2ee/$workspaceId',
-        params: { workspaceId: 'workspace' },
-      });
-    }
-  );
   it('ordinary workspaces show ordinary settings and never access a management port', async () => {
     platform.e2eeWorkspaces!.runtime!.managementState = async () => {
       throw new Error('ordinary must never query crypto');

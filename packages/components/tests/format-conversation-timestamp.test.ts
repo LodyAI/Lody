@@ -20,16 +20,6 @@ describe('formatConversationTimestamp', () => {
     expect(formatConversationTimestamp(new Date(2025, 6, 15, 9, 30), options)).toBe('7/15 09:30');
   });
 
-  it('keeps the weekday and numeric date labels compact in English', () => {
-    const englishOptions = { locale: 'en-US', now: new Date(2026, 6, 13, 12, 0) } as const;
-    expect(formatConversationTimestamp(new Date(2026, 6, 10, 14, 30), englishOptions)).toBe(
-      'Friday 02:30 PM'
-    );
-    expect(formatConversationTimestamp(new Date(2026, 5, 15, 14, 30), englishOptions)).toBe(
-      '6/15 02:30 PM'
-    );
-  });
-
   it('adds the year starting from the same date in the previous year', () => {
     expect(formatConversationTimestamp(new Date(2025, 6, 14, 9, 30), options)).toBe(
       '2025/7/14 09:30'

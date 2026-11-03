@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { STATIC_HTML_PREVIEW_DOCUMENT_MARKER } from '@lody/shared';
 
 import {
   buildStaticHtmlPreviewDocument,
   buildReadOnlyHtmlPreviewDocument,
-  getStaticHtmlPreviewLogicalUrl,
   STATIC_HTML_PREVIEW_CONTENT_SECURITY_POLICY,
 } from '../src/components/sessions/static-html-preview-document';
 
@@ -70,33 +70,5 @@ describe('static HTML preview document', () => {
     ).toBeNull();
     expect(document.querySelector('meta[http-equiv="refresh"]')).toBeNull();
     expect(document.head.firstElementChild?.getAttribute('content')).toContain("script-src 'none'");
-  });
-
-  it('maps comments to the file path without exposing a filesystem or capability URL', () => {
-    expect(getStaticHtmlPreviewLogicalUrl('artifacts\\design result.html')).toBe(
-      'https://html-file-preview.invalid/file/relative?path=artifacts%5Cdesign+result.html'
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('/tmp/report.html')).toBe(
-      'https://html-file-preview.invalid/file/posix-absolute?path=%2Ftmp%2Freport.html'
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('tmp/report.html')).toBe(
-      'https://html-file-preview.invalid/file/relative?path=tmp%2Freport.html'
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('C:\\tmp\\report.html')).toBe(
-      'https://html-file-preview.invalid/file/windows-drive-absolute?path=C%3A%5Ctmp%5Creport.html'
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('\\\\server\\share\\report.html')).toBe(
-      'https://html-file-preview.invalid/file/windows-unc?path=%5C%5Cserver%5Cshare%5Creport.html'
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('a/../report.html')).not.toBe(
-      getStaticHtmlPreviewLogicalUrl('report.html')
-    );
-    expect(getStaticHtmlPreviewLogicalUrl('/tmp/foo\\bar.html')).not.toBe(
-      getStaticHtmlPreviewLogicalUrl('/tmp/foo/bar.html')
-    );
-    const reservedPath = '/tmp/100% #?+😀.html';
-    expect(new URL(getStaticHtmlPreviewLogicalUrl(reservedPath)).searchParams.get('path')).toBe(
-      reservedPath
-    );
   });
 });

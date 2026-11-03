@@ -117,22 +117,14 @@ export function createCloudE2eeWorkspaces(input: {
         throw new Error('e2ee_creation_receipt_mismatch');
       }
       if (input.runtime) {
-        try {
-          await input.runtime.recordCreated({
-            workspaceId: result.workspaceId,
-            genesisHash: original.genesisHashHex,
-            requestId: original.requestId,
-          });
-        } catch (error) {
-          if (
-            error instanceof Error &&
-            /e2ee_(?:conflict|local-evidence-conflict|account_mismatch)/.test(error.message)
-          )
-            throw error;
-          console.warn('Encrypted workspace local binding pending', {
-            code: 'e2ee_binding_pending',
-          });
-        }
+        // A committed cloud workspace with an unbound local identity cannot open.
+        // Keep the pending creation and surface the failure so the same request can
+        // resume instead of clearing its only recovery material.
+        await input.runtime.recordCreated({
+          workspaceId: result.workspaceId,
+          genesisHash: original.genesisHashHex,
+          requestId: original.requestId,
+        });
         assertAccount(owner);
       }
       // Listing is a projection: its failure must not turn a committed, validated

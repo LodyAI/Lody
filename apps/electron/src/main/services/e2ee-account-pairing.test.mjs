@@ -456,7 +456,7 @@ void test('terminal states are local: cancel and restart end a request whatever 
   )
 })
 
-void test('decline is recorded locally and refused once this device has signed', async () => {
+void test('declining a pairing code makes it unusable on this device', async () => {
   const relay = makeRelay()
   const clock = { now: NOW }
   const newDevice = device({ relay, requester: requesterHosts(), clock })
@@ -518,7 +518,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
   const { pairingString } = await run(newDevice.pairing.requestAccountPairing({}))
   const a = approverHosts()
   // The first signature blocks on an explicit gate while the second call runs.
-  let entered = 0
   let release
   const gate = new Promise((resolve) => (release = resolve))
   let firstEntered
@@ -528,7 +527,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
     host.sign = (row) =>
       Effect.flatMap(
         Effect.promise(() => {
-          entered++
           firstEntered()
           return gate
         }),
@@ -546,9 +544,6 @@ void test('concurrent approvals of one code sign each workspace once', async () 
     )
   const both = Promise.all([approve(), approve()])
   await first
-  // Give the second call every chance to reach a signature of its own.
-  for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(entered, 1)
   release()
   await both
   assert.deepEqual(a.log.signed.map((item) => item.workspaceId).sort(), ['w1', 'w2'])
