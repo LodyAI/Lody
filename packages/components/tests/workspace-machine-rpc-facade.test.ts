@@ -1162,6 +1162,60 @@ describe('machine bug report client log', () => {
 });
 
 describe('local MCP discovery routing', () => {
+  it.each(['local', 'cloud', 'unsupported'] as const)(
+    'limits Sorbet credentials to a capable local target (%s)',
+    async (route) => {
+      const sent: unknown[] = [];
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (_channel: string, request: unknown) => {
+            sent.push(request);
+            return {
+              ok: true,
+              result: {
+                type: 'sorbet/credentials-list',
+                credentials: [{ providerId: 'openai', type: 'oauth' }],
+              },
+            };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          route === 'unsupported' ? {} : { sorbetCredentials: 1 },
+        targetRouter: {
+          getPlaneForMachine: () => (route === 'cloud' ? 'cloud' : 'local'),
+          resolvePlaneForMachine: async () => (route === 'cloud' ? 'cloud' : 'local'),
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('remote RPC forbidden');
+        },
+      });
+      const promise = facade.requestLocalSorbetCredentials(localMachineId, {
+        method: 'sorbet/credentials-list',
+        params: { configId: 'config' },
+      });
+      if (route === 'local') {
+        expect(await promise).toEqual({
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth' }],
+        });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            machineId: localMachineId,
+            workspaceId,
+            method: 'sorbet/credentials-list',
+            params: { configId: 'config' },
+          }),
+        ]);
+      } else {
+        await expect(promise).rejects.toThrow('supported local daemon');
+        expect(sent).toEqual([]);
+      }
+    }
+  );
   const server = {
     id: 'test' as McpServerId,
     name: 'Test',

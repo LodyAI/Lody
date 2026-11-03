@@ -17,6 +17,7 @@ import {
   type MemoryProviderResponse,
   type ProjectProbeLocalMemberResult,
 } from '@lody/shared';
+import { SorbetCredentialsResultSchema } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
@@ -31,6 +32,7 @@ import {
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
   MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
@@ -1928,7 +1930,43 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     );
   };
 
+  const requestLocalSorbetCredentials = async (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/credentials-list' }>,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/credentials-logout' }>,
+          'method' | 'params'
+        >
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.sorbetCredentials,
+        SORBET_CREDENTIALS_PROTOCOL_VERSION
+      ) ||
+      !(await canUseLocalMachineRpc(machineId))
+    ) {
+      throw new Error('Sorbet credentials require a supported local daemon.');
+    }
+    const result = SorbetCredentialsResultSchema.parse(
+      await sendLocalMachineRpcRequest({
+        ...request,
+        machineId,
+        workspaceId,
+        timeoutMs: 35_000,
+      })
+    );
+    if (result.type !== request.method) throw new Error('Unexpected Sorbet credentials response.');
+    return result;
+  };
+
   return {
+    requestLocalSorbetCredentials,
     requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,

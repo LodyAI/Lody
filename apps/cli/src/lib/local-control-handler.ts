@@ -71,7 +71,8 @@ export interface LocalSessionControlConfig {
     message: LocalProjectControlRequestValidated
   ) => Promise<LocalProjectControlResponse>;
   dispatchMachineRpc?: (
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ) => Promise<LocalMachineRpcResponse>;
 }
 
@@ -269,7 +270,8 @@ async function handleProjectControlRequest(
 async function handleMachineRpcRequest(
   config: LocalSessionControlConfig,
   raw: string,
-  requestId: number
+  requestId: number,
+  signal?: AbortSignal
 ): Promise<LocalControlHandlerResponse> {
   const parsed = safeParseLocalMachineRpcRequest(raw);
   if (!parsed.success) {
@@ -298,7 +300,7 @@ async function handleMachineRpcRequest(
   }
 
   try {
-    const response = await config.dispatchMachineRpc(message);
+    const response = await config.dispatchMachineRpc(message, signal);
     const validated = LocalMachineRpcResponseSchema.safeParse(response).success;
     if (!validated) {
       config.logger.error('Local machine RPC produced invalid response payload');
@@ -320,6 +322,7 @@ export class LocalControlHandler {
     rawBody: string;
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
+    signal?: AbortSignal;
   }): Promise<LocalControlHandlerResponse> {
     if (request.path === AUTOMATION_CONTROL_PATH) {
       return (async () => {
@@ -434,7 +437,12 @@ export class LocalControlHandler {
       });
     }
     if (request.path === LOCAL_MACHINE_RPC_PATH) {
-      return handleMachineRpcRequest(this.config, request.rawBody, request.requestId);
+      return handleMachineRpcRequest(
+        this.config,
+        request.rawBody,
+        request.requestId,
+        request.signal
+      );
     }
     if (request.path === LOCAL_PROJECT_CONTROL_PATH) {
       return handleProjectControlRequest(this.config, request.rawBody, request.requestId);

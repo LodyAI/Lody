@@ -15,6 +15,7 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import * as profileUsage from './codex-profile-process-usage';
 import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
@@ -564,6 +565,42 @@ describe('AcpAuthenticationManager', () => {
       success: true,
       disposition: 'authenticated',
     });
+  });
+
+  it('preserves the authentication failure and the cleanup failure while retaining the Sorbet lease', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild();
+    // Neither termination signal succeeds until the test explicitly confirms exit.
+    child.kill = vi.fn(() => true);
+    const spawned = createDeferred<void>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      nodeProcess: fakeNodeProcess(() => {
+        spawned.resolve();
+        return child;
+      }),
+      resolveLoginShellEnv: async () => ({}),
+      terminationGraceMs: 2,
+    });
+    const result = manager.authenticate({
+      requestId: 'sorbet-cleanup-failure',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+    });
+    await spawned.promise;
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(result).resolves.toEqual({
+      success: false,
+      disposition: 'error',
+      error:
+        'sorbet ACP authentication streams are unavailable; Sorbet authentication process cleanup is unconfirmed',
+    });
+    const retry = expect(acquireSorbetCredentialMutation()).rejects.toThrow(
+      'cleanup is unconfirmed'
+    );
+    await vi.advanceTimersByTimeAsync(20);
+    await retry;
+    child.exitCode = 0;
+    (await acquireSorbetCredentialMutation()).release();
   });
 
   it.each(['custom', 'devin', 'sorbet'] as const)(

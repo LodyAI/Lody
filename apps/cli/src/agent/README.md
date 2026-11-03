@@ -45,7 +45,13 @@ context/message-flow.md "Upstream".
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
   [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
-  uses the existing protected ACP interaction path.
+  uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
+  extension runs in a separate bounded builtin Sorbet ACP process, with no session or
+  terminal; the daemon verifies the local Provider identity and does not use stored
+  launch overrides. Socket disconnect cancels the operation. Authentication and logout
+  share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
+  retried before a later mutation. Account management is local-only and lists saved
+  credential types, not account identities, remote validity or environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.

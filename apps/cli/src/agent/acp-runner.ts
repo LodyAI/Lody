@@ -1,5 +1,6 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
+import { listSorbetAcpCredentials, logoutSorbetAcpCredential } from './sorbet-acp-credentials';
 import { platformLayer, toShared } from '@/platform/process-options';
 import { Effect } from 'effect';
 import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
@@ -387,6 +388,94 @@ export async function initializeAndReadAcpRateLimits(stream: Stream) {
   );
 }
 
+export async function initializeAndRunSorbetCredentials(
+  stream: Stream,
+  signal: AbortSignal,
+  operation: { type: 'list' } | { type: 'logout'; providerId: string }
+) {
+  const connection = new ClientSideConnection(
+    () => ({
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      sessionUpdate: async () => {},
+    }),
+    stream
+  );
+  const initialized = await connection.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+  });
+  signal.throwIfAborted();
+  if (operation.type === 'list') {
+    return await listSorbetAcpCredentials(connection, initialized.agentCapabilities);
+  }
+  await logoutSorbetAcpCredential(connection, initialized.agentCapabilities, operation.providerId);
+  return [];
+}
+
+/** A dedicated, bounded Sorbet process; no session, terminal, filesystem or MCP access. */
+export async function runLocalSorbetCredentials(
+  logger: Logger,
+  operation: { type: 'list' } | { type: 'logout'; providerId: string },
+  requestSignal?: AbortSignal
+) {
+  const timeoutSignal = AbortSignal.timeout(25_000);
+  const signal = requestSignal ? AbortSignal.any([timeoutSignal, requestSignal]) : timeoutSignal;
+  signal.throwIfAborted();
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-sorbet-credentials-'));
+  try {
+    const started = await startLocalAcpProtocol(
+      {
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        workdir,
+        logger,
+        signal,
+        terminalEnabled: false,
+        terminalManager: {
+          createTerminal: async () => {
+            throw new Error('Terminal unavailable');
+          },
+          terminalOutput: async () => {
+            throw new Error('Terminal unavailable');
+          },
+          releaseTerminal: async () => {},
+          waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
+          killTerminal: async () => {},
+        },
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      },
+      async ({ stream, startupAbort }) => {
+        return {
+          credentials: await Promise.race([
+            initializeAndRunSorbetCredentials(stream, signal, operation),
+            ...(startupAbort ? [startupAbort] : []),
+          ]),
+        };
+      },
+      true,
+      true
+    );
+    try {
+      await terminateAcpProcessTree(started.agentProcess, {
+        logger,
+        sessionLabel: 'sorbet-credentials',
+        exitTimeoutMs: 3000,
+      });
+    } catch (cause) {
+      throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    }
+    signal.throwIfAborted();
+    return started.credentials;
+  } finally {
+    try {
+      fs.rmSync(workdir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 /** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
   const started = await startLocalAcpProtocol(
@@ -438,7 +527,8 @@ export async function prepareAcpProcessEnvironmentLegacy(
 async function startLocalAcpProtocol<T>(
   options: StartLocalAcpAgentOptions,
   startClient: (options: CreateAcpClientOptions) => Promise<T>,
-  retainCleanupFailure = false
+  retainCleanupFailure = false,
+  sensitiveOutput = false
 ) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
@@ -614,7 +704,7 @@ async function startLocalAcpProtocol<T>(
     if (stderrStream) {
       stderrStream.setEncoding('utf8');
       stderrStream.on('data', (chunk: string) => {
-        if (!chunk) return;
+        if (!chunk || sensitiveOutput) return;
         stderrTail = appendStderrTail(stderrTail, chunk);
         lastStderrTail = stderrTail;
         options.logger.debug(
@@ -646,7 +736,7 @@ async function startLocalAcpProtocol<T>(
         sessionId: 'acp-startup',
         command: launch.command,
         args: [...attemptArgs],
-        getStderrTail: () => stderrTail,
+        getStderrTail: () => (sensitiveOutput ? '' : stderrTail),
       }
     );
 

@@ -580,6 +580,24 @@ export type WorkspaceRuntime = {
     server: WorkspaceMcpServerMeta,
     requesterUserId?: string
   ) => Promise<McpToolListResult>;
+  requestLocalSorbetCredentials: (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/credentials-list' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/credentials-logout' }
+          >,
+          'method' | 'params'
+        >
+  ) => Promise<import('@lody/shared/local-machine-rpc').SorbetCredentialsResult>;
   requestLocalMcpAuthentication: (
     machineId: MachineId,
     params: Extract<

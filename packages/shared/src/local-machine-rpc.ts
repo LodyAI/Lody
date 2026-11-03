@@ -121,7 +121,38 @@ export const SessionToolResultSchema = z
   })
   .strict();
 
+export const SorbetProviderIdSchema = z.string().min(1).max(1024);
+export const SorbetCredentialTypeSchema = z.string().min(1).max(1024);
+export const SORBET_CREDENTIALS_MAX_COUNT = 1000;
+const SorbetCredentialSchema = z
+  .object({
+    providerId: SorbetProviderIdSchema,
+    type: SorbetCredentialTypeSchema,
+  })
+  .strict();
+export const SorbetCredentialsResultSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('sorbet/credentials-list'),
+      credentials: z.array(SorbetCredentialSchema).max(SORBET_CREDENTIALS_MAX_COUNT),
+    })
+    .strict(),
+  z.object({ type: z.literal('sorbet/credentials-logout') }).strict(),
+]);
+
+export type SorbetCredentialsResult = z.infer<typeof SorbetCredentialsResultSchema>;
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/credentials-list'),
+    params: z.object({ configId: AgentConfigIdSchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/credentials-logout'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema })
+      .strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/status'),
     params: z.object({}).strict(),
@@ -458,6 +489,7 @@ export const LocalMachineRpcResultSchema = z.union([
   AndroidEmulatorResponseSchema,
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
+  SorbetCredentialsResultSchema,
   SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
@@ -488,6 +520,23 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,
 ]);
+export type SorbetCredentialsListRequest = Extract<
+  LocalMachineRpcRequest,
+  { method: 'sorbet/credentials-list' }
+>;
+export type SorbetCredentialsLogoutRequest = Extract<
+  LocalMachineRpcRequest,
+  { method: 'sorbet/credentials-logout' }
+>;
+export type SorbetCredentialsListResult = Extract<
+  SorbetCredentialsResult,
+  { type: 'sorbet/credentials-list' }
+>;
+export type SorbetCredentialsLogoutResult = Extract<
+  SorbetCredentialsResult,
+  { type: 'sorbet/credentials-logout' }
+>;
+
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;
 
 export const LocalMachineRpcResponseSchema = z.union([

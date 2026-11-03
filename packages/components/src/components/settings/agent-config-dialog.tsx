@@ -118,6 +118,7 @@ import {
   space,
 } from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { LodyAgentAccountsController } from './lody-agent-accounts-controller';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
@@ -1562,6 +1563,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     onManagedRuntimeSelected,
   } = props;
   const { t } = useTranslation();
+  const [accountsRefreshVersion, setAccountsRefreshVersion] = useState(0);
   const draftConfigIdRef = useRef<AgentConfigId | null>(null);
   const agentConfigId =
     mode.kind === 'edit'
@@ -3191,6 +3193,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 onBeforeStart={persistConfigBeforeMachineLaunch}
                 onAuthenticated={() => {
                   setAuthRequired(false);
+                  setAccountsRefreshVersion((version) => version + 1);
                   setProbeError(null);
                   setManuallyTested(true);
                   if (isCustom && parsedCustomAcp) {
@@ -3203,6 +3206,19 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               />
             </Field>
           ) : null}
+
+          {open &&
+            mode.kind === 'edit' &&
+            formData.cliType === 'builtin' &&
+            formData.agentType === 'sorbet' && (
+              <LodyAgentAccountsController
+                key={JSON.stringify([machine.id, agentConfigId])}
+                machineId={machine.id}
+                configId={agentConfigId}
+                supported={machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1)}
+                refreshVersion={accountsRefreshVersion}
+              />
+            )}
 
           {showBinaryPanel && (
             <div {...stylex.props(surface.formBlock, styles.status)}>

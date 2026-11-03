@@ -141,6 +141,7 @@ import {
   type LocalProjectControlErrorCode,
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
+  SORBET_CREDENTIALS_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalMachineRpcResult,
@@ -609,6 +610,13 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  sorbetCredentials?: {
+    list: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<Array<{ providerId: string; type: string }>>;
+    logout: (configId: AgentConfigId, providerId: string, signal?: AbortSignal) => Promise<void>;
+  };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -812,6 +820,7 @@ export class MessageHandler {
   private executionService: SessionExecutionService;
   /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
   private readonly encryptedExecution?: EncryptedAgentExecution;
+  private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
@@ -2915,6 +2924,7 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.sorbetCredentials = config.sorbetCredentials;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
@@ -3866,6 +3876,9 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.sorbetCredentials
+            ? { sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION }
+            : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },
         timeZone: getDeviceTimeZone(process.env.TZ),
@@ -6220,6 +6233,9 @@ export class MessageHandler {
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
+          ...(this.sorbetCredentials
+            ? { sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION }
+            : {}),
           ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
         },
         timeZone: getDeviceTimeZone(process.env.TZ),
@@ -7007,10 +7023,11 @@ export class MessageHandler {
   }
 
   async handleLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     try {
-      const result = await this.dispatchLocalMachineRpc(request);
+      const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
       if (isCodeCollabV2ServiceErrorForLocalRpc(error)) {
@@ -7065,7 +7082,8 @@ export class MessageHandler {
   }
 
   private async dispatchLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResult> {
     const assertOwner = async (sessionId: SessionId): Promise<void> => {
       if (!request.ownerSessionId) {
@@ -7116,6 +7134,40 @@ export class MessageHandler {
         )
           throw new Error('Project group probe scope mismatch');
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
+      case 'sorbet/credentials-list':
+      case 'sorbet/credentials-logout': {
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId
+        )
+          throw new Error('Sorbet credentials scope mismatch');
+        const configId = request.params.configId as AgentConfigId;
+        const config = await this.workspaceDocument.getAgentConfigById(configId, this.machineId);
+        if (
+          !config ||
+          config.machineId !== this.machineId ||
+          config.cliType !== 'builtin' ||
+          config.agentType !== 'sorbet'
+        )
+          throw new Error('Sorbet credentials configuration unavailable');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        try {
+          if (request.method === 'sorbet/credentials-list') {
+            const credentials = await this.sorbetCredentials.list(configId, signal);
+            const { SorbetCredentialsResultSchema } =
+              await import('@lody/shared/local-machine-rpc');
+            return SorbetCredentialsResultSchema.parse({
+              type: 'sorbet/credentials-list',
+              credentials,
+            });
+          }
+          await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+          return { type: 'sorbet/credentials-logout' };
+        } catch {
+          throw new Error('Sorbet credentials operation failed');
+        }
       }
       case 'mcp/list-tools':
       case 'mcp/authentication': {

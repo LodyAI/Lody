@@ -60,6 +60,8 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Machine protocol negotiation
 
+- Sorbet credential metadata and per-provider logout use the local Machine RPC only; never expose them through remote workspace dispatch. They do not imply credential validity or account identity.
+
 - Ask Question consumers must preserve Core note/replacement semantics and validate
   associations per the [notes contract](../../specs/ask-question-answer-notes.md).
 

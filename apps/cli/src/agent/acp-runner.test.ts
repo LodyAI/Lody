@@ -1,5 +1,5 @@
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
-import { initializeAndReadAcpRateLimits } from './acp-runner';
+import { initializeAndReadAcpRateLimits, initializeAndRunSorbetCredentials } from './acp-runner';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import fs from 'node:fs';
@@ -293,6 +293,65 @@ describe('read-only quota ACP handshake', () => {
         terminal: false,
         fs: { readTextFile: false, writeTextFile: false },
       });
+    }
+  );
+});
+
+describe('Sorbet credentials ACP handshake', () => {
+  it.each(['list', 'logout'] as const)(
+    'initializes without session capabilities and executes %s',
+    async (operation) => {
+      const outbound = new TransformStream();
+      const inbound = new TransformStream();
+      let initialization: unknown;
+      const received: Array<{ method: string; params: unknown }> = [];
+      const server = new AgentSideConnection(
+        () => ({
+          initialize: async (params) => {
+            initialization = params.clientCapabilities;
+            return {
+              protocolVersion: PROTOCOL_VERSION,
+              agentCapabilities: { _meta: { 'sorbet.dev': { credentials: { version: 1 } } } },
+            };
+          },
+          newSession: async () => {
+            throw new Error('Unexpected session');
+          },
+          authenticate: async () => {
+            throw new Error('Unexpected authentication');
+          },
+          prompt: async () => {
+            throw new Error('Unexpected prompt');
+          },
+          cancel: async () => {},
+          extMethod: async (method, params) => {
+            received.push({ method, params });
+            return method.endsWith('/list')
+              ? { credentials: [{ providerId: 'example', type: 'oauth' }] }
+              : {};
+          },
+        }),
+        { readable: outbound.readable, writable: inbound.writable } as Stream
+      );
+      void server;
+      const result = await initializeAndRunSorbetCredentials(
+        { readable: inbound.readable, writable: outbound.writable } as Stream,
+        new AbortController().signal,
+        operation === 'list' ? { type: 'list' } : { type: 'logout', providerId: 'example' }
+      );
+      expect(initialization).toMatchObject({
+        terminal: false,
+        fs: { readTextFile: false, writeTextFile: false },
+      });
+      expect(received).toEqual([
+        {
+          method: `_sorbet/auth/credentials/${operation}`,
+          params: operation === 'list' ? {} : { providerId: 'example' },
+        },
+      ]);
+      expect(result).toEqual(
+        operation === 'list' ? [{ providerId: 'example', type: 'oauth' }] : []
+      );
     }
   );
 });

@@ -31,6 +31,7 @@ import {
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
@@ -156,6 +157,7 @@ const BUILTIN_AUTH_METHODS = {
 
 type RunningAuthentication = {
   child?: ChildProcess;
+  sorbetLease?: Awaited<ReturnType<typeof acquireSorbetCredentialMutation>>;
   requestId: string;
   cancelled: boolean;
   timedOut: boolean;
@@ -645,6 +647,10 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      if (options.cliType === 'builtin' && options.agentType === 'sorbet') {
+        running.sorbetLease = await acquireSorbetCredentialMutation(running.abortController.signal);
+        running.abortController.signal.throwIfAborted();
+      }
       if (options.authenticateManagedProfile) {
         await options.authenticateManagedProfile({
           signal: running.abortController.signal,
@@ -795,6 +801,7 @@ export class AcpAuthenticationManager {
           'Codex authentication process record cleanup failed; retained for recovery'
         );
       } finally {
+        running.sorbetLease?.release();
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (this.runningByAgentType.get(options.agentType) === running) {
           this.runningByAgentType.delete(options.agentType);
@@ -988,6 +995,7 @@ export class AcpAuthenticationManager {
       },
       async () =>
         await runNpxStartupWithRecovery({
+          maxAttempts: running.sorbetLease ? 1 : undefined,
           command: launch.command,
           args: launch.args,
           env,
@@ -1045,6 +1053,10 @@ export class AcpAuthenticationManager {
               }
             );
 
+            let operationFailed = false;
+            let operationError: unknown;
+            let cleanupFailed = false;
+            let cleanupError: unknown;
             try {
               running.abortController.signal.throwIfAborted();
               if (!child.stdin || !child.stdout) {
@@ -1236,22 +1248,54 @@ export class AcpAuthenticationManager {
                 }),
                 startupMonitor.abortPromise,
               ]);
+            } catch (error) {
+              operationFailed = true;
+              operationError = error;
             } finally {
               running.pendingInteraction?.resolve({ action: 'cancel' });
               running.pendingInteraction = undefined;
               startupMonitor.dispose();
-              await shutdownLocalAcpAgent({
-                agentProcess: child,
-                logger: this.logger,
-                sessionLabel: `acp-auth:${options.agentType}:protocol`,
-                exitTimeoutMs: this.terminationGraceMs,
-                nodeProcess: this.nodeProcess,
-              }).catch((error: unknown) => {
-                this.logger.debug(
-                  `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
-                );
-              });
+              if (running.sorbetLease) {
+                const terminate = () =>
+                  terminateAcpProcessTree(child, {
+                    logger: this.logger,
+                    sessionLabel: 'sorbet-authentication',
+                    exitTimeoutMs: this.terminationGraceMs,
+                    nodeProcess: this.nodeProcess,
+                  });
+                try {
+                  await terminate();
+                } catch (error) {
+                  running.sorbetLease.retain(child, terminate);
+                  cleanupFailed = true;
+                  cleanupError = error;
+                }
+              } else {
+                await shutdownLocalAcpAgent({
+                  agentProcess: child,
+                  logger: this.logger,
+                  sessionLabel: `acp-auth:${options.agentType}:protocol`,
+                  exitTimeoutMs: this.terminationGraceMs,
+                  nodeProcess: this.nodeProcess,
+                }).catch((error: unknown) => {
+                  this.logger.debug(
+                    `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
+                  );
+                });
+              }
               if (running.child === child) running.child = undefined;
+            }
+            if (operationFailed && cleanupFailed) {
+              throw new AggregateError(
+                [operationError, cleanupError],
+                `${formatErrorMessage(operationError)}; Sorbet authentication process cleanup is unconfirmed`
+              );
+            }
+            if (operationFailed) throw operationError;
+            if (cleanupFailed) {
+              throw new Error('Sorbet authentication process cleanup is unconfirmed', {
+                cause: cleanupError,
+              });
             }
           },
         })

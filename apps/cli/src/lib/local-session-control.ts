@@ -147,16 +147,23 @@ export function createLocalSessionControlRequestHandler(
           `[local-control:${requestId}] request body received: bytes=${Buffer.byteLength(raw, 'utf8')} path=${requestPath}`
         );
         const streamResponses = wantsSessionControlStream(req, requestPath);
+        const disconnected = new AbortController();
+        const onClose = () => {
+          if (!res.writableFinished) disconnected.abort();
+        };
+        res.once('close', onClose);
         const response = await handler.handle({
           path: requestPath,
           rawBody: raw,
           requestId,
+          signal: disconnected.signal,
           onSessionResponse: streamResponses
             ? (message: LocalSessionControlResponse) => {
                 writeSessionControlStreamFrame(res, { kind: 'response', response: message });
               }
             : undefined,
         });
+        res.off('close', onClose);
         if (streamResponses && response.status === 200 && response.payload.ok === true) {
           writeSessionControlStreamFrame(res, { kind: 'complete' });
           if (!res.writableEnded && !res.destroyed) {

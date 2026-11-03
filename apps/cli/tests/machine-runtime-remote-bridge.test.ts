@@ -137,6 +137,33 @@ describe('MachineRuntime remote bridge transitions', () => {
   });
 });
 
+it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+  'rejects %s at encrypted remote ingress before dispatch',
+  async (method) => {
+    const { runtime, handler } = createHarness(true);
+    const dispatched: unknown[] = [];
+    Object.assign(handler, {
+      handleLocalMachineRpc: async (request: unknown) => {
+        dispatched.push(request);
+        return { ok: true };
+      },
+    });
+    const request =
+      method === 'sorbet/credentials-list'
+        ? { method, workspaceId: 'workspace', machineId: 'machine', params: { configId: 'config' } }
+        : {
+            method,
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            params: { configId: 'config', providerId: '提供商 / 账户' },
+          };
+    await expect(runtime.handleEncryptedFeatureRpc(request)).rejects.toThrow(
+      'e2ee_feature_unavailable'
+    );
+    expect(dispatched).toEqual([]);
+  }
+);
+
 it('admits encrypted file and preview features through machine dispatch while rejecting foreign routing and requester identity', async () => {
   const { runtime, handler } = createHarness(true);
   const files = new Map<string, string>();

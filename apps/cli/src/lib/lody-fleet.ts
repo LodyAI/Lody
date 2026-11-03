@@ -364,7 +364,8 @@ export class LodyFleet {
           };
         }
       },
-      dispatchMachineRpc: async (message) => await this.dispatchLocalMachineRpc(message),
+      dispatchMachineRpc: async (message, signal) =>
+        await this.dispatchLocalMachineRpc(message, signal),
     };
     await traceAsync(this.logger, 'startup.local_ipc', undefined, async () => {
       await startLocalIpcSocketServers({
@@ -1658,7 +1659,8 @@ export class LodyFleet {
   }
 
   private async dispatchLocalMachineRpc(
-    message: import('@lody/shared').LocalMachineRpcRequestValidated
+    message: import('@lody/shared').LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<import('@lody/shared').LocalMachineRpcResponse> {
     const pendingStart = this.startInFlight.get(message.workspaceId);
     if (pendingStart) {
@@ -1670,7 +1672,7 @@ export class LodyFleet {
       return { ok: false, error: `workspace_runtime_unavailable:${message.workspaceId}` };
     }
 
-    return await runtime.lody.dispatchLocalMachineRpc(message);
+    return await runtime.lody.dispatchLocalMachineRpc(message, signal);
   }
 
   // Resolves the push-based data-plane engine for a workspace the CLI socket
