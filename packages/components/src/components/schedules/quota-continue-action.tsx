@@ -61,7 +61,6 @@ function SessionLimitContinueOwner({
   session: SessionMeta;
   entryId: string;
 }) {
-  const { t } = useTranslation();
   const user = useAtomValue(userAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const active = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -89,9 +88,13 @@ function SessionLimitContinueOwner({
         }
       : null;
   const continuation = useLocalSessionContinuation(target, current);
-  if (current && target && continuation.error)
-    return <div {...stylex.props(styles.row)}>{t('sessions.continuation.connectionError')}</div>;
-  if (!current || !target || continuation.recoveryEnabled === null) return null;
+  if (
+    !current ||
+    !target ||
+    continuation.settingsUnavailable ||
+    continuation.recoveryEnabled === null
+  )
+    return null;
   return (
     <SessionLimitContinueRow
       state={continuation.busy ? 'pending' : continuation.recoveryEnabled ? 'enabled' : 'idle'}
