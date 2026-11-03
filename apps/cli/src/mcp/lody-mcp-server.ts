@@ -2022,6 +2022,17 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   });
 };
 
+const formatLiveActivity = (activity: NonNullable<SessionLiveStatusBatchItem['activity']>) => ({
+  ...(activity.turnStartedAt !== undefined
+    ? { turnStartedAt: new Date(activity.turnStartedAt).toISOString() }
+    : {}),
+  ...(activity.lastOutputAt !== undefined
+    ? { lastOutputAt: new Date(activity.lastOutputAt).toISOString() }
+    : {}),
+  ...(activity.currentAction ? { currentAction: activity.currentAction } : {}),
+  queuedInputs: activity.queuedInputs,
+});
+
 const readMcpSessionStatusTargets = async (
   ids: readonly string[],
   ctx: ReturnType<typeof getSessionContext>,
@@ -2104,6 +2115,13 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
               ...execution,
               ...(liveWorking.status ? { liveStatus: liveWorking.status } : {}),
               liveSource: liveWorking.source,
+              // Busy without a daemon answer (older daemon, offline or read failure)
+              // keeps the ordinary state and says so instead of guessing.
+              ...(live?.activity
+                ? { activity: formatLiveActivity(live.activity) }
+                : execution.executionState === 'busy'
+                  ? { activity: 'unknown' as const }
+                  : {}),
             },
             machine: { state: online ? ('online' as const) : ('offline' as const) },
             observation: {

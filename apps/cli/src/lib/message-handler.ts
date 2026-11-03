@@ -411,6 +411,7 @@ import {
   type LocalWorkspaceCatalogService,
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
@@ -749,6 +750,14 @@ export class MessageHandler {
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
+  /**
+   * Latest output time and running tool title per Session, for on-demand live
+   * activity reads. One small entry per Session; never published.
+   */
+  private readonly liveActivityBySession = new Map<
+    SessionId,
+    { lastOutputAt: number; currentAction?: { toolCallId: string; title: string } }
+  >();
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
@@ -3580,7 +3589,8 @@ export class MessageHandler {
             error: result.error,
           };
         },
-        getSessionLiveStatus: async ({ sessionId }) => this.readSessionLiveStatus(sessionId),
+        getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
+          await this.readSessionLiveStatus(sessionId, includeActivity === true),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -4764,6 +4774,70 @@ export class MessageHandler {
     );
   }
 
+  private recordLiveActivity(sessionId: SessionId, notification: AcpSessionNotification): void {
+    const previous = this.liveActivityBySession.get(sessionId);
+    const update = notification.update as {
+      sessionUpdate: string;
+      toolCallId?: string;
+      title?: string | null;
+      status?: string | null;
+    };
+    let currentAction = previous?.currentAction;
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const finished = update.status === 'completed' || update.status === 'failed';
+      if (finished && currentAction?.toolCallId === update.toolCallId) currentAction = undefined;
+      else if (!finished && update.toolCallId && update.title)
+        currentAction = { toolCallId: update.toolCallId, title: update.title.slice(0, 200) };
+    }
+    this.liveActivityBySession.set(sessionId, {
+      lastOutputAt: Date.now(),
+      ...(currentAction ? { currentAction } : {}),
+    });
+  }
+
+  /**
+   * Best-effort activity of a busy Session from local state. Any failure omits
+   * it, so the caller keeps the ordinary live status.
+   */
+  private async readSessionLiveActivity(
+    sessionId: SessionId
+  ): Promise<SessionLiveActivity | undefined> {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    if (!execution.hasActiveTurn || !execution.activeTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const history = (await this.getSessionBackend(sessionDoc)).history;
+      const total = await history.count();
+      let turnStartedAt: number | undefined;
+      let queuedInputs = 0;
+      // Queued inputs follow the running turn; stop at it or after a bounded scan.
+      for (let index = total - 1; index >= Math.max(0, total - 50); index -= 1) {
+        const read = await history.readAt(index);
+        if (read.state !== 'ready') continue;
+        if (read.turn.id === execution.activeTurnId) {
+          const started = Date.parse(read.turn.timestamp);
+          if (Number.isFinite(started)) turnStartedAt = started;
+          break;
+        }
+        if (
+          read.turn.role === 'user' &&
+          (read.turn.status === 'pending' || read.turn.status === 'pending_apply')
+        )
+          queuedInputs += 1;
+      }
+      const tracked = this.liveActivityBySession.get(sessionId);
+      return {
+        ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
+        ...(tracked ? { lastOutputAt: tracked.lastOutputAt } : {}),
+        ...(tracked?.currentAction ? { currentAction: tracked.currentAction.title } : {}),
+        queuedInputs,
+      };
+    } catch (error) {
+      this.logger.debug(`[${sessionId}] Live activity unavailable: ${formatErrorMessage(error)}`);
+      return undefined;
+    }
+  }
+
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
     if (this.deletedSessionIds.has(sessionId)) {
       this.logger.debug(
@@ -4775,6 +4849,7 @@ export class MessageHandler {
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    if (target) this.recordLiveActivity(sessionId, update);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -6983,12 +7058,14 @@ export class MessageHandler {
               execution: this.executionService.getExecutionSnapshot(sessionId),
               hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
             });
+            const activity = await this.readSessionLiveActivity(sessionId);
             return {
               sessionId,
               machineOnline: true,
               fresh: true,
               state: live.state,
               observedAt: getServerNow(),
+              ...(activity ? { activity } : {}),
             };
           },
           cancelSession: async (sessionId, turnId) => {
@@ -7065,9 +7142,11 @@ export class MessageHandler {
     };
   }
 
-  private readSessionLiveStatus(
-    sessionId: SessionId
-  ): import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse {
+  private async readSessionLiveStatus(
+    sessionId: SessionId,
+    includeActivity = false
+  ): Promise<import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse> {
+    const activity = includeActivity ? await this.readSessionLiveActivity(sessionId) : undefined;
     const liveStatus = resolveSessionLiveStatus({
       presence: this.sessionActivePresence.getStatus(sessionId),
       execution: this.executionService.getExecutionSnapshot(sessionId),
@@ -7080,6 +7159,7 @@ export class MessageHandler {
       success: true,
       ...liveStatus,
       observedAtMs: getServerNow(),
+      ...(activity ? { activity } : {}),
     };
   }
 
@@ -7122,7 +7202,10 @@ export class MessageHandler {
           ...request.params,
         });
       case 'session/live-status':
-        return this.readSessionLiveStatus(request.params.sessionId as SessionId);
+        return await this.readSessionLiveStatus(
+          request.params.sessionId as SessionId,
+          request.params.includeActivity === true
+        );
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
         return this.filePreviewService.downloadFileChunk(request.params);

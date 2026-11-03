@@ -203,4 +203,76 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       await handler.cleanup();
     }
   });
+
+  describe('live activity', () => {
+    const rows = [
+      { id: 'u1', role: 'user', status: 'handled', timestamp: '2026-11-03T01:00:00.000Z' },
+      { id: 'assistant:u1', role: 'assistant', timestamp: '2026-11-03T01:00:01.000Z' },
+      { id: 'u2', role: 'user', status: 'pending', timestamp: '2026-11-03T01:05:00.000Z' },
+      { id: 'u3', role: 'user', status: 'pending', timestamp: '2026-11-03T01:06:00.000Z' },
+    ];
+    const daemon = (history: { count: () => Promise<number>; readAt: unknown }) => {
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const internals = handler as unknown as Record<string, unknown> & {
+        workspaceDocument: { getOrCreateSessionDoc: unknown };
+      };
+      internals.executionService = {
+        getExecutionSnapshot: () => ({ hasActiveTurn: true, activeTurnId: 'assistant:u1' }),
+      };
+      internals.sessionActivePresence = { getStatus: () => undefined };
+      internals.sessionDispatchWatcher = { hasPendingDispatch: () => true };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({ history });
+      return handler as unknown as {
+        recordLiveActivity: (id: SessionId, update: unknown) => void;
+        readSessionLiveStatus: (
+          id: SessionId,
+          includeActivity?: boolean
+        ) => Promise<Record<string, unknown>>;
+      };
+    };
+    const history = {
+      count: async () => rows.length,
+      readAt: async (index: number) => ({ state: 'ready', turn: rows[index] }),
+    };
+
+    it('answers requested activity from the running turn and queued inputs', async () => {
+      const handler = daemon(history);
+      handler.recordLiveActivity(sessionId, {
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          title: 'shell: flock heavy.lock make test',
+          status: 'in_progress',
+        },
+      });
+      expect((await handler.readSessionLiveStatus(sessionId, true)).activity).toMatchObject({
+        turnStartedAt: Date.parse('2026-11-03T01:00:01.000Z'),
+        lastOutputAt: expect.any(Number),
+        currentAction: 'shell: flock heavy.lock make test',
+        queuedInputs: 2,
+      });
+      handler.recordLiveActivity(sessionId, {
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed' },
+      });
+      expect((await handler.readSessionLiveStatus(sessionId, true)).activity).not.toHaveProperty(
+        'currentAction'
+      );
+    });
+
+    it('omits activity unless requested, and when local history cannot be read', async () => {
+      expect(await daemon(history).readSessionLiveStatus(sessionId)).not.toHaveProperty('activity');
+      const failing = await daemon({
+        count: async () => {
+          throw new Error('Synthetic history failure');
+        },
+        readAt: async () => undefined,
+      }).readSessionLiveStatus(sessionId, true);
+      expect(failing).toMatchObject({ success: true });
+      expect(failing).not.toHaveProperty('activity');
+    });
+  });
 });

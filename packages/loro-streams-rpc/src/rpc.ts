@@ -615,6 +615,7 @@ export const LoroSessionLiveStatusRpcRequestSchema = BaseRpcRequestSchema.extend
   params: z
     .object({
       sessionId: z.string().trim().min(1),
+      includeActivity: z.literal(true).optional(),
     })
     .strict(),
 }).strict();
@@ -3305,11 +3306,16 @@ export class LoroStreamsMachineRpcClient {
   async requestSessionLiveStatus(options: {
     sessionId: string;
     timeoutMs?: number;
+    /** Only for daemons advertising `sessionLiveActivity`; older ones reject it. */
+    includeActivity?: boolean;
   }): Promise<LoroSessionLiveStatusRpcResponse | null> {
     return (await this.sendRequest({
       method: 'session/live-status',
       timeoutMs: options.timeoutMs ?? 10_000,
-      params: { sessionId: options.sessionId },
+      params: {
+        sessionId: options.sessionId,
+        ...(options.includeActivity ? { includeActivity: true as const } : {}),
+      },
     })) as LoroSessionLiveStatusRpcResponse | null;
   }
 
