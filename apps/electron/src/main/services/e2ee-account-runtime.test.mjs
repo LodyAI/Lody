@@ -2561,7 +2561,7 @@ void test('remote commands use workspace custody and never create an account con
   assert.ok(!(await readdir(join(directory, 'e2ee-bootstrap', roots[0]))).includes('control'))
 })
 
-async function memberIpcFixture() {
+async function memberIpcFixture(options = {}) {
   const identity = { userId: 'A', generation: 1 }
   const signed = [],
     closed = []
@@ -2605,7 +2605,8 @@ async function memberIpcFixture() {
         Effect.sync(() => {
           closed.push(label)
           return Effect.void
-        })
+        }),
+      ...options.host
     }
   })
   let current = makeOwner('A', 'original-A')
@@ -2620,7 +2621,8 @@ async function memberIpcFixture() {
           requestId: 'request',
           state: 'committed'
         }),
-      appendRecord: () => Effect.void
+      appendRecord: () => Effect.void,
+      ...options.client
     }
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
@@ -2672,7 +2674,7 @@ async function memberIpcFixture() {
   })
   const ipc = new E2eeIpc()
   ipc.permissionHistory = async () => []
-  ipc.refresh = async () => {}
+  if (!options.realRefresh) ipc.refresh = async () => {}
   return {
     ipc,
     identity,
@@ -2688,6 +2690,9 @@ async function memberIpcFixture() {
     },
     setOwner(owner) {
       current = owner
+    },
+    owner() {
+      return current
     },
     holdCloud() {
       holdCloud = true
@@ -2740,6 +2745,80 @@ void test('a background reader closes only the namespace returned by its own ope
   f.identity.userId = 'B'
   f.identity.generation++
   await assert.rejects(f.ipc.open('team', undefined, 'A'), /e2ee_account_mismatch/)
+})
+
+const approvalRequest = '55'.repeat(16)
+/** Real approval, ledger refresh and delivery paths over a synthetic relay and host. */
+async function memberApprovalFixture(keyRound) {
+  let committed = false
+  return memberIpcFixture({
+    realRefresh: true,
+    client: {
+      memberRead: ({ requestId }) =>
+        Effect.succeed({
+          workspaceId: 'team',
+          requestId,
+          source: 'email',
+          keyPackageHex: 'abcd',
+          state: committed ? 'committed' : 'pending'
+        }),
+      appendRecord: () =>
+        Effect.sync(() => {
+          committed = true
+        }),
+      history: () => Effect.succeed({ checkpoint: {}, nextCursor: null }),
+      memberPending: () =>
+        Effect.succeed({ invitations: [], items: [], hasMore: false, seatPreview: null })
+    },
+    host: {
+      prepareMemberAdmission: () => Effect.succeed({ workspaceId: 'team', recordHex: 'ab' }),
+      ...(keyRound ? { keyRound } : {})
+    }
+  })
+}
+void test('an admin sees a committed member admitted before key delivery ends; main finishes delivery after the window closes', { timeout: 5000 }, async () => {
+  // keyRound never settles until keyGate opens: the approval must not wait for it.
+  const f = await memberApprovalFixture()
+  const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+  assert.deepEqual(approved, { admitted: true, keyPending: true, keyDelivery: 'pending' })
+  await f.keyEntered.promise
+  assert.deepEqual((await f.ipc.memberKeyDeliveries('team')).items, [
+    { requestId: approvalRequest, state: 'pending' }
+  ])
+  // The only renderer window goes away while the key round is still running.
+  f.owner().readers.get('team').delete(1)
+  assert.deepEqual(f.closed, [])
+  f.keyGate.resolve()
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  // Main's own reader kept the workspace open, then released it after delivery.
+  assert.deepEqual(f.closed, ['original-A'])
+  f.owner().readers.set('team', new Map([[1, 1]]))
+  assert.deepEqual((await f.ipc.memberKeyDeliveries('team')).items, [
+    { requestId: approvalRequest, state: 'delivered' }
+  ])
+})
+void test('a failed key delivery stays visible by code and the next due periodic poll retries it until delivered', { timeout: 5000 }, async () => {
+  const outcomes = [Effect.fail(new Error('e2ee_management_retry')), Effect.void]
+  const f = await memberApprovalFixture(() => outcomes.shift() ?? Effect.die('unexpected round'))
+  let now = 1_000
+  f.ipc.keyDeliveryNow = () => now
+  const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+  assert.equal(approved.admitted, true)
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  const failed = [{ requestId: approvalRequest, state: 'failed', code: 'e2ee_management_retry' }]
+  assert.deepEqual((await f.ipc.memberKeyDeliveries('team')).items, failed)
+  // A poll inside the backoff interval does not start another round.
+  await f.ipc.memberJoinRequests('team')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual((await f.ipc.memberKeyDeliveries('team')).items, failed)
+  assert.equal(outcomes.length, 1)
+  now += 10_000
+  // The email admission worker's next poll drives the due retry.
+  await f.ipc.memberJoinRequests('team')
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual((await f.ipc.memberKeyDeliveries('team')).items, [
+    { requestId: approvalRequest, state: 'delivered' }
+  ])
 })
 
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
