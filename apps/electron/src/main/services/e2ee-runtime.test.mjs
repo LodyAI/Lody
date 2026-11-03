@@ -4570,3 +4570,223 @@ function expectNoEntry(snapshot) {
   assert.equal(snapshot.cachedPolicies, 0)
   assert.equal(snapshot.cachedExecutionGrants, 0)
 }
+
+const sharingCacheFixture = Effect.fnUntraced(function* (directory) {
+  const owner = yield* ownerWithHost(directory)
+  const prepared = yield* bind(owner)
+  yield* owner.host.open(workspaceId)
+  const records = yield* makeRecords(owner.custody, prepared, 2)
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex')))
+  const signer = yield* owner.custody.openDevice(genesis)
+  const machine = yield* owner.custody.prepareDevice()
+  yield* Effect.addFinalizer(() => owner.custody.discardDevice(machine).pipe(Effect.orDie))
+  let view = Result.getOrThrow(
+    verifyLedger({
+      anchor: genesis,
+      records,
+      checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+    })
+  )
+  const append = Effect.fnUntraced(function* (command) {
+    const proposal =
+      command instanceof Uint8Array
+        ? Result.getOrThrow(prepareLedgerRecord(view, command))
+        : Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, command))
+    const record = yield* signLedgerRecord(proposal, signer)
+    records.push(record)
+    view = Result.getOrThrow(
+      extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+    )
+  })
+  yield* append(
+    yield* prepareDeviceAdmission({
+      genesis,
+      membershipId: view.inspectState().owner,
+      encryptionPublicKey: machine.enc,
+      kind: 'machine',
+      machineId: 'cache-machine',
+      signer: machine
+    })
+  )
+  yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] })
+  const ingest = () =>
+    owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+  yield* ingest()
+  let head = null,
+    version = null
+  const remote = {
+    readHead: (binding) => Effect.succeed(binding.generation === head?.generation ? head : null),
+    readVersion: (binding) =>
+      Effect.succeed(binding.generation === version?.generation ? version : null),
+    readRequest: () => Effect.succeed(null),
+    commit: (input) =>
+      Effect.gen(function* () {
+        const { machineSharingDigest } = yield* Effect.promise(
+          () => import('@lody/e2ee-core/protocol')
+        )
+        const { credential: _credential, expectedHead: _expected, ...original } = input
+        version = {
+          ...original,
+          digest: Result.getOrThrow(machineSharingDigest(Buffer.from(input.frameHex, 'hex')))
+        }
+        head = { ...version, status: 'active' }
+        return { status: 'committed', version }
+      })
+  }
+  const initial = yield* owner.host.readMachineSharing(workspaceId, 'cache-machine', remote)
+  yield* owner.host.updateMachineSharing(
+    workspaceId,
+    'cache-machine',
+    initial.generation,
+    '81'.repeat(16),
+    { kind: 'machine', sharedWithTeam: true },
+    remote
+  )
+  yield* owner.host.readMachineSharing(workspaceId, 'cache-machine', remote)
+  const cache = () => owner.host.inspectCachedState(workspaceId, 'cache-machine')
+  assert.equal((yield* cache()).cachedExecutionGrants, 1)
+  return {
+    owner,
+    prepared,
+    genesis,
+    signer,
+    machine,
+    records,
+    view: () => view,
+    append,
+    ingest,
+    remote,
+    cache,
+    generation: initial.generation
+  }
+})
+
+void test('unchanged verified ledger refresh retains sharing cache; a real advance clears it', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* sharingCacheFixture(directory)
+      const cached = yield* f.cache()
+      // Empty current page, exact replay and older verified overlap are all no-ops.
+      for (const start of [f.records.length, 0, 1]) {
+        yield* f.owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(f.records, f.prepared.genesisHashHex, start)
+        )
+        assert.deepEqual(yield* f.cache(), cached)
+      }
+      yield* f.append({
+        _tag: 'SetRole',
+        membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.alloc(16, 17))),
+        role: 'admin'
+      })
+      yield* f.ingest()
+      assert.equal((yield* f.cache()).cachedExecutionGrants, 0)
+    })
+  )
+})
+
+for (const change of ['member revocation', 'device revocation', 'epoch', 'generation']) {
+  void test(`verified ${change} immediately clears the native sharing cache`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const f = yield* sharingCacheFixture(directory)
+        if (change === 'member revocation') {
+          yield* f.append({
+            _tag: 'RemoveMember',
+            membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.alloc(16, 17)))
+          })
+        } else {
+          yield* f.append({ _tag: 'RevokeDevice', target: f.machine.publicKey })
+          if (change === 'generation') {
+            const replacement = yield* f.owner.custody.prepareDevice()
+            yield* f.append(
+              yield* prepareDeviceAdmission({
+                genesis: f.genesis,
+                membershipId: f.view().inspectState().owner,
+                encryptionPublicKey: replacement.enc,
+                kind: 'machine',
+                machineId: 'cache-machine',
+                signer: replacement
+              })
+            )
+            yield* f.owner.custody.discardDevice(replacement)
+          } else if (change === 'epoch') {
+            yield* f.append(
+              Result.getOrThrow(
+                encodeCbor([
+                  f.view().head.toBytes(),
+                  f.signer.publicKey.toBytes(),
+                  [7, 1, Buffer.alloc(32, 81), Buffer.alloc(72, 82)]
+                ])
+              )
+            )
+          }
+        }
+        yield* f.ingest()
+        assert.equal((yield* f.cache()).cachedExecutionGrants, 0)
+        if (change === 'generation') {
+          const current = yield* f.owner.host.readMachineSharing(
+            workspaceId,
+            'cache-machine',
+            f.remote
+          )
+          assert.notEqual(current.generation, f.generation)
+          assert.equal(current.sharedWithTeam, false)
+          assert.equal(current.head, null)
+          assert.equal((yield* f.cache()).cachedExecutionGrants, 0)
+        }
+      })
+    )
+  })
+}
+
+for (const advance of [false, true]) {
+  void test(`a policy read racing ingest advance=${advance} follows the verified head`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const f = yield* sharingCacheFixture(directory)
+        const entered = Deferred.makeUnsafe(),
+          release = Deferred.makeUnsafe()
+        const slow = {
+          ...f.remote,
+          readHead: (binding) =>
+            Effect.gen(function* () {
+              const head = yield* f.remote.readHead(binding)
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+              return head
+            })
+        }
+        const reading = yield* Effect.forkChild(
+          Effect.result(f.owner.host.readMachineSharing(workspaceId, 'cache-machine', slow))
+        )
+        yield* Deferred.await(entered)
+        if (advance)
+          yield* f.append({
+            _tag: 'SetRole',
+            membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.alloc(16, 17))),
+            role: 'admin'
+          })
+        yield* f.ingest()
+        yield* Deferred.succeed(release, undefined)
+        const result = yield* Fiber.join(reading)
+        if (advance) {
+          assert.equal(result.failure?.code, 'sharing_unavailable')
+          assert.equal((yield* f.cache()).cachedExecutionGrants, 0)
+        } else {
+          assert.equal(Result.getOrThrow(result).sharedWithTeam, true)
+          assert.equal((yield* f.cache()).cachedExecutionGrants, 1)
+        }
+        assert.equal(
+          (yield* f.owner.host.readMachineSharing(workspaceId, 'cache-machine', f.remote))
+            .sharedWithTeam,
+          true
+        )
+        assert.equal((yield* f.cache()).cachedExecutionGrants, 1)
+      })
+    )
+  })
+}
