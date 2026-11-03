@@ -137,4 +137,4 @@ snapshots and join leases. Unready Blobs stay in memory; uncertain steers never 
   leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
   incomplete owners; only overlapping custody bindings or Repo namespaces wait.
   Independent workspaces remain usable. Device replacement shares its
-  account/workspace/genesis writer. Usable retained epochs wake existing admission.
+  account/workspace/genesis writer. First key reception keeps admission pending; usable epochs wake content.
