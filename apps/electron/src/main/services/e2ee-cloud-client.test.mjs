@@ -791,3 +791,49 @@ for (const [serverCode, code] of [
       )
     )
   })
+
+const jwtExpiringAt = (seconds, id) =>
+  [
+    Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ exp: seconds, jti: id })).toString('base64url'),
+    'synthetic-signature'
+  ].join('.')
+void test('relay calls reuse one unexpired Convex token, renew it near expiry and after a failed call', async () => {
+  let now = 1_000_000
+  let minted = 0
+  const seen = []
+  let failNext = false
+  const scope = await Effect.runPromise(Scope.make())
+  const client = await Effect.runPromise(
+    build(
+      async (_url, init) => {
+        seen.push(new Headers(init.headers).get('authorization'))
+        if (failNext) {
+          failNext = false
+          return new Response('unavailable', { status: 503 })
+        }
+        return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+      },
+      {
+        now: () => now,
+        convexToken: async () => ({
+          data: { token: jwtExpiringAt(Math.floor(now / 1000) + 600, ++minted) }
+        })
+      }
+    ).pipe(Scope.provide(scope))
+  )
+  const status = () => Effect.runPromise(Effect.result(client.mailbox(access).status(target)))
+  for (let index = 0; index < 3; index++) assert.ok(Result.isSuccess(await status()))
+  assert.equal(minted, 1)
+  assert.equal(new Set(seen).size, 1)
+  // Inside the renewal margin: a fresh token, never one about to expire in flight.
+  now += 560_000
+  await status()
+  assert.equal(minted, 2)
+  // A failed call may mean a rejected token: the next call mints again.
+  failNext = true
+  assert.ok(Result.isFailure(await status()))
+  await status()
+  assert.equal(minted, 3)
+  await Effect.runPromise(Scope.close(scope, Exit.void))
+})
