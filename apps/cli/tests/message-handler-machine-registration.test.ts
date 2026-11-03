@@ -207,6 +207,7 @@ describe('MessageHandler machine registration', () => {
       mcpToolDiscovery: 1,
       mcpLocalAuthentication: 1,
       codexAuthProfiles: 1,
+      sessionInputWithdraw: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,

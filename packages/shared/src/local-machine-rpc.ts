@@ -449,6 +449,29 @@ export const SessionLiveActivitySchema = z
   .strict();
 export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
 
+/**
+ * Best-effort withdrawal of a queued input that has not started. `withdrawn`
+ * means the input was still pending and is now canceled; a dispatch racing the
+ * withdrawal may still run it, which callers observe in the target history.
+ */
+export const SessionWithdrawInputResponseSchema = z
+  .object({
+    type: z.literal('session/withdraw-input_response'),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1),
+    outcome: z.enum([
+      'withdrawn',
+      'already_withdrawn',
+      'already_started',
+      'not_found',
+      'not_owner',
+      'error',
+    ]),
+    error: z.string().optional(),
+  })
+  .strict();
+export type SessionWithdrawInputResponse = z.infer<typeof SessionWithdrawInputResponseSchema>;
+
 export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
   z
     .object({

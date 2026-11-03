@@ -95,6 +95,7 @@ import {
   ensureWorkspaceMetaSynced,
   listAliveDocMetas,
   listAliveSessionMetas,
+  withMachineRpcClient,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
   resolveWorkspaceOrThrow,
@@ -128,6 +129,7 @@ import {
   readSessionMcpIdsForAuthoring,
   sendSessionChatResult,
   type SessionChatDelivery,
+  toSessionTranscriptEntry,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -154,6 +156,7 @@ import { registerAutomationTools } from './automation-tools';
 import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
@@ -846,6 +849,23 @@ const SessionChatManyToolInputSchema = z
     items: z.array(SessionChatBatchItemSchema).max(1_000),
   })
   .strict();
+
+const SessionQueueToolInputSchema = z
+  .object({
+    action: z.enum(['list', 'withdraw', 'replace']),
+    sessionId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1).optional(),
+    prompt: z.string().trim().min(1).optional(),
+    operationId: LodyOperationIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.action !== 'list' && !value.userTurnId)
+      ctx.addIssue({ code: 'custom', message: `${value.action} requires userTurnId` });
+    if (value.action === 'replace' && (!value.prompt || !value.operationId))
+      ctx.addIssue({ code: 'custom', message: 'replace requires prompt and operationId' });
+  });
+type SessionQueueToolInput = z.infer<typeof SessionQueueToolInputSchema>;
 
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
@@ -3528,6 +3548,163 @@ const renameSessionItems = async (
 };
 
 /** Cancel through the daemon's workspace replica, never a child CLI with its own. */
+const MAX_QUEUE_LIST_ROWS = 200;
+const MAX_QUEUE_LIST_ITEMS = 20;
+const QUEUE_PREVIEW_CHARS = 100;
+
+/** Inputs in the target history that no execution has started. */
+const listQueuedSessionInputs = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  requesterSessionId: string,
+  machineId: string
+) =>
+  await readSessionDocForMcp(
+    manager,
+    session,
+    machineId as MachineId,
+    async (sessionDoc) => {
+      const history = (await createSessionBackend(sessionDoc, session)).history;
+      const total = await history.count();
+      const rows = await history.readDirectory(Math.max(0, total - MAX_QUEUE_LIST_ROWS), total);
+      const queued = rows
+        .map((row) => row.scalars)
+        .filter(
+          (row): row is NonNullable<typeof row> =>
+            row?.role === 'user' &&
+            (row.status === 'pending' || row.status === 'pending_apply' || row.status === 'seen')
+        )
+        .slice(0, MAX_QUEUE_LIST_ITEMS);
+      const items = [];
+      for (const row of queued) {
+        const read = await history.readTurn(row.id);
+        const turn = read.state === 'ready' ? read.turn : undefined;
+        const author = turn ? readMessageAuthor(turn.author) : undefined;
+        const text = turn ? (toSessionTranscriptEntry(0, turn)?.text ?? '') : '';
+        items.push({
+          userTurnId: row.id,
+          status: row.status,
+          queuedAt: row.timestamp,
+          sender:
+            author?.kind === 'agent'
+              ? { kind: 'agent' as const, sessionId: author.sessionId }
+              : { kind: author?.kind ?? ('unknown' as const) },
+          own: author?.kind === 'agent' && author.sessionId === requesterSessionId,
+          preview: Array.from(text).slice(0, QUEUE_PREVIEW_CHARS).join(''),
+        });
+      }
+      return { sessionId: session.id, items };
+    },
+    REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+  );
+
+/**
+ * Routes a withdrawal to the daemon that owns the target: in process when it is
+ * this Machine, otherwise over RPC to daemons advertising the capability.
+ */
+const withdrawQueuedSessionInputForMcp = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  userTurnId: string,
+  requesterSessionId: SessionId,
+  requesterUserId: string
+): Promise<SessionWithdrawInputResponse> => {
+  const auth = getCliAuthContextOrThrow('mcp');
+  const environment = getSessionCommandEnvironment();
+  const unsupported = (error: string): SessionWithdrawInputResponse => ({
+    type: 'session/withdraw-input_response',
+    sessionId: session.id,
+    userTurnId,
+    outcome: 'error',
+    error,
+  });
+  if (environment) {
+    if (session.machineId !== auth.machineId) return unsupported('Session is not on this machine');
+    return await environment.host.withdrawQueuedInput({
+      sessionId: session.id,
+      userTurnId,
+      requesterSessionId,
+    });
+  }
+  const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
+  if (
+    !machineSupportsProtocolCapability(
+      machine?.meta as MachineMeta | undefined,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw
+    )
+  )
+    return unsupported('Update the target machine daemon to withdraw queued inputs');
+  const response = await withMachineRpcClient(
+    { auth, workspaceId: getMcpWorkspaceId(getSessionContext()), machineId: session.machineId },
+    async (client) =>
+      await client.requestSessionWithdrawInput({
+        sessionId: session.id,
+        userTurnId,
+        requesterSessionId,
+        // The invoking Turn's user, already checked locally; the target re-checks it.
+        userId: requesterUserId,
+      })
+  );
+  return response ?? unsupported('Target machine did not answer');
+};
+
+const runSessionQueueTool = async (args: SessionQueueToolInput): Promise<unknown> => {
+  const ctx = getSessionContext();
+  const auth = getCliAuthContextOrThrow('mcp');
+  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+  const sessionId = resolveMcpSessionId(args.sessionId, ctx) as SessionId;
+  const result = await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+    const session = await readCurrentSessionMeta(manager, sessionId);
+    if (!session)
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Session not found: ${sessionId}`,
+        false
+      );
+    if (args.action === 'list')
+      return await listQueuedSessionInputs(manager, session, ctx.sessionId, auth.machineId);
+    // Act as the invoking Turn's user, never the daemon owner: a collaborator without
+    // access to the target must not withdraw through the owner's identity.
+    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
+    if (!currentSession)
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Requester Session not found: ${ctx.sessionId}`,
+        false
+      );
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const requester = toDelegatedSessionRequester(invoking.identity);
+    await validateSessionChatTarget({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      delegatedRequester: requester,
+    });
+    return await withdrawQueuedSessionInputForMcp(
+      manager,
+      session,
+      args.userTurnId!,
+      ctx.sessionId as SessionId,
+      requester.userId
+    );
+  });
+  if (args.action !== 'replace') return result;
+  const withdrawal = result as SessionWithdrawInputResponse;
+  // Replace sends only once the old input will not run. A retry after a failed send
+  // finds it already withdrawn and resends under the same idempotent operationId.
+  if (withdrawal.outcome !== 'withdrawn' && withdrawal.outcome !== 'already_withdrawn')
+    return { withdrawal };
+  return {
+    withdrawal,
+    chat: await startSessionChatOperation({
+      operationId: args.operationId!,
+      sessionId,
+      prompt: args.prompt!,
+    }),
+  };
+};
+
 const cancelSessionTurnForMcp = async (sessionId: SessionId, turnId?: string) => {
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
@@ -4842,6 +5019,23 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionChatManyToolInput) => {
       try {
         return jsonTextResult(await startSessionChatManyOperation(args));
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  registerSessionTool(
+    'lody_session_queue',
+    {
+      title: 'Manage queued inputs of a Lody session',
+      description:
+        'list shows inputs a target Session has not started (sender, own, status, 100-char preview). withdraw cancels one of your own still-pending inputs; replace withdraws it and, only if that succeeded, sends prompt as a new session_chat with operationId. Withdrawal is best effort: outcome withdrawn means it was still pending, but a dispatch already under way may still run it; already_withdrawn means it was already canceled (a retried replace then sends its new chat); already_started, not_owner and not_found change nothing. You act as the invoking user and need access to the target. Targets on older daemons return an error outcome.',
+      inputSchema: SessionQueueToolInputSchema,
+    },
+    async (args: SessionQueueToolInput) => {
+      try {
+        return jsonTextResult(await runSessionQueueTool(args));
       } catch (error) {
         return mcpErrorResult(error);
       }
