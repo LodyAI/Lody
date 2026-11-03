@@ -186,6 +186,7 @@ describe('MessageHandler machine registration', () => {
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
       multiRepoProject: 1,
+      machineDiskStatus: 1,
       projectFileRoots: 1,
       projectRepositoryMembers: 1,
       projectFolderSelection: 1,
@@ -234,6 +235,7 @@ describe('MessageHandler machine registration', () => {
       sessionInputAttachments: 1,
       sessionCollaborationControl: 1,
       bugReportClientLog: 1,
+      sessionLiveActivity: 1,
     });
 
     await handler.cleanup();
