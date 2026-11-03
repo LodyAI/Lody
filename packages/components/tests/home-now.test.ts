@@ -9,9 +9,14 @@ import {
 } from '../src/lib/home-now';
 
 import {
+  HOME_NOW_ARRANGEMENTS,
+  HOME_NOW_COLUMN,
   HOME_NOW_LISTS,
+  HOME_NOW_SWITCH_MARGIN,
   homeNowBlockHeight,
   layoutHomeNow,
+  solveHomeNowColumn,
+  type HomeNowColumn,
   type HomeNowLayout,
 } from '../src/lib/home-now-layout';
 
@@ -115,7 +120,10 @@ describe("spending the board's height", () => {
       column.map((block) => (block.kind === 'list' ? `${block.key}:${block.shown}` : block.kind))
     );
 
-  it('never moves a list to another column, whatever the others hold', () => {
+  it('draws the arrangement it is given, whatever the others hold', () => {
+    // The board starts on the level arrangement; which one it speaks with per state is the
+    // dashboard's call (below).
+    expect(HOME_NOW_COLUMN).toEqual({ attention: 0, running: 0, finished: 0, next: 1 });
     const sizes = [0, 1, 3, 9, 40];
     const columnOf = (layout: ReturnType<typeof layoutHomeNow>) =>
       Object.fromEntries(
@@ -135,7 +143,7 @@ describe("spending the board's height", () => {
                 expect(columnOf(layout)).toEqual({});
                 continue;
               }
-              expect(columnOf(layout)).toEqual({ attention: 0, finished: 0, running: 1, next: 1 });
+              expect(columnOf(layout)).toEqual(HOME_NOW_COLUMN);
             }
   });
 
@@ -163,6 +171,63 @@ describe("spending the board's height", () => {
                 expect(height).toBeLessThanOrEqual(maxRows);
               }
             }
+  });
+
+  const gapOf = (given: HomeNowTotals, column: HomeNowColumn) =>
+    Math.abs(
+      layoutHomeNow(given, true, Infinity, column)
+        .columns.map((blocks) =>
+          blocks.reduce((sum, block) => sum + homeNowBlockHeight(block, given), 0)
+        )
+        .reduce((left, right) => left - right)
+    );
+
+  it('speaks with the arrangement it had until another is two rows more level', () => {
+    // Running joining needs you on the left would leave one row less than the arrangement on
+    // screen: one row is rounding, not a reason for a tile to change sides.
+    const nearly = totals(2, 5, 0, 5);
+    expect(gapOf(nearly, HOME_NOW_COLUMN)).toBe(2);
+    expect(gapOf(nearly, { attention: 0, running: 0, finished: 1, next: 1 })).toBe(1);
+    expect(solveHomeNowColumn(nearly, true, Infinity, HOME_NOW_COLUMN)).toEqual(HOME_NOW_COLUMN);
+
+    // The day that arrangement was never meant for: ten waiting and six just finished, one worth
+    // continuing. Every list but the anchors on the left leaves ten rows; running joining needs
+    // you on the left leaves none.
+    const mirror = totals(10, 0, 6, 1);
+    expect(gapOf(mirror, HOME_NOW_COLUMN)).toBe(10);
+    expect(solveHomeNowColumn(mirror, true, Infinity, HOME_NOW_COLUMN)).toEqual({
+      attention: 0,
+      running: 0,
+      finished: 1,
+      next: 1,
+    });
+    expect(gapOf(mirror, { attention: 0, running: 0, finished: 1, next: 1 })).toBe(0);
+
+    // And back again when the day turns: a backlog and a few running sessions put the level one
+    // back in front.
+    expect(
+      solveHomeNowColumn(totals(0, 3, 1, 10), true, Infinity, {
+        attention: 0,
+        running: 0,
+        finished: 1,
+        next: 1,
+      })
+    ).toEqual(HOME_NOW_COLUMN);
+  });
+
+  it('never ends more than the switch margin above the best arrangement of that state', () => {
+    for (const a of [0, 1, 4, 7])
+      for (const r of [0, 1, 3, 5])
+        for (const f of [0, 1, 3, 4])
+          for (const n of [0, 1, 4, 8]) {
+            const given = totals(a, r, f, n);
+            const best = Math.min(...HOME_NOW_ARRANGEMENTS.map((column) => gapOf(given, column)));
+            for (const previous of HOME_NOW_ARRANGEMENTS) {
+              const solved = solveHomeNowColumn(given, true, Infinity, previous);
+              expect(HOME_NOW_ARRANGEMENTS).toContainEqual(solved);
+              expect(gapOf(given, solved)).toBeLessThanOrEqual(best + HOME_NOW_SWITCH_MARGIN);
+            }
+          }
   });
 
   it('says so in one card when nothing is going on', () => {

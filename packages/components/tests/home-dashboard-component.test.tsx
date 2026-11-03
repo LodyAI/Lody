@@ -204,7 +204,9 @@ describe('HomeDashboard', () => {
       const attention = q('[data-now-column="left"] [data-testid="home-now-attention"]')!;
       expect(attention.textContent).toBe('Needs you0');
       expect(attention.querySelectorAll('[data-session]')).toHaveLength(0);
-      const running = q('[data-now-column="right"] [data-testid="home-now-running"]')!;
+      // Running takes the left column with needs you: with nothing else to place, that is the
+      // arrangement that leaves those two columns level, and just finished stays on the right.
+      const running = q('[data-now-column="left"] [data-testid="home-now-running"]')!;
       expect(running.querySelectorAll('[data-session]')).toHaveLength(4);
       // "Show all" under the last row: an action, not a session.
       const toggle = byTestId('home-now-running-toggle')!;
@@ -217,9 +219,10 @@ describe('HomeDashboard', () => {
       const all = byTestId('home-now-running-all')!;
       expect(all.querySelectorAll('[data-session]')).toHaveLength(6);
       expect(byTestId('home-now')?.getAttribute('data-focus')).toBe('running');
-      expect(q('[data-now-column="right"]')?.contains(all)).toBe(true);
+      expect(q('[data-now-column="left"]')?.contains(all)).toBe(true);
       expect(running.closest('[inert]')).not.toBeNull();
-      expect(attention.closest('[inert]')).toBeNull();
+      expect(attention.closest('[inert]')).not.toBeNull();
+      expect(byTestId('home-now-next')?.closest('[inert]')).toBeNull();
       const back = byTestId('home-now-back')!;
       expect(document.activeElement).toBe(back);
       expect(back.textContent).toBe('Show less');
@@ -275,11 +278,11 @@ describe('HomeDashboard', () => {
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
       expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
 
-      // Room for six rows a column (182px of board): needs you keeps one row and its "Show all"
-      // over just finished's title, and running, in the other column, the same.
-      render({ rows, defaultBoard: 'now', stage: { height: 340, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      // Room for ten rows a column (262px of board): needs you takes the left column alone and
+      // shows seven of its nine, and running the first three of its six on the right.
+      render({ rows, defaultBoard: 'now', stage: { height: 420, rest: 100 } });
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(7);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(3);
       expect(byTestId('home-now-running-toggle')).not.toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
 
