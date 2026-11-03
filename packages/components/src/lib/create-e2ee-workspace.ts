@@ -32,6 +32,23 @@ export function e2eeCreationErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+/** Only the account that saved this request may resume or discard it. */
+export function canResumePendingCreation(
+  pending: PendingE2eeWorkspace | null,
+  accountId: string | null
+): boolean {
+  return Boolean(pending && accountId && pending.accountId === accountId);
+}
+
+/** While a submit is in flight, the discard action stays unavailable. */
+export function canDiscardPendingCreation(
+  creating: boolean,
+  pending: PendingE2eeWorkspace | null,
+  accountId: string | null
+): boolean {
+  return !creating && canResumePendingCreation(pending, accountId);
+}
+
 /** A pending request has already been submitted: its slug and free slot may
  * belong to that request, so new-workspace checks must not block continuation. */
 export function e2eeCreationAvailability(

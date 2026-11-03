@@ -1,6 +1,6 @@
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { useAtomValue } from 'jotai';
@@ -9,6 +9,8 @@ import { useCloudQuery, usePlatform } from '@lody/platform/react';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
+  canDiscardPendingCreation,
+  canResumePendingCreation,
   createPreparedE2eeWorkspace,
   e2eeCreationAvailability,
   e2eeCreationIntent,
@@ -74,6 +76,7 @@ export function MobileCreateWorkspaceSheet({
   const [creating, setCreating] = useState(false);
   const [encrypted, setEncrypted] = useState(false);
   const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  const submitInFlight = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
   const creationAvailability = useCloudQuery(
@@ -81,14 +84,18 @@ export function MobileCreateWorkspaceSheet({
   );
   // A submitted request may already have consumed the free slot and taken the
   // slug. Resume must not be blocked by checks that only apply to a new workspace.
-  const creationState = e2eeCreationAvailability(pendingCreation, creationAvailability);
+  const pendingOwned = canResumePendingCreation(pendingCreation, accountId);
+  const creationState = e2eeCreationAvailability(
+    pendingOwned ? pendingCreation : null,
+    creationAvailability
+  );
   const resumable = creationState.resumable;
   const creationAvailable = creationState.canCreate;
   const creationBlocked = creationState.blocked;
   const encryptionSupported = Boolean(platform.e2eeWorkspaces?.prepareCreation);
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
-  const fieldsDisabled = Boolean(pendingCreation) || creating;
+  const fieldsDisabled = pendingOwned || creating;
 
   // Recover the exact saved intent on every open. A lost create response must
   // retry this requestId, name and handle, never mint a second device identity.
@@ -109,6 +116,13 @@ export function MobileCreateWorkspaceSheet({
     }
   }, [accountId, open, setSlug]);
 
+  // Account changes drop only this component's recovered intent. The saved
+  // request stays on disk for that same account's next open.
+  useEffect(() => {
+    if (pendingCreation && (!accountId || pendingCreation.accountId !== accountId))
+      setPendingCreation(null);
+  }, [accountId, pendingCreation]);
+
   const slugReady = resumable || (!!slug && !error && !isChecking && isAvailable);
   const canSubmit =
     creationAvailable &&
@@ -116,6 +130,7 @@ export function MobileCreateWorkspaceSheet({
     slugReady &&
     !creating &&
     !intentReadFailed &&
+    (!pendingCreation || pendingOwned) &&
     (!encrypted || encryptionSupported);
 
   /* While the create mutation is in flight (and during the close
@@ -151,14 +166,20 @@ export function MobileCreateWorkspaceSheet({
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitInFlight.current) return;
+    submitInFlight.current = true;
     setCreating(true);
     setCreateError(null);
     try {
       if (encrypted) {
         const port = platform.e2eeWorkspaces;
         if (!port?.prepareCreation || !accountId) throw new Error('e2ee_creation_unavailable');
-        const intent = e2eeCreationIntent(accountId, pendingCreation, name, slug);
+        const intent = e2eeCreationIntent(
+          accountId,
+          pendingOwned ? pendingCreation : null,
+          name,
+          slug
+        );
         // Persist before producing a device identity or sending a request. A lost
         // response retries these exact fields on this device.
         savePendingE2eeWorkspace(localStorage, intent);
@@ -182,6 +203,7 @@ export function MobileCreateWorkspaceSheet({
       }
       console.error('Failed to create organization:', err);
     } finally {
+      submitInFlight.current = false;
       setCreating(false);
     }
   };
@@ -233,10 +255,11 @@ export function MobileCreateWorkspaceSheet({
               {createError}
             </p>
           ) : null}
-          {pendingCreation ? (
+          {canDiscardPendingCreation(creating, pendingCreation, accountId) && pendingCreation ? (
             <button
               type="button"
               onClick={() => {
+                if (creating) return;
                 clearPendingE2eeWorkspace(localStorage, pendingCreation);
                 setPendingCreation(null);
                 setName('');
@@ -244,7 +267,8 @@ export function MobileCreateWorkspaceSheet({
                 setCreateError(null);
                 resetSlug();
               }}
-              className="mx-4 mb-2 self-start text-[0.72rem] font-medium text-muted-foreground hover:text-foreground"
+              disabled={creating}
+              className="mx-4 mb-2 self-start text-[0.72rem] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               {t('e2ee.create.discardPending', 'Discard this creation')}
             </button>

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest';
-import { e2eeCreationAvailability, e2eeCreationIntent } from '../src/lib/create-e2ee-workspace';
+import {
+  canDiscardPendingCreation,
+  canResumePendingCreation,
+  e2eeCreationAvailability,
+  e2eeCreationIntent,
+} from '../src/lib/create-e2ee-workspace';
 import {
   clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
@@ -68,5 +73,26 @@ describe('discarding a pending creation', () => {
     expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(1);
     clearPendingE2eeWorkspace(localStorage, pending);
     expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(0);
+  });
+});
+
+describe('pending creation account ownership', () => {
+  const pending = {
+    accountId: 'account-A',
+    requestId: 'saved-request-01',
+    name: 'Saved workspace',
+    slug: 'saved-slug',
+  };
+
+  it('only resumes and discards for the saved account', () => {
+    expect(canResumePendingCreation(pending, 'account-A')).toBe(true);
+    expect(canResumePendingCreation(pending, 'account-B')).toBe(false);
+    expect(canResumePendingCreation(pending, null)).toBe(false);
+    expect(canDiscardPendingCreation(false, pending, 'account-B')).toBe(false);
+  });
+
+  it('disables discard while a submit is creating', () => {
+    expect(canDiscardPendingCreation(false, pending, 'account-A')).toBe(true);
+    expect(canDiscardPendingCreation(true, pending, 'account-A')).toBe(false);
   });
 });
