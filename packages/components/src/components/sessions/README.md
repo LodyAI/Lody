@@ -155,8 +155,12 @@ are captured in page coordinates to preserve centering and crop edges, and cross
 Source context is staged as an expandable text reference and screenshots as
 ordinary image attachments, awaiting the user's send. The session composer also
 offers markup on existing image drafts, replacing their pixels only after acceptance.
+Accepted image markup is encoded as JPEG on a white background, reducing quality
+when necessary to fit the 5 MiB image limit. Attachments sent without accepting
+markup keep their original format; document selection captures continue to use PNG.
 See the [document-selection decision](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
-and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md).
+and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md),
+and the [JPEG markup decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 
 `session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
 PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
