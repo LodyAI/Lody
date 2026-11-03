@@ -6,6 +6,7 @@ import {
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
 import { getDaemonWorkspace } from '@/lib/session-command-environment';
+import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import {
   getMachineRoomId,
@@ -4117,6 +4118,34 @@ async function validateSessionChatTargetForRequester(args: {
 // Cold token/gateway lookup and subscription setup need more time than an offer.
 const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
 
+/**
+ * What actually happened to an Agent chat at send time. Advisory: absent when
+ * the outcome is uncertain or was decided by an earlier attempt or replay.
+ */
+export type SessionChatDelivery = 'steered' | 'queued' | 'dispatched';
+
+const withDelivery = <T extends object>(
+  result: T,
+  delivery: SessionChatDelivery | undefined
+): T & { delivery?: SessionChatDelivery } => (delivery ? { ...result, delivery } : result);
+
+/** Maps a steer verdict to a receipt; rejected steers become ordinary input. */
+export const deliveryFromSteerResponse = (
+  response: Pick<SessionSteerResponse, 'applied' | 'disposition'>
+): SessionChatDelivery | undefined => {
+  if (response.applied) return 'steered';
+  switch (response.disposition) {
+    case 'unsupported':
+      return 'queued';
+    // stale-turn is ambiguous: promoted to the queue, or consumed after the
+    // provider accepted it too late. Report nothing rather than a false queue.
+    case 'no-active-turn':
+      return 'dispatched';
+    default:
+      return undefined;
+  }
+};
+
 export async function sendSessionChatResult(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -4144,6 +4173,7 @@ export async function sendSessionChatResult(
   machineId: MachineId;
   workspaceId: WorkspaceId;
   userTurnId: string;
+  delivery?: SessionChatDelivery;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
@@ -4347,9 +4377,11 @@ export async function sendSessionChatResult(
           deliveredSteer: true,
           onlyPendingApply: true,
         });
-        return result;
+        return { ...result, delivery: 'steered' };
       }
-      if (response?.recoveryOwned) return result;
+      if (response?.recoveryOwned) {
+        return withDelivery(result, deliveryFromSteerResponse(response));
+      }
     } catch {
       // Setup, transport and response failures never fail the accepted chat.
     } finally {
@@ -4381,7 +4413,7 @@ export async function sendSessionChatResult(
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    await environment.host.steerSession({
+    const response = await environment.host.steerSession({
       sessionId,
       expectedTurnId: steerTurnId,
       userTurnId,
@@ -4389,8 +4421,16 @@ export async function sendSessionChatResult(
       timestamp: userTurn.timestamp,
       inputConfig: userTurn.inputConfig,
     });
-    return result;
+    return withDelivery(result, deliveryFromSteerResponse(response));
   }
+  // A busy target without an applied steer (including an unconfirmed remote one)
+  // runs this input after the current turn. Retries keep their earlier outcome.
+  const ordinaryDelivery: SessionChatDelivery | undefined =
+    !orchestration?.steerActiveTurn || derivedFrom || userTurn.existingStatus !== undefined
+      ? undefined
+      : steerTurnId === undefined
+        ? 'dispatched'
+        : 'queued';
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
@@ -4433,6 +4473,7 @@ export async function sendSessionChatResult(
       machineId: session.machineId,
       workspaceId: workspace.id as WorkspaceId,
       userTurnId,
+      ...(ordinaryDelivery ? { delivery: ordinaryDelivery } : {}),
       completionPromise,
     };
   } catch (error) {
