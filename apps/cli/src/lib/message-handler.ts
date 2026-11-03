@@ -2774,6 +2774,8 @@ export class MessageHandler {
       const author = readMessageAuthor(input.turn.author);
       if (author?.kind !== 'agent' || author.sessionId !== args.requesterSessionId)
         return response('not_owner');
+      // Idempotent for a retried withdrawal or replace: the input will not run.
+      if (input.turn.status === 'canceled') return response('already_withdrawn');
       // Same guard as `onlyAwaitingStart`: pending or seen means no execution claimed it.
       if (input.turn.status !== 'pending' && input.turn.status !== 'seen')
         return response('already_started');

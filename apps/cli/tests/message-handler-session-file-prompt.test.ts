@@ -373,6 +373,7 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       await append('own-started', 'processing', 'coordinator');
       await append('other-pending', 'pending', 'someone-else');
       await append('own-seen', 'seen', 'coordinator');
+      await append('own-canceled', 'canceled', 'coordinator');
       const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
       const internals = handler as unknown as Record<string, unknown> & {
         workspaceDocument: { getOrCreateSessionDoc: unknown };
@@ -410,6 +411,8 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       expect(await status('other-pending')).toBe('pending');
       expect(await run('missing')).toMatchObject({ outcome: 'not_found' });
       expect(await run('own-seen')).toMatchObject({ outcome: 'withdrawn' });
+      // A retried withdrawal or replace finds it already withdrawn.
+      expect(await run('own-canceled')).toMatchObject({ outcome: 'already_withdrawn' });
     });
   });
 });
