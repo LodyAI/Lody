@@ -132,7 +132,7 @@ export const SessionToolResultSchema = z
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/status'),
-    params: z.object({}).strict(),
+    params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/ping'),

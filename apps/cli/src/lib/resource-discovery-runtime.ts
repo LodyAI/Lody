@@ -1,5 +1,7 @@
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockRateLimits,
+  machineSupportsDiskStatus,
   getMachineFlockDocId,
   getWorkspaceFlockDocId,
   isMachineDocRoomId,
@@ -13,6 +15,7 @@ import {
 import {
   listAliveDocMetas,
   syncWorkspaceMetaForRead,
+  withMachineRpcClient,
   WorkspaceSyncUnavailableError,
   type AuthContext,
 } from './command-runtime';
@@ -25,6 +28,8 @@ import { listWorkspaceMcpCatalog } from './workspace-mcp-store';
 import { ResourceDiscovery } from './resource-discovery';
 import { getCliPlatformKind } from './cli-platform';
 import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
+
+const MACHINE_RESOURCES_TIMEOUT_MS = 5_000;
 
 export async function createResourceDiscovery(args: {
   manager: LoroDocumentManager;
@@ -135,6 +140,36 @@ export async function createResourceDiscovery(args: {
       machineBaselines.set(machineId, baselines.get(id) !== false);
       const handle = await manager.repo.openFlockDoc(id);
       return getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(handle.flock));
+    },
+    rateLimits: async (machineId: MachineId) => {
+      const id = getMachineFlockDocId(workspaceId, machineId);
+      await sync(id);
+      const handle = await manager.repo.openFlockDoc(id);
+      return getMachineFlockRateLimits(readMachineFlockRowsFromFlock(handle.flock));
+    },
+    machineResources: async (machine: MachineMeta) => {
+      const response = await withMachineRpcClient(
+        { auth, workspaceId, machineId: machine.id },
+        async (client) =>
+          await client.requestMachineStatus({
+            timeoutMs: MACHINE_RESOURCES_TIMEOUT_MS,
+            // Older daemons reject unknown params, so only capable ones get the flag.
+            ...(machineSupportsDiskStatus(machine) ? { includeDisk: true } : {}),
+          })
+      );
+      if (!response?.success) return undefined;
+      return {
+        ...(response.resources
+          ? {
+              memory: {
+                totalGB: response.resources.totalMemoryGB,
+                freeGB: response.resources.freeMemoryGB,
+              },
+              cpuUsagePercent: response.resources.cpuUsagePercent,
+            }
+          : {}),
+        ...(response.disk ? { disk: response.disk } : {}),
+      };
     },
     projects: async (machineId) => {
       await sync(getMachineFlockDocId(workspaceId, machineId));

@@ -1135,6 +1135,17 @@ export const MachineStatusRequestSchema = z
     type: z.literal('machine/status'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
+    /** Only for daemons advertising `machineDiskStatus`. */
+    includeDisk: z.literal(true).optional(),
+  })
+  .strict();
+
+/** Free space of the volume holding the Lody data directory. */
+export const MachineDiskInfoSchema = z
+  .object({
+    totalGB: z.number().nonnegative(),
+    freeGB: z.number().nonnegative(),
+    usedPercent: z.number().min(0).max(100),
   })
   .strict();
 
@@ -1166,6 +1177,7 @@ export const MachineStatusResponseSchema = z
     machineId: MachineIdSchema,
     success: z.boolean(),
     resources: MachineResourceInfoSchema.optional(),
+    disk: MachineDiskInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
     error: SharedOptionalStringSchema,
   })
@@ -2218,7 +2230,9 @@ export const SessionHistoryReadQuerySchema = z
       })
       .strict(),
     z.object({ kind: z.literal('readAll') }).strict(),
-    z.object({ kind: z.literal('readTurnOutput'), userTurnId: SharedTrimmedNonEmptyStringSchema }).strict(),
+    z
+      .object({ kind: z.literal('readTurnOutput'), userTurnId: SharedTrimmedNonEmptyStringSchema })
+      .strict(),
   ])
   .superRefine((value, ctx) => {
     if (value.kind === 'readQuerySnapshot') {

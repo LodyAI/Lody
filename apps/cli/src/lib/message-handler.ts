@@ -3428,11 +3428,12 @@ export class MessageHandler {
               )
             ),
         },
-        getMachineStatus: async () =>
+        getMachineStatus: async (args) =>
           await this.executionService.getMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
+            ...(args?.includeDisk ? { includeDisk: true as const } : {}),
           }),
         getPreviewControl: async () => ({
           type: 'machine/preview-control_response',
@@ -7106,6 +7107,7 @@ export class MessageHandler {
           type: 'machine/status',
           machineId: this.machineId,
           workspaceId: this.workspaceId,
+          ...(request.params.includeDisk ? { includeDisk: true as const } : {}),
         });
       case 'machine/ping':
         return this.executionService.pingMachine({
