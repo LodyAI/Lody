@@ -1,4 +1,4 @@
-import { resolveSessionPrimaryPullRequest } from '@lody/shared';
+import { resolveSessionPrimaryPullRequest, resolveSessionPullRequests } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
@@ -330,6 +330,7 @@ export function mapSessionMetaToSessionListRow(
     historyBackend: resolveSessionHistoryBackendKind(session),
     repoFullName: repoFullNameRaw ? repoFullNameRaw : null,
     branchName,
+    pullRequests: resolveSessionPullRequests(session),
     prUrl: prInfo.url,
     prNumber: prInfo.number,
     prStatus: prInfo.status,
