@@ -160,10 +160,20 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
     try {
       // This candidate is not yet owned by Repo. Keep the original available if
       // cache import/persistence fails; a live replica is never replaced.
+      //
+      // A plain snapshot omits received remote updates still waiting for
+      // missing causal dependencies. Re-import the durable sidecar after the
+      // bootstrap snapshot so adopting it does not hide those updates from the
+      // live replica. The storage journal remains their durability owner, so
+      // this does not write a second copy.
       const seeded = LoroDoc.fromSnapshot(
         persisted ? persisted.export({ mode: 'snapshot' }) : snapshot
       );
-      if (persisted) seeded.import(snapshot);
+      if (persisted) {
+        seeded.import(snapshot);
+        const persistedPending = persisted.exportPendingUpdates();
+        if (persistedPending !== undefined) seeded.import(persistedPending);
+      }
       // Repo treats storage-loaded versions as durable. Save the merged state
       // before adoption so a later cursor cannot outrun its document.
       await storage.save({
