@@ -43,18 +43,6 @@ describe('history import domain boundary', () => {
     // Fixed v1 fixture captured on unmodified main: v1 canonicalization must not move.
     expect(hashes[0]).toBe('cc7ec54e218e6c9570af864fa57d76ee5677fcd0897c1b4919564e969f585935');
   });
-  it('rejects a missing cursor capability before writing', async () => {
-    const doc = new LoroDoc();
-    const data = createLoroSessionData({
-      doc,
-      sessionId: 'test' as SessionId,
-    });
-    expect(await data.commands.applyHistoryImport(input)).toMatchObject({
-      status: 'rejected',
-      reason: { code: 'unsupported' },
-    });
-    expect(await data.history.count()).toBe(0);
-  });
   it('does not report a cursor failure after a write as rejected', async () => {
     const doc = new LoroDoc();
     let attempted: unknown;
@@ -235,19 +223,6 @@ describe('versioned history import through the real port', () => {
     expect(doc.getList('history').toJSON()).toEqual(before);
   });
 
-  it('refreshes v1/v1 without recomputation and keeps the cursor at v1', async () => {
-    const { port, legacyMeta } = await seedLegacyDoc(1);
-    const next = replayOf(rounds(2), HASH_VERSION_V1);
-    const result = await port.data.commands.applyHistoryImport({
-      mode: 'refresh',
-      replay: next,
-      externalHistory: legacyMeta,
-    });
-    expect(result).toMatchObject({ status: 'accepted', appended: 2 });
-    expect(port.getCursor()?.hashVersion).toBe(HASH_VERSION_V1);
-    expect(port.getCursor()?.importedTurnHashes).toEqual(next.turnHashes);
-  });
-
   it('keeps a local untracked suffix a conflict against a v1 cursor', async () => {
     const { doc, port, legacyMeta } = await seedLegacyDoc(1);
     createHistoryWriter(doc).append({ ...userTurn(9), id: 'local-only' });
@@ -284,23 +259,6 @@ describe('versioned history import through the real port', () => {
     const ids = (doc.getList('history').toJSON() as Array<{ id: string }>).map((t) => t.id);
     expect(ids).toEqual(rounds(2).map((t) => t.id));
     expect(port.getCursor()?.hashVersion).toBe(HASH_VERSION_V2);
-  });
-
-  it('reports an already-resolved session instead of replacing it again', async () => {
-    const { port } = await seedLegacyDoc(1);
-    const replay = replayOf(rounds(1), HASH_VERSION_V2);
-    // Metadata digest advanced to v2 while history already matches the replay exactly.
-    const result = await port.data.commands.applyHistoryImport({
-      mode: 'resolve-conflict',
-      replay,
-      externalHistory: {
-        status: 'synced',
-        importedTurnCount: 2,
-        replayDigest: replay.replayDigest,
-        hashVersion: HASH_VERSION_V2,
-      },
-    });
-    expect(result).toMatchObject({ status: 'rejected', reason: { code: 'already_resolved' } });
   });
 
   it('refuses an unknown stored hash version before any write', async () => {

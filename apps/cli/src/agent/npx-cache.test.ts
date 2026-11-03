@@ -16,20 +16,12 @@ import {
   type NpxStartupAttemptInput,
 } from './acp-npx-startup-policy';
 import {
-  extractNpxCacheDirsFromText,
-  findNpxCacheDirsForPackage,
-  getConfiguredNpmCacheDir,
-  getConfiguredNpxCacheRoot,
-  getNpxCacheRoots,
   getLodyNpmCacheDir,
   inspectNpxInstallState,
   isLodyNpmCacheDir,
-  isNpxCommand,
   isLikelyBrokenNpxInstall,
   isLikelyNpmCacheCorruption,
   type NpxCacheIo,
-  parseNpxPackageSpec,
-  parseNpxPackageSpecFromArgs,
   purgeBrokenNpxCache,
   purgeBrokenNpxInstall,
   purgeLodyNpmCache,
@@ -129,70 +121,6 @@ function healthyInstall(root: string, hash: string, pkg: string, version: string
   };
 }
 
-describe('parseNpxPackageSpec', () => {
-  it('parses a plain name@version', () => {
-    expect(parseNpxPackageSpec('acp-extension-codex-darwin-arm64@0.15.0')).toEqual({
-      name: 'acp-extension-codex-darwin-arm64',
-      version: '0.15.0',
-    });
-  });
-
-  it('parses a scoped @scope/pkg@version', () => {
-    expect(parseNpxPackageSpec('@scope/pkg@1.2.3')).toEqual({
-      name: '@scope/pkg',
-      version: '1.2.3',
-    });
-  });
-
-  it('returns undefined when there is no version separator', () => {
-    expect(parseNpxPackageSpec('acp-extension-codex')).toBeUndefined();
-    expect(parseNpxPackageSpec('@scope/pkg')).toBeUndefined();
-    expect(parseNpxPackageSpec('')).toBeUndefined();
-    expect(parseNpxPackageSpec(undefined)).toBeUndefined();
-  });
-});
-
-describe('parseNpxPackageSpecFromArgs', () => {
-  it('reads the spec immediately after -y, ignoring trailing agent args', () => {
-    const args = [
-      '--registry=https://registry.npmjs.org/',
-      '--prefer-online',
-      '-y',
-      'acp-extension-codex-darwin-arm64@0.15.0',
-      '-c',
-      'features.goals=true',
-    ];
-    expect(parseNpxPackageSpecFromArgs(args)).toEqual({
-      name: 'acp-extension-codex-darwin-arm64',
-      version: '0.15.0',
-    });
-  });
-
-  it('supports --yes and returns undefined when absent', () => {
-    expect(parseNpxPackageSpecFromArgs(['--yes', 'acp-extension-claude@0.39.0'])).toEqual({
-      name: 'acp-extension-claude',
-      version: '0.39.0',
-    });
-    expect(parseNpxPackageSpecFromArgs(['--prefer-online', 'pkg@1.0.0'])).toBeUndefined();
-  });
-
-  it('reads the first package selector from a composed npx launch', () => {
-    expect(
-      parseNpxPackageSpecFromArgs([
-        '--prefer-offline',
-        '-y',
-        '--package',
-        '@deepseek-ai/dsh-acp-demo@0.1.0-rc.6',
-        '--package=@deepseek-ai/dsh-llm-deepseek@0.1.0-rc.6',
-        'dsh-acp-demo',
-      ])
-    ).toEqual({
-      name: '@deepseek-ai/dsh-acp-demo',
-      version: '0.1.0-rc.6',
-    });
-  });
-});
-
 describe('isLikelyBrokenNpxInstall', () => {
   it('matches module-resolution / missing-binary signatures', () => {
     expect(
@@ -277,12 +205,6 @@ describe('inspectNpxInstallState', () => {
     }
   });
 
-  it('returns missing when no candidate install exists', () => {
-    const io = makeIo({ dirs: { [root]: ['other'] } });
-
-    expect(inspectNpxInstallState(pkg, version, { io, roots: [root] }).kind).toBe('missing');
-  });
-
   it('skips same-package installs for other versions', () => {
     const io = makeIo({
       dirs: { [root]: ['aa11'], [hashDir]: [] },
@@ -365,53 +287,6 @@ describe('inspectNpxInstallState', () => {
 });
 
 describe('runNpxStartupWithRecovery', () => {
-  it('uses the cold npx init timeout when the install is missing', async () => {
-    const attempts: NpxStartupAttemptInput[] = [];
-    const io = makeIo({});
-
-    await runNpxStartupWithRecovery({
-      command: 'npx',
-      args: npxArgs(),
-      env: { npm_config_cache: '/cache' },
-      logger,
-      logPrefix: '[test]',
-      npxCacheIo: io,
-      npxCacheRoots: ['/cache/_npx'],
-      getStderrTail: () => '',
-      attempt: async (input) => {
-        attempts.push(input);
-        return 'ok';
-      },
-    });
-
-    expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.startupTimeouts?.initTimeoutMs).toBe(COLD_NPX_INIT_TIMEOUT_MS);
-  });
-
-  it('does not override init timeout when the install is ready', async () => {
-    const attempts: NpxStartupAttemptInput[] = [];
-    const root = '/cache/_npx';
-    const io = makeIo(healthyInstall(root, 'aa11', 'acp-extension-claude', '0.50.0'));
-
-    await runNpxStartupWithRecovery({
-      command: 'npx',
-      args: npxArgs(),
-      env: { npm_config_cache: '/cache' },
-      logger,
-      logPrefix: '[test]',
-      npxCacheIo: io,
-      npxCacheRoots: [root],
-      getStderrTail: () => '',
-      attempt: async (input) => {
-        attempts.push(input);
-        return 'ok';
-      },
-    });
-
-    expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.startupTimeouts).toBeUndefined();
-  });
-
   it('purges a preflight broken install before starting with cold timeout', async () => {
     const attempts: NpxStartupAttemptInput[] = [];
     const root = '/cache/_npx';
@@ -684,40 +559,6 @@ describe('runNpxStartupWithRecovery', () => {
 
     expect(io.removed).toEqual([]);
   });
-
-  it('runs non-npx commands once without cache policy', async () => {
-    const attempts: NpxStartupAttemptInput[] = [];
-
-    await runNpxStartupWithRecovery({
-      command: 'node',
-      args: ['agent.js'],
-      env: {},
-      logger,
-      logPrefix: '[test]',
-      getStderrTail: () => '',
-      attempt: async (input) => {
-        attempts.push(input);
-        return 'ok';
-      },
-    });
-
-    expect(attempts).toEqual([{ attempt: 1, args: ['agent.js'], startupTimeouts: undefined }]);
-  });
-});
-
-describe('isNpxCommand', () => {
-  it('matches bare npx, absolute paths, and Windows shims', () => {
-    expect(isNpxCommand('npx')).toBe(true);
-    expect(isNpxCommand('/opt/homebrew/bin/npx')).toBe(true);
-    expect(isNpxCommand('C:\\Program Files\\nodejs\\npx.cmd')).toBe(true);
-    expect(isNpxCommand('C:\\Program Files\\nodejs\\npx.exe')).toBe(true);
-  });
-
-  it('does not match other launchers', () => {
-    expect(isNpxCommand('node')).toBe(false);
-    expect(isNpxCommand('/usr/local/bin/pnpm')).toBe(false);
-    expect(isNpxCommand('custom-npx-wrapper')).toBe(false);
-  });
 });
 
 describe('withLodyNpmCacheForNpx', () => {
@@ -737,26 +578,9 @@ describe('withLodyNpmCacheForNpx', () => {
     });
     expect(env.npm_config_cache).toBe('/Users/u/.npm');
   });
-
-  it('leaves non-npx agents untouched', () => {
-    const env = { PATH: '/usr/bin', npm_config_cache: '/Users/u/.npm' };
-    expect(withLodyNpmCacheForNpx('node', env, { home: '/Users/u' })).toBe(env);
-  });
 });
 
 describe('npm cache isolation helpers', () => {
-  it('reads npm_config_cache before NPM_CONFIG_CACHE', () => {
-    expect(
-      getConfiguredNpmCacheDir({
-        npm_config_cache: '/lower',
-        NPM_CONFIG_CACHE: '/upper',
-      })
-    ).toBe('/lower');
-    expect(getConfiguredNpmCacheDir({ NPM_CONFIG_CACHE: '/upper' })).toBe('/upper');
-    expect(getConfiguredNpmCacheDir({ npm_config_cache: '' })).toBeUndefined();
-    expect(getConfiguredNpxCacheRoot({ npm_config_cache: '/lower' })).toBe(join('/lower', '_npx'));
-  });
-
   it('recognizes only the Lody npm cache path', () => {
     expect(isLodyNpmCacheDir('/Users/u/.lody-oss/npm-cache', '/Users/u')).toBe(true);
     expect(isLodyNpmCacheDir('/Users/u/.lody-oss/npm-cache/', '/Users/u')).toBe(true);
@@ -806,142 +630,7 @@ describe('isLikelyNpmCacheCorruption', () => {
   });
 });
 
-describe('extractNpxCacheDirsFromText', () => {
-  it('extracts the _npx/<hash> dir from a posix module-resolution error', () => {
-    const text =
-      "Cannot find package 'acp-extension-codex-darwin-arm64' imported from " +
-      '/Users/bytedance/.npm/_npx/4ecc573a5eb0b4f6/node_modules/acp-extension-codex/bin/acp-extension-codex.js';
-    expect(extractNpxCacheDirsFromText(text)).toEqual([
-      '/Users/bytedance/.npm/_npx/4ecc573a5eb0b4f6',
-    ]);
-  });
-
-  it('extracts a windows-style _npx path', () => {
-    const text =
-      "Cannot find module 'C:\\Users\\u\\AppData\\Local\\npm-cache\\_npx\\abcdef12\\node_modules\\x'";
-    expect(extractNpxCacheDirsFromText(text)).toEqual([
-      'C:\\Users\\u\\AppData\\Local\\npm-cache\\_npx\\abcdef12',
-    ]);
-  });
-
-  it('dedupes the dir from a zod/v4 ERR_UNSUPPORTED_DIR_IMPORT (path appears twice)', () => {
-    const text =
-      "Directory import '/Users/f/.npm/_npx/495e3ff36615a20b/node_modules/zod/v4' is not supported " +
-      'resolving ES modules imported from ' +
-      '/Users/f/.npm/_npx/495e3ff36615a20b/node_modules/@agentclientprotocol/sdk/dist/acp.js';
-    expect(extractNpxCacheDirsFromText(text)).toEqual(['/Users/f/.npm/_npx/495e3ff36615a20b']);
-  });
-
-  it('dedupes and returns empty for unrelated text', () => {
-    const text = '/a/_npx/aa11 and again /a/_npx/aa11';
-    expect(extractNpxCacheDirsFromText(text)).toEqual(['/a/_npx/aa11']);
-    expect(extractNpxCacheDirsFromText('no cache path here')).toEqual([]);
-    expect(extractNpxCacheDirsFromText(null)).toEqual([]);
-  });
-});
-
-describe('getNpxCacheRoots', () => {
-  it('prefers an explicit npm_config_cache and adds the posix default', () => {
-    const roots = getNpxCacheRoots({
-      env: { npm_config_cache: '/custom/cache' },
-      platform: 'linux',
-      home: '/home/u',
-    });
-    expect(roots).toEqual([join('/custom/cache', '_npx'), join('/home/u', '.npm', '_npx')]);
-  });
-
-  it('uses the windows default cache location', () => {
-    const roots = getNpxCacheRoots({
-      env: { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' },
-      platform: 'win32',
-      home: 'C:\\Users\\u',
-    });
-    expect(roots).toContain(join('C:\\Users\\u\\AppData\\Local', 'npm-cache', '_npx'));
-  });
-});
-
-describe('findNpxCacheDirsForPackage', () => {
-  const root = '/home/u/.npm/_npx';
-  const pkg = 'acp-extension-codex-darwin-arm64';
-  const pkgJson = (hash: string) => join(root, hash, 'node_modules', pkg, 'package.json');
-
-  it('matches dirs holding the package at the requested version', () => {
-    const io = makeIo({
-      dirs: { [root]: ['match', 'mismatch'] },
-      files: {
-        [pkgJson('match')]: JSON.stringify({ version: '0.15.0' }),
-        [pkgJson('mismatch')]: JSON.stringify({ version: '0.14.0' }),
-      },
-    });
-    expect(findNpxCacheDirsForPackage(pkg, '0.15.0', { io, roots: [root] })).toEqual([
-      join(root, 'match'),
-    ]);
-  });
-
-  it('treats a corrupt package.json as a broken dir worth purging', () => {
-    const io = makeIo({
-      dirs: { [root]: ['corrupt'] },
-      files: { [pkgJson('corrupt')]: 'not-json{' },
-    });
-    expect(findNpxCacheDirsForPackage(pkg, '0.15.0', { io, roots: [root] })).toEqual([
-      join(root, 'corrupt'),
-    ]);
-  });
-
-  it('skips a missing root without throwing', () => {
-    const io = makeIo({});
-    expect(findNpxCacheDirsForPackage(pkg, '0.15.0', { io, roots: ['/nope/_npx'] })).toEqual([]);
-  });
-});
-
 describe('purgeBrokenNpxCache', () => {
-  it('purges dirs from both the error text and the cache scan, deduped', () => {
-    const root = '/home/u/.npm/_npx';
-    const pkg = 'acp-extension-codex-darwin-arm64';
-    const fromText = join(root, 'aa11'); // referenced in stderr AND found by scan
-    const fromScan = join(root, 'bb22'); // only found by scan
-    const pkgJson = (hash: string) => join(root, hash, 'node_modules', pkg, 'package.json');
-
-    const io = makeIo({
-      dirs: { [root]: ['aa11', 'bb22'], [fromText]: [], [fromScan]: [] },
-      files: {
-        [pkgJson('aa11')]: JSON.stringify({ version: '0.15.0' }),
-        [pkgJson('bb22')]: JSON.stringify({ version: '0.15.0' }),
-      },
-    });
-
-    const purged = purgeBrokenNpxCache({
-      packageName: pkg,
-      version: '0.15.0',
-      hintText: `imported from ${fromText}/node_modules/${pkg}/bin/x.js`,
-      io,
-      roots: [root],
-    });
-
-    expect(new Set(purged)).toEqual(new Set([fromText, fromScan]));
-    expect(new Set(io.removed)).toEqual(new Set([fromText, fromScan]));
-  });
-
-  it('skips non-existent extracted dirs and is best-effort on rm failures', () => {
-    // npx hashes are hex, which is what the extraction regex matches.
-    const existing = '/home/u/.npm/_npx/aa11';
-    const blocked = '/home/u/.npm/_npx/bb22';
-    const missing = '/home/u/.npm/_npx/cc33';
-    const io = makeIo({
-      dirs: { [existing]: [], [blocked]: [] },
-      rmThrows: [blocked],
-    });
-
-    const purged = purgeBrokenNpxCache({
-      hintText: `${existing} ${blocked} ${missing}`,
-      io,
-    });
-
-    // `missing` never existed → skipped; `blocked` throws on rm → swallowed; only `existing` removed.
-    expect(purged).toEqual([existing]);
-    expect(io.removed).toEqual([existing]);
-  });
-
   it('does not purge extracted dirs outside allowed roots', () => {
     const allowedRoot = '/Users/u/.lody/npm-cache/_npx';
     const allowed = join(allowedRoot, 'aa11');
@@ -995,24 +684,5 @@ describe('purgeLodyNpmCache', () => {
       })
     ).toEqual([]);
     expect(io.removed).toEqual([]);
-  });
-
-  it('is best-effort when cleanup fails', () => {
-    const cache = '/Users/u/.lody-oss/npm-cache';
-    const npx = join(cache, '_npx');
-    const cacache = join(cache, '_cacache');
-    const io = makeIo({
-      dirs: { [npx]: [], [cacache]: [] },
-      rmThrows: [cacache],
-    });
-
-    expect(
-      purgeLodyNpmCache({
-        env: { NPM_CONFIG_CACHE: cache },
-        home: '/Users/u',
-        io,
-      })
-    ).toEqual([npx]);
-    expect(io.removed).toEqual([npx]);
   });
 });

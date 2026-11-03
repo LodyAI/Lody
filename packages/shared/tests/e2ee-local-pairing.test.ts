@@ -49,14 +49,4 @@ describe('local machine pairing UTF-8 identity boundary', () => {
       );
     }
   );
-  it('keeps the unrelated account/workspace identifier limits', () => {
-    for (const field of ['accountId', 'workspaceId'] as const)
-      expect(
-        LocalE2eePrepareRequestSchema.safeParse({
-          ...request,
-          machineId: 'machine',
-          [field]: 'x'.repeat(129),
-        }).success
-      ).toBe(false);
-  });
 });

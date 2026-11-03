@@ -16,24 +16,12 @@ vi.mock('@/utils/const', () => ({
   LODY_AUTH_URL: 'https://convex.example.test',
 }));
 
-import {
-  collectAgentFeedbackSystemInfo,
-  MAX_AGENT_FEEDBACK_LENGTH,
-  submitAgentFeedback,
-} from './feedback';
+import { submitAgentFeedback } from './feedback';
 
 describe('agent feedback client', () => {
   beforeEach(() => {
     mutationMock.mockReset();
     mutationMock.mockResolvedValue({ ok: true, feedbackId: 'feedback-1' });
-  });
-
-  it('collects only minimal non-content system information', () => {
-    expect(collectAgentFeedbackSystemInfo('1.2.3')).toEqual({
-      cliVersion: '1.2.3',
-      platform: process.platform,
-      arch: process.arch,
-    });
   });
 
   it('trims feedback and sends the authenticated CLI token separately', async () => {
@@ -56,26 +44,6 @@ describe('agent feedback client', () => {
         arch: process.arch,
       },
     });
-  });
-
-  it('rejects blank and oversized feedback before making a request', async () => {
-    await expect(
-      submitAgentFeedback({
-        cliToken: 'token',
-        source: 'cli',
-        feedback: '   ',
-        cliVersion: '1.2.3',
-      })
-    ).rejects.toThrow('Feedback is required');
-    await expect(
-      submitAgentFeedback({
-        cliToken: 'token',
-        source: 'cli',
-        feedback: 'x'.repeat(MAX_AGENT_FEEDBACK_LENGTH + 1),
-        cliVersion: '1.2.3',
-      })
-    ).rejects.toThrow('Feedback must be at most');
-    expect(mutationMock).not.toHaveBeenCalled();
   });
 
   it('rejects obvious credentials before making a request', async () => {

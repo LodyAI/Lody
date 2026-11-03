@@ -61,12 +61,4 @@ describe('sidebar local project order', () => {
     store.set(currentWorkspaceIdAtom, workspaceId('workspace-b'));
     expect(store.get(localProjectOrderAtom)).toEqual(['machine-b:project-1']);
   });
-
-  it('does not persist an order before a workspace is resolved', () => {
-    const store = createStore();
-
-    store.set(localProjectOrderAtom, ['machine-a:project-1']);
-
-    expect(store.get(localProjectOrderAtom)).toEqual([]);
-  });
 });

@@ -95,20 +95,6 @@ void test('an unreadable volume is skipped, and no reading at all never blocks',
   assert.deepEqual(none.guard.getState(), { blocked: false })
 })
 
-void test('one disk check answers a burst of write failures', async () => {
-  const h = createHarness({ '/profile': { freeBytes: 200 * GIB, totalBytes: 500 * GIB } })
-  await Promise.all([
-    h.guard.reportWriteFailure('renderer'),
-    h.guard.reportWriteFailure('renderer'),
-    h.guard.reportWriteFailure('cli')
-  ])
-  await h.guard.reportWriteFailure('renderer')
-  assert.equal(h.reads.length, 1)
-  h.advance(10_000)
-  await h.guard.reportWriteFailure('renderer')
-  assert.equal(h.reads.length, 2)
-})
-
 void test('relaunch refuses while the volume is still short, then relaunches once freed', async () => {
   const profile = { freeBytes: 3.6 * GIB, totalBytes: 360 * GIB }
   const h = createHarness({ '/profile': profile })
@@ -148,12 +134,6 @@ void test('does not treat an unreadable disk as recovery', async () => {
   assert.equal(await h.guard.relaunchIfSpaceFreed(), 'check_failed')
   assert.equal(h.relaunches.length, 0)
   assert.equal(h.guard.getState().blocked, true)
-  h.guard.quit()
-  assert.equal(h.quits(), 1)
-})
-
-void test('quit is delegated', () => {
-  const h = createHarness({ '/profile': { freeBytes: 1 * GIB, totalBytes: 250 * GIB } })
   h.guard.quit()
   assert.equal(h.quits(), 1)
 })

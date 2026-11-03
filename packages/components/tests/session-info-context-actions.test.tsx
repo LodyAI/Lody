@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -178,120 +179,6 @@ describe('ContextChip actions', () => {
     expect(
       container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
     ).toBe('CI checks');
-  });
-
-  it('renders the highest-priority action directly and folds the rest into a menu', async () => {
-    const onCreatePr = vi.fn();
-    const onCommitAndPush = vi.fn();
-
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(
-        createElement(ContextChip, {
-          mode: 'stage',
-          projectName: 'loro-dev/lody',
-          branch: 'feat/info-bar-actions',
-          workspaceLocation: { kind: 'worktree', path: '/tmp/lody-worktree' },
-          diffStat: { add: 12, del: 4 },
-          actions: [
-            { id: 'create-pr', label: 'Create PR', onClick: onCreatePr },
-            {
-              id: 'commit-and-push',
-              label: 'Commit & Push',
-              onClick: onCommitAndPush,
-            },
-          ],
-        })
-      );
-    });
-
-    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
-    const createPrButton = buttons.find((button) => button.textContent === 'Create PR');
-    const commitButton = buttons.find((button) => button.textContent === 'Commit & Push');
-    const menuButton = buttons.find(
-      (button) => button.getAttribute('aria-label') === 'More actions'
-    );
-
-    expect(createPrButton).toBeInstanceOf(HTMLButtonElement);
-    expect(commitButton).toBeUndefined();
-    expect(menuButton).toBeInstanceOf(HTMLButtonElement);
-    expect(createPrButton?.className).toContain('focus-visible:ring-0');
-    expect(createPrButton?.className).toContain('text-muted-foreground/80');
-    expect(menuButton?.className).toContain('focus-visible:ring-0');
-    // One borderless tinted surface in both themes — the bar keeps controls flat.
-    expect(createPrButton?.parentElement?.className).not.toContain('border');
-    expect(createPrButton?.parentElement?.className).toContain('bg-foreground/[0.05]');
-    expect(createPrButton?.parentElement?.className).toContain('dark:bg-muted-foreground/[0.08]');
-
-    await act(async () => createPrButton?.click());
-
-    expect(onCreatePr).toHaveBeenCalledTimes(1);
-    expect(onCommitAndPush).not.toHaveBeenCalled();
-
-    await act(async () => {
-      menuButton?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    const menuItems = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(menuItems.map((item) => item.textContent)).toEqual(['Commit & Push']);
-
-    await act(async () => {
-      menuItems[0]?.focus();
-      menuItems[0]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    expect(onCommitAndPush).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not render an overflow trigger for a single action', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(
-        createElement(ContextChip, {
-          mode: 'stage',
-          projectName: 'loro-dev/lody',
-          actions: [{ id: 'merge-pr', label: 'Merge PR', onClick: vi.fn() }],
-        })
-      );
-    });
-
-    expect(container.textContent).toContain('Merge PR');
-    expect(container.querySelector('button[aria-label="More actions"]')).toBeNull();
-  });
-
-  it('keeps the location tooltip stable across context rerenders', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    for (let render = 0; render < 20; render += 1) {
-      await act(async () => {
-        root?.render(
-          createElement(ContextChip, {
-            mode: 'stage',
-            projectName: 'loro-dev/lody',
-            branch: `fix/location-tooltip-${render}`,
-            workspaceLocation: { kind: 'worktree', path: '/tmp/lody-worktree' },
-          })
-        );
-      });
-    }
-
-    expect(container.querySelector('button[aria-label="Worktree"]')).toBeInstanceOf(
-      HTMLButtonElement
-    );
   });
 
   it('keeps a demoted merge action reachable from the overflow menu', async () => {

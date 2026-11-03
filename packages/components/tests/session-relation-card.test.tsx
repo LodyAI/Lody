@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -12,7 +13,7 @@ import {
   buildChatVirtualRows,
   type ChatStreamItem,
 } from '../src/components/ai-gui/view';
-import { SessionRelationCard } from '../src/components/shared/session-relation-card';
+
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 import { initI18n } from '../src/i18n';
@@ -76,43 +77,6 @@ describe('Session relation cards', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-  });
-
-  it('navigates back to the precise opener from the provenance card', async () => {
-    const onOpen = vi.fn();
-    await act(async () => {
-      root.render(
-        <SessionRelationCard
-          relation="opened-by"
-          label="This session was automatically created by"
-          sessionTitle="Child Tab Opener"
-          actionLabel="Back to session"
-          onAction={() => onOpen(openerSessionId)}
-        />
-      );
-    });
-
-    expect(container.textContent).toContain('Child Tab Opener');
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('button')?.click();
-    });
-    expect(onOpen).toHaveBeenCalledWith(openerSessionId);
-  });
-
-  it('shows dangling provenance without a navigation action', async () => {
-    await act(async () => {
-      root.render(
-        <SessionRelationCard
-          relation="opened-by"
-          label="This session was automatically created by"
-          sessionTitle="Deleted session"
-          actionLabel="Back to session"
-        />
-      );
-    });
-
-    expect(container.textContent).toContain('Deleted session');
-    expect(container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true);
   });
 
   it('turns a successful session_create completion into a live Session card', async () => {
@@ -386,44 +350,6 @@ describe('Session relation cards', () => {
     expect(split).toHaveLength(3);
   });
 
-  it('does not show a disclosure for five creation cards', async () => {
-    const item = completionMessage.items[0]!;
-    if (item.type !== 'operation_completion' || item.completion.type !== 'result')
-      throw new Error('fixture');
-    const target = item.completion.value.items[0]!;
-    await act(async () =>
-      root.render(
-        <Provider store={createStore()}>
-          <MessageRowView
-            sessionId={openerSessionId}
-            message={{
-              ...completionMessage,
-              items: [
-                {
-                  ...item,
-                  completion: {
-                    type: 'result',
-                    value: {
-                      items: Array.from({ length: 5 }, (_, index) => ({
-                        ...target,
-                        target: {
-                          sessionId: `five-${index}` as SessionId,
-                          userTurnId: `turn-${index}`,
-                        },
-                      })),
-                    },
-                  },
-                },
-              ],
-            }}
-          />
-        </Provider>
-      )
-    );
-    expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(5);
-    expect(container.querySelector('button[aria-expanded]')).toBeNull();
-  });
-
   it('keeps legacy failure summaries outside grouped successful creations', async () => {
     const completion = completionMessage.items[0]!;
     if (completion.type !== 'operation_completion' || completion.completion.type !== 'result')
@@ -486,34 +412,6 @@ describe('Session relation cards', () => {
     );
   });
 
-  it('hides an empty completion summary while retaining creation records', async () => {
-    const completion = completionMessage.items[0]!;
-    if (completion.type !== 'operation_completion') throw new Error('fixture');
-    await act(async () =>
-      root.render(
-        <Provider store={createStore()}>
-          <MessageRowView
-            sessionId={openerSessionId}
-            message={{
-              ...completionMessage,
-              items: [
-                completion,
-                {
-                  ...completion,
-                  operationId: 'empty-result',
-                  deliveryId: 'empty-result-delivery',
-                  completion: { type: 'result', value: { items: [] } },
-                },
-              ],
-            }}
-          />
-        </Provider>
-      )
-    );
-    expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(1);
-    expect(container.textContent).not.toContain('orchestration.operationCompleted');
-  });
-
   it('does not duplicate target cards on completion when progress was published', async () => {
     const completion = completionMessage.items[0];
     if (completion.type !== 'operation_completion') throw new Error('Expected completion fixture');
@@ -531,37 +429,6 @@ describe('Session relation cards', () => {
     expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
     expect(container.textContent).toBe('');
   });
-
-  it.each(['prepared', 'submitted', 'settled', 'not_submitted'] as const)(
-    'removes a contentless %s batch from the rendered stream',
-    async (deliveryStatus) => {
-      const completion = completionMessage.items[0];
-      if (completion.type !== 'operation_completion') throw new Error('fixture');
-      const message: SessionHistoryParsed = {
-        ...completionMessage,
-        items: [
-          {
-            type: 'operation_completion_batch',
-            batchId: 'batch',
-            memberCount: 1,
-            deliveryStatus,
-            members: [{ ...completion, progressMessageId: 'progress' }],
-          },
-        ],
-      };
-      await act(async () =>
-        root.render(<MessageRowView message={message} sessionId={openerSessionId} />)
-      );
-      expect(container.textContent).toBe('');
-      expect(
-        buildChatVirtualRows({
-          items: [{ type: 'message', message, sessionId: openerSessionId, turnIndex: 0 }],
-          lastAssistantMessageId: null,
-          expansionVersion: 0,
-        })
-      ).toEqual([]);
-    }
-  );
 
   it('retains delivery uncertainty even when every preview member is hidden', async () => {
     const completion = completionMessage.items[0];

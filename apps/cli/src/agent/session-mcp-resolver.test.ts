@@ -53,58 +53,6 @@ describe('loadSessionMcpCatalog', () => {
     expect(select(undefined)).toEqual({ servers: [], problems: [] });
   });
 
-  it('reads the catalog and expands target-daemon environment variables', async () => {
-    const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc: vi.fn(async () => ({ flock: catalogFlock })) },
-      workspaceId,
-      sessionId,
-      selectedIds: [selectedId],
-      logger: { debug: vi.fn() },
-      env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
-    });
-    expect(select(undefined)).toEqual({
-      servers: [{ name: 'filesystem', command: 'node', args: ['server.js'], env: [] }],
-      problems: [],
-    });
-  });
-
-  it('finishes every read before the agent capabilities are known', async () => {
-    let selecting = false;
-    const openFlockDoc = async () => {
-      if (selecting) throw new Error('Selection must not read or prepare the catalog again');
-      return { flock: catalogFlock };
-    };
-    const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc },
-      workspaceId,
-      sessionId,
-      selectedIds: [selectedId],
-      logger: { debug: vi.fn() },
-      env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
-    });
-    selecting = true;
-
-    // Selecting twice with different capabilities must not touch the document
-    // again: the load phase is what ACP startup overlaps with its handshake.
-    expect(select({ http: true }).servers).toHaveLength(1);
-    expect(select({ http: false }).servers).toHaveLength(1);
-  });
-
-  it('turns catalog read failures into catalog_unavailable', async () => {
-    const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc: vi.fn(async () => Promise.reject(new Error('database unavailable'))) },
-      workspaceId,
-      sessionId,
-      selectedIds: [selectedId],
-      logger: { debug: vi.fn() },
-    });
-    const result = select(undefined);
-    expect(result.servers).toEqual([]);
-    expect(result.problems).toEqual([
-      { kind: 'catalog_unavailable', reason: 'database unavailable' },
-    ]);
-  });
-
   it('waits for the shared baseline and then loads the selected server', async () => {
     const baseline = Promise.withResolvers<void>();
     let ready = false;

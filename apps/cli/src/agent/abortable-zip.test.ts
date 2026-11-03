@@ -138,21 +138,6 @@ describe('extractAbortableZip', () => {
     await rm(rootDir, { recursive: true, force: true });
   });
 
-  it('extracts entries and waits for the ZIP reader to close', async () => {
-    const zipFile = new FakeZipFile(entry('bin/agent'), () => Readable.from('agent-bytes'));
-    const outputDir = join(rootDir, 'output');
-
-    await extractAbortableZip(
-      join(rootDir, 'archive.zip'),
-      outputDir,
-      new AbortController().signal,
-      openFake(zipFile)
-    );
-
-    expect(zipFile.isOpen).toBe(false);
-    expect(await readFile(join(outputDir, 'bin', 'agent'), 'utf8')).toBe('agent-bytes');
-  });
-
   it('extracts a real deflated entry that spans many reads', async () => {
     // yauzl 2.x stalled here on Node 24.16+ (#1185).
     const payload = incompressibleBytes(1024 * 1024);

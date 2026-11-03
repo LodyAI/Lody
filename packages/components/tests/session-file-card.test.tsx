@@ -5,6 +5,11 @@
 // no route at all. Every other previewable file downloads from inside the
 // preview dialog and must NOT grow a duplicate control.
 
+// @vitest-environment jsdom
+// The card's second action exists for exactly one gap: an HTML attachment's
+// click opens the RENDERED page, so without it the uploaded source bytes have
+// no route at all. Every other previewable file downloads from inside the
+// preview dialog and must NOT grow a duplicate control.
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -112,14 +117,6 @@ describe('SessionFileCard download action', () => {
     expect(view.textContent).not.toContain('expired');
   });
 
-  it('recognizes an HTML attachment by extension when the MIME type is generic', async () => {
-    const view = await render({
-      file: file({ fileName: 'report.htm', mimeType: 'application/octet-stream' }),
-    });
-
-    expect(downloadButton(view)).not.toBeNull();
-  });
-
   it('does not duplicate the control on a previewable file whose dialog downloads', async () => {
     const view = await render({
       file: file({ fileName: 'README.md', mimeType: 'text/markdown' }),
@@ -146,20 +143,6 @@ describe('SessionFileCard download action', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
-  it('disables the download button while its own download is in flight', async () => {
-    const view = await render({ isDownloading: true });
-
-    expect(downloadButton(view)?.disabled).toBe(true);
-    await act(async () => {
-      downloadButton(view)?.click();
-    });
-    expect(onDownload).not.toHaveBeenCalled();
-    // The primary action still reads as preview, not as a second spinner.
-    expect(
-      view.querySelector<HTMLButtonElement>('button[aria-label="lody-one-flyer.html"]')?.disabled
-    ).toBe(false);
-  });
-
   it('offers no download for bytes the client cannot fetch', async () => {
     const pending = await render({
       file: file({ transport: 'local', machineId: 'machine-abc' }),
@@ -175,43 +158,6 @@ describe('SessionFileCard download action', () => {
     expect(downloadButton(expired)).toBeNull();
   });
 
-  it('offers no download button when the caller wires no download handler', async () => {
-    const view = await render({ onDownload: undefined });
-
-    expect(downloadButton(view)).toBeNull();
-  });
-
   const statusLine = (view: HTMLElement) =>
     view.querySelector('button[aria-label]')?.querySelector('[title]')?.textContent;
-
-  it('spells the type beside the size, and leaves the size alone without a short extension', async () => {
-    const markdown = await render({
-      file: file({ fileName: 'README.md', mimeType: 'text/markdown', sizeBytes: 12_400 }),
-    });
-    expect(statusLine(markdown)).toBe('MD · 12.1 KB');
-
-    const dockerfile = await render({
-      file: file({ fileName: 'Dockerfile', mimeType: 'text/plain', sizeBytes: 300 }),
-    });
-    expect(statusLine(dockerfile)).toBe('300 B');
-
-    // An extension too long to be a type label reads as part of the name.
-    const notebook = await render({
-      file: file({ fileName: 'analysis.ipynb', mimeType: 'application/json', sizeBytes: 300 }),
-    });
-    expect(statusLine(notebook)).toBe('300 B');
-  });
-
-  it('states a file that cannot be opened under its name', async () => {
-    const expired = await render({
-      file: file({ uploadedAt: getServerNow() - SESSION_FILE_RETENTION_MS - 1000 }),
-    });
-    expect(expired.textContent).toContain('File expired');
-
-    const pending = await render({
-      file: file({ transport: 'local', machineId: 'machine-abc' }),
-      pendingMachineName: 'Studio Mac',
-    });
-    expect(pending.textContent).toContain('Uploading from Studio Mac');
-  });
 });

@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { createStore, Provider } from 'jotai';
+import { createStore, getDefaultStore, Provider } from 'jotai';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { sessionSendStatusesAtom } from '../src/atoms/session-send-status';
 import { SessionList } from '../src/components/session-list';
-import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
+import { SidebarBranchSegment, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
 import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
+
+
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
@@ -69,7 +73,52 @@ describe('SessionList PR badge', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    getDefaultStore().set(sidebarShowBranchNamesAtom, false);
     vi.restoreAllMocks();
+  });
+
+  it('keeps activity and PR visible on separate lines while preserving single-line priority', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const openPr = vi.fn();
+    const archive = vi.fn();
+    const renderSlot = (twoLines: boolean) =>
+      React.createElement(SidebarRowEndSlot, {
+        isWaitingPermission: true,
+        restOnSecondLine: twoLines,
+        interactiveRest: true,
+        restIcon: React.createElement('button', { type: 'button', onClick: openPr }, 'PR #42'),
+        archive: React.createElement('button', { type: 'button', onClick: archive }, 'Archive'),
+      });
+    flushSync(() => root?.render(renderSlot(true)));
+    expect(container.querySelector('[data-session-row-end-slot]')?.textContent).toContain('PR #42');
+    expect(
+      container.querySelector('[data-session-row-end-slot]')?.querySelector('svg')
+    ).not.toBeNull();
+    expect(container.textContent).toContain('Archive');
+    flushSync(() => {
+      container?.querySelectorAll('button')[0]?.click();
+      container?.querySelectorAll('button')[1]?.click();
+    });
+    expect(openPr).toHaveBeenCalledOnce();
+    expect(archive).toHaveBeenCalledOnce();
+    flushSync(() => root?.render(renderSlot(false)));
+    expect(container.textContent).not.toContain('PR #42');
+    expect(container.textContent).toContain('Archive');
+  });
+
+  it('keeps the full branch available when its middle is clipped', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const branch = 'feature/a-very-long-branch-name-with-a-distinct-ending';
+    flushSync(() =>
+      root?.render(React.createElement(SidebarBranchSegment, { branchName: branch }))
+    );
+    const label = container.querySelector('[title]');
+    expect(label?.getAttribute('title')).toBe(branch);
+    expect(label?.textContent).toBe(branch);
   });
 
   it('opens the in-app PR target instead of GitHub when a handler is provided', () => {
@@ -137,75 +186,8 @@ describe('SessionList PR badge', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps PR status rightmost and line diff immediately before it', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SessionList, {
-          sessions: [
-            {
-              sessionId: 'session-with-pr',
-              title: 'Session with PR',
-              repoFullName: 'loro-dev/lody',
-              branchName: 'fix/session-with-pr',
-              prUrl: 'https://github.com/loro-dev/lody/pull/42',
-              prStatus: 'open',
-              prCiState: 's',
-              latestMessageAt: '2026-04-22T00:00:00.000Z',
-              addedLines: 12,
-              deletedLines: 4,
-              isWorking: false,
-              hasUnreadMessages: false,
-              isOffline: false,
-              isWaitingPermission: false,
-            },
-            {
-              sessionId: 'session-without-pr',
-              title: 'Session without PR',
-              repoFullName: 'loro-dev/lody',
-              branchName: 'fix/session-without-pr',
-              latestMessageAt: '2026-04-21T00:00:00.000Z',
-              addedLines: 8,
-              deletedLines: 2,
-              isWorking: false,
-              hasUnreadMessages: false,
-              isOffline: false,
-              isWaitingPermission: false,
-            },
-          ],
-          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
-        })
-      );
-    });
-
-    const rowWithPr = container.querySelector('[data-sidebar-session-id="session-with-pr"]');
-    const rowWithoutPr = container.querySelector('[data-sidebar-session-id="session-without-pr"]');
-
-    const passedPrIcon = rowWithPr?.querySelector('svg[data-pr-ci-verdict="success"]');
-    const passedBase = passedPrIcon?.querySelector('.lucide-git-pull-request');
-    const passedVerdict = passedPrIcon?.querySelector('.lucide-check');
-    expect(passedPrIcon).not.toBeNull();
-    expect(passedPrIcon?.querySelector('mask')).not.toBeNull();
-    expect(passedBase?.getAttribute('width')).toBe('14');
-    expect(passedBase?.getAttribute('height')).toBe('14');
-    expect(passedBase?.classList.contains('text-github-open')).toBe(true);
-    expect(passedVerdict).not.toBeNull();
-    expect(passedVerdict?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
-    expect(passedVerdict?.getAttribute('width')).toBe('10');
-    expect(passedVerdict?.getAttribute('height')).toBe('10');
-    expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
-    expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
-    expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
-  });
-
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
+    getDefaultStore().set(sidebarShowBranchNamesAtom, true);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -260,121 +242,47 @@ describe('SessionList PR badge', () => {
     expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
-  it.each(PR_STATUS_CI_CASES)(
-    'keeps the $prStatus PR tone independent from CI $prCiState',
-    ({
-      prStatus,
-      baseSelector,
-      baseToneClassName,
-      prCiState,
-      verdict,
-      verdictSelector,
-      verdictToneClassName,
-      cutoutRadius,
-    }) => {
-      container = document.createElement('div');
-      document.body.appendChild(container);
-      root = createRoot(container);
-
-      flushSync(() => {
-        root?.render(React.createElement(SessionPrIcon, { prStatus, prCiState }));
-      });
-
-      const icon = container.querySelector(`svg[data-pr-ci-verdict="${verdict}"]`);
-      const baseIcon = icon?.querySelector(baseSelector);
-      const cutout = icon?.querySelector('mask circle');
-      const verdictIcon = icon?.querySelector(verdictSelector);
-      expect(icon).not.toBeNull();
-      expect(baseIcon).not.toBeNull();
-      expect(baseIcon?.classList.contains(baseToneClassName)).toBe(true);
-      expect(baseIcon?.classList.contains(verdictToneClassName)).toBe(false);
-      expect(cutout?.getAttribute('cx')).toBe('12');
-      expect(cutout?.getAttribute('cy')).toBe('12');
-      expect(cutout?.getAttribute('r')).toBe(cutoutRadius);
-      expect(verdictIcon).not.toBeNull();
-      expect(verdictIcon?.classList.contains(verdictToneClassName)).toBe(true);
-      expect(verdictIcon?.classList.contains(baseToneClassName)).toBe(false);
-      expect(verdictIcon?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
-      expect(icon?.querySelector('.bg-sidebar')).toBeNull();
-      expect(icon?.querySelector('.rounded-full')).toBeNull();
-      if (verdict === 'pending') {
-        expect(verdictIcon?.getAttribute('cx')).toBe('5');
-        expect(verdictIcon?.getAttribute('cy')).toBe('5');
-        expect(verdictIcon?.getAttribute('r')).toBe('2.5');
-        expect(verdictIcon?.getAttribute('fill')).toBe('currentColor');
-        expect(icon?.querySelector('.lucide-loader-circle')).toBeNull();
-        expect(icon?.querySelector('.animate-spin')).toBeNull();
-      }
-    }
-  );
-
-  it('does not update shared list state during render', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('shows the PR control only while branch names are enabled', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-
-    flushSync(() => {
+    const store = createStore();
+    const session = {
+      sessionId: 'pr-toggle',
+      title: 'PR session',
+      repoFullName: 'example/repo',
+      branchName: 'feature',
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+      prUrl: 'https://github.com/example/repo/pull/42',
+      prStatus: 'open' as const,
+    };
+    flushSync(() =>
       root?.render(
         React.createElement(
           Provider,
-          null,
+          { store },
           React.createElement(SessionList, {
-            sessions: [
-              {
-                sessionId: 'session-1',
-                title: 'Fix sidebar state sync',
-                repoFullName: 'loro-dev/lody',
-                branchName: 'fix/sidebar-state-sync',
-                latestMessageAt: '2026-04-22T00:00:00.000Z',
-                addedLines: 0,
-                deletedLines: 0,
-                isWorking: false,
-                hasUnreadMessages: false,
-                isOffline: false,
-                isWaitingPermission: false,
-              },
-            ],
-            repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+            sessions: [session],
+            repos: [{ repoFullName: 'example/repo', collapsed: false }],
+            onToggleRepoCollapsed: () => undefined,
           })
         )
-      );
-    });
-
-    const emittedRenderUpdateWarning = consoleError.mock.calls.some((call) =>
-      call.some((arg) => typeof arg === 'string' && arg.includes('Cannot update a component'))
+      )
     );
-    expect(emittedRenderUpdateWarning).toBe(false);
-  });
-
-  it('mounts the working mark only while the session works', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SidebarRowEndSlot, {
-          isWorking: true,
-        })
-      );
-    });
-
-    const mark = container.querySelector('[data-session-working-indicator]');
-    expect(mark?.matches('[data-working-grid]')).toBe(true);
-    expect(mark?.querySelectorAll('[data-working-grid-tile]')).toHaveLength(9);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SidebarRowEndSlot, {
-          isWorking: false,
-          hasUnreadMessages: true,
-        })
-      );
-    });
-
-    expect(container.querySelector('[data-session-working-indicator]')).toBeNull();
-    expect(container.querySelector('[data-working-grid]')).toBeNull();
+    const row = container.querySelector('[data-sidebar-session-id="pr-toggle"]')!;
+    expect(row.querySelector('.lucide-git-pull-request')).toBeNull();
+    expect(row.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
+    flushSync(() => store.set(sidebarShowBranchNamesAtom, true));
+    expect(row.querySelector('[aria-label="Open pull request #42"]')).not.toBeNull();
+    flushSync(() => store.set(sidebarShowBranchNamesAtom, false));
+    expect(row.querySelector('[aria-label="Open pull request #42"]')).toBeNull();
+    expect(row.querySelector('.lucide-git-pull-request')).toBeNull();
   });
 
   it('keeps a folded repo group telling what its hidden sessions are doing', () => {

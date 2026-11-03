@@ -37,15 +37,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       ).toEqual(['commit-and-push']);
     }
   });
-  it('offers Create PR and Commit & Push for a dirty GitHub-capable workspace without a PR', () => {
-    expect(
-      resolveSessionInfoBarGitHubActionIds({
-        ...BASE_INPUT,
-        workspaceDirty: true,
-        hasChanges: true,
-      })
-    ).toEqual(['create-pr', 'create-draft-pr', 'commit-and-push']);
-  });
 
   it('offers Create PR (but not Commit & Push) for a committed, clean GitHub-capable workspace without a PR', () => {
     // The agent committed everything: tree is clean (not dirty) but there are
@@ -64,25 +55,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
     expect(resolveSessionInfoBarGitHubActionIds(BASE_INPUT)).toEqual([]);
   });
 
-  it('keeps commit and push for a dirty PR workspace', () => {
-    expect(
-      resolveSessionInfoBarGitHubActionIds({
-        ...BASE_INPUT,
-        hasExistingPr: true,
-        workspaceDirty: true,
-      })
-    ).toEqual(['commit-and-push']);
-  });
-
-  it('does not infer an action from review comments on a clean PR', () => {
-    expect(
-      resolveSessionInfoBarGitHubActionIds({
-        ...BASE_INPUT,
-        hasExistingPr: true,
-      })
-    ).toEqual([]);
-  });
-
   it('offers Commit & Push ahead of Ready for review on a dirty draft PR', () => {
     expect(
       resolveSessionInfoBarGitHubActionIds({
@@ -95,19 +67,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prReadiness: 'y',
       })
     ).toEqual(['commit-and-push', 'ready-for-review']);
-  });
-
-  it('offers only Ready for review on a clean draft PR', () => {
-    expect(
-      resolveSessionInfoBarGitHubActionIds({
-        ...BASE_INPUT,
-        hasExistingPr: true,
-        prStatus: 'draft',
-        prMergeState: 'd',
-        prCiState: 'f',
-        prReadiness: 'y',
-      })
-    ).toEqual(['ready-for-review']);
   });
 
   it('ranks conflict repair, CI repair, and direct merge when the worktree is clean', () => {

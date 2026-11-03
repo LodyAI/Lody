@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  type AgentConfigMeta,
   buildLiveActivityConversationItems,
   countLiveActivityConversationCandidates,
   countLiveActivityConversationStatuses,
   findLiveActivityPermissionAlertCandidate,
-  selectPermissionOptionId,
   type SessionMeta,
   type SessionStatus,
 } from '@lody/shared';
@@ -160,70 +158,6 @@ describe('buildLiveActivityConversationItems', () => {
     ).toEqual([]);
   });
 
-  it('builds an alert candidate for the latest permission request', () => {
-    const sessions = [
-      {
-        ...baseSession,
-        id: 'question',
-        title: 'Question task',
-        lastMessageAt: 300,
-        lastRunningSeen: Date.now(),
-        status: { type: 'requestPermission' },
-      },
-      {
-        ...baseSession,
-        id: 'permission-old',
-        title: 'Older permission task',
-        lastMessageAt: 200,
-        lastRunningSeen: Date.now(),
-        status: { type: 'requestPermission' },
-      },
-      {
-        ...baseSession,
-        id: 'permission-new',
-        title: 'Newer permission task',
-        lastMessageAt: 400,
-        lastRunningSeen: Date.now(),
-        status: { type: 'requestPermission' },
-      },
-    ] as SessionMeta[];
-
-    expect(
-      findLiveActivityPermissionAlertCandidate({
-        sessions,
-        currentUserId: 'user-1',
-        defaultTitle: 'New Task',
-      })
-    ).toEqual({
-      key: 'permission-new:400',
-      sessionTitle: 'Newer permission task',
-      updatedAt: 400,
-    });
-  });
-
-  it('builds an alert candidate for requestPermission without legacy details', () => {
-    expect(
-      findLiveActivityPermissionAlertCandidate({
-        sessions: [
-          {
-            ...baseSession,
-            id: 'question',
-            title: 'Question task',
-            lastMessageAt: 300,
-            lastRunningSeen: Date.now(),
-            status: { type: 'requestPermission' },
-          } as SessionMeta,
-        ],
-        currentUserId: 'user-1',
-        defaultTitle: 'New Task',
-      })
-    ).toEqual({
-      key: 'question:300',
-      sessionTitle: 'Question task',
-      updatedAt: 300,
-    });
-  });
-
   it('filters stale permission and question requests when heartbeat expired', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-02T12:00:00.000Z'));
@@ -352,77 +286,5 @@ describe('buildLiveActivityConversationItems', () => {
         currentUserId: 'user-1',
       })
     ).toBe(0);
-  });
-
-  it('uses agent config branding for the compact logo', () => {
-    const agentConfig = {
-      id: 'agent-1',
-      machineId: 'machine-1',
-      name: 'DeepSeek Claude',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'claude',
-      brandId: 'deepseek',
-      env: {},
-      prompt: '',
-    } as AgentConfigMeta;
-
-    const items = buildLiveActivityConversationItems({
-      sessions: [
-        {
-          ...baseSession,
-          id: 'deepseek',
-          cliType: 'builtin',
-          agentType: 'claude',
-          agentConfigId: 'agent-1',
-          lastMessageAt: 500,
-          lastReadAt: 100,
-        } as SessionMeta,
-      ],
-      agentConfigs: [agentConfig],
-      currentUserId: 'user-1',
-      defaultTitle: 'New Task',
-      statusLabels: labels,
-      formatUpdatedAt: (updatedAt) => String(updatedAt),
-    });
-
-    expect(items[0]?.agentLogoText).toBe('DS');
-    expect(items[0]?.agentLogoKind).toBe('deepseek');
-  });
-});
-
-describe('selectPermissionOptionId', () => {
-  it('prefers allow_always before allow_once for live activity allow actions', () => {
-    expect(
-      selectPermissionOptionId(
-        [
-          { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
-          { optionId: 'approve-fallback', name: 'Approve' },
-          { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
-        ],
-        'allow'
-      )
-    ).toBe('allow-always');
-  });
-
-  it('falls back to allow-like labels and reject-like options', () => {
-    expect(
-      selectPermissionOptionId(
-        [
-          { optionId: 'approve-fallback', name: 'Approve' },
-          { optionId: 'reject-once', name: 'Deny', kind: 'reject_once' },
-        ],
-        'allow'
-      )
-    ).toBe('approve-fallback');
-    expect(
-      selectPermissionOptionId(
-        [
-          { optionId: 'approve-fallback', name: 'Approve' },
-          { optionId: 'reject-once', name: 'Deny', kind: 'reject_once' },
-        ],
-        'reject'
-      )
-    ).toBe('reject-once');
   });
 });

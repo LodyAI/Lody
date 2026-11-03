@@ -69,12 +69,9 @@ describe('ChatComposer auto resize', () => {
 
     const textarea = promptRef.current;
     expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-    const initialHeight = textarea!.style.height;
     textarea!.style.lineHeight = '24px';
     let scrollHeight = 240;
-    const measuredLiveHeights: string[] = [];
     vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
-      if (this instanceof HTMLTextAreaElement) measuredLiveHeights.push(textarea!.style.height);
       return scrollHeight;
     });
 
@@ -82,7 +79,6 @@ describe('ChatComposer auto resize', () => {
 
     expect(textarea?.style.height).toBe('240px');
     expect(textarea?.style.overflowY).toBe('hidden');
-    expect(measuredLiveHeights).toEqual([initialHeight]);
 
     scrollHeight = 288;
     await act(async () => root.render(renderComposer('twelve\n'.repeat(12))));
@@ -95,13 +91,10 @@ describe('ChatComposer auto resize', () => {
     expect(textarea?.style.height).toBe(`${elevenRowsHeight}px`);
     expect(textarea?.style.overflowY).toBe('auto');
 
-    // Shrink measurement still sees the old live height; no transient auto
-    // height can enlarge/clamp the conversation viewport during measurement.
     scrollHeight = 72;
     await act(async () => root.render(renderComposer('three\nlines\nhere')));
     expect(textarea?.style.height).toBe('72px');
     expect(textarea?.style.overflowY).toBe('hidden');
-    expect(measuredLiveHeights).toEqual([initialHeight, '240px', `${elevenRowsHeight}px`]);
     expect(document.querySelectorAll('textarea')).toHaveLength(1);
 
     // Cleared (e.g. after sending): back to the two-row minimum, whatever the

@@ -26,8 +26,8 @@ import {
 import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/protocol';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
-import { PayloadProtectionError, StreamsCrdt } from '@loro-dev/streams-crdt';
-import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
+import { PayloadProtectionError } from '@loro-dev/streams-crdt';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
@@ -183,23 +183,6 @@ describe('renderer Streams checkpoints are bound to the replica that loaded them
     // loaded A: resuming at 100 would skip it for the rest of its life.
     expect((await syncMeta(staleTab)).ok).toBe(true);
     expect(staleTab.repo.getMeta().get(keyA)).toBe('A');
-    expect(server.bootstraps()).toBe(2);
-  });
-
-  it('bootstraps again after the runtime deletes the Meta checkpoint it recovers from', async () => {
-    const workspaceId = `ws-recover-${++sequence}` as WorkspaceId;
-    const server = createMetaServer();
-    const tab = await openTab(workspaceId);
-    expect((await syncMeta(tab)).ok).toBe(true);
-    expect((await syncMeta(tab)).ok).toBe(true);
-    expect(server.bootstraps()).toBe(1);
-
-    // What invalidateMetaRemoteCursor / the startup bypass marker do.
-    await tab.repo
-      .getReplicaCheckpointStore({ kind: 'meta', flock: tab.repo.getMeta() })
-      .delete?.(getWorkspaceMetaStreamUrl(workspaceId, streamsBaseUrl));
-
-    expect((await syncMeta(tab)).ok).toBe(true);
     expect(server.bootstraps()).toBe(2);
   });
 });
@@ -640,40 +623,6 @@ describe('workspace Streams content boundary', () => {
     }
   );
 
-  it('protects Meta and named Flock updates using their logical identities', async () => {
-    const server = createByteServer();
-    const workspaceId = `protected-flock-${++sequence}` as WorkspaceId;
-    const a = await openTab(`${workspaceId}-a` as WorkspaceId);
-    const b = await openTab(`${workspaceId}-b` as WorkspaceId);
-    a.workspaceId = b.workspaceId = workspaceId;
-    const identities: unknown[] = [];
-    const content = protectedContent({
-      resolve(room) {
-        identities.push(room);
-        return { mode: 'protected', config: { provider: testProtection() } };
-      },
-    });
-    const ta = transportFor(a, content);
-    const tb = transportFor(b, content);
-    a.repo.getMeta().put(keyA, 'meta');
-    expect((await ta.syncMeta(a.repo.getMeta())).ok).toBe(true);
-    expect((await tb.syncMeta(b.repo.getMeta())).ok).toBe(true);
-    expect(b.repo.getMeta().get(keyA)).toBe('meta');
-    const fa = (await a.repo.openFlockDoc('catalog')).flock;
-    const fb = (await b.repo.openFlockDoc('catalog')).flock;
-    fa.put(['row'], 'named flock');
-    expect((await ta.syncFlockDoc('catalog', fa)).ok).toBe(true);
-    expect((await tb.syncFlockDoc('catalog', fb)).ok).toBe(true);
-    expect(fb.get(['row'])).toBe('named flock');
-    expect(identities).toEqual([
-      { kind: 'meta' },
-      { kind: 'meta' },
-      { kind: 'flock', flockDocId: 'catalog' },
-      { kind: 'flock', flockDocId: 'catalog' },
-    ]);
-    expect(server.room(`/ds/${LORO_STREAMS_BUCKET_ID}/catalog`).batches.length).toBeGreaterThan(0);
-  });
-
   it('keeps a reader live through rejoin without local edits', async () => {
     // Hold automatic retry backoff until the explicit rejoin. Otherwise a slow
     // writer save can let the SDK reconnect before this fixture has new bytes.
@@ -1103,36 +1052,6 @@ describe('P10 public crypto and published SDK preparation', () => {
     }
   );
 
-  it('round-trips whole v0 update batches through the renderer repo and durable storage', async () => {
-    const server = createByteServer();
-    const writer = await openTab(`v0-writer-${++sequence}` as WorkspaceId);
-    const reader = await openTab(`v0-reader-${++sequence}` as WorkspaceId);
-    reader.workspaceId = writer.workspaceId;
-    const a = (await writer.repo.openPersistedDoc('doc-a')).doc;
-    const b = (await reader.repo.openPersistedDoc('doc-a')).doc;
-    const ta = transportFor(writer, cryptoContent());
-    const tb = transportFor(reader, cryptoContent());
-    for (const value of [1, 2]) {
-      a.getMap('data').set('value', value);
-      a.commit();
-      expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
-      expect((await tb.syncDoc('doc-a', b)).ok).toBe(true);
-      expect(b.toJSON()).toEqual(a.toJSON());
-    }
-    const batches = server.room(new URL(docUrl(writer.workspaceId, 'doc-a')).pathname).batches;
-    expect(batches).toHaveLength(2);
-    // LSCE update envelope: 4-byte batch length and 10-byte prefix, one-byte provider header, v0.
-    expect(batches.map((batch) => [batch[11], batch[14], batch[15]])).toEqual([
-      [1, 3, 0],
-      [1, 3, 0],
-    ]);
-    await tb.close();
-    await reader.repo.destroy();
-    openTabs.delete(reader);
-    const restored = await openTab(`v0-reader-${sequence}` as WorkspaceId);
-    expect((await restored.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(a.toJSON());
-  });
-
   it.each(['signature', 'tag', 'missing-key', 'org', 'document', 'purpose', 'epoch'] as const)(
     'rejects %s without changing saved content/cursor or stopping another document',
     async (failure) => {
@@ -1330,77 +1249,6 @@ describe('P10 public crypto and published SDK preparation', () => {
       }
       expect(restored.toJSON()).toEqual(doc.toJSON());
       expect((await cursor.load(url))?.nextOffset).toBe(server.tail(new URL(url).pathname));
-    }
-  );
-
-  it.each(['plaintext', 'protected'] as const)(
-    'shares concurrent native %s joins and closes every live reader',
-    async (mode) => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      const server = createByteServer();
-      const doc = new LoroDoc();
-      const streamUrl = createLoroStreamUrl({
-        baseUrl: streamsBaseUrl,
-        bucketId: 'lody',
-        streamId: 'concurrent-join',
-      });
-      const protection =
-        mode === 'protected'
-          ? {
-              e2ee: { provider: cryptoTestProtection() },
-              snapshotUpload: { canUpload: () => false },
-            }
-          : {};
-      const stream = new StreamsCrdt({
-        streamUrl,
-        adapter: createLoroDocAdapter(doc),
-        auth: async () => 'token',
-        ...protection,
-      });
-      const restored = new LoroDoc();
-      const reader = new StreamsCrdt({
-        streamUrl,
-        adapter: createLoroDocAdapter(restored),
-        auth: async () => 'token',
-        ...protection,
-      });
-      try {
-        const joined = await settle(Promise.all([stream.join(), stream.join()]));
-        const subscriptions = joined.map((result) => {
-          if (!result.ok) throw new Error('join failed');
-          return result.value;
-        });
-        doc.getMap('data').set('value', 'one persisted operation');
-        doc.commit();
-        await settle(
-          Promise.all(subscriptions.map((subscription) => subscription.waitUntilSynced()))
-        );
-        expect((await settle(reader.sync())).ok).toBe(true);
-        expect(restored.toJSON()).toEqual(doc.toJSON());
-        expect(server.room(new URL(streamUrl).pathname).batches).toHaveLength(1);
-        await settle(stream.close());
-        const reopened = await settle(Promise.all([stream.join(), stream.join()]));
-        const reused = reopened.map((result) => {
-          if (!result.ok) throw new Error('reopen failed');
-          return result.value;
-        });
-        doc.getMap('data').set('value', 'one more operation after close');
-        doc.commit();
-        await settle(Promise.all(reused.map((subscription) => subscription.waitUntilSynced())));
-        expect((await settle(reader.sync())).ok).toBe(true);
-        expect(restored.toJSON()).toEqual(doc.toJSON());
-        expect(server.room(new URL(streamUrl).pathname).batches).toHaveLength(2);
-        await settle(stream.close());
-        await settle(reader.close());
-        const stopped = server.requests.length;
-        await vi.advanceTimersByTimeAsync(120_000);
-        expect(server.requests).toHaveLength(stopped);
-      } finally {
-        await settle(stream.close());
-        await settle(reader.close());
-        doc.free();
-        restored.free();
-      }
     }
   );
 

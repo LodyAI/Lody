@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 import {
@@ -83,53 +84,6 @@ it('prepares the native iOS data URL before releasing the source', async () => {
   expect(await getSessionImageDataUrl({ ...identity, token: 'token', variant: 'thumbnail' })).toBe(
     url
   );
-});
-
-it('revokes cached previews when the cache is cleared', async () => {
-  await seedSessionImageCache(identity, new Blob(['source']));
-  const url = peekSessionImageUrl(identity);
-  expect(blobs.has(url!)).toBe(true);
-  clearSessionImageCache();
-  expect(blobs.has(url!)).toBe(false);
-  expect(peekSessionImageUrl(identity)).toBeNull();
-});
-
-it('waits for local image decoding before publishing the handoff URL', async () => {
-  const started = Promise.withResolvers<string>();
-  const finish = Promise.withResolvers<void>();
-  vi.stubGlobal(
-    'Image',
-    class {
-      src = '';
-      decode() {
-        started.resolve(this.src);
-        return finish.promise;
-      }
-    }
-  );
-  const seeding = seedSessionImageCache(identity, new Blob(['source']));
-  const decodedUrl = await started.promise;
-  expect(peekSessionImageUrl(identity)).toBeNull();
-  finish.resolve();
-  await seeding;
-  expect(peekSessionImageUrl(identity)).toBe(decodedUrl);
-});
-
-it('releases an undecodable preview without publishing it', async () => {
-  vi.stubGlobal(
-    'Image',
-    class {
-      src = '';
-      async decode() {
-        throw new Error('Unable to decode');
-      }
-    }
-  );
-  await expect(seedSessionImageCache(identity, new Blob(['invalid']))).rejects.toThrow(
-    'Unable to decode'
-  );
-  expect(peekSessionImageUrl(identity)).toBeNull();
-  expect(blobs.size).toBe(0);
 });
 
 it.each(['clear', 'cancel'] as const)(

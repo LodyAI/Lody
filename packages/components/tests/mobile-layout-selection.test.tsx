@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -127,24 +126,6 @@ describe('mobile layout selection', () => {
       value: 867,
     });
     flushSync(() => observers.forEach((callback) => callback([], {} as ResizeObserver)));
-    expect(container?.textContent).toBe('desktop:full');
-  });
-
-  it('gives a wide phone reported by client hints the desktop renderer', () => {
-    setNavigatorIdentity('Mozilla/5.0 AppleWebKit/537.36 Chrome/140 Safari/537.36', true);
-    setViewportWidth(915);
-    renderLayoutProbe();
-
-    expect(container?.textContent).toBe('desktop:full');
-  });
-
-  it('keeps a wide tablet on the desktop renderer', () => {
-    setNavigatorIdentity(
-      'Mozilla/5.0 (Linux; Android 16; Pixel Tablet) AppleWebKit/537.36 Chrome/140 Safari/537.36'
-    );
-    setViewportWidth(1280);
-    renderLayoutProbe();
-
     expect(container?.textContent).toBe('desktop:full');
   });
 

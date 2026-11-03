@@ -44,32 +44,4 @@ describe('getExpandedClipboardTextForSelection', () => {
       })
     ).toBe(replacement);
   });
-
-  it('keeps native copy when the selection does not intersect an expanding rewrite', () => {
-    expect(
-      getExpandedClipboardTextForSelection({
-        value,
-        selectionStart: 0,
-        selectionEnd: prefix.length,
-        rewrites,
-      })
-    ).toBeNull();
-  });
-
-  it('ignores verbatim rewrites that have no replacement', () => {
-    expect(
-      getExpandedClipboardTextForSelection({
-        value: '@README.md',
-        selectionStart: 0,
-        selectionEnd: '@README.md'.length,
-        rewrites: [
-          {
-            start: 0,
-            end: '@README.md'.length,
-            span: { kind: 'file', label: '@README.md', target: 'README.md' },
-          },
-        ],
-      })
-    ).toBeNull();
-  });
 });

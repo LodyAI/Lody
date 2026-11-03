@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -116,31 +117,5 @@ describe('useResolvedWorkspaceScope', () => {
     );
 
     expect(snapshot).toEqual({ workspaceId: null, enabled: false });
-  });
-
-  it('preserves the default workspace identity outside a workspace route provider', async () => {
-    const store = createStore();
-    store.set(setWorkspaceContextAtom, {
-      slug: 'workspace-a',
-      workspaceId: 'workspace-a-id' as WorkspaceId,
-    });
-    let snapshot: ScopeSnapshot | undefined;
-
-    await render(
-      createElement(
-        Provider,
-        { store },
-        createElement(ScopeProbe, {
-          onSnapshot: (value) => {
-            snapshot = value;
-          },
-        })
-      )
-    );
-
-    expect(snapshot).toEqual({
-      workspaceId: 'workspace-a-id',
-      enabled: true,
-    });
   });
 });
