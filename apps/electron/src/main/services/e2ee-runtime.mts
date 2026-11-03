@@ -236,6 +236,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
+        keyDeliveryTarget: (device: string) => Effect.Effect<boolean, unknown>
+        keyDeliveryEvidence: (
+          recipient: string
+        ) => Effect.Effect<
+          string | { genesis: string; epoch: number; signal: AbortSignal },
+          unknown
+        >
         observe: (
           checkpoint: ObservedCheckpoint,
           proof?: readonly E2eeWorkspaceHistoryPage[]
@@ -1453,6 +1460,35 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           rpc,
           sharing,
           refreshSharingLedger: refreshManagementHistory,
+          // Same selection as KeyDistributor: an admitted device of an active member.
+          keyDeliveryTarget: (device: string) =>
+            Effect.map(verified.current(), (view) => {
+              const state = view.inspectState()
+              const admitted = state.devices.get(device)
+              return Boolean(admitted && state.members.has(hex(admitted.membershipId.toBytes())))
+            }),
+          // Local half of delivery evidence: a code when this device cannot have sent the
+          // current key to `device`, else the slot to confirm remotely outside the lock.
+          keyDeliveryEvidence: (recipient: string) =>
+            Effect.gen(function* () {
+              const view = yield* verified.current()
+              const state = view.inspectState()
+              const admitted = state.devices.get(recipient)
+              if (!admitted || !state.members.has(hex(admitted.membershipId.toBytes())))
+                return 'e2ee_admission_not_ingested'
+              // KeyDistributor's sender eligibility: a non-recovery device of an active member.
+              const own = state.devices.get(hex(device.publicKey.toBytes()))
+              if (
+                !own ||
+                own.kind === 'recovery' ||
+                !state.members.has(hex(own.membershipId.toBytes()))
+              )
+                return 'e2ee_key_sender_ineligible'
+              const epoch = state.epoch.number
+              if (Result.isFailure(yield* Effect.result(keys.check(epoch))))
+                return 'e2ee_key_unavailable'
+              return { genesis: hex(genesis.toBytes()), epoch, signal: networkAbort.signal }
+            }),
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1861,6 +1897,43 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
+      /** Whether this device's verified ledger makes `device` a key distribution target. */
+      keyDeliveryTarget: (workspaceId: string, device: string) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.keyDeliveryTarget(device))),
+      /** Positive evidence only: 'delivered' when the mailbox holds an envelope for `device`
+       * at the current epoch (the check KeyDistributor uses for `Observed`), else a code.
+       * The status read runs after releasing the host lock. */
+      keyDeliveryEvidence: (
+        workspaceId: string,
+        device: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+      ) =>
+        Effect.flatMap(
+          run(
+            Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.keyDeliveryEvidence(device))
+          ),
+          (local) =>
+            typeof local === 'string'
+              ? Effect.succeed(local)
+              : mailbox(local.signal)
+                  .status({ genesis: local.genesis, epoch: local.epoch, recipient: device })
+                  .pipe(
+                    Effect.map((remote) =>
+                      remote.genesis === local.genesis &&
+                      remote.epoch === local.epoch &&
+                      remote.recipient === device &&
+                      (remote.status === 'EnvelopeStored' ||
+                        remote.status === 'InstallationReported')
+                        ? 'delivered'
+                        : remote.status === 'NeedsEnvelope'
+                          ? 'e2ee_key_not_sent'
+                          : remote.status === 'Obsolete'
+                            ? 'e2ee_key_epoch_changed'
+                            : 'e2ee_key_recipient_ineligible'
+                    ),
+                    Effect.catch(() => Effect.succeed('e2ee_key_status_unavailable'))
+                  )
+        ),
       ingestLedgerRecords: (workspaceId: string, page: E2eeWorkspaceHistoryPage) =>
         run(
           Effect.suspend(() => {

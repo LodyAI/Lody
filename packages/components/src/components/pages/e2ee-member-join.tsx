@@ -208,6 +208,9 @@ function JoinSession({
                 : t('e2ee.team.join')}
             </Card.Title>
             <Card.Description>{t(message)}</Card.Description>
+            {message === 'e2ee.team.waitingKey' && (
+              <Card.Description>{t('e2ee.team.waitingKeyAdminOnline')}</Card.Description>
+            )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
             {email && <p>{email}</p>}

@@ -10,6 +10,8 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'prepareMemberJoin',
     'memberJoinRequests',
     'approveMemberJoin',
+    'memberKeyDeliveries',
+    'retryMemberKeyDelivery',
     'rejectMemberJoin',
     'revokeMemberInvitation',
     'claimMemberJoin',

@@ -30,6 +30,8 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'prepareMemberJoin',
       'memberJoinRequests',
       'approveMemberJoin',
+      'memberKeyDeliveries',
+      'retryMemberKeyDelivery',
       'rejectMemberJoin',
       'revokeMemberInvitation',
       'claimMemberJoin',

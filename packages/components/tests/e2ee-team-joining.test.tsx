@@ -176,6 +176,8 @@ describe('encrypted team joining', () => {
     await render(<E2eeMemberJoin {...props} />);
     await settle();
     expect(container.textContent).toContain('e2ee.team.waitingKey');
+    // Key delivery needs an administrator device; the joining member is told so.
+    expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
     expect(button('e2ee.team.submit')).toBeUndefined();
     installed = true;
     await act(async () => window.dispatchEvent(new Event('online')));
@@ -222,7 +224,14 @@ describe('encrypted team joining', () => {
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
     let state = 'pending';
-    const confirmation = deferred<{ admitted: boolean; keyPending: boolean }>();
+    let delivery: { requestId: string; state: 'pending' | 'delivered' | 'failed'; code?: string }[] =
+      [];
+    const retried: string[] = [];
+    const confirmation = deferred<{
+      admitted: boolean;
+      keyPending: boolean;
+      keyDelivery?: 'pending' | 'delivered' | 'failed';
+    }>();
     await render(
       <E2eeTeamSettings
         workspaceId="team"
@@ -239,6 +248,12 @@ describe('encrypted team joining', () => {
             state = 'committed';
             return result;
           },
+          memberKeyDeliveries: async () => ({ items: delivery }),
+          retryMemberKeyDelivery: async (_workspace, id) => {
+            retried.push(id);
+            delivery = [{ requestId: id, state: 'pending' }];
+            return delivery[0]!;
+          },
           rejectMemberJoin: async () => ({ state: 'rejected' }),
           revokeMemberInvitation: async () => ({ revoked: true }),
         }}
@@ -248,12 +263,32 @@ describe('encrypted team joining', () => {
     expect(state).toBe('pending');
     await act(async () => button('e2ee.team.approve').click());
     expect(state).toBe('pending');
-    expect(button('e2ee.team.approve').disabled).toBe(true);
-    confirmation.resolve({ admitted: true, keyPending: true });
+    // The submitting admin sees progress on the request itself, not a silent disabled card.
+    const submitting = button('e2ee.team.submitting');
+    expect(submitting.disabled).toBe(true);
+    expect(submitting.getAttribute('aria-busy')).toBe('true');
+    delivery = [{ requestId: request.requestId, state: 'pending' }];
+    confirmation.resolve({ admitted: true, keyPending: true, keyDelivery: 'pending' });
     await settle();
     expect(state).toBe('committed');
     expect(container.textContent).toContain('e2ee.team.admitted');
     expect(container.textContent).toContain('e2ee.team.noRequests');
+    // Admission and key delivery are separate: the admitted applicant stays visible.
+    const row = () => container.querySelector(`[data-key-delivery-id="${request.requestId}"]`);
+    expect(row()?.textContent).toContain(request.applicantName);
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    delivery = [{ requestId: request.requestId, state: 'failed', code: 'e2ee_management_retry' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(row()?.textContent).toContain('e2ee.team.keyFailed');
+    await act(async () => button('e2ee.team.keyRetry').click());
+    await settle();
+    expect(retried).toEqual([request.requestId]);
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    delivery = [{ requestId: request.requestId, state: 'delivered' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(row()).toBeNull();
   });
   it('recovers online manager qualification after an initial failed refresh and releases each owned background reader', async () => {
     let role = 'member',

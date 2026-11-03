@@ -265,6 +265,9 @@ export function CloudPlatformProvider({
               memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
               approveMemberJoin: (workspaceId, requestId, mode) =>
                 native.approveMemberJoin(workspaceId, requestId, mode),
+              memberKeyDeliveries: (workspaceId) => native.memberKeyDeliveries(workspaceId),
+              retryMemberKeyDelivery: (workspaceId, requestId) =>
+                native.retryMemberKeyDelivery(workspaceId, requestId),
               rejectMemberJoin: (workspaceId, requestId) =>
                 native.rejectMemberJoin(workspaceId, requestId),
               revokeMemberInvitation: (workspaceId, token) =>
