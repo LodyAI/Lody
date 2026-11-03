@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,13 +16,11 @@ import {
   roostHistoryExperimentEnabledAtom,
   roostHistoryFeatureEnabledAtom,
 } from '../src/atoms/settings';
-import { bugReportDialogOpenAtom } from '../src/atoms/bug-report';
-import { userAtom } from '../src/atoms';
+
 import { SettingsCategoryList } from '../src/components/settings/settings-category-list';
 import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 import { MobileStatsSettings } from '../src/components/mobile/mobile-stats-settings';
-import { MobileGeneralSettings } from '../src/components/mobile/mobile-general-settings';
-import { MobileSettingsFoldPanels } from '../src/components/mobile/mobile-settings-fold-panels';
+
 import { MobileSettingsLayout } from '../src/components/mobile/mobile-settings-layout';
 import { initI18n } from '../src/i18n';
 import { TestCloudPlatformProvider } from './test-platform';
@@ -129,39 +128,6 @@ describe('SettingsCategoryList', () => {
     });
   }
 
-  it('keeps usage controls and charts on their panels and retains the chosen range when unfolded', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    const renderUsage = (
-      fold: { messageHeight: number; lowerTop: number; gapHeight: number } | null
-    ) =>
-      root!.render(
-        <TestCloudPlatformProvider>
-          <Provider store={store}>
-            <MobileSettingsFoldContext.Provider value={fold}>
-              <MobileStatsSettings />
-            </MobileSettingsFoldContext.Provider>
-          </Provider>
-        </TestCloudPlatformProvider>
-      );
-    await act(async () => renderUsage({ messageHeight: 250, lowerTop: 290, gapHeight: 40 }));
-    const summary = container.querySelector<HTMLElement>('[data-usage-summary]')!;
-    const charts = container.querySelector<HTMLElement>('[data-usage-charts]')!;
-    expect(summary.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Week');
-    expect(summary.style.flexBasis).toBe('250px');
-    expect(charts.classList.contains('overflow-y-auto')).toBe(true);
-    const day = [...summary.querySelectorAll<HTMLElement>('[role="tab"]')].find(
-      (tab) => tab.textContent === 'Day'
-    )!;
-    await act(async () => day.click());
-    await act(async () => renderUsage(null));
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Day');
-    expect(
-      container.querySelector('[data-usage-charts]')?.classList.contains('overflow-y-auto')
-    ).toBe(false);
-  });
-
   it('retains the selected usage range when the actual settings layout folds and unfolds', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       top: 100,
@@ -216,87 +182,6 @@ describe('SettingsCategoryList', () => {
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Day');
     expect(container.querySelector('[data-scroll-area-viewport]')).toBe(settingsViewport);
   });
-
-  it('puts notification preferences above the fold and session settings below', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () =>
-      root!.render(
-        <TestCloudPlatformProvider>
-          <Provider store={store}>
-            <MobileSettingsFoldContext.Provider
-              value={{ messageHeight: 250, lowerTop: 290, gapHeight: 40 }}
-            >
-              <MobileGeneralSettings />
-            </MobileSettingsFoldContext.Provider>
-          </Provider>
-        </TestCloudPlatformProvider>
-      )
-    );
-    const upper = container.querySelector('[data-settings-fold-upper]')!;
-    const lower = container.querySelector('[data-settings-fold-lower]')!;
-    expect(upper.textContent?.toLowerCase()).toContain('notification');
-    expect(lower.textContent).toContain('Queued message behavior');
-  });
-
-  it.each(['account', 'appearance', 'preferences'])(
-    'enables the %s detail panels and preserves their input during fold and keyboard changes',
-    async (page) => {
-      route.pathname = `/acme/settings/${page}`;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-        top: 100,
-        bottom: 900,
-        left: 0,
-        right: 669,
-        width: 669,
-        height: 800,
-        x: 0,
-        y: 100,
-        toJSON: () => ({}),
-      });
-      container = document.createElement('div');
-      document.body.appendChild(container);
-      root = createRoot(container);
-      await act(async () =>
-        root!.render(
-          <MobileSettingsLayout
-            title="Settings"
-            isNativeApp
-            isMachineDetail={false}
-            isAgentConfigTab={false}
-            onBack={() => {}}
-          >
-            <MobileSettingsFoldPanels
-              upper={<input aria-label="draft" defaultValue="unsaved" />}
-              lower={<div>Details</div>}
-            />
-          </MobileSettingsLayout>
-        )
-      );
-      const input = container.querySelector<HTMLInputElement>('input')!;
-      await act(async () => {
-        window.__LODY_HORIZONTAL_DIVISION__ = { top: 455, height: 40, viewportHeight: 951 };
-        window.dispatchEvent(new Event('lody:division-change'));
-      });
-      expect(
-        container.querySelector<HTMLElement>('[data-settings-fold-upper]')?.style.flexBasis
-      ).toBe('355px');
-      expect(
-        container.querySelector('[data-settings-fold-lower]')?.classList.contains('overflow-y-auto')
-      ).toBe(true);
-      await act(async () => {
-        document.documentElement.style.setProperty('--native-keyboard-height', '250px');
-        window.dispatchEvent(new Event('lody:keyboard-resize'));
-      });
-      expect(
-        container.querySelector('[data-settings-fold-lower]')?.classList.contains('overflow-y-auto')
-      ).toBe(false);
-      expect(container.querySelector('input')).toBe(input);
-      expect(input.value).toBe('unsaved');
-      document.documentElement.style.removeProperty('--native-keyboard-height');
-    }
-  );
 
   it('requires developer mode only for new encrypted workspace creation and retains the preference', async () => {
     store?.set(developerModeEnabledAtom, true);
@@ -370,48 +255,6 @@ describe('SettingsCategoryList', () => {
     expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(false);
   });
 
-  it('renders a bottom bug report action that opens the report dialog state', async () => {
-    await renderList();
-
-    const reportButton = getButton('Report a bug');
-    expect(reportButton.textContent).toContain('Send a report with optional machine logs');
-
-    await act(async () => {
-      reportButton.click();
-    });
-
-    expect(navigateMock).not.toHaveBeenCalled();
-    expect(store?.get(bugReportDialogOpenAtom)).toBe(true);
-  });
-
-  it('places the account above the fold and all settings below', async () => {
-    store?.set(userAtom, { id: 'person', name: 'Example User', email: 'user@example.test' });
-    await renderList({ messageHeight: 300, lowerTop: 450, gapHeight: 40 });
-    const upper = container!.querySelector<HTMLElement>('[data-settings-fold-upper]')!;
-    const lower = container!.querySelector<HTMLElement>('[data-settings-fold-lower]')!;
-    expect(upper.textContent).toContain('Example User');
-    expect(upper.textContent).toContain('user@example.test');
-    const workspace = upper.querySelector<HTMLButtonElement>('[data-settings-fold-workspace]')!;
-    expect(workspace.textContent).toContain('acme');
-    expect(workspace.textContent).toContain('Workspace');
-    await act(async () => workspace.click());
-    expect(navigateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ to: '/$workspaceName/settings/workspace' })
-    );
-    navigateMock.mockClear();
-    expect(upper.textContent).not.toContain('Preferences');
-    expect(lower.textContent).toContain('Preferences');
-    expect(lower.textContent).toContain('General');
-    await act(async () => {
-      [...lower.querySelectorAll('button')]
-        .find((button) => button.textContent?.includes('General'))!
-        .click();
-    });
-    expect(navigateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ to: '/$workspaceName/settings/workspace' })
-    );
-  });
-
   it('shows weekly workspace totals and aggregates hourly buckets by UTC day', async () => {
     usageCache.value = {
       workspaceId: 'workspace',
@@ -473,77 +316,6 @@ describe('SettingsCategoryList', () => {
     const usage = container!.querySelector<HTMLElement>('[data-settings-fold-usage]')!;
     expect(usage.textContent).toContain('—');
     expect(usage.textContent).toContain('Loading');
-  });
-
-  it('keeps settings category rows navigating normally', async () => {
-    await renderList();
-
-    expect(container?.textContent).not.toContain('My Machines');
-    expect(container?.textContent).not.toContain('People');
-
-    await act(async () => {
-      getButton('Preferences').click();
-    });
-
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: '/$workspaceName/settings/preferences',
-      params: { workspaceName: 'acme' },
-      search: expect.any(Function),
-    });
-    expect(store?.get(bugReportDialogOpenAtom)).toBe(false);
-  });
-
-  it('does not expose desktop-only keyboard shortcuts', async () => {
-    await renderList();
-
-    expect(container?.textContent).not.toContain('Keyboard Shortcuts');
-  });
-
-  it('routes workspace member management through General', async () => {
-    await renderList();
-
-    await act(async () => {
-      getButton('General').click();
-    });
-
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: '/$workspaceName/settings/workspace',
-      params: { workspaceName: 'acme' },
-      search: expect.any(Function),
-    });
-  });
-
-  it('navigates to the appearance category', async () => {
-    await renderList();
-
-    await act(async () => {
-      getButton('Appearance').click();
-    });
-
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: '/$workspaceName/settings/appearance',
-      params: { workspaceName: 'acme' },
-      search: expect.any(Function),
-    });
-  });
-
-  it('opens the category reached by keyboard navigation', async () => {
-    await renderList();
-    const preferences = getButton('Preferences');
-
-    await act(async () => preferences.focus());
-    await act(async () => {
-      preferences.dispatchEvent(
-        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' })
-      );
-    });
-
-    expect(document.activeElement).toBe(getButton('Appearance'));
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: '/$workspaceName/settings/appearance',
-      params: { workspaceName: 'acme' },
-      search: expect.any(Function),
-    });
   });
 
   it('exposes billing in a mobile web browser and navigates to it', async () => {

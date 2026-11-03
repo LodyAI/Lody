@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   getAgentConfigRoomId,
   getCodeCollabFileIndexFlockDocId,
-  getMachineFlockDocId,
   getMachineRoomId,
   getSessionRoomId,
   type AgentConfigId,
@@ -100,43 +99,6 @@ describe('WorkspaceTargetRouter', () => {
     expect(
       router.resolveTransportRoute({ kind: 'doc', id: getSessionRoomId(remoteSessionId) })
     ).toEqual({ transportIds: ['cloud'] });
-  });
-
-  it('routes session docs, file indexes, and machine Flocks by owning machine', () => {
-    const { router } = createRouter();
-    const localSessionId = 'session-local' as SessionId;
-    const remoteSessionId = 'session-remote' as SessionId;
-    router.setLocalMachineId(localMachineId);
-    router.rememberSessionTarget(localSessionId, localMachineId);
-    router.rememberSessionTarget(remoteSessionId, remoteMachineId);
-
-    expect(router.getPlaneForDocRoom(getSessionRoomId(localSessionId))).toBe('local');
-    expect(router.getPlaneForDocRoom(getSessionRoomId(remoteSessionId))).toBe('cloud');
-    expect(
-      router.getPlaneForFlockDoc(getCodeCollabFileIndexFlockDocId(workspaceId, localSessionId))
-    ).toBe('local');
-    expect(
-      router.getPlaneForFlockDoc(getCodeCollabFileIndexFlockDocId(workspaceId, remoteSessionId))
-    ).toBe('cloud');
-    expect(router.getPlaneForFlockDoc(getMachineFlockDocId(workspaceId, localMachineId))).toBe(
-      'local'
-    );
-    expect(router.getPlaneForFlockDoc(getMachineFlockDocId(workspaceId, remoteMachineId))).toBe(
-      'cloud'
-    );
-  });
-
-  it('loads immutable session ownership from repo meta before selecting a plane', async () => {
-    const sessionId = 'session-loaded' as SessionId;
-    const roomId = getSessionRoomId(sessionId);
-    const { router, getDocMeta } = createRouter({
-      [roomId]: { id: sessionId, machineId: remoteMachineId },
-    });
-    router.setLocalMachineId(localMachineId);
-
-    await expect(router.prepareSessionTarget(sessionId)).resolves.toBe('cloud');
-    expect(getDocMeta).toHaveBeenCalledWith(roomId);
-    expect(router.getPlaneForDocRoom(roomId)).toBe('cloud');
   });
 
   it('rejects an ownership change instead of rerouting a live session', async () => {

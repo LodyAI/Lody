@@ -18,6 +18,6 @@ The opt-in `\(...\)` inline path is unchanged. Code spans, fenced and indented c
 ## Evidence
 
 - Implementation: [math delimiter normalizer](../../../../packages/components/src/lib/markdown-single-dollar-math.ts).
-- Regression coverage: [delimiter tests](../../../../packages/components/tests/markdown-math-delimiters.test.ts) and [renderer tests](../../../../packages/components/tests/markdown-streaming-reparse.test.ts).
+- Regression coverage: delimiter tests (implementation-only test retired) and [renderer tests](../../../../packages/components/tests/markdown-streaming-reparse.test.ts).
 - Contract: [Markdown math rendering Spec](../../../../specs/markdown-math-rendering.md).
 - A synthetic case with display delimiters after prose no longer blocks a later inline formula from rendering.

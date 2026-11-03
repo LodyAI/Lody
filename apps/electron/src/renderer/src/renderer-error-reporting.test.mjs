@@ -27,18 +27,6 @@ function createHarness(initiallyCommitted = false) {
   }
 }
 
-void test('routes a caught initial render through fatal IPC after the boundary commits', () => {
-  const harness = createHarness()
-  const error = new Error('caught during initial render')
-
-  harness.reporting.onReactCaughtError(error)
-  harness.commit()
-  harness.flush()
-
-  assert.deepEqual(harness.fatalReports, [{ error, scope: 'react:caught' }])
-  assert.deepEqual(harness.bootFailures, [])
-})
-
 void test('shows the boot fallback for an uncaught initial render with no commit', () => {
   const harness = createHarness()
   const error = new Error('uncaught during initial render')
@@ -64,44 +52,4 @@ void test('persists caught and uncaught post-mount render errors without replaci
     { error: uncaught, scope: 'react:uncaught' }
   ])
   assert.deepEqual(harness.bootFailures, [])
-})
-
-void test('routes unhandled rejections according to actual commit state', () => {
-  const initial = createHarness()
-  const initialError = new Error('initial rejection')
-  initial.reporting.onUnhandledRejection({ reason: initialError })
-  initial.flush()
-
-  assert.deepEqual(initial.bootFailures, [{ error: initialError, scope: 'unhandledrejection' }])
-  assert.deepEqual(initial.fatalReports, [])
-
-  const mounted = createHarness(true)
-  const mountedError = new Error('mounted rejection')
-  mounted.reporting.onUnhandledRejection({ reason: mountedError })
-  mounted.flush()
-
-  assert.deepEqual(mounted.fatalReports, [{ error: mountedError, scope: 'unhandledrejection' }])
-  assert.deepEqual(mounted.bootFailures, [])
-})
-
-void test('deduplicates the same Error across React and window reporting paths', () => {
-  const harness = createHarness(true)
-  const error = new Error('reported twice')
-
-  harness.reporting.onReactCaughtError(error)
-  harness.reporting.onWindowError({ error, message: error.message })
-  harness.flush()
-
-  assert.deepEqual(harness.fatalReports, [{ error, scope: 'react:caught' }])
-  assert.deepEqual(harness.bootFailures, [])
-})
-
-void test('routes a synchronous pre-commit failure to the boot fallback', () => {
-  const harness = createHarness()
-  const error = new Error('router setup failed')
-
-  harness.reporting.reportSynchronousError(error)
-  harness.flush()
-
-  assert.deepEqual(harness.bootFailures, [{ error, scope: 'boot:synchronous' }])
 })

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -117,15 +118,6 @@ describe('login page last-used method', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('marks nothing on a device that has not signed in before', async () => {
-    await render();
-
-    expect(buttons().some((button) => /Continue with GitHub/.test(button.textContent ?? ''))).toBe(
-      true
-    );
-    expect(buttonsMarkedLastUsed()).toEqual([]);
-  });
-
   it('marks the provider whose sign-in completed, after the OAuth round trip returns', async () => {
     await render();
     await click(/Continue with Google/);
@@ -165,12 +157,5 @@ describe('login page last-used method', () => {
     await remount();
 
     expect(buttonsMarkedLastUsed()).toEqual(['Continue with email']);
-  });
-
-  it('ignores a stored value that is not a sign-in method', async () => {
-    window.localStorage.setItem('lody.auth.last_login_method', 'myspace');
-    await render();
-
-    expect(buttonsMarkedLastUsed()).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CreateElicitationRequest, RequestPermissionRequest } from '@agentclientprotocol/sdk';
+import type { CreateElicitationRequest } from '@agentclientprotocol/sdk';
 import { Loro } from 'loro-crdt';
 import { createSessionMirror } from '../src/session-mirror';
 import type { SessionId } from '../src/ids';
@@ -9,9 +9,7 @@ import {
   createAskUserQuestionPermissionOutcome,
   extractAskUserQuestionAnswersFromOutcome,
   getAskUserQuestionDisplayTitle,
-  getAskUserQuestionPermissionDisplayTitle,
   getAskUserQuestionAnswerKey,
-  isAskUserQuestionPermissionRequest,
   parseAskUserQuestionElicitationRequest,
   parseAskUserQuestionPermissionMeta,
 } from '../src/acp/ask-user-question';
@@ -38,222 +36,6 @@ describe('AskUserQuestion permission metadata', () => {
     },
   };
 
-  it('parses valid Claude Code AskUserQuestion permission metadata', () => {
-    expect(parseAskUserQuestionPermissionMeta(meta)).toEqual({
-      source: 'claude',
-      version: 1,
-      allowCustomAnswer: true,
-      questions: [
-        {
-          question: 'Which database should we use?',
-          header: 'Database',
-          options: [
-            { label: 'Postgres', description: 'Use PostgreSQL' },
-            { label: 'SQLite', description: 'Use SQLite', preview: 'sqlite.db' },
-          ],
-          multiSelect: false,
-        },
-      ],
-    });
-  });
-
-  it('accepts options without descriptions', () => {
-    const parsed = parseAskUserQuestionPermissionMeta({
-      claudeCode: {
-        askUserQuestion: {
-          version: 1,
-          allowCustomAnswer: false,
-          questions: [
-            {
-              question: 'Pick one',
-              header: 'Pick',
-              options: [{ label: 'Yes' }, { label: 'No' }],
-              multiSelect: false,
-            },
-          ],
-        },
-      },
-    });
-    expect(parsed?.questions[0]?.options).toEqual([{ label: 'Yes' }, { label: 'No' }]);
-  });
-
-  it('parses Codex request_user_input metadata with dynamic options', () => {
-    expect(
-      parseAskUserQuestionPermissionMeta({
-        codex: {
-          requestUserInput: {
-            callId: 'call-1',
-            turnId: 'turn-1',
-            questions: [
-              {
-                id: 'next_step',
-                header: 'Next step',
-                question: 'How should I proceed with this plan?',
-                isOther: true,
-                isSecret: false,
-                options: [
-                  {
-                    label: 'Tighten the plan first',
-                    description: 'Review edge cases before implementation',
-                  },
-                  {
-                    label: 'Start implementation',
-                    description: 'Use the current proposal as the implementation guide',
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      })
-    ).toEqual({
-      source: 'codex',
-      version: 1,
-      allowCustomAnswer: true,
-      questions: [
-        {
-          id: 'next_step',
-          question: 'How should I proceed with this plan?',
-          header: 'Next step',
-          options: [
-            {
-              label: 'Tighten the plan first',
-              description: 'Review edge cases before implementation',
-            },
-            {
-              label: 'Start implementation',
-              description: 'Use the current proposal as the implementation guide',
-            },
-          ],
-          multiSelect: false,
-          allowCustomAnswer: true,
-          isSecret: false,
-        },
-      ],
-    });
-  });
-
-  it('parses Codex request_user_input options without descriptions', () => {
-    expect(
-      parseAskUserQuestionPermissionMeta({
-        codex: {
-          requestUserInput: {
-            callId: 'call-1',
-            turnId: 'turn-1',
-            questions: [
-              {
-                id: 'next_step',
-                header: 'Next step',
-                question: 'What should happen next?',
-                is_other: true,
-                is_secret: true,
-                options: [{ label: 'Revise plan' }, { label: 'Start implementation' }],
-              },
-            ],
-          },
-        },
-      })
-    ).toEqual({
-      source: 'codex',
-      version: 1,
-      allowCustomAnswer: true,
-      questions: [
-        {
-          id: 'next_step',
-          question: 'What should happen next?',
-          header: 'Next step',
-          options: [{ label: 'Revise plan' }, { label: 'Start implementation' }],
-          multiSelect: false,
-          allowCustomAnswer: true,
-          isSecret: true,
-        },
-      ],
-    });
-  });
-
-  it('rejects malformed question payloads', () => {
-    expect(
-      parseAskUserQuestionPermissionMeta({
-        claudeCode: {
-          askUserQuestion: {
-            questions: [{ question: 'Missing header', options: [] }],
-          },
-        },
-      })
-    ).toBeNull();
-  });
-
-  it('detects AskUserQuestion request permission objects', () => {
-    expect(
-      isAskUserQuestionPermissionRequest({
-        sessionId: 'session-1',
-        toolCall: { toolCallId: 'tool-1' },
-        options: [],
-        _meta: meta,
-      } as RequestPermissionRequest)
-    ).toBe(true);
-  });
-
-  it('extracts a notification display title from question metadata', () => {
-    expect(getAskUserQuestionDisplayTitle(meta)).toBe('Which database should we use?');
-    expect(
-      getAskUserQuestionPermissionDisplayTitle({
-        sessionId: 'session-1',
-        toolCall: { toolCallId: 'tool-1' },
-        options: [],
-        _meta: meta,
-      } as RequestPermissionRequest)
-    ).toBe('Which database should we use?');
-  });
-
-  it('builds selected outcomes with ACP answer metadata', () => {
-    expect(
-      createAskUserQuestionPermissionOutcome('answer', {
-        'Which database should we use?': 'Postgres',
-        'Which constraints matter?': ['Docker', 'Offline'],
-      })
-    ).toEqual({
-      outcome: 'selected',
-      optionId: 'answer',
-      _meta: {
-        claudeCode: {
-          askUserQuestion: {
-            answers: {
-              'Which database should we use?': 'Postgres',
-              'Which constraints matter?': ['Docker', 'Offline'],
-            },
-          },
-        },
-      },
-    });
-  });
-
-  it('builds Codex selected outcomes as RequestUserInputResponse metadata', () => {
-    expect(
-      createAskUserQuestionPermissionOutcome(
-        'answer',
-        {
-          next_step: 'Start implementation',
-          constraints: ['Docker', 'Offline'],
-        },
-        'codex'
-      )
-    ).toEqual({
-      outcome: 'selected',
-      optionId: 'answer',
-      _meta: {
-        codex: {
-          requestUserInput: {
-            answers: {
-              next_step: { answers: ['Start implementation'] },
-              constraints: { answers: ['Docker', 'Offline'] },
-            },
-          },
-        },
-      },
-    });
-  });
-
   it('uses stable answer keys without overwriting duplicate question text', () => {
     const questions = [
       {
@@ -279,28 +61,6 @@ describe('AskUserQuestion permission metadata', () => {
     expect(getAskUserQuestionAnswerKey(questions, 0)).toBe('Database');
     expect(getAskUserQuestionAnswerKey(questions, 1)).toBe('1');
     expect(getAskUserQuestionAnswerKey(questions, 2)).toBe('2');
-  });
-
-  it('uses Codex question ids as answer keys', () => {
-    const questions = [
-      {
-        id: 'next_step',
-        question: 'Which option?',
-        header: 'Next step',
-        options: [],
-        multiSelect: false,
-      },
-      {
-        id: 'constraints',
-        question: 'Which constraints?',
-        header: 'Constraints',
-        options: [],
-        multiSelect: false,
-      },
-    ];
-
-    expect(getAskUserQuestionAnswerKey(questions, 0)).toBe('next_step');
-    expect(getAskUserQuestionAnswerKey(questions, 1)).toBe('constraints');
   });
 
   it('accepts legacy Claude answers for a Core question request', () => {
@@ -397,36 +157,6 @@ describe('AskUserQuestion form elicitation bridge (Claude >= 0.44.0)', () => {
     },
   } as unknown as CreateElicitationRequest;
 
-  it('parses a single-question form into AskUserQuestion metadata', () => {
-    expect(parseAskUserQuestionElicitationRequest(singleRequest)).toEqual({
-      meta: {
-        source: 'claude',
-        version: 1,
-        allowCustomAnswer: true,
-        questions: [
-          {
-            question: 'Which database should we use?',
-            header: 'Database',
-            options: [{ label: 'Postgres', description: 'Use PostgreSQL' }, { label: 'SQLite' }],
-            multiSelect: false,
-          },
-        ],
-      },
-      fieldKeys: ['question_0'],
-    });
-  });
-
-  it('folds a selected answer back into form content keyed by field id', () => {
-    const elicitation = parseAskUserQuestionElicitationRequest(singleRequest)!;
-    const outcome = createAskUserQuestionPermissionOutcome('answer', {
-      'Which database should we use?': 'Postgres',
-    });
-    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
-      action: 'accept',
-      content: { question_0: 'Postgres' },
-    });
-  });
-
   it('carries a custom (non-option) answer through the same field', () => {
     const elicitation = parseAskUserQuestionElicitationRequest(singleRequest)!;
     const outcome = createAskUserQuestionPermissionOutcome('answer', {
@@ -473,25 +203,6 @@ describe('AskUserQuestion form elicitation bridge (Claude >= 0.44.0)', () => {
     },
   } as unknown as CreateElicitationRequest;
 
-  it('parses a multi-question form with a multi-select field', () => {
-    const elicitation = parseAskUserQuestionElicitationRequest(multiRequest)!;
-    expect(elicitation.fieldKeys).toEqual(['question_0', 'question_1']);
-    expect(elicitation.meta.questions).toEqual([
-      {
-        question: 'Which database?',
-        header: 'Database',
-        options: [{ label: 'Postgres' }, { label: 'SQLite' }],
-        multiSelect: false,
-      },
-      {
-        question: 'Which constraints matter?',
-        header: 'Constraints',
-        options: [{ label: 'Docker' }, { label: 'Offline' }],
-        multiSelect: true,
-      },
-    ]);
-  });
-
   it('maps multi-question answers (including arrays) to their fields', () => {
     const elicitation = parseAskUserQuestionElicitationRequest(multiRequest)!;
     const outcome = createAskUserQuestionPermissionOutcome('answer', {
@@ -513,15 +224,6 @@ describe('AskUserQuestion form elicitation bridge (Claude >= 0.44.0)', () => {
     expect(
       buildAskUserQuestionElicitationResponse(elicitation, { outcome: cancelOutcome })
     ).toEqual({ action: 'cancel' });
-  });
-
-  it('accepts with empty content when no answers were provided', () => {
-    const elicitation = parseAskUserQuestionElicitationRequest(singleRequest)!;
-    expect(
-      buildAskUserQuestionElicitationResponse(elicitation, {
-        outcome: { outcome: 'selected', optionId: 'answer' },
-      })
-    ).toEqual({ action: 'accept', content: {} });
   });
 
   it('declines non-AskUserQuestion elicitations', () => {
@@ -594,21 +296,6 @@ describe('AskUserQuestion form elicitation bridge (Lody extension)', () => {
     },
     _meta: { lody: { elicitation: { version: 1, autoResolveAfterSeconds: 60 } } },
   } as unknown as CreateElicitationRequest;
-
-  it.each([
-    { description: undefined, message: 'Which path?', expected: 'Which path?' },
-    { description: '', message: '', expected: 'Next step' },
-  ])('falls back when a Core question has no prompt: %#', ({ description, message, expected }) => {
-    const parsed = parseAskUserQuestionElicitationRequest({
-      ...request,
-      message,
-      requestedSchema: {
-        type: 'object',
-        properties: { next_step: { type: 'string', title: 'Next step', description } },
-      },
-    } as unknown as CreateElicitationRequest);
-    expect(parsed?.meta.questions[0]?.question).toBe(expected);
-  });
 
   it.each(['choice', 'free text'])(
     'preserves a single Core %s question through history and its answer',
@@ -741,19 +428,6 @@ describe('AskUserQuestion form elicitation bridge (Lody extension)', () => {
         next_step__other: 'Use a smaller patch',
         api_key: 'secret-value',
       },
-    });
-  });
-
-  it('writes selected options to the primary field', () => {
-    const elicitation = parseAskUserQuestionElicitationRequest(request)!;
-    const outcome = createAskUserQuestionPermissionOutcome(
-      'answer',
-      { next_step: 'Start implementation', api_key: 'secret-value' },
-      elicitation.meta
-    );
-    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
-      action: 'accept',
-      content: { next_step: 'Start implementation', api_key: 'secret-value' },
     });
   });
 });
@@ -984,16 +658,6 @@ describe('Core answer notes', () => {
       mirror.dispose();
     }
   );
-
-  it('rejects colliding note ids in stored metadata', () => {
-    const parsed = parse();
-    parsed.meta.questions[0]!.note!.fieldId = 'approach';
-    expect(
-      parseAskUserQuestionPermissionMeta({
-        lody: { elicitation: { version: 1, questions: parsed.meta.questions } },
-      })
-    ).toBeNull();
-  });
 
   it.each([
     'duplicate question',

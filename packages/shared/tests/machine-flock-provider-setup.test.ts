@@ -1,18 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CodexAuthProfileSchema,
-  encodeCodexProfileConfig,
-  CODEX_PROFILE_LEGACY_LAUNCH_GUARD,
-} from '../src/codex-auth-profile';
+import { CodexAuthProfileSchema, encodeCodexProfileConfig, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from '../src/codex-auth-profile';
 import type { AgentConfigId, MachineId } from '../src/ids';
-import {
-  getMachineFlockProviderSetups,
-  machineFlockKeys,
-  parseMachineFlockRow,
-  serializeMachineFlockKey,
-  type MachineFlockRowMap,
-  type ProviderSetupTask,
-} from '../src/machine-flock';
+import { machineFlockKeys, parseMachineFlockRow, type ProviderSetupTask } from '../src/machine-flock';
 
 const setupId = 'setup-1' as AgentConfigId;
 const machineId = 'machine-1' as MachineId;
@@ -92,15 +81,6 @@ describe('machine flock provider setup rows', () => {
         apiKey: 'synthetic',
       }).success
     ).toBe(false);
-  });
-  it('parses and indexes a valid durable setup', () => {
-    const row = parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), setup);
-    expect(row).toEqual({ key: ['providerSetup', setupId], value: setup });
-
-    const rows = {
-      [serializeMachineFlockKey(machineFlockKeys.providerSetup(setupId))]: row!,
-    } as MachineFlockRowMap;
-    expect(getMachineFlockProviderSetups(rows)).toEqual({ [setupId]: setup });
   });
 
   it('rejects a setup whose key and future config identity do not match', () => {

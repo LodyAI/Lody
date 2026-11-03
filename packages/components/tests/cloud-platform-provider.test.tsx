@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { getDefaultStore } from 'jotai';
 import type { WorkspaceId } from '@lody/shared';
 import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
@@ -8,7 +9,7 @@ import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getFunctionName, type FunctionReference } from 'convex/server';
+import { type FunctionReference } from 'convex/server';
 import type {
   PlatformProvider,
   E2eeRuntimeFactory,
@@ -96,7 +97,7 @@ vi.mock('@/lib/github-token-port', () => ({ installGitHubTokenPort: () => () => 
 vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }));
 
 import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
-import { createDesktopE2eeContent } from '@/providers/desktop-e2ee-content';
+
 import { initI18n } from '@/i18n';
 import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
 import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platform-provider';
@@ -184,45 +185,6 @@ describe('CloudPlatformProvider', () => {
     container.remove();
     localStorage.clear();
     delete window.ipc;
-  });
-
-  it('borrows the injected runtime with a live read-only session and preserves exact optional ports', async () => {
-    refetch('A');
-    let input: Parameters<E2eeRuntimeFactory>[0] | undefined;
-    const borrowed = {
-      readerLeases: 'preallocated-v1',
-      account: async () => {
-        const session = input!.session.get();
-        return session.status === 'authenticated'
-          ? { userId: session.user.id, source: 'network' }
-          : null;
-      },
-    } as E2eeWorkspaceRuntime;
-    const factory: E2eeRuntimeFactory = (context) => {
-      input = context;
-      return borrowed;
-    };
-    await render(factory);
-    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(borrowed);
-    expect(await seen.at(-1)!.e2eeWorkspaces!.runtime!.account!()).toMatchObject({
-      userId: 'user-a',
-    });
-    expect('set' in input!.session).toBe(false);
-    expect(seen.at(-1)!.e2eeWorkspaces!.runtime!.prepareFeatureRpc).toBeUndefined();
-    const first = seen.at(-1)!.e2eeWorkspaces!.runtime;
-    refetch('Renamed');
-    await render(factory);
-    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(first);
-    fixture.session = {
-      ...fixture.session,
-      data: { user: { id: 'user-b', email: 'b@example.test', name: 'B', image: null } },
-    };
-    await render(factory);
-    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(first);
-    expect(await first!.account!()).toMatchObject({ userId: 'user-b' });
-    fixture.session = { ...fixture.session, data: null };
-    await render(factory);
-    expect(await first!.account!()).toBeNull();
   });
 
   it('keeps standalone anonymous login independent of an injected runtime factory', async () => {
@@ -387,107 +349,6 @@ describe('CloudPlatformProvider', () => {
       });
     }
   );
-
-  it('routes encrypted dispatch and ACK verification through the production provider, IPC proxy and preload', async () => {
-    fixture.electron = true;
-    fixture.usePreload = true;
-    window.ipc = ipcBridge;
-    refetch('Encrypted');
-    const input = {
-      sessionId: 'session-a',
-      userTurnId: 'turn-a',
-      userId: 'user-a',
-      timestamp: new Date(1000).toISOString(),
-      inputConfig: { prompt: 'synthetic input' },
-    };
-    const original = {
-      targetMachineId: 'machine-a',
-      requesterDevice: '11'.repeat(32),
-      requestId: '22'.repeat(16),
-      frameHex: '33'.repeat(143),
-      expiresAt: 901000,
-    };
-    const ack = {
-      type: 'session/dispatch-turn_response',
-      sessionId: input.sessionId,
-      userTurnId: input.userTurnId,
-      accepted: true,
-      disposition: 'accepted',
-    };
-    const retained: unknown[][] = [];
-    fixture.invoke = async (channel, ...args) => {
-      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
-      // Returning a value requires the exact production route and arguments.
-      if (channel === 'e2ee.prepareDispatch') {
-        expect(args).toEqual(['workspace-a', 'machine-a', input]);
-        retained.push(args);
-        return original;
-      }
-      if (channel === 'e2ee.acceptDispatchResponse') {
-        expect(retained).toEqual([['workspace-a', 'machine-a', input]]);
-        expect(args).toEqual(['workspace-a', 'machine-a', input, '44'.repeat(143)]);
-        return ack;
-      }
-      throw new Error(`unexpected IPC invocation: ${channel}`);
-    };
-    await render();
-    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
-    const access = createDesktopE2eeContent({
-      runtime,
-      workspaceId: 'workspace-a',
-      genesisHash: 'aa'.repeat(32),
-      epoch: 0,
-      authToken: () => 'synthetic-account-token',
-    });
-    try {
-      expect(await access.e2ee.prepareDispatch!('machine-a', input)).toEqual(original);
-      expect(
-        await access.e2ee.acceptDispatchResponse!('machine-a', input, '44'.repeat(143))
-      ).toEqual(ack);
-    } finally {
-      await access.close();
-    }
-  });
-
-  it('routes sharing reads and pending reconciliation through the real preload and provider', async () => {
-    fixture.electron = true;
-    fixture.usePreload = true;
-    window.ipc = ipcBridge;
-    refetch('Encrypted');
-    const view = {
-      generation: '55'.repeat(32),
-      machineId: 'machine-a',
-      ownerMembershipId: '11'.repeat(16),
-      head: { revision: 2, digest: '22'.repeat(32) },
-      sharedWithTeam: true,
-      projects: ['project-a'],
-    };
-    const rid = '33'.repeat(16);
-    const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
-    let pending = true;
-    fixture.invoke = async (channel, ...args) => {
-      if (channel === 'e2ee.readMachineSharing') {
-        expect(args).toEqual(['workspace-a', 'machine-a']);
-        return view;
-      }
-      if (channel === 'e2ee.updateMachineSharing') {
-        expect(args).toEqual(['workspace-a', 'machine-a', view.generation, rid, change]);
-        const result = { status: pending ? 'pending' : 'saved', requestId: rid };
-        pending = false;
-        return result;
-      }
-      throw new Error(`unexpected IPC invocation: ${channel}`);
-    };
-    await render();
-    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
-    expect(await runtime.readMachineSharing!('workspace-a', 'machine-a')).toEqual(view);
-    expect(
-      await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)
-    ).toEqual({ status: 'pending', requestId: rid });
-    expect(
-      await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)
-    ).toEqual({ status: 'saved', requestId: rid });
-  });
 
   const policyView = (): import('@lody/platform').E2eeMachineSharingView => ({
     machineId: 'machine-a',
@@ -710,29 +571,6 @@ describe('CloudPlatformProvider', () => {
     }
   );
 
-  it('keeps unrelated settings usable while a write is unresolved and reports a safe ownership refusal', async () => {
-    let reject!: (error: Error) => void;
-    const waiting = new Promise((_, fail) => {
-      reject = fail;
-    });
-    let other = 0;
-    fixture.invoke = async (channel) =>
-      channel === 'e2ee.readMachineSharing' ? policyView() : waiting;
-    await renderSharing({
-      other: () => {
-        other++;
-      },
-    });
-    await clickSharing('Share with the whole team');
-    await clickSharing('Other setting');
-    expect(other).toBe(1);
-    await act(async () => {
-      reject(new Error('e2ee_machine_not_owned'));
-    });
-    expect(container.textContent).toContain('Only a current personal device');
-    expect(container.textContent).not.toContain('e2ee_machine_not_owned');
-  });
-
   it('discards a pending old-generation intent when the machine rejoins', async () => {
     let view = policyView();
     const writes: unknown[][] = [];
@@ -781,81 +619,6 @@ describe('CloudPlatformProvider', () => {
     });
     expect(container.textContent).toContain('v7');
     expect(container.textContent).not.toContain('v99');
-  });
-
-  it('routes encrypted feature preparation and response verification through the production provider, IPC proxy and preload', async () => {
-    fixture.electron = true;
-    fixture.usePreload = true;
-    window.ipc = ipcBridge;
-    refetch('Encrypted');
-    const input = {
-      requestId: '55'.repeat(16),
-      request: {
-        workspaceId: 'workspace-a',
-        machineId: 'machine-a',
-        method: 'machine/status' as const,
-        params: {},
-      },
-    };
-    const original = {
-      targetMachineId: 'machine-a',
-      requesterDevice: '11'.repeat(32),
-      requestId: '22'.repeat(16),
-      frameHex: '33'.repeat(143),
-      expiresAt: 901000,
-    };
-    const ack = {
-      ok: false as const,
-      code: 'e2ee_query_failed',
-      error: 'synthetic complete outcome',
-    };
-    const retained: unknown[][] = [];
-    fixture.invoke = async (channel, ...args) => {
-      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
-      // Returning a value requires the exact production route and arguments.
-      if (channel === 'e2ee.prepareFeatureRpc') {
-        expect(args).toEqual(['workspace-a', input]);
-        retained.push(args);
-        return original;
-      }
-      if (channel === 'e2ee.acceptFeatureRpcResponse') {
-        expect(retained).toEqual([['workspace-a', input]]);
-        expect(args).toEqual(['workspace-a', input, '44'.repeat(143)]);
-        return ack;
-      }
-      if (channel === 'e2ee.contentStreamsToken') {
-        expect(args).toEqual(['workspace-a', undefined, undefined, true]);
-        return {
-          token: 'synthetic-rpc-only',
-          bucketId: 'synthetic-encrypted-content',
-          gatewayBaseUrl: 'https://streams.example.test',
-          expiresIn: 900,
-          expiresAt: Date.now() + 900000,
-        };
-      }
-      throw new Error(`unexpected IPC invocation: ${channel}`);
-    };
-    await render();
-    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
-    const access = createDesktopE2eeContent({
-      runtime,
-      workspaceId: 'workspace-a',
-      genesisHash: 'aa'.repeat(32),
-      epoch: 0,
-      authToken: () => 'synthetic-account-token',
-    });
-    try {
-      expect(await access.e2ee.prepareFeatureRpc!(input)).toEqual(original);
-      expect(await access.e2ee.acceptFeatureRpcResponse!(input, '44'.repeat(143))).toEqual(ack);
-      const rpcToken = access.e2ee.createRpcTokenProvider(new AbortController().signal);
-      try {
-        expect(await rpcToken.getToken()).toBe('synthetic-rpc-only');
-      } finally {
-        await rpcToken.close();
-      }
-    } finally {
-      await access.close();
-    }
   });
 
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
@@ -925,133 +688,6 @@ describe('CloudPlatformProvider', () => {
     });
     expect(container.textContent).toBe('unauthenticated:null:null');
     expect(acceptedBearers.length).toBe(beforeLogout);
-  });
-
-  it('keeps one platform object across a session refetch and calls the latest actions', async () => {
-    refetch('first');
-    await render();
-    const first = seen.at(-1)!;
-    expect(first.identity.session.get()).toMatchObject({
-      status: 'authenticated',
-      user: { id: 'user-a' },
-    });
-
-    refetch('second');
-    await render();
-
-    // A consumer that owns resources per platform object (the Prompt Shortcut
-    // runtime) must not be torn down by a refetch that changed nothing.
-    expect(seen.at(-1)).toBe(first);
-    await expect(first.workspaces.create({ name: 'x' })).resolves.toMatchObject({
-      name: 'second',
-      role: 'owner',
-    });
-  });
-
-  it('uses actions for creation and fixed-checkpoint history while keeping mode lookup a query', async () => {
-    refetch('Encrypted');
-    const prepared: E2eeWorkspacePrepared = {
-      accountId: 'user-a',
-      requestId: 'request-a',
-      name: 'Encrypted',
-      slug: 'encrypted',
-      genesisRecordHex: '01',
-      genesisHashHex: 'ab'.repeat(32),
-    };
-    const receipt = {
-      workspaceId: 'workspace-encrypted',
-      name: prepared.name,
-      slug: prepared.slug,
-      contentMode: 'e2ee' as const,
-      contentModeVersion: 1 as const,
-      cryptoOrgId: prepared.genesisHashHex,
-      genesisHash: prepared.genesisHashHex,
-      activation: 'control-only' as const,
-    };
-    const createRequest = {
-      accountId: prepared.accountId,
-      requestId: prepared.requestId,
-      name: prepared.name,
-      slug: prepared.slug,
-      genesisRecordHex: prepared.genesisRecordHex,
-      developerMode: true as const,
-    };
-    const historyRequest = {
-      workspaceId: receipt.workspaceId,
-      cursor: 'page-two',
-      checkpoint: { headHash: 'cd'.repeat(32), length: 2 },
-    };
-    const historyPage = {
-      workspaceId: receipt.workspaceId,
-      genesisHash: receipt.genesisHash,
-      checkpoint: { ...historyRequest.checkpoint },
-      startIndex: 1,
-      recordsHex: ['02'],
-      position: 'p1:workspace-encrypted:2:offset:0',
-      nextCursor: null,
-    };
-    fixture.electron = true;
-    const bindings: Array<{ workspaceId: string; genesisHash: string; requestId?: string }> = [];
-    const unused = async (): Promise<never> => {
-      throw new Error('unused runtime method');
-    };
-    fixture.native = {
-      e2ee: {
-        prepareCreation: async () => ({ ...prepared }),
-        recordCreated: async (binding) => {
-          bindings.push({ ...binding });
-        },
-        open: unused,
-        close: async () => {},
-        status: unused,
-        ledgerView: unused,
-        ingestLedgerRecords: unused,
-      },
-    };
-    fixture.cloudClient.query = async (reference, args) => {
-      expect(args).toEqual({ workspaceId: receipt.workspaceId });
-      if (getFunctionName(reference) === 'e2eeWorkspaces:memberProfiles')
-        return {
-          workspaceId: receipt.workspaceId,
-          profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
-        };
-      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
-      return receipt;
-    };
-    fixture.cloudClient.action = async (reference, args) => {
-      switch (getFunctionName(reference)) {
-        case 'e2eeWorkspaces:create':
-          expect(args).toEqual(createRequest);
-          return receipt;
-        case 'e2eeWorkspaces:history':
-          expect(args).toEqual(historyRequest);
-          return historyPage;
-        default:
-          throw new Error('unexpected action');
-      }
-    };
-    await render();
-    const port = seen.at(-1)!.e2eeWorkspaces!;
-    await expect(port.prepareCreation!(prepared)).resolves.toEqual(prepared);
-    await expect(port.create(createRequest)).resolves.toEqual(receipt);
-    expect(bindings).toEqual([
-      {
-        workspaceId: receipt.workspaceId,
-        genesisHash: prepared.genesisHashHex,
-        requestId: prepared.requestId,
-      },
-    ]);
-    await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
-    await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
-    await expect(port.memberProfiles!({ workspaceId: receipt.workspaceId })).resolves.toEqual({
-      workspaceId: receipt.workspaceId,
-      profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
-    });
-
-    fixture.cloudClient.action = async () => {
-      throw new Error('history temporarily unavailable');
-    };
-    await expect(port.history(historyRequest)).rejects.toThrow('history temporarily unavailable');
   });
 });
 

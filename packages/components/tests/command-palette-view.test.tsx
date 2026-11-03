@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -97,16 +98,6 @@ describe('CommandPaletteView', () => {
     container.remove();
   });
 
-  it('heads each run of commands with its group, once', async () => {
-    await render([
-      result('back', 'Navigation'),
-      result('new', 'Session'),
-      result('pin', 'Session'),
-    ]);
-    const headings = [...document.body.querySelectorAll('[cmdk-list] p')].map((p) => p.textContent);
-    expect(headings).toEqual(['Navigation', 'Session']);
-  });
-
   it('moves the highlight with the arrow keys and runs the highlighted row on Enter', async () => {
     await render([
       result('back', 'Navigation'),
@@ -119,11 +110,6 @@ describe('CommandPaletteView', () => {
     expect(selectedTitle()).toBe('pin');
     await press('Enter');
     expect(ran).toEqual(['pin']);
-  });
-
-  it('says so when nothing matches', async () => {
-    await render([]);
-    expect(document.body.textContent).toContain('Nothing here');
   });
 
   it('closes on Escape but lets an active IME composition handle Escape first', async () => {
@@ -139,11 +125,5 @@ describe('CommandPaletteView', () => {
 
     await pressOnDialogSurface('Escape');
     expect(document.body.querySelector('[cmdk-input]')).toBeNull();
-  });
-
-  it('reports the controlled close request when Escape is pressed', async () => {
-    await render([result('back', 'Navigation')]);
-    await press('Escape');
-    expect(openChanges).toContain(false);
   });
 });

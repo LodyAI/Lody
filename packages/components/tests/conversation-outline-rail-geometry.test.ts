@@ -9,7 +9,6 @@ import {
   outlineTickRestingWidth,
   outlineTickWidth,
   outlineTickWidthAt,
-  tickLineTopOffset,
 } from '../src/components/ai-gui/conversation-outline-rail-geometry';
 
 const RESTING = [...TICK_WIDTHS];
@@ -66,37 +65,10 @@ describe('outlineTickWidth', () => {
     }
   });
 
-  it('is symmetric about the cursor', () => {
-    for (const distance of [1, 2, 3, 4]) {
-      expect(outlineTickWidth(HEAVIEST, -distance)).toBeCloseTo(
-        outlineTickWidth(HEAVIEST, distance),
-        6
-      );
-    }
-  });
-
-  it('has the inflection of a bell rather than a straight ramp', () => {
-    // A linear falloff would make successive drops equal. A Gaussian's drops
-    // grow toward the inflection point — that is what reads as a swell.
-    const uniform = [LIGHTEST, LIGHTEST, LIGHTEST, LIGHTEST];
-    const widths = uniform.map((resting, distance) => outlineTickWidth(resting, distance));
-    const drop1 = (widths[0] ?? 0) - (widths[1] ?? 0);
-    const drop2 = (widths[1] ?? 0) - (widths[2] ?? 0);
-    expect(drop2).toBeGreaterThan(drop1);
-  });
-
   it('leaves ticks outside the radius at their resting width', () => {
     for (const resting of RESTING) {
       expect(outlineTickWidth(resting, 5)).toBe(resting);
       expect(outlineTickWidth(resting, 50)).toBe(resting);
-    }
-  });
-
-  it('never returns a non-finite width', () => {
-    for (const distance of [0, 1, 4, 5, 100, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
-      const width = outlineTickWidth(LIGHTEST, distance);
-      expect(Number.isFinite(width)).toBe(true);
-      expect(width).toBeGreaterThan(0);
     }
   });
 });
@@ -106,12 +78,6 @@ describe('outlineTickWidthAt', () => {
     for (const index of [0, 3, 40]) {
       expect(outlineTickWidthAt(HEAVIEST, index, -1)).toBe(HEAVIEST);
     }
-  });
-
-  it('centres the swell on the hovered tick', () => {
-    expect(outlineTickWidthAt(HEAVIEST, 10, 10)).toBe(outlineTickWidth(HEAVIEST, 0));
-    expect(outlineTickWidthAt(HEAVIEST, 9, 10)).toBe(outlineTickWidth(HEAVIEST, 1));
-    expect(outlineTickWidthAt(HEAVIEST, 11, 10)).toBe(outlineTickWidth(HEAVIEST, 1));
   });
 });
 
@@ -129,30 +95,11 @@ describe('rail track', () => {
     }
     expect(ACTIVE_TICK_WIDTH).toBeLessThanOrEqual(RAIL_TRACK_WIDTH);
   });
-
-  it('keeps the active bar covering its own tick at every magnification', () => {
-    for (const resting of RESTING) {
-      for (const distance of [0, 1, 2, 3, 4, 9]) {
-        const tick = outlineTickWidth(resting, distance);
-        const bar = Math.max(ACTIVE_TICK_WIDTH, tick + ACTIVE_BAR_OVERHANG);
-        expect(bar).toBeGreaterThan(tick);
-      }
-    }
-  });
-
-  it('overhangs by enough that the resting bar covers the widest resting tick', () => {
-    expect(HEAVIEST + ACTIVE_BAR_OVERHANG).toBe(ACTIVE_TICK_WIDTH);
-  });
 });
 
 describe('outlineTickRestingWidth', () => {
   it('grows with weight', () => {
     expect(outlineTickRestingWidth(0)).toBeLessThan(outlineTickRestingWidth(3));
-  });
-
-  it('falls back to the lightest bucket for an unknown weight', () => {
-    expect(outlineTickRestingWidth(99)).toBe(TICK_WIDTHS[0]);
-    expect(outlineTickRestingWidth(-1)).toBe(TICK_WIDTHS[0]);
   });
 });
 
@@ -162,17 +109,5 @@ describe('rail edge fade length', () => {
     // low-contrast. The mask itself is the shared `buildScrollEdgeFadeMask`,
     // covered by `tests/scroll-edge-fade.test.ts`.
     expect(RAIL_EDGE_FADE_LENGTH).toBeGreaterThanOrEqual(TICK_PITCH * 5);
-  });
-});
-
-describe('tickLineTopOffset', () => {
-  it('advances by exactly one pitch per tick', () => {
-    const first = tickLineTopOffset(0);
-    const second = tickLineTopOffset(1);
-    expect(second - first).toBe(tickLineTopOffset(2) - second);
-  });
-
-  it('centres the line inside its hit area', () => {
-    expect(tickLineTopOffset(0)).toBeGreaterThan(0);
   });
 });

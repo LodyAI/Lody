@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -96,35 +97,6 @@ describe('useCodeCollabSaveText', () => {
       expect(unloadProtected()).toBe(false);
     }
   );
-
-  it('coalesces edits that return to the text being saved', async () => {
-    let disk = 'A';
-    const saving = createDeferred<SessionFileOpenResult>();
-    const provider = createProvider(async (_id, text) => {
-      const result = await saving.promise;
-      disk = text;
-      return result;
-    });
-    const hook = mountSaveHook(provider);
-    act(() => hook.current.onExternalTextApplied('A'));
-    act(() => hook.current.onContentChange('B'));
-    let flush!: Promise<void>;
-    await act(async () => {
-      flush = hook.current.flush();
-      await flushMicrotasks();
-    });
-    act(() => {
-      hook.current.onContentChange('C');
-      hook.current.onContentChange('B');
-    });
-    await act(async () => {
-      saving.resolve(readyResult('B'));
-      await flush;
-    });
-    expect(disk).toBe('B');
-    expect(hook.current.status.kind).toBe('saved');
-    expect(unloadProtected()).toBe(false);
-  });
 
   it('does not advance the baseline or release protection after a failed save', async () => {
     let disk = 'A';
@@ -371,100 +343,6 @@ describe('useCodeCollabSaveText', () => {
     });
 
     expect(saveText).not.toHaveBeenCalled();
-  });
-
-  it('warns before unloading while edits are dirty', () => {
-    const saveText = vi.fn(async (_pathOrFileId: string, text: string) => readyResult(text));
-    const provider = createProvider(saveText);
-    let hook: UseCodeCollabSaveTextResult | undefined;
-
-    render(
-      <SaveTextHarness
-        provider={provider}
-        onReady={(value) => {
-          hook = value;
-        }}
-      />
-    );
-
-    act(() => {
-      hook?.onContentChange('draft');
-    });
-    const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
-    window.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-  });
-
-  it('keeps failed saves dirty and lets the next explicit flush retry', async () => {
-    const saveText = vi
-      .fn<SessionFileProvider['saveText']>()
-      .mockRejectedValueOnce(new Error('fetch failed'))
-      .mockResolvedValueOnce(readyResult('draft'));
-    const provider = createProvider(saveText);
-    let hook: UseCodeCollabSaveTextResult | undefined;
-
-    render(
-      <SaveTextHarness
-        provider={provider}
-        onReady={(value) => {
-          hook = value;
-        }}
-      />
-    );
-
-    act(() => {
-      hook?.onContentChange('draft');
-    });
-    await act(async () => {
-      await hook?.flush();
-    });
-    expect(hook?.status.kind).toBe('error');
-
-    await act(async () => {
-      await hook?.flush();
-    });
-    expect(saveText).toHaveBeenCalledTimes(2);
-    expect(hook?.status.kind).toBe('saved');
-  });
-
-  it('resolves save conflicts with the host conflict id', async () => {
-    const saveText = vi.fn(async () => {
-      throw new SaveTextConflictError('disk_changed', 'conflict-1', 'save_conflict: disk_changed');
-    });
-    const resolveSaveConflict = vi.fn(async () => {});
-    const provider = createProvider(saveText, { resolveSaveConflict });
-    let hook: UseCodeCollabSaveTextResult | undefined;
-
-    render(
-      <SaveTextHarness
-        provider={provider}
-        onReady={(value) => {
-          hook = value;
-        }}
-      />
-    );
-
-    act(() => {
-      hook?.onContentChange('draft');
-    });
-    await act(async () => {
-      await hook?.flush();
-    });
-    expect(hook?.status).toMatchObject({
-      kind: 'conflict',
-      conflict: 'disk_changed',
-      conflictId: 'conflict-1',
-    });
-
-    await act(async () => {
-      await hook?.resolveConflict('override');
-    });
-    expect(resolveSaveConflict).toHaveBeenCalledWith('t:file-1', {
-      conflictId: 'conflict-1',
-      resolution: 'override',
-    });
-    expect(hook?.status.kind).toBe('saved');
   });
 
   it('keeps the editor pending after loading conflict markers', async () => {

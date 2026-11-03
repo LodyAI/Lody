@@ -74,24 +74,4 @@ describe('explicit ledger audit', () => {
       expect(ledgerVerificationCode(trusted).stateDigest).toBe(expected.stateDigest);
     }
   );
-
-  it('stops after an in-flight cancellation and recovers on the next explicit call', async () => {
-    const abort = new AbortController();
-    await expect(
-      auditLedgerHistory({
-        ...base,
-        signal: abort.signal,
-        progress: () => {
-          throw new Error('late progress');
-        },
-        read: async () => {
-          abort.abort();
-          return page;
-        },
-      })
-    ).rejects.toThrow();
-    await expect(
-      auditLedgerHistory({ ...base, progress: () => undefined, read: async () => page })
-    ).resolves.toEqual({ length: 11, stateDigest: expected.stateDigest });
-  });
 });

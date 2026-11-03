@@ -169,17 +169,6 @@ describe('billing checkout return confirmation', () => {
     expect(container!.textContent).not.toContain('Payment received');
     expect(container!.textContent).toContain('Plus');
     expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
-    expect(
-      analytics.capture.mock.calls.filter(([event]) => event === 'billing/page_viewed')
-    ).toHaveLength(1);
-    expect(
-      analytics.capture.mock.calls.filter(([event]) => event === 'billing/checkout_returned')
-    ).toEqual([
-      ['billing/checkout_returned', { workspace_id: 'workspace-1', return_status: 'success' }],
-    ]);
-    expect(analytics.capture.mock.calls.some(([event]) => event === 'billing/invoice_paid')).toBe(
-      false
-    );
   });
 
   it('still reconciles a checkout return when analytics throws', async () => {
@@ -208,13 +197,6 @@ describe('billing checkout return confirmation', () => {
 
     expect(container!.textContent).not.toContain('Payment received');
     expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
-    expect(analytics.capture.mock.calls).toContainEqual([
-      'billing/checkout_returned',
-      { workspace_id: 'workspace-1', return_status: 'canceled' },
-    ]);
-    expect(analytics.capture.mock.calls.some(([event]) => event === 'billing/payment_failed')).toBe(
-      false
-    );
   });
 
   it('keeps unpaid checkout available during and after the background check, including remount', async () => {

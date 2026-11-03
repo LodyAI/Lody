@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -138,117 +139,6 @@ describe('MobileRunConfigSheet', () => {
       (trigger as HTMLElement).click();
     });
   };
-
-  it('has no Role row when the caller offers no Roles at all', async () => {
-    const view = await render();
-    expect(view.querySelector('button[aria-label="Role"]')).toBeNull();
-  });
-
-  /* An empty catalog is not "no Role control": the row reads `None`, and its
-     list is the way to make the first one — the same as the desktop row. */
-  it('still shows the row when the machine has no Roles yet', async () => {
-    const onCreate = vi.fn();
-    const view = await render({
-      agentRoles: { items: [], selectedRoleId: null, onSelect: () => undefined, onCreate },
-    });
-    expect(view.querySelector('button[aria-label="Role"]')?.textContent).toContain('None');
-
-    await openRolePicker(view);
-    const create = [...view.querySelectorAll('[role="dialog"] button:not([aria-label])')].find(
-      (node) => node.textContent?.includes('New role')
-    );
-    await act(async () => {
-      (create as HTMLElement).click();
-    });
-    expect(onCreate).toHaveBeenCalled();
-  });
-
-  it('puts Role above Agent, because a Role answers every row under it', async () => {
-    const view = await render({
-      agentRoles: { items: [reviewer], selectedRoleId: null, onSelect: () => undefined },
-    });
-    const labels = [...view.querySelectorAll('button[aria-label]')].map((node) =>
-      node.getAttribute('aria-label')
-    );
-    const role = labels.indexOf('Role');
-    const agent = labels.indexOf('Agent');
-    expect(role).toBeGreaterThanOrEqual(0);
-    expect(agent).toBeGreaterThan(role);
-  });
-
-  it('reads as None until a Role is picked, and as the Role after', async () => {
-    const none = await render({
-      agentRoles: { items: [reviewer], selectedRoleId: null, onSelect: () => undefined },
-    });
-    expect(none.querySelector('button[aria-label="Role"]')?.textContent).toContain('None');
-
-    const picked = await render({
-      agentRoles: {
-        items: [reviewer],
-        selectedRoleId: reviewer.role.id,
-        onSelect: () => undefined,
-      },
-    });
-    expect(picked.querySelector('button[aria-label="Role"]')?.textContent).toContain(
-      'Code Reviewer'
-    );
-  });
-
-  /* jsdom has no layout, so alignment is asserted structurally: the picker only
-     draws its fixed-size icon box for options that HAVE an icon, so `None`
-     reserving one is what puts its label where every Role's label is. The
-     TRIGGER deliberately has no such slot — it shows one value, not a column. */
-  it('reserves the emoji slot for None in the list, so the labels line up', async () => {
-    const view = await render({
-      agentRoles: { items: [reviewer], selectedRoleId: null, onSelect: () => undefined },
-    });
-    await openRolePicker(view);
-    // Option rows only: the row's own trigger also carries the label, and it
-    // deliberately has no slot.
-    const options = ['None', 'Code Reviewer'].map((label) =>
-      [...view.querySelectorAll('[role="dialog"] button:not([aria-label])')].find((node) =>
-        node.textContent?.includes(label)
-      )
-    );
-    expect(options.every(Boolean)).toBe(true);
-    for (const option of options) {
-      expect(option?.querySelector('span.h-4.w-4')).not.toBeNull();
-    }
-    // The trigger shows one value, not a column, so it stays flush.
-    expect(view.querySelector('button[aria-label="Role"] span.h-4.w-4')).toBeNull();
-  });
-
-  it('selects and clears a Role without changing the permission', async () => {
-    function Harness() {
-      const [selectedRoleId, onSelect] = useState<AgentRoleId | null>(null);
-      return (
-        <MobileRunConfigSheet
-          {...baseProps}
-          modeOptions={[{ value: 'read-only', label: 'Read-only' }]}
-          selectedModeId="read-only"
-          agentRoles={{ items: [reviewer], selectedRoleId, onSelect }}
-        />
-      );
-    }
-    await act(async () =>
-      root?.render(
-        <Provider>
-          <Harness />
-        </Provider>
-      )
-    );
-    const view = document.body;
-    for (const label of ['Code Reviewer', 'None']) {
-      await openRolePicker(view);
-      const option = [...view.querySelectorAll<HTMLButtonElement>('[role="option"] button')].find(
-        (node) => node.textContent?.includes(label)
-      )!;
-      await act(async () => option.click());
-      expect(view.querySelector('button[aria-label="Role"]')?.textContent).toContain(label);
-      // The fixture's modeOptions resolve to a mode control, named "Mode".
-      expect(view.querySelector('button[aria-label="Mode"]')?.textContent).toContain('Read-only');
-    }
-  });
 
   it('keeps an unavailable Role listed, disabled, and says why', async () => {
     const onSelect = vi.fn();

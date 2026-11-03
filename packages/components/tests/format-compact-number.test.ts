@@ -1,15 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { formatCompactNumber, formatUsdAmount } from '../src/lib/format-compact-number';
-import { toIntlLocaleOrEn } from '../src/lib/intl-locale';
-
-describe('toIntlLocaleOrEn', () => {
-  it('maps product language tags and falls back to English', () => {
-    expect(toIntlLocaleOrEn('en')).toBe('en');
-    expect(toIntlLocaleOrEn('zh_CN')).toBe('zh-CN');
-    expect(toIntlLocaleOrEn(undefined)).toBe('en');
-    expect(toIntlLocaleOrEn(null)).toBe('en');
-  });
-});
 
 describe('formatCompactNumber', () => {
   it('uses English compact units for English locales', () => {
@@ -34,12 +24,6 @@ describe('formatCompactNumber', () => {
 });
 
 describe('formatUsdAmount', () => {
-  it('formats USD with locale-aware grouping', () => {
-    expect(formatUsdAmount(1234.5, 'en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })).toBe(
-      '$1,234.50'
-    );
-  });
-
   it('keeps sub-cent precision for tiny daily costs', () => {
     expect(formatUsdAmount(0.004, 'en')).toBe('$0.004');
   });

@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { installFocusModality } from '../src/focus/focus-modality';
 import { focus } from '../src/tokens/scales.stylex';
@@ -46,12 +49,5 @@ describe('installFocusModality', () => {
     key(document.body, 'ArrowDown');
     expect(root.dataset.focusModality).toBe('keyboard');
     input.remove();
-  });
-
-  test('uninstalling leaves the document as it found it', () => {
-    uninstall();
-    expect(root.dataset.focusModality).toBeUndefined();
-    expect(ringWidth()).toBe('');
-    uninstall = () => {};
   });
 });

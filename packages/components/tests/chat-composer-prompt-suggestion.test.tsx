@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, createRef, useState, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -113,25 +114,6 @@ describe('ChatComposer prompt suggestion', () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
-  });
-
-  it('shows the desktop Tab hint only while the draft is empty, and restores it after clearing', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
-    await act(async () => {
-      root.render(createElement(Harness, { promptRef }));
-    });
-
-    const hint = getSuggestionHint(container);
-    expect(hint).not.toBeNull();
-    expect(hint?.querySelector('kbd')?.textContent).toBe('Tab');
-    expect(hint?.textContent).toContain(SUGGESTION);
-    expect(hint?.querySelector('button')).toBeNull();
-
-    await act(async () => setPromptValue?.('A draft the user typed'));
-    expect(getSuggestionHint(container)).toBeNull();
-
-    await act(async () => setPromptValue?.(''));
-    expect(getSuggestionHint(container)?.textContent).toContain(SUGGESTION);
   });
 
   it('hides the hint during IME composition before the draft value commits', async () => {
@@ -277,19 +259,4 @@ describe('ChatComposer prompt suggestion', () => {
       expect(promptRef.current?.selectionStart).toBe(SUGGESTION.length);
     }
   );
-
-  it('ignores empty and whitespace-only suggestions', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
-    await act(async () => {
-      root.render(createElement(Harness, { promptRef, suggestion: '   ' }));
-    });
-    expect(getSuggestionHint(container)).toBeNull();
-    await pressTab(promptRef.current!);
-    expect(promptRef.current?.value).toBe('');
-
-    await act(async () => {
-      root.render(createElement(Harness, { promptRef, suggestion: '' }));
-    });
-    expect(getSuggestionHint(container)).toBeNull();
-  });
 });

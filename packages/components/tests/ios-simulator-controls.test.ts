@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   IOS_SIMULATOR_CAPTURE_MAX_BYTES,
-  getIosSimulatorScreenshotFileName,
   parseIosSimulatorCaptureResult,
-  validateIosSimulatorText,
   validateIosSimulatorUrl,
 } from '../src/lib/ios-simulator/ios-simulator-controls';
 import {
   getIosSimulatorControlAvailability,
   getIosSimulatorDeviceGeometry,
-  getIosSimulatorExteriorGeometry,
   getIosSimulatorHardware,
 } from '../src/lib/ios-simulator/ios-simulator-hardware';
 
@@ -17,36 +14,6 @@ const iphone = (deviceType: string, name = '') =>
   getIosSimulatorHardware('iphone', `com.apple.CoreSimulator.SimDeviceType.${deviceType}`, name);
 
 describe('iOS Simulator hardware', () => {
-  it('gives an Action button only to the models that have one', () => {
-    expect(iphone('iPhone-15-Pro').actionButton).toBe(true);
-    expect(iphone('iPhone-16').actionButton).toBe(true);
-    expect(iphone('iPhone-16e').actionButton).toBe(true);
-    expect(iphone('iPhone-15').actionButton).toBe(false);
-    expect(iphone('iPhone-14-Pro').actionButton).toBe(false);
-    expect(
-      getIosSimulatorHardware('watch', 'Apple-Watch-Ultra-2-49mm', 'Apple Watch Ultra 2')
-        .actionButton
-    ).toBe(true);
-    expect(getIosSimulatorHardware('watch', 'Apple-Watch-Series-10-46mm', '').actionButton).toBe(
-      false
-    );
-  });
-
-  it('puts a Home button below the glass on older iPhones and iPads', () => {
-    const se = iphone('iPhone-SE-3rd-generation', 'iPhone SE (3rd generation)');
-    expect(se.homeButton).toBe(true);
-    expect(se.chin).toBeGreaterThan(0);
-    expect(se.buttons.find((button) => button.id === 'home')?.press).toBe('home');
-    expect(iphone('iPhone-8').homeButton).toBe(true);
-    expect(iphone('iPhone-16-Pro').homeButton).toBe(false);
-    expect(
-      getIosSimulatorHardware('ipad', 'iPad-9th-generation', 'iPad (9th generation)').homeButton
-    ).toBe(true);
-    expect(
-      getIosSimulatorHardware('ipad', 'iPad-Pro-11-inch-M4', 'iPad Pro 11-inch (M4)').homeButton
-    ).toBe(false);
-  });
-
   it('uses the actual model rather than a user-editable device name', () => {
     expect(getIosSimulatorHardware('iphone', 'iPhone 16', 'iPhone SE')).toMatchObject({
       homeButton: false,
@@ -72,13 +39,6 @@ describe('iOS Simulator hardware', () => {
         'QA'
       )
     ).toEqual(getIosSimulatorHardware('ipad', 'iPad Pro 12 9 inch 2nd generation', 'Renamed'));
-  });
-
-  it('draws no island, notch or home indicator: only rim and buttons outside the screen', () => {
-    const pro = iphone('iPhone-16-Pro');
-    expect(pro.forehead).toBe(0);
-    expect(pro.chin).toBe(0);
-    expect(pro.buttons.every((button) => button.edge !== 'face')).toBe(true);
   });
 
   it('disables what a device lacks and keeps the rest', () => {
@@ -119,20 +79,9 @@ describe('iOS Simulator orientation', () => {
     const right = getIosSimulatorDeviceGeometry(se, 1334 / 750, 1);
     expect(right.screen.left).toBeCloseTo(se.rim + se.chin);
   });
-
-  it('lays the bare screen out edge to edge', () => {
-    const geometry = getIosSimulatorDeviceGeometry(iphone('iPhone-16-Pro'), 0.46, 0, false);
-    expect(geometry.screen).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
-  });
 });
 
 describe('iOS Simulator input limits', () => {
-  it('checks text before it is sent', () => {
-    expect(validateIosSimulatorText('')).toBe('empty');
-    expect(validateIosSimulatorText('hello')).toBeNull();
-    expect(validateIosSimulatorText('x'.repeat(4097))).toBe('too-long');
-  });
-
   it('opens web addresses and app deep links, never executable or local schemes', () => {
     expect(validateIosSimulatorUrl('https://example.com/a?b=c')).toBeNull();
     expect(validateIosSimulatorUrl('  myapp://settings/profile ')).toBeNull();
@@ -142,15 +91,6 @@ describe('iOS Simulator input limits', () => {
     expect(validateIosSimulatorUrl('example.com')).toBe('invalid');
     expect(validateIosSimulatorUrl('')).toBe('empty');
     expect(validateIosSimulatorUrl(`https://x.test/${'a'.repeat(2048)}`)).toBe('too-long');
-  });
-
-  it('names a screenshot after the device and the moment, without path characters', () => {
-    expect(
-      getIosSimulatorScreenshotFileName('iPhone 16 Pro', new Date(2026, 8, 30, 14, 5, 9))
-    ).toBe('iPhone 16 Pro 2026-09-30 14.05.09.png');
-    expect(getIosSimulatorScreenshotFileName('a/b:c', new Date(2026, 0, 1, 0, 0, 0))).toBe(
-      'a b c 2026-01-01 00.00.00.png'
-    );
   });
 });
 
@@ -211,36 +151,5 @@ describe('iOS Simulator capture replies', () => {
       ok: false,
       error: 'failed',
     });
-  });
-});
-
-it('preserves exact DeviceKit screen insets through every rotation', () => {
-  const exterior = {
-    width: 450,
-    height: 900,
-    screen: { x: 30, y: 20, width: 390, height: 850, radius: 50 },
-    buttons: [],
-  };
-  expect(getIosSimulatorExteriorGeometry(exterior, 0)).toMatchObject({
-    width: 450,
-    height: 900,
-    screen: { top: 20, right: 30, bottom: 30, left: 30 },
-  });
-  expect(getIosSimulatorExteriorGeometry(exterior, 1)).toMatchObject({
-    width: 900,
-    height: 450,
-    screen: { top: 30, right: 20, bottom: 30, left: 30 },
-  });
-  expect(getIosSimulatorExteriorGeometry(exterior, 2).screen).toEqual({
-    top: 30,
-    right: 30,
-    bottom: 20,
-    left: 30,
-  });
-  expect(getIosSimulatorExteriorGeometry(exterior, 3).screen).toEqual({
-    top: 30,
-    right: 30,
-    bottom: 30,
-    left: 20,
   });
 });

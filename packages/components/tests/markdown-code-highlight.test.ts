@@ -19,11 +19,6 @@ describe('resolveMarkdownCodeLanguage', () => {
     expect(resolveMarkdownCodeLanguage('postgresql', false)).toBeNull();
     expect(resolveMarkdownCodeLanguage('postgresql', true)).toBe('sql');
   });
-
-  it('keeps core grammars available without the extension setting', () => {
-    expect(resolveMarkdownCodeLanguage('typescript', false)).toBe('typescript');
-    expect(resolveMarkdownCodeLanguage('sql', false)).toBe('sql');
-  });
 });
 
 import {

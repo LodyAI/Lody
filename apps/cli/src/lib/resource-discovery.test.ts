@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { McpServer } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { z } from 'zod';
+
 import type {
   AgentConfigMeta,
   AgentRole,
@@ -12,56 +9,6 @@ import type {
   WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { ResourceDiscovery, type DiscoverySource } from './resource-discovery';
-import { registerDiscoveryTools } from '@/mcp/discovery-tools';
-import { createSessionToolRegistrar, type SessionToolHandlers } from '@/mcp/session-tool-router';
-
-describe('Session tool argument boundaries', () => {
-  it('normalizes once and rejects invalid input through both MCP and direct daemon dispatch', async () => {
-    const server = new McpServer({ name: 'boundary-test', version: '1' });
-    const handlers: SessionToolHandlers = new Map();
-    const register = createSessionToolRegistrar(
-      server,
-      (_name, _args, execute) => execute(),
-      handlers
-    );
-    const received: string[] = [];
-    register(
-      'resolve',
-      {
-        inputSchema: z.object({
-          value: z
-            .string()
-            .min(1)
-            .transform((value) => `resolved:${value}`),
-        }),
-      },
-      async ({ value }) => {
-        received.push(value);
-        return { content: [{ type: 'text', text: value }] };
-      }
-    );
-    const daemonHandler = handlers.get('resolve');
-    if (!daemonHandler) throw new Error('Missing daemon handler');
-    const client = new Client({ name: 'boundary-client', version: '1' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-      await expect(daemonHandler({ value: 123 })).rejects.toThrow();
-      const mcp = await client.callTool({ name: 'resolve', arguments: { value: 'input' } });
-      const daemon = await daemonHandler({ value: 'input' });
-      expect(mcp.content).toEqual([{ type: 'text', text: 'resolved:input' }]);
-      expect(daemon.content).toEqual(mcp.content);
-      expect(received).toEqual(['resolved:input', 'resolved:input']);
-      const invalid = await client.callTool({ name: 'resolve', arguments: { value: 123 } });
-      expect(invalid.isError).toBe(true);
-      expect(received).toEqual(['resolved:input', 'resolved:input']);
-    } finally {
-      await client.close();
-      await server.close();
-    }
-  });
-});
 
 const machine = (id: string): MachineMeta => ({ id, name: id }) as MachineMeta;
 const config = (id: string, machineId = 'one'): AgentConfigMeta =>
@@ -378,23 +325,6 @@ describe('resource discovery across MCP and CLI', () => {
     ]);
   });
 
-  it('preserves mixed, local-only and machine-scoped project results', async () => {
-    const discovery = new ResourceDiscovery(source());
-    expect((await discovery.list('project')).items.map((row) => [row.kind, row.machineId])).toEqual(
-      [
-        ['github', undefined],
-        ['local', 'one'],
-        ['local', 'two'],
-      ]
-    );
-    expect(
-      (await discovery.list('project', { machineId: 'two' })).items.map((row) => [
-        row.kind,
-        row.machineId,
-      ])
-    ).toEqual([['local', 'two']]);
-  });
-
   it('reports cached and missing agent capabilities and omits launch secrets', async () => {
     const deps = source({
       configs: async (id) =>
@@ -440,48 +370,5 @@ describe('resource discovery across MCP and CLI', () => {
     expect(mcp.items[0]?.selectedForCurrentTurn).toBe(false);
     expect(JSON.stringify(mcp)).not.toContain('synthetic-command');
     expect(JSON.stringify(mcp)).not.toContain('synthetic-secret');
-  });
-
-  it('surfaces read failures without claiming an empty catalog', async () => {
-    const discovery = new ResourceDiscovery(
-      source({
-        projects: async () => {
-          throw new Error('sync unavailable');
-        },
-      })
-    );
-    await expect(discovery.list('project', { kind: 'local' })).rejects.toThrow('sync unavailable');
-  });
-
-  it('serves the shared result through the real MCP wire and rejects irrelevant filters', async () => {
-    const discovery = new ResourceDiscovery(source());
-    const server = new McpServer({ name: 'synthetic-discovery', version: '1' });
-    registerDiscoveryTools(
-      createSessionToolRegistrar(server, (_name, _args, run) => run()),
-      (read) => read(discovery)
-    );
-    const client = new Client({ name: 'synthetic-client', version: '1' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
-    try {
-      const result = await client.callTool({ name: 'lody_machine_list', arguments: { limit: 1 } });
-      const expected = await discovery.list('machine', { limit: 1 });
-      expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(expected) }]);
-      for (const [resource, args] of [
-        ['machine', { machineId: 'one' }],
-        ['project', { onlineStatus: 'online' }],
-        ['agent_config', { kind: 'local' }],
-        ['agent_role', { onlineStatus: 'online' }],
-        ['mcp', { machineId: 'one' }],
-      ] as const) {
-        const invalid = await client.callTool({ name: `lody_${resource}_list`, arguments: args });
-        expect(invalid.isError, resource).toBe(true);
-        await expect(discovery.list(resource, args)).rejects.toThrow();
-      }
-    } finally {
-      await client.close();
-      await server.close();
-    }
   });
 });

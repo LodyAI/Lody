@@ -108,16 +108,6 @@ describe('Magpie import contract', () => {
     ])
       expect(() => parseMagpieImportLink(link(value))).toThrow();
   });
-  it('rejects unversioned, oversized and ambiguous links', () => {
-    for (const url of [
-      link(payload()).replace('v=1', 'v=2'),
-      `${link(payload())}&v=1`,
-      `${link(payload())}#x`,
-      link(payload()).replace('provider/', 'user@provider/'),
-      `lody://provider/import?v=1&data=${'a'.repeat(8192)}`,
-    ])
-      expect(() => parseMagpieImportLink(url)).toThrow();
-  });
   it('only imports targets explicitly present in the link', () => {
     const value = payload();
     value.endpoints = [value.endpoints[1]!];

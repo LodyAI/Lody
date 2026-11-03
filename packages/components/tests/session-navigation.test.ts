@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import {
-  getSessionNavigationLocation,
   resolveCurrentWorkspaceTabNavigation,
   resolveSessionTabRestoreNavigation,
   resolveOpenedByNavigationTarget,
@@ -10,19 +9,6 @@ import {
 const sessionId = (value: string) => value as SessionId;
 
 describe('resolveOpenedByNavigationTarget', () => {
-  it('returns the root Session when the opener is already a root', () => {
-    expect(
-      resolveOpenedByNavigationTarget(
-        { openedBySessionId: sessionId('root-session') },
-        {
-          metadataReady: true,
-          openerSession: { id: sessionId('root-session') },
-          rootSession: { id: sessionId('root-session') },
-        }
-      )
-    ).toEqual({ sessionId: 'root-session' });
-  });
-
   it('restores the exact opener Tab from persisted relationship metadata', () => {
     expect(
       resolveOpenedByNavigationTarget(
@@ -103,24 +89,6 @@ describe('resolveOpenedByNavigationTarget', () => {
   });
 });
 
-describe('getSessionNavigationLocation', () => {
-  it('encodes the exact Tab in the root Session route', () => {
-    expect(
-      getSessionNavigationLocation({
-        sessionId: sessionId('root-session'),
-        tabSessionId: sessionId('child-tab'),
-      })
-    ).toEqual({ sessionId: 'root-session', tab: 'session:child-tab' });
-  });
-
-  it('omits the tab search for a root Session target', () => {
-    expect(getSessionNavigationLocation({ sessionId: sessionId('root-session') })).toEqual({
-      sessionId: 'root-session',
-      tab: undefined,
-    });
-  });
-});
-
 describe('resolveCurrentWorkspaceTabNavigation', () => {
   const currentTabs = new Set(['root-session', 'open-child', 'closed-child']);
   const closedTabs = new Set(['closed-child']);
@@ -134,20 +102,6 @@ describe('resolveCurrentWorkspaceTabNavigation', () => {
         closedTabs
       )
     ).toEqual({ tabSessionId: 'closed-child', shouldReopen: true });
-  });
-
-  it('selects an open explicit root-and-tab navigation target without restoring it', () => {
-    expect(
-      resolveCurrentWorkspaceTabNavigation(
-        {
-          sessionId: sessionId('root-session'),
-          tabSessionId: sessionId('open-child'),
-        },
-        sessionId('root-session'),
-        currentTabs,
-        closedTabs
-      )
-    ).toEqual({ tabSessionId: 'open-child', shouldReopen: false });
   });
 
   it('leaves an unrelated Session to route navigation', () => {

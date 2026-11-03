@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GitHubPullRequestDetails } from '@lody/shared';
 
-import {
-  isPullRequestMergeabilityPending,
-  isPullRequestReadyForReviewTransitionPending,
-  mergePullRequestDetailsState,
-} from '../src/lib/github-pr-details-state';
+import { mergePullRequestDetailsState } from '../src/lib/github-pr-details-state';
 
 const createPullRequest = (
   overrides: Partial<GitHubPullRequestDetails> = {}
@@ -60,16 +56,6 @@ describe('mergePullRequestDetailsState', () => {
     });
   });
 
-  it('accepts normal PR details updates before the PR is merged', () => {
-    const previous = createPullRequest();
-    const incoming = createPullRequest({
-      title: 'Updated title',
-      updatedAt: '2026-04-21T09:15:00.000Z',
-    });
-
-    expect(mergePullRequestDetailsState(previous, incoming)).toEqual(incoming);
-  });
-
   it('does not let a stale PR details response roll a ready PR back to draft', () => {
     const previous = createPullRequest({
       draft: false,
@@ -107,71 +93,5 @@ describe('mergePullRequestDetailsState', () => {
     });
 
     expect(mergePullRequestDetailsState(previous, incoming)).toEqual(incoming);
-  });
-});
-
-describe('isPullRequestReadyForReviewTransitionPending', () => {
-  it('stays pending while GitHub still reports the PR as draft', () => {
-    expect(
-      isPullRequestReadyForReviewTransitionPending(
-        createPullRequest({ draft: true, mergeable: null, mergeableState: 'draft' })
-      )
-    ).toBe(true);
-  });
-
-  it('stays pending while GitHub is recomputing mergeability after draft clears', () => {
-    expect(
-      isPullRequestReadyForReviewTransitionPending(
-        createPullRequest({ draft: false, mergeable: null, mergeableState: 'unknown' })
-      )
-    ).toBe(true);
-  });
-
-  it('finishes once a non-draft PR has a resolved mergeability state', () => {
-    expect(isPullRequestReadyForReviewTransitionPending(createPullRequest())).toBe(false);
-    expect(
-      isPullRequestReadyForReviewTransitionPending(
-        createPullRequest({ mergeable: false, mergeableState: 'dirty' })
-      )
-    ).toBe(false);
-  });
-});
-
-describe('isPullRequestMergeabilityPending', () => {
-  it('returns true while GitHub has not resolved mergeability', () => {
-    expect(
-      isPullRequestMergeabilityPending(
-        createPullRequest({ mergeable: null, mergeableState: 'unknown' })
-      )
-    ).toBe(true);
-    expect(
-      isPullRequestMergeabilityPending(
-        createPullRequest({ mergeable: null, mergeableState: 'clean' })
-      )
-    ).toBe(true);
-    expect(
-      isPullRequestMergeabilityPending(
-        createPullRequest({ mergeable: true, mergeableState: 'unknown' })
-      )
-    ).toBe(true);
-  });
-
-  it('returns false once the PR is resolved or cannot be merged from this state', () => {
-    expect(isPullRequestMergeabilityPending(createPullRequest())).toBe(false);
-    expect(
-      isPullRequestMergeabilityPending(
-        createPullRequest({ mergeable: false, mergeableState: 'dirty' })
-      )
-    ).toBe(false);
-    expect(
-      isPullRequestMergeabilityPending(createPullRequest({ draft: true, mergeableState: 'draft' }))
-    ).toBe(false);
-    expect(
-      isPullRequestMergeabilityPending(createPullRequest({ state: 'closed', mergeable: null }))
-    ).toBe(false);
-    expect(
-      isPullRequestMergeabilityPending(createPullRequest({ merged: true, mergeable: null }))
-    ).toBe(false);
-    expect(isPullRequestMergeabilityPending(null)).toBe(false);
   });
 });

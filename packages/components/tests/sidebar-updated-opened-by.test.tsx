@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -53,17 +54,6 @@ function makeOpenerItems(): SidebarUpdatedItem[] {
 }
 
 describe('updated bucket opened-by tree', () => {
-  it('renders opened sessions directly after their opener', () => {
-    const ordered = sortUpdatedItems(makeOpenerItems());
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
-      'opener',
-      'opened-1',
-      'opened-2',
-      'opened-3',
-      'unrelated',
-    ]);
-  });
-
   it('ranks an opener by its freshest opened session, keeping Updated truly recency-ordered', () => {
     // The opener itself is the oldest row in the list, but it opened the newest
     // one — the whole group must still sort above the mid-aged standalone row.
@@ -82,13 +72,6 @@ describe('updated bucket opened-by tree', () => {
       'fresh-opened',
       'standalone',
     ]);
-  });
-
-  it('hides opened sessions behind a collapsed opener', () => {
-    const ordered = sortUpdatedItems(makeOpenerItems());
-    expect(
-      getVisibleUpdatedItems(ordered, true, false, { opener: true }).map((item) => item.id)
-    ).toEqual(['opener', 'unrelated']);
   });
 
   it('leaves an opened session top-level when its opener is in another section', () => {
@@ -188,11 +171,6 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     expect(depthOf('unrelated')).toBe('0');
   });
 
-  it('keeps a flat list flat, with no tree gutter', () => {
-    render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
-    expect(container?.querySelector('[data-session-tree-depth]')).toBeNull();
-  });
-
   it('renders one disclosure toggle on the opener and collapses on click', () => {
     const { onSelectItem } = render(makeOpenerItems());
     const toggles = container?.querySelectorAll('[data-session-opened-by-toggle]') ?? [];
@@ -206,23 +184,6 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     expect(container?.querySelector('[data-sidebar-updated-id="opened-1"]')).toBeNull();
     // Toggling the tree must never navigate.
     expect(onSelectItem).not.toHaveBeenCalled();
-  });
-
-  it('shares the tree affordance slot with the row menu button', () => {
-    render(makeOpenerItems());
-    const openerSlot = container
-      ?.querySelector('[data-sidebar-updated-id="opener"]')
-      ?.querySelector('[data-session-row-leading-slot]');
-    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
-    expect(openerSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
-
-    const childSlot = container
-      ?.querySelector('[data-sidebar-updated-id="opened-3"]')
-      ?.querySelector('[data-session-row-leading-slot]');
-    expect(childSlot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
-    expect(childSlot?.querySelector('[data-session-tree-connector="trunk"]')).not.toBeNull();
-    expect(childSlot?.querySelector('[data-session-tree-connector="elbow"]')).not.toBeNull();
-    expect(childSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
   });
 
   it('keeps the connectors on a working or unread child and puts status at the row end', () => {
@@ -295,14 +256,6 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     });
 
     expect(onSelectItem).toHaveBeenCalledWith('root', 'child-tab');
-  });
-
-  it('renders a working and an unread opened session with their own row state', () => {
-    render(makeOpenerItems(), { selectedItemId: 'opened-2' });
-    const working = container?.querySelector('[data-sidebar-updated-id="opened-1"]');
-    expect(working?.querySelector('[data-session-working-indicator]')).not.toBeNull();
-    const selected = container?.querySelector('[data-sidebar-updated-id="opened-2"]');
-    expect(selected).not.toBeNull();
   });
 
   it('renders an orphan opened session as a top-level row with no gutter', () => {

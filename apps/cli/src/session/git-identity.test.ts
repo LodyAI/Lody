@@ -80,8 +80,11 @@ describe('readHostDefaultGitIdentity', () => {
     mkdirSync(xdg, { recursive: true });
     process.env = { ...originalEnv, HOME: home, XDG_CONFIG_HOME: xdg };
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith('GIT_')) delete process.env[key];
+      if (/^(GIT_|LODY_GIT_|SSH_)/.test(key)) delete process.env[key];
     }
+    // These fixtures exercise native host config, independently of a surrounding
+    // Lody session's credential wrapper and its frozen identity context.
+    process.env.LODY_GIT_NATIVE = '1';
     process.env.GIT_CONFIG_NOSYSTEM = '1';
     process.chdir(dir);
     execFileSync('git', ['init', '-q']);

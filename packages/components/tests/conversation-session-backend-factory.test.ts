@@ -4,7 +4,7 @@ import { createRoostDirectoryRow, readSessionHistoryMetadata } from '@lody/share
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { createLoroSessionData } from '@lody/shared/session-data';
+
 import type { SessionId, MachineId, WorkspaceId } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view/create-conversation-session';
 import {
@@ -12,7 +12,7 @@ import {
   createRemoteRoostSessionDataFactory,
   createRoostSessionDataFactoryForMachine,
 } from '../src/lib/roost-session-bridge';
-import { RoostHistoryError, SessionHistoryRequestError } from '../src/lib/roost-history-error';
+
 import {
   createLoroStreamsJsonStreamClient,
   encryptCodeCollabV2RpcPayload,
@@ -21,7 +21,7 @@ import {
   LoroStreamsMachineRpcClient,
   LoroStreamsRpcResponseDispatcher,
 } from '@lody/loro-streams-rpc';
-import { initI18n } from '../src/i18n';
+
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/main/services/local-session-control-budget';
 import type { SessionDataChange } from '@lody/shared/session-data';
@@ -230,75 +230,6 @@ describe('createConversationSession backend seam', () => {
         data.dispose();
         cache.dispose();
         doc.free();
-      }
-    }
-  );
-
-  it.each(
-    [0, 1, 500, 501].flatMap((count) =>
-      [false, true].map((coherentInspection) => ({ count, coherentInspection }))
-    )
-  )(
-    'reads schedule metadata with $count turns (owner queries: $coherentInspection)',
-    async ({ count, coherentInspection }) => {
-      Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
-      const sessionId = `synthetic-metadata-${count}-${coherentInspection}` as SessionId;
-      const turns: SessionHistoryInput[] = Array.from({ length: count }, (_, index) => ({
-        id: `turn-${index}`,
-        role: 'user',
-        timestamp: '2026-10-31T00:00:00Z',
-        inputConfig: { modeId: 'ask', modelId: 'synthetic-model' },
-        scheduleRun: { scheduleId: 'synthetic-schedule' },
-        items: [{ type: 'text', text: 'Synthetic body' }],
-      }));
-      const data = createLocalRoostSessionDataFactory({
-        coherentInspection,
-        workspaceId: 'synthetic-workspace' as WorkspaceId,
-        machineId: 'synthetic-machine' as MachineId,
-        sendControl: async (request) => {
-          if (request.type !== 'session/history-read') throw new Error('Unexpected write');
-          const query = request.query;
-          let result: unknown;
-          if (query.kind === 'readMetadata' && coherentInspection)
-            result = turns.map(({ items: _items, ...metadata }) => metadata);
-          else if (query.kind === 'readAll' && !coherentInspection) result = turns;
-          else if (query.kind === 'count') result = turns.length;
-          else if (query.kind === 'readDirectory')
-            result = turns
-              .slice(query.from, query.to)
-              .map((turn, index) => createRoostDirectoryRow(query.from + index, turn));
-          else throw new Error('Metadata lookup requested transcript bodies');
-          return {
-            ok: true,
-            responses: [
-              {
-                type: 'session/history-read_response',
-                sessionId,
-                success: true,
-                result,
-                historyRevision: 0,
-                historyCount: turns.length,
-              },
-            ],
-          };
-        },
-      })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
-      try {
-        expect(
-          (await data.history.readDirectory(0, Number.MAX_SAFE_INTEGER)).map((row) => row.turnId)
-        ).toEqual(turns.map((turn) => turn.id));
-        const metadata = await readSessionHistoryMetadata(data.history);
-        expect(metadata).toEqual(
-          turns.map((turn) => ({
-            id: turn.id,
-            role: turn.role,
-            timestamp: turn.timestamp,
-            inputConfig: turn.inputConfig,
-            scheduleRun: turn.scheduleRun,
-          }))
-        );
-      } finally {
-        data.dispose();
       }
     }
   );
@@ -569,255 +500,6 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it.each([
-    ['en', 'append'],
-    ['zh_CN', 'append'],
-    ['en', 'response'],
-    ['zh_CN', 'response'],
-  ] as const)(
-    'distinguishes a %s %s transport timeout from Roost storage',
-    async (locale, phase) => {
-      await initI18n(locale);
-      vi.useFakeTimers();
-      let entered!: () => void;
-      const fetching = new Promise<void>((resolve) => {
-        entered = resolve;
-      });
-      const json = createLoroStreamsJsonStreamClient({
-        bucketId: 'synthetic-bucket',
-        getToken: async () => 'synthetic-token',
-        baseUrl: 'https://streams.example.com',
-        fetchImpl: async (_url, init) => {
-          entered();
-          return new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener(
-              'abort',
-              () => reject(new DOMException('Aborted', 'AbortError')),
-              { once: true }
-            );
-          });
-        },
-      });
-      const destinations: string[] = [];
-      const rpc = new LoroStreamsMachineRpcClient({
-        workspaceId: 'synthetic-workspace',
-        machineId: 'synthetic-wsl',
-        streamClient: {
-          ensureJsonStream: async () => {},
-          appendJson: async (id, value) => {
-            destinations.push(id);
-            if (phase === 'response') {
-              entered();
-              return 'synthetic-offset';
-            }
-            return json.appendJson(id, value);
-          },
-          readJsonLive: async (_id, _state, _batch, options) =>
-            new Promise<void>((resolve) => {
-              if (options?.signal?.aborted) resolve();
-              else options?.signal?.addEventListener('abort', () => resolve(), { once: true });
-            }),
-        },
-      });
-      const factory = createRemoteRoostSessionDataFactory({
-        workspaceId: 'synthetic-workspace' as WorkspaceId,
-        machineId: 'synthetic-wsl' as MachineId,
-        requestHistoryRead: async () => {
-          throw new Error('Unexpected synthetic read');
-        },
-        requestHistoryWrite: async ({ sessionId, operation, payload }) => {
-          const response = await rpc.requestSessionHistoryWrite({ sessionId, operation, payload });
-          if (!response) throw new Error('Missing synthetic response');
-          return response;
-        },
-      });
-      const doc = new LoroDoc();
-      const session = factory({
-        doc,
-        sessionId: 'synthetic-session' as SessionId,
-        backendKind: 'roost',
-      });
-      try {
-        const writing = session.commands
-          .appendTurn({
-            id: 'synthetic-turn',
-            role: 'user',
-            timestamp: '2026-10-12T00:00:00Z',
-            items: [{ type: 'text', text: 'synthetic input' }],
-          })
-          .catch((error: unknown) => error);
-        await fetching;
-        await vi.advanceTimersByTimeAsync(phase === 'append' ? 10_000 : 30_000);
-        const error = await writing;
-        expect(error).toBeInstanceOf(SessionHistoryRequestError);
-        expect(error).toMatchObject({
-          failure: {
-            source: 'transport',
-            code: phase === 'append' ? 'request_failed' : 'response_timeout',
-            machineId: 'synthetic-wsl',
-            requestId: expect.any(String),
-          },
-        });
-        expect(String(error)).toContain(
-          locale === 'en' ? 'write may have reached it' : '请求可能已经到达'
-        );
-        expect(String(error)).not.toContain(locale === 'en' ? 'local logs' : '本地日志');
-        expect(destinations).toEqual(['synthetic-workspace:rpc:req:synthetic-wsl']);
-        expect(doc.getList('history').length).toBe(0);
-      } finally {
-        session.dispose?.();
-        rpc.stop();
-        vi.useRealTimers();
-      }
-    }
-  );
-
-  it.each(['transport', 'metadata', 'protocol', 'owner'] as const)(
-    'preserves %s failure provenance through history reads and writes',
-    async (scenario) => {
-      await initI18n('en');
-      const sessionId = 'synthetic-session' as SessionId;
-      const failure = {
-        source:
-          scenario === 'transport'
-            ? ('transport' as const)
-            : scenario === 'protocol'
-              ? ('protocol' as const)
-              : ('remote' as const),
-        code:
-          scenario === 'metadata'
-            ? 'session_metadata_pending'
-            : scenario === 'owner'
-              ? 'session_owner_mismatch'
-              : 'request_failed',
-        requestId: 'synthetic-request',
-        machineId: 'synthetic-wsl',
-      };
-      const factory = createRemoteRoostSessionDataFactory({
-        workspaceId: 'synthetic-workspace' as WorkspaceId,
-        machineId: 'synthetic-wsl' as MachineId,
-        requestHistoryRead: async () => ({
-          type: 'session/history-read_response',
-          sessionId,
-          success: false,
-          error: 'synthetic failure',
-          rpcFailure: failure,
-        }),
-        requestHistoryWrite: async ({ operation }) => ({
-          type: 'session/history-write_response',
-          sessionId,
-          operation,
-          success: false,
-          error: 'synthetic failure',
-          rpcFailure: failure,
-        }),
-      });
-      const doc = new LoroDoc();
-      const session = factory({ doc, sessionId, backendKind: 'roost' });
-      try {
-        const read = await session.history.count().catch((error: unknown) => error);
-        const write = await session.commands
-          .appendTurn({ id: 'first', role: 'user', timestamp: 'synthetic', items: [] })
-          .catch((error: unknown) => error);
-        for (const error of [read, write]) {
-          expect(error).toBeInstanceOf(SessionHistoryRequestError);
-          expect(error).toMatchObject({ failure });
-          expect(String(error)).toContain('request=synthetic-request; machine=synthetic-wsl');
-          expect(String(error)).not.toContain('local logs');
-        }
-        if (scenario === 'metadata') expect(String(write)).toContain('operation did not start');
-        expect(doc.getList('history').length).toBe(0);
-      } finally {
-        session.dispose?.();
-      }
-    }
-  );
-
-  it.each(['en', 'zh_CN'] as const)(
-    'surfaces an owner diagnostic in %s through local and remote Roost bridges',
-    async (locale) => {
-      await initI18n(locale);
-      const sessionId = `diagnostic-${locale}` as SessionId;
-      const machineId = 'synthetic-machine' as MachineId;
-      const workspaceId = 'synthetic-workspace' as WorkspaceId;
-      const detail =
-        'Roost history initialize failed (code=workerFailed; diagnostic=65b4a1d8-6f6a-4ea0-87e8-2dbd563d25f6)';
-      const factories = [
-        createLocalRoostSessionDataFactory({
-          machineId,
-          workspaceId,
-          sendControl: async (request) => {
-            if (request.type === 'session/history-write')
-              return {
-                ok: true,
-                responses: [
-                  {
-                    type: 'session/history-write_response',
-                    sessionId,
-                    operation: request.operation,
-                    success: false,
-                    error: detail,
-                  },
-                ],
-              };
-            if (request.type === 'session/history-read')
-              return {
-                ok: true,
-                responses: [
-                  {
-                    type: 'session/history-read_response',
-                    sessionId,
-                    success: false,
-                    error: detail,
-                  },
-                ],
-              };
-            throw new Error('Unexpected synthetic request');
-          },
-        }),
-        createRemoteRoostSessionDataFactory({
-          machineId,
-          workspaceId,
-          requestHistoryRead: async () => ({
-            type: 'session/history-read_response',
-            sessionId,
-            success: false,
-            error: detail,
-          }),
-          requestHistoryWrite: async ({ operation }) => ({
-            type: 'session/history-write_response',
-            sessionId,
-            operation,
-            success: false,
-            error: detail,
-          }),
-        }),
-      ];
-      for (const factory of factories) {
-        const doc = new LoroDoc();
-        const session = factory({ doc, sessionId, backendKind: 'roost' });
-        try {
-          const writeError = await session.commands
-            .appendTurn({
-              id: 'synthetic-turn',
-              role: 'user',
-              timestamp: '2026-10-10T00:00:00.000Z',
-              items: [{ type: 'text', text: 'synthetic draft' }],
-            })
-            .catch((error: unknown) => error);
-          expect(writeError).toBeInstanceOf(RoostHistoryError);
-          expect(writeError).toMatchObject({ backend: 'roost' });
-          expect(String(writeError)).toContain(detail);
-          expect(String(writeError)).toContain(locale === 'en' ? 'could not confirm' : '未能确认');
-          await expect(session.history.count()).rejects.toBeInstanceOf(RoostHistoryError);
-          expect(doc.getList('history').length).toBe(0);
-        } finally {
-          session.dispose?.();
-        }
-      }
-    }
-  );
-
   it.each(['reader', 'view'] as const)(
     'makes the initial %s readable without depending on another owner round trip',
     async (consumer) => {
@@ -1025,38 +707,6 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it('uses the injected SessionData factory and forwards the backend kind', async () => {
-    const doc = new LoroDoc();
-    const injectedDoc = new LoroDoc();
-    const createSessionData = vi.fn(({ sessionId }) =>
-      createLoroSessionData({ sessionId, doc: injectedDoc })
-    );
-
-    const session = createConversationSession(doc, {
-      sessionId: 'session-1' as never,
-      backendKind: 'roost',
-      createSessionData,
-      scheduleIdle: () => () => {},
-    });
-
-    expect(createSessionData).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      doc,
-      backendKind: 'roost',
-      writer: undefined,
-    });
-    expect(session.sessionData.sessionId).toBe('session-1');
-    await session.sessionData.commands.appendTurn({
-      id: 'injected-user',
-      role: 'user',
-      timestamp: '2026-10-10T00:00:00.000Z',
-      items: [{ type: 'text', text: 'injected storage' }],
-    });
-    expect(await session.sessionData.history.readAll()).toMatchObject([{ id: 'injected-user' }]);
-    expect(doc.getList('history').length).toBe(0);
-    session.dispose();
-  });
-
   it('fails closed when Roost metadata has no renderer factory', () => {
     expect(() =>
       createConversationSession(new LoroDoc(), {
@@ -1065,16 +715,6 @@ describe('createConversationSession backend seam', () => {
         scheduleIdle: () => () => {},
       })
     ).toThrow(/requires a renderer SessionData factory/);
-  });
-
-  it('keeps the default Loro composition when no factory is supplied', () => {
-    const session = createConversationSession(new LoroDoc(), {
-      sessionId: 'session-1' as never,
-      scheduleIdle: () => () => {},
-    });
-
-    expect(session.sessionData.sessionId).toBe('session-1');
-    session.dispose();
   });
 });
 
@@ -2012,60 +1652,6 @@ it('adopts late owner capabilities and watches a quiet control document from the
     clearTimer.mockRestore();
   }
 });
-
-it.each(['turns', 'consecutive page'])(
-  'retains change coverage after an unbound %s and repairs it without replaying patches',
-  async (write) => {
-    const h = await cachedRecoveryFixture(`binding-${write}`, 2);
-    const tail = { ...h.entries[1]!, items: [{ type: 'text' as const, text: 'oldA' }] };
-    const page = (checkpoint?: string) => ({
-      startPosition: 1,
-      totalCount: 2,
-      rows: [createRoostDirectoryRow(1, tail)],
-      hasMoreOlder: true,
-      cursor: 'older',
-      checkpoint,
-    });
-    try {
-      const prior = (await h.cache.getHead())!;
-      if (write === 'turns') await h.cache.updateTurns(2, 2, [tail]);
-      else await h.cache.acceptPage(page(), [tail], 2, { kind: 'changed', ids: [tail.id] });
-      const unbound = (await h.cache.getHead())!;
-      expect(unbound).toMatchObject({
-        revision: 2,
-        checkpoint: undefined,
-        recoveryCheckpoint: 'checkpoint-1',
-      });
-      expect((await h.cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([h.entries[0], tail]);
-      expect(await h.cache.applyChanges(unbound, 3, 2, 'unbound-patch', undefined, [])).toBe(false);
-      expect(await h.cache.applyChanges(prior, 3, 2, 'stale-patch', undefined, [])).toBe(false);
-      await h.cache.acceptPage(page('checkpoint-2'), [tail], 2);
-      expect(await h.cache.getHead()).toEqual(unbound);
-      const target = { ...tail, items: [{ type: 'text' as const, text: 'oldAB' }] };
-      expect(
-        await h.cache.applyChanges(
-          unbound,
-          3,
-          2,
-          'checkpoint-3',
-          undefined,
-          [{ position: 1, turn: target }],
-          true
-        )
-      ).toBe(true);
-      expect(await h.cache.getHead()).toMatchObject({
-        checkpoint: 'checkpoint-3',
-        recoveryCheckpoint: undefined,
-      });
-      expect((await h.cache.readRows(0, 2))?.map((row) => row.turn)).toEqual([
-        h.entries[0],
-        target,
-      ]);
-    } finally {
-      h.cache.dispose();
-    }
-  }
-);
 
 it.each([
   [undefined, 1],

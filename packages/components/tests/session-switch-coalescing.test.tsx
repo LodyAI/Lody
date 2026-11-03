@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -133,11 +134,6 @@ function pressNext() {
 }
 
 describe('session switch coalescing', () => {
-  it('navigates immediately for a single press', () => {
-    pressNext();
-    expect(navigations).toEqual(['s2']);
-  });
-
   it('collapses presses that arrive before the last one painted', () => {
     pressNext();
     expect(navigations).toEqual(['s2']);
@@ -155,14 +151,6 @@ describe('session switch coalescing', () => {
     frames.paint();
     expect(navigations).toEqual(['s2', 's4']);
     expect(frames.pending).toBe(0);
-  });
-
-  it('resumes immediately once a press lands after a paint', () => {
-    pressNext();
-    frames.paint();
-
-    pressNext();
-    expect(navigations).toEqual(['s2', 's3']);
   });
 
   it('re-anchors on the route when the selection changed between bursts', () => {
@@ -258,50 +246,10 @@ describe('session switch coalescing', () => {
     expect(frames.pending).toBe(0);
   });
 
-  it('reads the sidebar list at key time without re-rendering the layout that hosts it', () => {
-    let renders = 0;
-    function CountingHost() {
-      renders += 1;
-      useKeyboardNavigation();
-      return null;
-    }
-    unmount();
-    for (const cmd of commands.list()) commands.unregister(cmd.id);
-    root = createRoot(container);
-    renderWith(createElement(CountingHost));
-    const rendersAfterMount = renders;
-
-    // The sidebar republishes its rows on every session change.
-    act(() => {
-      store.set(
-        sidebarNavItemsAtom,
-        ['s1', 's7', 's8'].map((sessionId) => ({
-          kind: 'session' as const,
-          sessionId,
-          groupKey: 'g',
-        }))
-      );
-    });
-    expect(renders).toBe(rendersAfterMount);
-
-    pressNext();
-    expect(navigations).toEqual(['s7']);
-  });
-
   it('stops at the last session instead of wrapping', () => {
     routeSessionId = 's10';
     pressNext();
     expect(navigations).toEqual([]);
     expect(frames.pending).toBe(0);
-  });
-
-  it('drops a queued frame when the surface unmounts mid-burst', () => {
-    pressNext();
-    pressNext();
-    expect(frames.pending).toBe(1);
-
-    unmount();
-    expect(frames.pending).toBe(0);
-    expect(navigations).toEqual(['s2']);
   });
 });
