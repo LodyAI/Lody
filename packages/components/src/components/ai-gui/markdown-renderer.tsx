@@ -1560,6 +1560,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   headingAnchors = false,
   compact = false,
   muted = false,
+  allowImages = true,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1576,6 +1577,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   compact?: boolean;
   /** Use secondary text color without changing prose typography. */
   muted?: boolean;
+  /** Keep images as alt text on surfaces that do not load message attachments. */
+  allowImages?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1624,27 +1627,29 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     canvasLabel,
   });
 
-  const currentComponents = useMemo(
-    () =>
-      createMarkdownComponents({
-        copyAgentFileLabel,
-        openAgentFileLabel,
-        onAgentFileLinkClick,
-        getAgentFileLinkContextMenuItems,
-        readonly: readonly !== null,
-        headingAnchors,
-        compact,
-      }),
-    [
+  const currentComponents = useMemo(() => {
+    const components = createMarkdownComponents({
       copyAgentFileLabel,
-      getAgentFileLinkContextMenuItems,
-      onAgentFileLinkClick,
       openAgentFileLabel,
-      readonly,
+      onAgentFileLinkClick,
+      getAgentFileLinkContextMenuItems,
+      readonly: readonly !== null,
       headingAnchors,
       compact,
-    ]
-  );
+    });
+    return allowImages
+      ? components
+      : { ...components, img: ({ alt }: MarkdownImageProps) => <span>{alt}</span> };
+  }, [
+    allowImages,
+    copyAgentFileLabel,
+    getAgentFileLinkContextMenuItems,
+    onAgentFileLinkClick,
+    openAgentFileLabel,
+    readonly,
+    headingAnchors,
+    compact,
+  ]);
 
   const components = useSelectionStableValue(currentComponents);
   const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
