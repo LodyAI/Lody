@@ -1110,6 +1110,37 @@ describe('cloud E2EE creation ownership', () => {
     await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
   });
 
+  it('keeps the pending creation recoverable when the local binding write fails', async () => {
+    const bound: string[] = [];
+    const port = createCloudE2eeWorkspaces({
+      session: authenticated,
+      remote,
+      prepareCreation: async (input) => ({
+        ...original,
+        ...input,
+        deviceCredentialHash: 'ef'.repeat(32),
+      }),
+      runtime: {
+        recordCreated: async () => {
+          bound.push('attempt');
+          throw new Error('e2ee_storage_failed');
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      refreshWorkspaces: async () => {
+        bound.push('refresh');
+      },
+    });
+    await port.prepareCreation!(original);
+    await expect(
+      port.create({
+        ...request,
+        genesisRecordHex: original.genesisRecordHex,
+        deviceCredentialHash: 'ef'.repeat(32),
+      })
+    ).rejects.toThrow('e2ee_storage_failed');
+    expect(bound).toEqual(['attempt']);
+  });
+
   it('preserves explicit legacy admission without inventing a plaintext descriptor', async () => {
     const legacy = { workspaceId: 'legacy-workspace', admission: 'legacy-unclassified' as const };
     const port = createCloudE2eeWorkspaces({

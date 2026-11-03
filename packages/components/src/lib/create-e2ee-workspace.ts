@@ -32,6 +32,24 @@ export function e2eeCreationErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+/** Reuse the device's saved request instead of minting a second identity after a
+ * lost response. The caller persists the returned intent before any host call. */
+export function e2eeCreationIntent(
+  accountId: string,
+  pending: PendingE2eeWorkspace | null,
+  name: string,
+  slug: string
+): PendingE2eeWorkspace {
+  return (
+    pending ?? {
+      accountId,
+      requestId: crypto.randomUUID(),
+      name: name.trim(),
+      slug,
+    }
+  );
+}
+
 /** Reconcile the durable intent. Any unknown outcome leaves it available for retry;
  * a refusal that proves nothing was reserved removes it and rethrows the refusal. */
 export async function createPreparedE2eeWorkspace(
