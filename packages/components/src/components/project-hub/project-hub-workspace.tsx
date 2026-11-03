@@ -32,6 +32,7 @@ import {
 import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { withClassName } from '@/lib/stylex';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
@@ -338,7 +339,7 @@ const styles = stylex.create({
 function useRelativeTime() {
   const { i18n } = useTranslation();
   return useMemo(() => {
-    const format = new Intl.RelativeTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    const format = new Intl.RelativeTimeFormat(toIntlLocaleOrEn(i18n.resolvedLanguage), {
       numeric: 'auto',
       style: 'short',
     });
