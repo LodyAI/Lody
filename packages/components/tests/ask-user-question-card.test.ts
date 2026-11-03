@@ -89,6 +89,79 @@ function getButton(container: HTMLElement, label: string): HTMLElement {
   return button;
 }
 
+describe('AskUserQuestionCard plan review', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+
+  it('renders the plan in a real elicitation and preserves the selected answer', () => {
+    const parsed = parseAskUserQuestionElicitationRequest({
+      mode: 'form',
+      sessionId: 'synthetic',
+      message: 'Approve this plan?',
+      _meta: { lody: { elicitation: { version: 1 } } },
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          question_0: {
+            type: 'string',
+            title: 'Plan review',
+            description:
+              'Approve this plan?\n\n## Implementation\n\n- Update the **parser**\n\n| Step | Result |\n| --- | --- |\n| Test | Pass |\n\n![diagram](https://images.example.test/plan.png)',
+            oneOf: [
+              { const: 'Approve', title: 'Approve' },
+              { const: 'Reject', title: 'Reject' },
+            ],
+          },
+        },
+      },
+    });
+    if (!parsed) throw new Error('Expected a plan-review question');
+    let submitted: AskUserQuestionAnswers | undefined;
+    const mode = {
+      kind: 'interactive' as const,
+      isReady: true,
+      isPendingSubmit: false,
+      isPendingCancel: false,
+      disabled: false,
+      onSubmit: (answers: AskUserQuestionAnswers) => {
+        submitted = answers;
+      },
+      onCancel: () => {},
+    };
+    flushSync(() => root.render(createElement(AskUserQuestionCard, { meta: parsed.meta, mode })));
+    expect(container.querySelector('h2')?.textContent).toBe('Implementation');
+    expect(container.querySelector('li strong')?.textContent).toBe('parser');
+    expect(container.querySelector('table')?.textContent).toContain('Pass');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('diagram');
+    flushSync(() => getButton(container, 'Approve').click());
+    flushSync(() => getButton(container, 'Submit').click());
+    expect(submitted).toEqual({ question_0: 'Approve' });
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: parsed.meta,
+          mode: { kind: 'readonly', answers: submitted! },
+        })
+      )
+    );
+    expect(container.querySelector('h2')?.textContent).toBe('Implementation');
+    expect(container.textContent).toContain('Approve');
+  });
+});
+
 describe('AskUserQuestionCard touch navigation', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;

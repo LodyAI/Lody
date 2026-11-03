@@ -36,6 +36,9 @@ Harness 工具 → userQuestions.ask（live/root 校验）
 custom。没有 notes 能力时保留替换式 Other。adapter 恢复原生 id，且仅从答案中
 移除自己生成的选项。Plan-review 详情并入问题正文，批准仍由显式标签表达，不自动
 切换 Plan 或权限。
+通用问题卡片使用现有 Markdown 渲染器显示正文，已回答的历史也如此。ACP 表单没有
+单独标记计划正文，因此此格式适用于所有 provider 的问题文本。该界面仍只显示图片的
+替代文字，不加载图片；这样无需引入针对特定 provider 的协议标记，也不改变答案。
 
 原生 `userQuestions.ask` 继续负责 `CALLER_NOT_LIVE` 和 `DELEGATED_CALLER`。
 作用域注册加精确 ACP 所有权校验防止问题串 session。取消排队项不会越过当前请求；

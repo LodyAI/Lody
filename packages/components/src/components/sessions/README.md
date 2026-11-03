@@ -23,7 +23,9 @@ Both the row and the switch toggle the preference without dismissing the menu.
 including independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
 replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
-describes the shared parsing and persistence boundary.
+describes the shared parsing and persistence boundary. Question text renders as
+Markdown without loading images; this also renders the plan-review detail carried
+in a DSH form. See the [DSH question decision](../../../../../.agents/notes/implemented/feature/2026-09-20-dsh-user-questions.md).
 
 | File                                         | Responsibility                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
