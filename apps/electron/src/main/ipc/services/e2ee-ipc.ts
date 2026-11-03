@@ -153,15 +153,15 @@ const KEY_DELIVERY_READER = 0
 const KEY_DELIVERY_RETRY_MS = 10_000
 const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
 const KEY_DELIVERY_RETAINED = 32
-/** Access loss, a missing binding or a closed workspace ends delivery from this device;
- * other failures retry on a later due poll. */
+/** Only permanent causes end delivery from this device: access loss, a missing binding
+ * or a restart-required owner. A closed workspace reopens on the next round. */
 const TERMINAL_KEY_DELIVERY = new Set([
   'e2ee_member_removed',
   'e2ee_device_revoked',
   'e2ee_missing-binding',
-  'e2ee_closed'
+  'e2ee_restart-required'
 ])
-const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'closed'])
+const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'restart-required'])
 /** The admission is not in this device's verified ledger yet, so no round targets it. */
 const KEY_DELIVERY_NOT_INGESTED = 'e2ee_admission_not_ingested'
 type MemberKeyDelivery = {
@@ -177,7 +177,8 @@ const keyDeliveryCode = (cause: unknown) => {
   const loss = accessLoss(cause)
   if (loss) return `e2ee_${loss}`
   const message = cause instanceof Error ? cause.message : ''
-  return /^e2ee_[a-z0-9_-]{1,64}$/.test(message) ? message : 'e2ee_key_delivery_failed'
+  // Some public messages append guidance after the code (`e2ee_restart-required: …`).
+  return /^(e2ee_[a-z0-9_-]{1,64})(?=$|:)/.exec(message)?.[1] ?? 'e2ee_key_delivery_failed'
 }
 /** A key round reports phase failures inside WorkspaceKeyRoundFailure Results, which the
  * account boundary's public projection does not unwrap. Find a terminal cause before it. */
@@ -301,9 +302,9 @@ export class E2eeIpc extends IpcService {
               KEY_DELIVERY_RETRY_MAX_MS
             )
         }
-        let targets: Set<string>
+        let evidence: Map<string, string>
         try {
-          targets = await this.deliverMemberKeys(
+          evidence = await this.deliverMemberKeys(
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device))
@@ -320,10 +321,11 @@ export class E2eeIpc extends IpcService {
           for (const delivery of covered) retry(delivery, code)
           return
         }
-        // Only a device the verified ledger made a target of this round was delivered to.
+        // Delivered only on positive per-device evidence; every other outcome retries.
         for (const delivery of covered) {
-          if (!targets.has(delivery.device)) {
-            retry(delivery, KEY_DELIVERY_NOT_INGESTED)
+          const outcome = evidence.get(delivery.device) ?? KEY_DELIVERY_NOT_INGESTED
+          if (outcome !== 'delivered') {
+            retry(delivery, outcome)
             continue
           }
           delivery.state = 'delivered'
@@ -342,8 +344,8 @@ export class E2eeIpc extends IpcService {
     return running
   }
   /** One key round under a main-owned reader, so closing every window cannot stop it.
-   * Ingests relay history first, then returns which `devices` the local verified
-   * ledger makes distribution targets; only those were covered by the round. */
+   * Ingests relay history first, runs the round for devices the local verified ledger
+   * targets, then returns per-device evidence: 'delivered' or a retryable code. */
   private async deliverMemberKeys(accountId: string, workspaceId: string, devices: Set<string>) {
     const scope = this.memberScope(workspaceId)
     const cloud = await desktopE2eeCloudClient()
@@ -366,17 +368,22 @@ export class E2eeIpc extends IpcService {
         if (TERMINAL_KEY_DELIVERY.has(keyDeliveryCode(cause))) throw cause
         this.pairingFailure = cause
       }
-      const targets = new Set<string>()
+      const evidence = new Map<string, string>()
+      const targets: string[] = []
       for (const device of devices)
         if (device && (await scope((owner) => owner.host.keyDeliveryTarget(workspaceId, device))))
-          targets.add(device)
-      if (targets.size === 0) return targets
+          targets.push(device)
+        else evidence.set(device, KEY_DELIVERY_NOT_INGESTED)
+      if (targets.length === 0) return evidence
+      const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
+      const mailbox = (signal: AbortSignal) =>
+        cloud.client.mailbox({ workspaceId, credential }, signal)
       const work = await scope((owner) =>
-        Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) =>
+        Effect.succeed(
           owner.host
             .keyRound(
               workspaceId,
-              (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
+              mailbox,
               (signal) => cloud.client.staging({ workspaceId, credential }, signal),
               (signal) => (request) => cloud.client.history(request, signal)
             )
@@ -384,7 +391,15 @@ export class E2eeIpc extends IpcService {
         )
       )
       await runDesktopE2eeOperation(accountId, work)
-      return targets
+      // A successful round is not evidence: an ineligible sender, a blocked target or a
+      // joined round all succeed. Ask the mailbox per device, outside the account lock.
+      for (const device of targets) {
+        const check = await scope((owner) =>
+          Effect.succeed(owner.host.keyDeliveryEvidence(workspaceId, device, mailbox))
+        )
+        evidence.set(device, await runDesktopE2eeOperation(accountId, check))
+      }
+      return evidence
     } finally {
       try {
         const cleanup = await scope((owner) =>
