@@ -55,7 +55,7 @@ describe('CLI zstd wasm packaging', () => {
     );
   });
 
-  it('rejects a missing wasm without retaining the caller document, then round-trips once the file is beside the module', async () => {
+  it('rejects a missing or timed-out wasm without retaining the caller document, then round-trips once the runtime can run', async () => {
     const entry = fileURLToPath(import.meta.resolve('@loro-dev/streams-crdt/zstd'));
     await verifyRelocatedZstdRuntime(entry);
   });

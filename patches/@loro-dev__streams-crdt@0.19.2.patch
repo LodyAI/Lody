@@ -353,7 +353,7 @@ index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9
 diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
 --- a/dist/zstd-core-nJ4Lg1a0.js
 +++ b/dist/zstd-core-nJ4Lg1a0.js
-@@ -123,6 +123,7 @@
+@@ -123,6 +123,7 @@ function init$1(filePathOrBuf) {
  	function instantiateAsync() {
  		if (filePathOrBuf && filePathOrBuf.byteLength > 0) return WebAssembly.instantiate(filePathOrBuf, info).then(receiveInstantiationResult, function(reason) {
  			err("wasm compile failed: " + reason);
@@ -361,21 +361,22 @@ diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
  		});
  		else if (typeof WebAssembly.instantiateStreaming === "function" && typeof filePathOrBuf === "string" && typeof fetch === "function") return fetch(filePathOrBuf, { credentials: "same-origin" }).then(function(response) {
  			return WebAssembly.instantiateStreaming(response, info).then(receiveInstantiationResult, function(reason) {
-@@ -139,7 +140,12 @@
+@@ -139,7 +140,13 @@ function init$1(filePathOrBuf) {
  		err("Module.instantiateWasm callback failed with error: " + e);
  		return false;
  	}
 -	instantiateAsync();
++	var ownedZstdAttempt = zstdRuntimeAttempt;
 +	var instantiation = instantiateAsync();
 +	if (instantiation != null && typeof instantiation.then === "function") {
 +		instantiation.catch(function(reason) {
-+			rejectZstdInitialization(reason);
++			rejectOwnedZstdAttempt(ownedZstdAttempt, reason);
 +		});
 +	}
  	return {};
  }
  var ExitStatus = class {
-@@ -317,12 +323,27 @@
+@@ -317,12 +324,38 @@ var __awaiter$1 = function(thisArg, _arguments, P, generator) {
  		step((generator = generator.apply(thisArg, _arguments || [])).next());
  	});
  };
@@ -385,63 +386,90 @@ diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
 -const waitInitialized = () => __awaiter$1(void 0, void 0, void 0, function* () {
 -	yield initialized;
 -});
-+let zstdInitialization = null;
-+function rejectZstdInitialization(reason) {
-+	const attempt = zstdInitialization;
++let zstdRuntimeAttempt = null;
++function rejectOwnedZstdAttempt(attempt, reason) {
 +	if (attempt == null || attempt.settled) return;
 +	attempt.settled = true;
-+	clearTimeout(attempt.timer);
 +	attempt.reject(reason instanceof Error ? reason : new Error(String(reason)));
 +}
-+function resolveZstdInitialization() {
-+	const attempt = zstdInitialization;
++function resolveOwnedZstdAttempt(attempt) {
 +	if (attempt == null || attempt.settled) return;
 +	attempt.settled = true;
-+	clearTimeout(attempt.timer);
 +	attempt.resolve();
 +}
 +const ZSTD_INITIALIZATION_TIMEOUT_MS = 10000;
++function waitForZstdRuntime(attempt) {
++	let settled = false;
++	let timer;
++	const timeout = new Promise((resolve, reject) => {
++		timer = setTimeout(() => {
++			if (settled) return;
++			settled = true;
++			reject(new Error("zstd wasm initialization timed out"));
++		}, ZSTD_INITIALIZATION_TIMEOUT_MS);
++	});
++	return Promise.race([attempt.promise, timeout]).finally(() => {
++		settled = true;
++		clearTimeout(timer);
++	});
++}
 +const waitInitialized = () => {
-+	const attempt = zstdInitialization;
++	const attempt = zstdRuntimeAttempt;
 +	if (attempt == null) return Promise.reject(new Error("zstd wasm initialization was not started"));
 +	return attempt.promise;
 +};
  //#endregion
  //#region ../../node_modules/.pnpm/@bokuweb+zstd-wasm@0.0.27/node_modules/@bokuweb/zstd-wasm/dist/web/errors/index.js
  const isError = (code) => {
-@@ -501,8 +522,30 @@
+@@ -501,8 +534,45 @@ var __awaiter = function(thisArg, _arguments, P, generator) {
  };
  const init = (path) => __awaiter(void 0, void 0, void 0, function* () {
  	const url = new URL(`./zstd.wasm`, import.meta.url).href;
-+	// A failed attempt leaves Emscripten's run dependency incremented, so a later
-+	// attempt would never reach onRuntimeInitialized. The runtime has not started.
-+	if (!calledRun) runDependencies = 0;
-+	let resolveAttempt;
-+	let rejectAttempt;
-+	const promise = new Promise((resolve, reject) => {
-+		resolveAttempt = resolve;
-+		rejectAttempt = reject;
-+	});
-+	const attempt = {
-+		settled: false,
-+		promise,
-+		resolve: resolveAttempt,
-+		reject: rejectAttempt,
-+		timer: setTimeout(() => {
-+			rejectZstdInitialization(new Error("zstd wasm initialization timed out"));
-+		}, ZSTD_INITIALIZATION_TIMEOUT_MS)
-+	};
-+	zstdInitialization = attempt;
-+	Module.onRuntimeInitialized = () => {
-+		resolveZstdInitialization();
-+	};
- 	Module["init"](path !== null && path !== void 0 ? path : url);
+-	Module["init"](path !== null && path !== void 0 ? path : url);
 -	yield waitInitialized();
-+	yield attempt.promise;
++	// calledRun means this Emscripten instance already started. A second init would
++	// not run onRuntimeInitialized again, so reuse the runtime that is already up.
++	if (calledRun) {
++		const running = zstdRuntimeAttempt;
++		if (running != null && !running.settled) {
++			if (ABORT) rejectOwnedZstdAttempt(running, new Error("zstd wasm runtime aborted"));
++			else resolveOwnedZstdAttempt(running);
++		}
++		if (zstdRuntimeAttempt != null) yield zstdRuntimeAttempt.promise;
++		return;
++	}
++	let attempt = zstdRuntimeAttempt;
++	// A waiter timeout does not settle this attempt. Callers that arrive while it is
++	// still in flight share it instead of starting another instantiate.
++	if (attempt == null || attempt.settled) {
++		// A failed attempt leaves Emscripten's run dependency incremented, so a later
++		// attempt would never reach onRuntimeInitialized. The runtime has not started.
++		runDependencies = 0;
++		let resolveAttempt;
++		let rejectAttempt;
++		const promise = new Promise((resolve, reject) => {
++			resolveAttempt = resolve;
++			rejectAttempt = reject;
++		});
++		void promise.then(() => {}, () => {});
++		attempt = {
++			settled: false,
++			promise,
++			resolve: resolveAttempt,
++			reject: rejectAttempt
++		};
++		zstdRuntimeAttempt = attempt;
++		const ownedAttempt = attempt;
++		Module.onRuntimeInitialized = () => {
++			resolveOwnedZstdAttempt(ownedAttempt);
++		};
++		Module["init"](path !== null && path !== void 0 ? path : url);
++	}
++	yield waitForZstdRuntime(attempt);
  });
  //#endregion
  //#region src/zstd-core.ts
-@@ -532,7 +575,14 @@
+@@ -532,7 +602,14 @@ async function loadZstdModule() {
  	}
  }
  async function getZstdModule() {
