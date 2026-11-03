@@ -58,6 +58,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sessionInputDispatch: 'sessionInputDispatch',
   sessionCollaborationControl: 'sessionCollaborationControl',
   bugReportClientLog: 'bugReportClientLog',
+  sessionInputWithdraw: 'sessionInputWithdraw',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -155,6 +156,8 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  // Daemon answers `session/withdraw-input` for queued Agent inputs.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
     PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject]: MULTI_REPO_PROJECT_PROTOCOL_VERSION,

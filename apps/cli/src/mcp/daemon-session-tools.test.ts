@@ -1174,6 +1174,56 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
+  it('lists queued inputs and leaves them untouched when the target daemon cannot withdraw', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const targetId = await manager.createSession(machineId, 'custom', 'claude');
+    const doc = await manager.getOrCreateSessionDoc(targetId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'queued-1',
+      role: 'user',
+      status: 'pending',
+      author: { v: 1, kind: 'agent', sessionId, turnId: 'synthetic-turn', name: 'Codex' },
+      timestamp: '2026-11-03T01:00:00.000Z',
+      items: [{ type: 'text', text: 'Also run the edge-case suite before reporting.' }],
+      fileDiff: [],
+    } as never);
+
+    const listed = await call('lody_session_queue', { action: 'list', sessionId: targetId });
+    expect(listed.isError, listed.text).toBe(false);
+    expect(JSON.parse(listed.text).items).toEqual([
+      expect.objectContaining({
+        userTurnId: 'queued-1',
+        own: true,
+        sender: { kind: 'agent', sessionId },
+        preview: 'Also run the edge-case suite before reporting.',
+      }),
+    ]);
+
+    // The daemon fixture advertises no withdrawal capability, like an older release.
+    const withdrawn = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(withdrawn.text)).toMatchObject({ outcome: 'error' });
+    const read = await backend.history.readTurn('queued-1');
+    expect(read.state === 'ready' ? read.turn.status : undefined).toBe(
+      JSON.parse(listed.text).items[0].status
+    );
+  });
+
   it('binds daemon workspace resolution to the daemon identity and workspace', async () => {
     const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken');
     const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };

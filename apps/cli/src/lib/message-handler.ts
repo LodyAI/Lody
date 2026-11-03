@@ -411,6 +411,7 @@ import {
   type LocalWorkspaceCatalogService,
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
 import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
@@ -2699,6 +2700,51 @@ export class MessageHandler {
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
+  /**
+   * Best-effort withdrawal of a queued Agent input. Only the requesting Session's
+   * own input that is still pending is canceled, with the same not-yet-started
+   * guard dispatch respects; a dispatch already under way may still run it.
+   */
+  private async withdrawQueuedInput(args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+  }): Promise<SessionWithdrawInputResponse> {
+    const response = (
+      outcome: SessionWithdrawInputResponse['outcome'],
+      error?: string
+    ): SessionWithdrawInputResponse => ({
+      type: 'session/withdraw-input_response',
+      sessionId: args.sessionId,
+      userTurnId: args.userTurnId,
+      outcome,
+      ...(error ? { error } : {}),
+    });
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(args.userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return response('not_found');
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent' || author.sessionId !== args.requesterSessionId)
+        return response('not_owner');
+      // Same guard as `onlyAwaitingStart`: pending or seen means no execution claimed it.
+      if (input.turn.status !== 'pending' && input.turn.status !== 'seen')
+        return response('already_started');
+      const result = await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: args.userTurnId,
+        status: 'canceled',
+        onlyAwaitingStart: true,
+      });
+      if (!result.matched) return response('already_started');
+      this.sessionDispatchWatcher.discardRpcTurn(args.sessionId, args.userTurnId);
+      return response('withdrawn');
+    } catch (error) {
+      return response('error', formatErrorMessage(error));
+    }
+  }
+
   private async steerSessionWithAccessCheck(
     args: Parameters<SessionExecutionService['steerSession']>[0]
   ): ReturnType<SessionExecutionService['steerSession']> {
@@ -3581,6 +3627,18 @@ export class MessageHandler {
           };
         },
         getSessionLiveStatus: async ({ sessionId }) => this.readSessionLiveStatus(sessionId),
+        withdrawSessionInput: async ({ userId, ...args }) => {
+          const access = await this.verifySessionMachineAccess(args.sessionId, userId);
+          if (access.outcome !== 'allowed')
+            return {
+              type: 'session/withdraw-input_response' as const,
+              sessionId: args.sessionId,
+              userTurnId: args.userTurnId,
+              outcome: 'error' as const,
+              error: `Withdraw access verification ${access.outcome}`,
+            };
+          return await this.withdrawQueuedInput(args);
+        },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -7008,6 +7066,7 @@ export class MessageHandler {
           },
           readActiveTurnId: (sessionId) =>
             this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+          withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
           dispatchSession: async (sessionId, input) => {
             if (input?.inputOrigin === 'human')

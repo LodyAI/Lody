@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, SessionInputBlock, WorkspaceId } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { Loro } from 'loro-crdt';
+import { createLoroSessionData } from '@lody/shared/session-data';
 
 import { MessageHandler } from '../src/lib/message-handler';
 import {
@@ -202,5 +204,69 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     } finally {
       await handler.cleanup();
     }
+  });
+
+  describe('queued input withdrawal', () => {
+    const author = (requester: string) => ({
+      v: 1,
+      kind: 'agent',
+      sessionId: requester,
+      turnId: `${requester}-turn`,
+      name: 'Codex',
+    });
+    const withdraw = async () => {
+      const data = createLoroSessionData({ sessionId, doc: new Loro() });
+      const append = (id: string, status: string, requester: string) =>
+        data.commands.appendTurn({
+          id,
+          role: 'user',
+          status,
+          author: author(requester),
+          timestamp: '2026-11-03T01:00:00.000Z',
+          items: [{ type: 'text', text: id }],
+          fileDiff: [],
+        } as never);
+      await append('own-pending', 'pending', 'coordinator');
+      await append('own-started', 'processing', 'coordinator');
+      await append('other-pending', 'pending', 'someone-else');
+      await append('own-seen', 'seen', 'coordinator');
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const internals = handler as unknown as Record<string, unknown> & {
+        workspaceDocument: { getOrCreateSessionDoc: unknown };
+      };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      internals.sessionDispatchWatcher = { discardRpcTurn: () => undefined };
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({
+        history: data.history,
+        applyHistoryAction: (action: never) => data.commands.applyHistoryAction(action),
+      });
+      const run = (userTurnId: string) =>
+        (
+          handler as unknown as {
+            withdrawQueuedInput: (args: unknown) => Promise<{ outcome: string }>;
+          }
+        ).withdrawQueuedInput({ sessionId, userTurnId, requesterSessionId: 'coordinator' });
+      const status = async (id: string) => {
+        const read = await data.history.readTurn(id);
+        return read.state === 'ready' ? read.turn.status : undefined;
+      };
+      return { run, status };
+    };
+
+    it("cancels only the requester's own input that has not started", async () => {
+      const { run, status } = await withdraw();
+      expect(await run('own-pending')).toMatchObject({ outcome: 'withdrawn' });
+      expect(await status('own-pending')).toBe('canceled');
+
+      expect(await run('own-started')).toMatchObject({ outcome: 'already_started' });
+      expect(await status('own-started')).toBe('processing');
+      expect(await run('other-pending')).toMatchObject({ outcome: 'not_owner' });
+      expect(await status('other-pending')).toBe('pending');
+      expect(await run('missing')).toMatchObject({ outcome: 'not_found' });
+      expect(await run('own-seen')).toMatchObject({ outcome: 'withdrawn' });
+    });
   });
 });
