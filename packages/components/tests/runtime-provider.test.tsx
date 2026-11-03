@@ -14,6 +14,14 @@ import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notificat
 
 import React, { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  createMemoryHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
 import { atom, createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ConvexError } from 'convex/values';
@@ -174,12 +182,17 @@ vi.mock('@/providers/local-platform-provider', () => ({
   useImplicitLocalWorkspace: () => environment.workspace,
   getLocalWorkspaceSlug: (workspace: { slug: string }) => workspace.slug,
 }));
+// Keep visual recovery diagnostics out of this router/provider boundary test.
+vi.mock('../src/components/blocking-wait-placeholder', () => ({
+  BlockingWaitPlaceholder: () => <div>workspace waiting</div>,
+}));
 vi.mock('../src/components/chat/session-pending-sends-host', () => ({
   SessionPendingSendsHost: () => null,
 }));
 vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime: vi.fn() }));
 
 import { RuntimeProvider } from '../src/providers/runtime-provider';
+import { WorkspaceAdmissionGate } from '../src/components/workspace-admission-gate';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -197,7 +210,10 @@ import {
   workspaceRuntimeInitFailureAtom,
 } from '../src/atoms/runtime';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { lodyControlConnectionStateAtom } from '../src/atoms/control-connection';
+import {
+  lodyControlConnectionStateAtom,
+  runtimeInitializingAtom,
+} from '../src/atoms/control-connection';
 import * as clientLog from '../src/lib/client-log';
 import {
   editSessionRunConfigDraftAtom,
@@ -1182,6 +1198,136 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(installed).toBe(true);
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
+  });
+
+  it.each(['ready', 'unavailable', 'failure'] as const)(
+    'keeps encrypted admission initializing until first key reception settles: %s',
+    async (outcome) => {
+      ordinaryCloud();
+      listEncrypted();
+      const received = Promise.withResolvers<void>();
+      const receiving = Promise.withResolvers<void>();
+      let installed = false;
+      const status = () => ({
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+        epoch: 1,
+        hasCurrentKey: installed,
+        writeEpoch: installed ? 1 : null,
+        rotationRequired: false,
+      });
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => status(),
+        status: async () => status(),
+        refresh: async (_id, options) => {
+          if (options?.installKeys) {
+            receiving.resolve();
+            await received.promise;
+            if (outcome === 'failure') throw new Error('mailbox unavailable');
+            installed = outcome === 'ready';
+          }
+          return status();
+        },
+        close: async () => {},
+      } as unknown as E2eeWorkspaceRuntime;
+      Object.assign(prepared, { accountId: 'local:user', contentMode: 'e2ee' });
+      const route = createRootRoute({
+        component: () => (
+          <RuntimeProvider>
+            <Outlet />
+          </RuntimeProvider>
+        ),
+      });
+      const router = createRouter({
+        history: createMemoryHistory({ initialEntries: ['/local/chat'] }),
+        routeTree: route.addChildren([
+          createRoute({
+            getParentRoute: () => route,
+            path: '/local/chat',
+            component: () => (
+              <WorkspaceAdmissionGate workspaceName="local">
+                <div>protected history</div>
+              </WorkspaceAdmissionGate>
+            ),
+          }),
+          createRoute({
+            getParentRoute: () => route,
+            path: '/workspace/e2ee/$workspaceId',
+            component: () => <div>workspace control</div>,
+          }),
+        ]),
+      });
+      try {
+        await act(async () => {
+          await router.load();
+          root.render(
+            <Provider store={store}>
+              <RouterProvider router={router} />
+            </Provider>
+          );
+        });
+        await receiving.promise;
+        expect(store.get(runtimeAtom)).toBeNull();
+        expect(router.state.location.pathname).toBe('/local/chat');
+        expect(store.get(runtimeInitializingAtom)).toBe(true);
+        expect(container.textContent).not.toContain('protected history');
+        await act(async () => received.resolve());
+        expect(store.get(runtimeAtom)).toBe(installed ? prepared : null);
+        expect(store.get(runtimeInitializingAtom)).toBe(false);
+        expect(prepared.disposed).toBe(false);
+        expect(router.state.location.pathname).toBe(
+          installed ? '/local/chat' : '/workspace/e2ee/local%3Aworkspace'
+        );
+        expect(container.textContent).toContain(
+          installed ? 'protected history' : 'workspace control'
+        );
+      } finally {
+        await act(async () => received.resolve());
+      }
+    }
+  );
+
+  it('does not revive a cancelled first-key admission when its receive settles late', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const received = Promise.withResolvers<void>();
+    const receiving = Promise.withResolvers<void>();
+    let installed = false;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: installed,
+      writeEpoch: installed ? 1 : null,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async (_id, options) => {
+        if (options?.installKeys) {
+          receiving.resolve();
+          await received.promise;
+          installed = true;
+        }
+        return status();
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    try {
+      await render();
+      await receiving.promise;
+      expect(store.get(runtimeInitializingAtom)).toBe(true);
+      await act(async () => store.set(currentWorkspaceSlugAtom, null));
+      await act(async () => received.resolve());
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(prepared.disposed).toBe(false);
+    } finally {
+      await act(async () => received.resolve());
+    }
   });
 
   it('opens when a retained epoch arrives after the initial no-key lease, without requiring the current epoch', async () => {
