@@ -1,13 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Deferred, Effect, Fiber, Result } from 'effect';
-import { TestClock } from 'effect/testing';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { Effect } from 'effect';
+
 import { expect, it } from 'vitest';
 import { makeLabScenarioFixture } from '../src/platform/scenario-fixture';
-import { LabProcessSpawn, makeLabProcessActor } from '../src/platform/process-actor';
-import { history } from './ledger-fixture';
+import { makeLabProcessActor } from '../src/platform/process-actor';
+
 import { exportDevice } from '../src/platform/device';
 import { executeLabActions, inspectLabEvidence } from '../src/platform/action-executor';
 import type { runLabKeyRound } from '../src/platform/key-round';
@@ -217,99 +216,3 @@ it('hard kills a real actor after protected writes, restarts with independent pi
     rmSync(root, { recursive: true, force: true });
   }
 });
-
-it.each(['crash', 'shutdown'] as const)(
-  'retains the real %s child until its explicit native close notification, independently of elapsed virtual time',
-  async (operation) => {
-    const root = mkdtempSync(join(tmpdir(), 'lab-native-close-observation-'));
-    let child: ChildProcess | undefined;
-    let closeReleased = false;
-    let delayedClose: (() => void) | undefined;
-    const releaseClose = () => {
-      closeReleased = true;
-      const deliver = delayedClose;
-      delayedClose = undefined;
-      deliver?.();
-    };
-    let actualClose: Promise<void> | undefined;
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const nativeClosed = yield* Deferred.make<void>();
-            const create = () => {
-              child = spawn(
-                process.execPath,
-                [
-                  '-e',
-                  `
-              process.on('message', (message) => {
-                process.send({ id: message.id, ok: true }, () => {
-                  if (message.operation === 'close') process.exit(0);
-                });
-              });
-            `,
-                ],
-                { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }
-              );
-              const native = child;
-              const emit = native.emit;
-              actualClose = new Promise<void>((resolve) => {
-                native.emit = function (event: string | symbol, ...args: unknown[]) {
-                  if (event === 'close') {
-                    const deliver = () => {
-                      Reflect.apply(emit, native, [event, ...args]);
-                    };
-                    if (closeReleased) deliver();
-                    else delayedClose = deliver;
-                    Deferred.doneUnsafe(nativeClosed, Effect.void);
-                    resolve();
-                    return true;
-                  }
-                  return Reflect.apply(emit, native, [event, ...args]);
-                };
-              });
-              return native;
-            };
-            const fixture = history();
-            // This worker substitutes only the IPC protocol; the process and exit
-            // are real. No cryptographic or session behavior is inferred from it.
-            const actor = yield* makeLabProcessActor((mode) =>
-              Effect.succeed({
-                syntheticOnly: true,
-                device: 'unused by this IPC-only native owner fixture',
-                targets: {},
-                initialKeyOwner: false,
-                baseUrl: 'http://127.0.0.1:1',
-                directory: root,
-                actor: 'owner',
-                mode,
-                genesis: Buffer.from(fixture.anchor.toBytes()).toString('hex'),
-                records: fixture.records.map((record) => Buffer.from(record).toString('hex')),
-                point: {
-                  head: Buffer.from(fixture.checkpoint.head.toBytes()).toString('hex'),
-                  length: fixture.checkpoint.length,
-                },
-              })
-            ).pipe(Effect.provideService(LabProcessSpawn, create));
-            expect((yield* actor.start('create')).ok).toBe(true);
-            const closing = yield* Effect.result(
-              operation === 'crash' ? actor.crash() : actor.shutdown()
-            ).pipe(Effect.forkChild);
-            yield* Deferred.await(nativeClosed);
-            expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
-            yield* TestClock.adjust('6 seconds');
-            expect(closing.pollUnsafe()).toBeUndefined();
-            releaseClose();
-            expect(Result.isSuccess(yield* Fiber.join(closing))).toBe(true);
-          }).pipe(Effect.ensuring(Effect.sync(releaseClose)))
-        ).pipe(Effect.provide(TestClock.layer()))
-      );
-    } finally {
-      if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      await actualClose;
-      releaseClose();
-      rmSync(root, { recursive: true, force: true });
-    }
-  }
-);

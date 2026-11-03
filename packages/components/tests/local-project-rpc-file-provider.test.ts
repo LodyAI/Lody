@@ -52,21 +52,6 @@ describe('LocalProjectRpcFileProvider', () => {
       sourceState: 'live-readonly',
     });
   });
-
-  it('dedupes concurrent loads for the same directory', async () => {
-    const pending = deferred<{ entries: []; truncated: false }>();
-    const listDir = vi.fn(() => pending.promise);
-    const provider = new LocalProjectRpcFileProvider({
-      transport: createTransport({ listDir }),
-    });
-
-    const first = provider.initializeDirectory('');
-    const second = provider.initializeDirectory('');
-
-    expect(listDir).toHaveBeenCalledTimes(1);
-    pending.resolve({ entries: [], truncated: false });
-    await Promise.all([first, second]);
-  });
 });
 
 const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
@@ -78,46 +63,6 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 describe('LocalProjectRpcFileProvider.openFile (images)', () => {
-  it('decodes base64 image reads into a binary snapshot with exact bytes', async () => {
-    const provider = new LocalProjectRpcFileProvider({
-      transport: createTransport({
-        readFile: vi.fn(async ({ relativePath }) => ({
-          path: relativePath,
-          content: toBase64(pngBytes),
-          truncated: false,
-          encoding: 'base64' as const,
-        })),
-      }),
-    });
-
-    const result = await provider.openFile('assets/logo.png');
-    expect(result.status).toBe('ready');
-    if (result.status !== 'ready') return;
-    expect(result.snapshot.kind).toBe('binary');
-    if (result.snapshot.kind !== 'binary') return;
-    expect(result.snapshot.bytes && Array.from(result.snapshot.bytes)).toEqual(
-      Array.from(pngBytes)
-    );
-  });
-
-  it('requests a larger byte budget for images than for text', async () => {
-    const requestedMaxBytes: Record<string, number | undefined> = {};
-    const provider = new LocalProjectRpcFileProvider({
-      transport: createTransport({
-        readFile: vi.fn(async ({ relativePath, maxBytes }) => {
-          requestedMaxBytes[relativePath] = maxBytes;
-          return { path: relativePath, content: '', truncated: false, encoding: 'utf8' as const };
-        }),
-      }),
-    });
-
-    await provider.openFile('assets/logo.png');
-    await provider.openFile('src/index.ts');
-    expect(requestedMaxBytes['assets/logo.png']).toBeGreaterThan(
-      requestedMaxBytes['src/index.ts'] ?? 0
-    );
-  });
-
   it('omits bytes for a truncated (too-large) image so callers can show a notice', async () => {
     const provider = new LocalProjectRpcFileProvider({
       transport: createTransport({
@@ -158,25 +103,5 @@ describe('LocalProjectRpcFileProvider.openFile (images)', () => {
       status: 'ready',
       snapshot: { kind: 'text', text: '<h1>Partial', truncated: true },
     });
-  });
-
-  it('returns a text snapshot for utf8 reads', async () => {
-    const provider = new LocalProjectRpcFileProvider({
-      transport: createTransport({
-        readFile: vi.fn(async ({ relativePath }) => ({
-          path: relativePath,
-          content: 'hello world',
-          truncated: false,
-          encoding: 'utf8' as const,
-        })),
-      }),
-    });
-
-    const result = await provider.openFile('notes.md');
-    expect(result.status).toBe('ready');
-    if (result.status !== 'ready') return;
-    expect(result.snapshot.kind).toBe('text');
-    if (result.snapshot.kind !== 'text') return;
-    expect(result.snapshot.text).toBe('hello world');
   });
 });

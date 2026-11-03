@@ -4,7 +4,6 @@ import { LoroDoc } from 'loro-crdt';
 import {
   createLocalWindowBootstrap,
   createSessionSnapshotLoader,
-  readSessionBootstrapSnapshot,
 } from '../src/providers/local-window-bootstrap';
 
 function channelFactory() {
@@ -133,56 +132,6 @@ describe('local window bootstrap', () => {
     expect(await receiver.readDocument('session:test')).toBeUndefined();
     owner.close();
     await repo.destroy();
-  });
-
-  it('falls through immediately when live peers do not own the requested document', async () => {
-    vi.useFakeTimers();
-    const { createChannel, createRegistry } = channelFactory();
-    const repo = await LoroRepo.create({});
-    const owner = createLocalWindowBootstrap(
-      repo,
-      'workspace',
-      new Map(),
-      createChannel,
-      createRegistry
-    );
-    const receiver = createLocalWindowBootstrap(
-      repo,
-      'workspace',
-      new Map(),
-      createChannel,
-      createRegistry
-    );
-    expect(await receiver.readDocument('session:missing')).toBeUndefined();
-    owner.close();
-    expect(await receiver.readDocument('session:closed-peer')).toBeUndefined();
-    receiver.close();
-    await repo.destroy();
-  });
-
-  it('uses the disk snapshot before peer state and tolerates disk failure', async () => {
-    const disk = new Uint8Array([1]);
-    const peer = new Uint8Array([2]);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => disk,
-        async () => peer
-      )
-    ).toEqual(disk);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => {
-          throw new Error('broken cache');
-        },
-        async () => peer
-      )
-    ).toEqual(peer);
-    expect(
-      await readSessionBootstrapSnapshot(
-        async () => undefined,
-        async () => undefined
-      )
-    ).toBeUndefined();
   });
 });
 

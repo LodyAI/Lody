@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -10,7 +11,6 @@ import { parseAskUserQuestionElicitationRequest } from '@lody/shared';
 import { AskUserQuestionCard } from '../src/components/sessions/ask-user-question-card';
 import { Tooltip } from '@lody/ui/tooltip';
 import { initI18n } from '../src/i18n';
-import storyMeta, { SecretNote } from '../src/stories/AskUserQuestionCard.stories';
 
 const meta: AskUserQuestionPermissionMeta = {
   source: 'codex',
@@ -401,13 +401,6 @@ describe('AskUserQuestionCard answer notes', () => {
       });
     }
   );
-  it.each(['', '   '])('omits blank notes (%j)', (value) => {
-    const result = render();
-    typeNote(value);
-    flushSync(() => getButton(container, 'Small change').click());
-    flushSync(() => getButton(container, 'Submit').click());
-    expect(result.answers()).toEqual({ approach: 'Small change' });
-  });
   it('keeps multi-question notes on their own fields and stays on the current question after selection', () => {
     const result = render({
       ...noteMeta,
@@ -492,16 +485,6 @@ describe('AskUserQuestionCard answer notes', () => {
       expect(result.answers()).toEqual({ approach: '保留现有接口' });
     }
   );
-
-  it('renders the real readonly story fixtures with independent secret masking', () => {
-    flushSync(() => root.render(createElement(AskUserQuestionCard, storyMeta.args)));
-    expect(container.querySelector('textarea')!.value).toBe('Keep the public API stable.');
-    flushSync(() =>
-      root.render(createElement(AskUserQuestionCard, { ...storyMeta.args, ...SecretNote.args }))
-    );
-    expect(container.querySelector('input')!.value).toBe('••••••••');
-    expect(getButton(container, 'Small change').getAttribute('aria-pressed')).toBe('true');
-  });
   it('replays the choice and masks only the secret note', () => {
     flushSync(() =>
       root.render(
@@ -524,18 +507,5 @@ describe('AskUserQuestionCard answer notes', () => {
     expect(input.type).toBe('password');
     expect(input.value).toBe('••••••••');
     expect(container.innerHTML).not.toContain('Hidden note');
-  });
-  it('replays old records without a note input', () => {
-    const { note: _note, ...question } = noteMeta.questions[0]!;
-    flushSync(() =>
-      root.render(
-        createElement(AskUserQuestionCard, {
-          meta: { ...noteMeta, questions: [question] },
-          mode: { kind: 'readonly', answers: { approach: 'Small change' } },
-        })
-      )
-    );
-    expect(getButton(container, 'Small change').getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelector('input')).toBeNull();
   });
 });

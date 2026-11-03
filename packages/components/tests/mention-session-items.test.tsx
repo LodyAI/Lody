@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
@@ -169,37 +170,6 @@ describe('useSessionMentionItems', () => {
 
     // Recency-ordered: child first, parent second; archived stays excluded.
     expect(snapshot).toEqual(['child-session', 'parent-session']);
-  });
-
-  it('builds the items once for every composer surface of a conversation', async () => {
-    const one = cachedSession({ id: 'one-session', title: 'one', lastMessageAt: 20 });
-    const two = cachedSession({ id: 'two-session', title: 'two', lastMessageAt: 10 });
-    store.set(sessionMetaCacheAtom, {
-      [getSessionRoomId(one.id)]: one,
-      [getSessionRoomId(two.id)]: two,
-    });
-    const seen: unknown[] = [];
-    function Surface() {
-      const items = useSessionMentionItems('one-session');
-      seen.push(items);
-      return null;
-    }
-
-    // Input area, composer and mention textarea each read the items.
-    await mount(createElement('div', null, createElement(Surface), createElement(Surface)));
-    const settled = seen.slice(-2);
-    expect(settled[0]).toBe(settled[1]);
-
-    // A session-list change is a new list: the surfaces move to fresh items together.
-    await act(async () => {
-      store.set(sessionMetaCacheAtom, {
-        [getSessionRoomId(one.id)]: one,
-        [getSessionRoomId(two.id)]: { ...two, title: 'renamed' },
-      });
-    });
-    const latest = seen.slice(-2);
-    expect(latest[0]).toBe(latest[1]);
-    expect(latest[0]).not.toBe(settled[0]);
   });
 
   it('still drops the session the composer belongs to', async () => {

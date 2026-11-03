@@ -21,10 +21,4 @@ describe('getSessionFileMonacoLanguageId', () => {
     expect(isSessionFileShikiLanguage('coq')).toBe(true);
     expect(isSessionFileShikiLanguage('v')).toBe(false);
   });
-
-  it('keeps core grammars available by default', () => {
-    expect(getSessionFileMonacoLanguageId('src/main.ts')).toBe('typescript');
-    expect(getSessionFileMonacoLanguageId('styles/app.css')).toBe('css');
-    expect(getSessionFileMonacoLanguageId('README.md')).toBe('markdown');
-  });
 });

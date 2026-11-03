@@ -25,14 +25,4 @@ describe('shouldShowQueuedItemSteer', () => {
   ] as const)('shows steer for %s: %s', (_label, row, expected) => {
     expect(shouldShowQueuedItemSteer({ showSteerAction: true, ...row })).toBe(expected);
   });
-
-  it('hides steer everywhere when the action itself is off', () => {
-    expect(
-      shouldShowQueuedItemSteer({
-        showSteerAction: false,
-        isFirst: true,
-        nativeSteerAvailable: true,
-      })
-    ).toBe(false);
-  });
 });

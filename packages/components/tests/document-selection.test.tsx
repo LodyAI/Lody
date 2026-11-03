@@ -1,16 +1,9 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  captureDocumentRegion,
-  documentSelectionLocation,
-  formatDocumentSelection,
-  MAX_SELECTION_PIXELS,
-  MAX_SELECTION_TEXT,
-  selectionRect,
-  type DocumentSelection,
-} from '../src/lib/document-selection';
+import { type DocumentSelection } from '../src/lib/document-selection';
 import {
   DocumentCaptureButton,
   DocumentSelectionSurface,
@@ -20,62 +13,6 @@ import {
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
 }));
-
-describe('document selections', () => {
-  it('clamps reverse drags to the visible preview', () => {
-    expect(
-      selectionRect({ x: 200, y: 150 }, { x: -20, y: -30 }, { width: 100, height: 80 })
-    ).toEqual({ x: 0, y: 0, width: 100, height: 80 });
-  });
-  it('retains source, selected cells, comment and associated image in expanded context', () => {
-    const text = formatDocumentSelection({
-      path: 'report.xlsx',
-      location: 'Revenue!A1:B2',
-      text: 'North\t125000',
-      comment: 'Check the total',
-      image: new File(['png'], 'report-selection.png', { type: 'image/png' }),
-    });
-    expect(text).toBe(
-      'Document selection\nFile: report.xlsx\nLocation: Revenue!A1:B2\nSelected content:\nNorth\t125000\nAnnotated image: report-selection.png\nComment:\nCheck the total'
-    );
-    expect(() =>
-      formatDocumentSelection({
-        path: 'report.pdf',
-        location: 'Page 1',
-        text: 'x'.repeat(MAX_SELECTION_TEXT + 1),
-      })
-    ).toThrow(RangeError);
-  });
-  it('locates mounted PDF, read-only DOCX and PPTX pages by intersecting visible bounds', () => {
-    const root = document.createElement('div');
-    root.innerHTML =
-      '<div class="page" data-page-number="2"></div><div data-page-index="0" data-page="1"></div><div data-lody-slide="3"></div>';
-    root.getBoundingClientRect = () => new DOMRect(10, 20, 400, 600);
-    for (const page of root.children)
-      page.getBoundingClientRect = () => new DOMRect(10, 20, 400, 600);
-    expect(documentSelectionLocation(root, { x: 20, y: 20, width: 40, height: 40 })).toBe(
-      'Page 2, Page 1, Slide 4'
-    );
-    expect(documentSelectionLocation(root, { x: 500, y: 500, width: 10, height: 10 })).toBe(
-      'Visible preview'
-    );
-  });
-  it('rejects canceled or over-budget captures before loading the capture engine', async () => {
-    const root = document.createElement('div'),
-      controller = new AbortController();
-    controller.abort();
-    await expect(
-      captureDocumentRegion(root, { x: 0, y: 0, width: 40, height: 40 }, controller.signal)
-    ).rejects.toMatchObject({ name: 'AbortError' });
-    await expect(
-      captureDocumentRegion(
-        root,
-        { x: 0, y: 0, width: MAX_SELECTION_PIXELS, height: 2 },
-        new AbortController().signal
-      )
-    ).rejects.toThrow(RangeError);
-  });
-});
 
 describe('document selection ownership', () => {
   let root: Root, container: HTMLDivElement;

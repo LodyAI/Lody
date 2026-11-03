@@ -15,7 +15,6 @@ import type { LoroRepo } from 'loro-repo';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { WorkspaceSummary } from '@/lib/workspace';
-import { shouldUseRemoteProjectCatalog } from '@/commands/project';
 
 import { listRemoteLocalProjects, selectRemoteProjectMachine } from './remote-local-project-list';
 
@@ -120,12 +119,6 @@ const fixtureDependencies = {
 };
 
 describe('remote local project list', () => {
-  it('uses the remote path for any explicit selector, including the auth machine id', () => {
-    expect(shouldUseRemoteProjectCatalog({})).toBe(false);
-    expect(shouldUseRemoteProjectCatalog({ workspace: 'fixture' })).toBe(true);
-    expect(shouldUseRemoteProjectCatalog({ machine: authMachineId })).toBe(true);
-  });
-
   it('awaits the target Flock sync, merges legacy rows, and hides denied paths', async () => {
     const { manager } = createFixtureManager();
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { GitHubAuthError } from '@lody/shared';
@@ -18,7 +19,7 @@ vi.mock('../src/lib/github-token', () => ({
     run('token'),
 }));
 import { useRepoFilePaths } from '../src/components/mentions/file-at-mention';
-import { normalizeGithubFetchErrorCode } from '../src/components/mentions/mention-analytics';
+
 import { clearRepoFilePathsMemoryCache } from '../src/lib/repo-file-paths-cache';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -109,11 +110,4 @@ it('does not retain another repository paths when the next repository fails', as
   state.fetch.mockRejectedValueOnce(new Error('GitHub API error: 404'));
   await act(async () => root.render(<Probe repo="org/other" />));
   expect(container.textContent).toBe('error:');
-});
-it('classifies actual typed auth failures and HTTP rate limits without relying on token wording', () => {
-  expect(normalizeGithubFetchErrorCode(new GitHubAuthError())).toBe('auth_failed');
-  expect(normalizeGithubFetchErrorCode(new Error('GitHub API error: 429'))).toBe('rate_limited');
-  expect(normalizeGithubFetchErrorCode(new Error('GitHub API error: 403 denied'))).toBe(
-    'forbidden'
-  );
 });

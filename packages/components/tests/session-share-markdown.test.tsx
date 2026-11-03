@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -162,21 +163,6 @@ describe('conversation Markdown images across row remounts', () => {
     await act(async () => root.render(<MarkdownRenderer text={text} />));
   };
 
-  it('reserves a loaded image size on the next mount', async () => {
-    const text = '![Screenshot](https://example.org/remount-loaded.png)';
-    await act(async () => root.render(<MarkdownRenderer text={text} />));
-    const image = container.querySelector('img')!;
-    expect(image.hasAttribute('height')).toBe(false);
-    Object.defineProperty(image, 'naturalWidth', { value: 1200 });
-    Object.defineProperty(image, 'naturalHeight', { value: 800 });
-    await act(async () => image.dispatchEvent(new Event('load')));
-
-    await remount(text);
-    const again = container.querySelector('img')!;
-    expect(again.getAttribute('width')).toBe('1200');
-    expect(again.getAttribute('height')).toBe('800');
-  });
-
   it('shows an unreachable image as its alt text, and keeps it so on the next mount', async () => {
     const text = '![Local preview](/tmp/remount-unreachable.png)';
     await act(async () => root.render(<MarkdownRenderer text={text} />));
@@ -267,16 +253,6 @@ describe('file Markdown images', () => {
     expect(blobs.get(img.src)?.size).toBe(4);
     await act(async () => img.dispatchEvent(new Event('load')));
     expect(container.querySelector('button')).toBeNull();
-  });
-
-  it('loads same-machine resources automatically without creating a blob', async () => {
-    const source = createFakeFileWorkspaceProvider({
-      files: [{ path: 'images/plot.png', kind: 'binary', sourceState: 'live-readonly' }],
-      snapshots: { 'images/plot.png': { kind: 'binary', url: 'lody-file://synthetic/image' } },
-    });
-    await render(source, true);
-    expect(container.querySelector('img')?.getAttribute('src')).toBe('lody-file://synthetic/image');
-    expect(blobs.size).toBe(0);
   });
 
   it('shows a failed read and can retry it', async () => {

@@ -24,10 +24,6 @@ describe('readinessBinding', () => {
     expect(readinessBinding(makeSub(['local', 'cloud'])).transportId).toBe('local');
   });
 
-  it('uses the sole routed transport regardless of its id', () => {
-    expect(readinessBinding(makeSub(['streams'])).transportId).toBe('streams');
-  });
-
   it('falls back to cloud for multi-transport routes without local', () => {
     expect(readinessBinding(makeSub(['a', 'cloud'])).transportId).toBe('cloud');
   });

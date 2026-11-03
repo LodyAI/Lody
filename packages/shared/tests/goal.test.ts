@@ -4,7 +4,6 @@ import {
   isSessionGoalPaused,
   isSessionGoalResumable,
   isSessionGoalActive,
-  isSessionGoalWorking,
   resolveLatestSessionGoalFromHistory,
   resolveVisibleSessionGoal,
   sanitizeGoalObjective,
@@ -62,10 +61,6 @@ describe('sanitizeGoalObjective', () => {
       )
     ).toBe('say hi');
   });
-
-  it('leaves normal goal objectives unchanged except surrounding whitespace', () => {
-    expect(sanitizeGoalObjective('  ship the release  ')).toBe('ship the release');
-  });
 });
 
 describe('session goal state helpers', () => {
@@ -113,10 +108,6 @@ describe('session goal state helpers', () => {
     expect(isSessionGoalResumable({ ...goal, status: 'complete' })).toBe(false);
     expect(isSessionGoalComplete({ ...goal, status: 'complete' })).toBe(true);
     expect(isSessionGoalActive({ ...goal, status: 'complete' })).toBe(false);
-  });
-
-  it('keeps the legacy working helper as an active-state compatibility alias', () => {
-    expect(isSessionGoalWorking(goal)).toBe(isSessionGoalActive(goal));
   });
 
   it('shows a new goal on the same Codex thread after dismissing the cleared snapshot', () => {

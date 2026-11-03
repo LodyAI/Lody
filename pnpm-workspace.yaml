@@ -1,5 +1,4 @@
 packages:
-  - scripts/effect-lint
   - packages/*
   # Full upstream-derived runtime workspace; built and validated independently.
   - '!packages/acp-extension-kimi'

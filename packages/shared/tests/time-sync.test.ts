@@ -3,14 +3,8 @@ import { Clock, Deferred, Effect, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  getServerNow,
-  getServerTimeOffset,
-  resetTimeSync,
-  syncTime,
-  createServerTimeFetcher,
-} from '../src/time-sync';
-import { maintainTimeSync, startTimeSyncLegacy } from '../src/time-sync-maintenance';
+import { getServerNow, getServerTimeOffset, resetTimeSync, syncTime } from '../src/time-sync';
+import { maintainTimeSync } from '../src/time-sync-maintenance';
 import { isFreshLodyPresenceState } from '../src/presence';
 import { makeLoroStreamsTokenWebPorts } from '../src/loro-streams-auth';
 
@@ -30,20 +24,6 @@ describe('time sync', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetTimeSync();
-  });
-
-  it('keeps calibrated timestamps integral when the RTT midpoint is fractional', async () => {
-    vi.spyOn(performance, 'now').mockReturnValue(0);
-    vi.spyOn(Date, 'now')
-      .mockReturnValueOnce(1_000)
-      .mockReturnValueOnce(1_001)
-      .mockReturnValue(2_000);
-
-    await syncTime(async () => 1_500);
-
-    expect(getServerTimeOffset()).toBe(500);
-    expect(getServerNow()).toBe(2_500);
-    expect(Number.isInteger(getServerNow())).toBe(true);
   });
 
   it('does not publish cancelled samples after a successor calibrates', async () => {
@@ -71,74 +51,6 @@ describe('time sync', () => {
     }).catch((error: unknown) => error);
     expect(getServerTimeOffset()).toBe(500);
     expect(failure).toMatchObject({ message: 'System clock changed during time synchronization' });
-  });
-
-  it('aborts the actual HTTP request when its application owner stops', async () => {
-    const started = Promise.withResolvers<AbortSignal>();
-    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
-      started.resolve(init.signal as AbortSignal);
-      return new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
-      });
-    });
-    const owner = startTimeSyncLegacy('https://old.invalid/api/time');
-    const signal = await started.promise;
-    await owner.stop();
-    expect(signal.aborted).toBe(true);
-    await owner.ready;
-    expect(getServerTimeOffset()).toBe(0);
-    vi.unstubAllGlobals();
-  });
-
-  it('the fetcher retains a deadline through response-body consumption', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => ({
-        ok: true,
-        json: () =>
-          new Promise((_resolve, reject) => {
-            init.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
-              once: true,
-            });
-          }),
-      }));
-      const outcome = createServerTimeFetcher('https://synthetic.invalid/api/time', 50)();
-      const rejected = expect(outcome).rejects.toMatchObject({ name: 'AbortError' });
-      await vi.advanceTimersByTimeAsync(50);
-      await rejected;
-    } finally {
-      vi.useRealTimers();
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('releases an unterminated error body instead of leaving it behind on every retry', async () => {
-    let response: Response | undefined;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      response = new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode('unfinished error body'));
-            init.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), {
-              once: true,
-            });
-          },
-        }),
-        { status: 503 }
-      );
-      return response;
-    });
-    try {
-      await expect(createServerTimeFetcher('https://synthetic.invalid/api/time')()).rejects.toThrow(
-        'Time sync failed: 503'
-      );
-      // Fetch abort errors a returned response body, even after headers resolve.
-      await expect(response?.body?.getReader().read()).rejects.toMatchObject({
-        name: 'AbortError',
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 });
 

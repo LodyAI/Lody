@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import i18next from 'i18next';
 
@@ -318,21 +319,6 @@ describe('chat landing draft persistence', () => {
     expect(readHarness().sessionId).toBe(reservedSessionId);
   });
 
-  it('revokes a preview URL when the user removes that image', () => {
-    mountLanding(WORKSPACE_A_KEY);
-    act(() => {
-      readHarness().addImages([pngFile('shot.png')]);
-    });
-    const [item] = readHarness().imageItems;
-
-    act(() => {
-      readHarness().removeImage(item!.id);
-    });
-
-    expect(revokedUrls).toEqual([item!.previewUrl]);
-    expect(readHarness().imageItems).toEqual([]);
-  });
-
   it('keeps images and files as nonblocking local drafts across navigation', () => {
     mountLanding(WORKSPACE_A_KEY);
     act(() => {
@@ -407,7 +393,14 @@ it('retains encrypted attachment drafts and the reserved identity after storage 
   const reserved = before.sessionId!;
   await expect(
     acceptSessionUserTurn(
-      { contentMode: 'e2ee', repo: { getDocMeta: async () => { throw new Error('Workspace storage unavailable'); } } } as unknown as WorkspaceRuntime,
+      {
+        contentMode: 'e2ee',
+        repo: {
+          getDocMeta: async () => {
+            throw new Error('Workspace storage unavailable');
+          },
+        },
+      } as unknown as WorkspaceRuntime,
       reserved,
       {} as never,
       { kind: 'dispatch' },

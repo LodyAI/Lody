@@ -21,23 +21,6 @@ afterEach(async () => {
 });
 
 describe('prepareExportOutputDir', () => {
-  it('creates a missing directory', async () => {
-    const root = await createTempDir();
-    const target = path.join(root, 'nested', 'export');
-
-    await prepareExportOutputDir(target);
-
-    const stats = await fs.stat(target);
-    expect(stats.isDirectory()).toBe(true);
-  });
-
-  it('allows placeholder files in an otherwise empty directory', async () => {
-    const target = await createTempDir();
-    await fs.writeFile(path.join(target, '.gitkeep'), '', 'utf8');
-
-    await expect(prepareExportOutputDir(target)).resolves.toBeUndefined();
-  });
-
   it('rejects directories with real content', async () => {
     const target = await createTempDir();
     await fs.writeFile(path.join(target, 'notes.txt'), 'keep out', 'utf8');

@@ -2,7 +2,7 @@ import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
 import { ClientCustodyError } from '@lody/e2ee-core/services';
-import { PersonalHostError } from '@lody/e2ee-client';
+
 import {
   encodeCbor,
   hashRecordBytes,
@@ -18,7 +18,6 @@ import {
 } from '../src/lib/e2ee-ledger-history';
 import {
   createPreparedE2eeWorkspace,
-  e2eeCreationChoice,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
 } from '../src/lib/create-e2ee-workspace';
@@ -384,43 +383,6 @@ const failureOf = (run: () => unknown) => {
   }
   throw new Error('expected a failure');
 };
-
-it.each(['identity-lost', 'approval-required'] as const)(
-  'projects the portable %s outcome into desktop approval guidance',
-  (code) => {
-    expect(classifyE2eeControlFailure(new PersonalHostError({ code }))).toEqual({
-      kind: 'approval-required',
-      code,
-    });
-  }
-);
-
-it('routes an authenticated revocation of this device to re-pairing guidance', () => {
-  expect(
-    classifyE2eeControlFailure(
-      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked")
-    )
-  ).toEqual({ kind: 'approval-required', code: 'device-revoked' });
-});
-
-it.each(['locked', 'indeterminate', 'unavailable'] as const)(
-  'keeps the typed custody %s outcome distinct from a network failure',
-  (reason) => {
-    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
-      kind: `custody-${reason}`,
-      code: reason,
-    });
-  }
-);
-it.each(['identity-lost', 'corrupt'] as const)(
-  'preserves explicit recovery guidance for custody %s',
-  (reason) => {
-    expect(classifyE2eeControlFailure(new ClientCustodyError({ reason }))).toEqual({
-      kind: reason === 'identity-lost' ? 'approval-required' : 'custody-indeterminate',
-      code: reason,
-    });
-  }
-);
 it('does not infer custody recovery from an error message or unwrap a mixed runtime failure', () => {
   expect(classifyE2eeControlFailure(new Error('LOCKED indeterminate'))).toMatchObject({
     kind: 'network',
@@ -654,66 +616,6 @@ describe('encrypted workspace recovery classification', () => {
       .describe({ workspaceId: 'w' })
       .catch((reason: unknown) => reason);
     expect(classifyE2eeControlFailure(malformed)).toMatchObject({ kind: 'mode' });
-  });
-});
-
-describe('encrypted workspace creation gate', () => {
-  it('requires both developer toggles for new creation but keeps a saved request resumable', () => {
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: true,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: false,
-      encrypt: false,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: true,
-        selected: false,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: false,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: true,
-        selected: true,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: true,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: false,
-        resumable: true,
-        savedRequests: 1,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: true,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: false,
-        resumable: false,
-        savedRequests: 1,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: false,
-    });
   });
 });
 

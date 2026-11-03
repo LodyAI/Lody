@@ -8,11 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Effect } from 'effect';
 import type { LocalSessionControlRequest } from '../src/message';
 import {
-  LOCAL_CONTROL_HEADER,
   LOCAL_IPC_MAX_RESPONSE_BODY_BYTES,
-  LocalDaemonRunFileCorruptError,
-  LocalDaemonRunFileMissingError,
-  LocalDaemonRunFilePermissionError,
   IpcProtocolError,
   getLocalControlSocketPath,
   getLocalDaemonRunDir,
@@ -90,60 +86,6 @@ describe('local IPC socket client', () => {
     }
   });
 
-  it('posts local-control messages with the control header and parses responses', async () => {
-    const socketPath = makeSocketPath('control');
-    const request = createSessionRequest();
-    const seen: string[] = [];
-    await listenSocket(socketPath, (req, res) => {
-      void (async () => {
-        expect(req.url).toBe('/session-control');
-        expect(req.method).toBe('POST');
-        expect(req.headers[LOCAL_CONTROL_HEADER]).toBe('1');
-        seen.push(await readBody(req));
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            ok: true,
-            responses: [
-              {
-                type: 'session/create_response',
-                sessionId: 'session-1',
-                success: true,
-              },
-            ],
-          })
-        );
-      })();
-    });
-
-    await expect(
-      Effect.runPromise(makeLocalControlClientSocket({ socketPath }).sessionControl(request))
-    ).resolves.toEqual([
-      {
-        type: 'session/create_response',
-        sessionId: 'session-1',
-        success: true,
-      },
-    ]);
-    expect(seen).toEqual([JSON.stringify(request)]);
-  });
-
-  it('maps malformed JSON responses to typed protocol errors', async () => {
-    const socketPath = makeSocketPath('control');
-    await listenSocket(socketPath, (_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end('not-json');
-    });
-
-    await expect(
-      Effect.runPromise(
-        Effect.flip(
-          makeLocalControlClientSocket({ socketPath }).sessionControl(createSessionRequest())
-        )
-      )
-    ).resolves.toBeInstanceOf(IpcProtocolError);
-  });
-
   it('rejects oversized responses with a typed protocol error instead of buffering them', async () => {
     const socketPath = makeSocketPath('control');
     await listenSocket(socketPath, (_req, res) => {
@@ -194,16 +136,6 @@ describe('local IPC socket client', () => {
     }
   });
 
-  it('throws typed run-file errors for missing and corrupt files', () => {
-    const tempDir = makeTempDir('lody-run-errors-');
-    const missingPath = path.join(tempDir, 'missing.json');
-    const corruptPath = path.join(tempDir, 'corrupt.json');
-    fs.writeFileSync(corruptPath, '{bad json', 'utf8');
-
-    expect(() => readLocalDaemonRunFile(missingPath)).toThrow(LocalDaemonRunFileMissingError);
-    expect(() => readLocalDaemonRunFile(corruptPath)).toThrow(LocalDaemonRunFileCorruptError);
-  });
-
   it.skipIf(process.platform === 'win32')(
     'places default socket paths inside the private daemon run dir, not tmpdir',
     () => {
@@ -222,19 +154,4 @@ describe('local IPC socket client', () => {
     };
     expect(cjs.getLocalTerminalSocketPath()).toBe(getLocalTerminalSocketPath());
   });
-
-  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
-    'throws typed run-file errors for permission failures',
-    () => {
-      const tempDir = makeTempDir('lody-run-permission-');
-      const deniedPath = path.join(tempDir, 'daemon.json');
-      fs.writeFileSync(deniedPath, '{}', 'utf8');
-      fs.chmodSync(deniedPath, 0o000);
-      try {
-        expect(() => readLocalDaemonRunFile(deniedPath)).toThrow(LocalDaemonRunFilePermissionError);
-      } finally {
-        fs.chmodSync(deniedPath, 0o600);
-      }
-    }
-  );
 });

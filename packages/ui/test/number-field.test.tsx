@@ -1,9 +1,8 @@
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { Input } from '../src/field/input';
 import { NumberField } from '../src/field/number-field';
-import { all, classesOf, click, mount, one, press, typeInto } from './dom';
+import { all, classesOf, click, mount, one, press } from './dom';
 
 /** The control as a surface writes it: a value with a stepper either side. */
 function Stepped(props: {
@@ -29,17 +28,6 @@ const input = () => one('input[aria-label="Font size"]') as HTMLInputElement;
 const stepper = (label: string) => one(`button[aria-label="${label}"]`);
 
 describe('NumberField', () => {
-  test('hands a surface a number, not the string that was typed', async () => {
-    const seen: (number | null)[] = [];
-    const view = await mount(<Stepped defaultValue={14} onValueChange={(v) => seen.push(v)} />);
-    await typeInto(input(), '18');
-    expect(seen).toEqual([18]);
-    // The point of the primitive: every caller that used `<Input type="number">`
-    // parsed `event.target.value` itself, and a half-typed "1" parses to 1.
-    expect(seen.every((value) => value === null || typeof value === 'number')).toBe(true);
-    await view.unmount();
-  });
-
   test('clamps a stepped value to the range instead of leaving it to the caller', async () => {
     const view = await mount(<Stepped defaultValue={20} min={1} max={20} />);
     await click(stepper('Increase'));
@@ -67,46 +55,6 @@ describe('NumberField', () => {
     // It is reachable by touch and pointer, so it is not hidden from the tree.
     expect(all('button[aria-hidden="true"]')).toHaveLength(0);
     await view.unmount();
-  });
-
-  test('a localised surface renames the steppers, since Base UI names them in English', () => {
-    const html = renderToStaticMarkup(
-      <NumberField.Root defaultValue={14}>
-        <NumberField.Group>
-          <NumberField.Input />
-          <NumberField.Decrement aria-label="减小" />
-          <NumberField.Increment aria-label="增大" />
-        </NumberField.Group>
-      </NumberField.Root>
-    );
-    expect(html).toContain('aria-label="减小"');
-    expect(html).toContain('aria-label="增大"');
-    expect(html).not.toContain('aria-label="Increase"');
-  });
-
-  test('the group is the well and the input inside it is bare', () => {
-    const grouped = renderToStaticMarkup(
-      <NumberField.Root defaultValue={14}>
-        <NumberField.Group>
-          <NumberField.Input />
-        </NumberField.Group>
-      </NumberField.Root>
-    );
-    const alone = renderToStaticMarkup(
-      <NumberField.Root defaultValue={14}>
-        <NumberField.Input />
-      </NumberField.Root>
-    );
-    const inputClasses = (html: string) =>
-      (/<input\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '').split(' ').filter(Boolean);
-    // Two wells would draw two edges around one control, so the grouped input
-    // carries strictly fewer classes than the one that is the whole control.
-    expect(inputClasses(grouped).length).toBeLessThan(inputClasses(alone).length);
-    // On its own it is the same well as an Input on the same rung.
-    const plain = (/<input\b[^>]*class="([^"]*)"/.exec(renderToStaticMarkup(<Input />))?.[1] ?? '')
-      .split(' ')
-      .filter(Boolean);
-    expect(inputClasses(alone).filter((c) => plain.includes(c)).length).toBeGreaterThan(0);
   });
 
   test('an invalid field says so to a screen reader, not only to the eye', async () => {

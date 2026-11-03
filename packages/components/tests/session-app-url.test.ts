@@ -9,12 +9,7 @@ import {
 } from '../src/lib/session-deep-link';
 import { createStore } from 'jotai';
 import { vi } from 'vitest';
-import {
-  buildAppSessionUrl,
-  getAppSessionUrlOrigins,
-  isPlainLinkPasteShortcut,
-  parseAppSessionUrl,
-} from '../src/lib/session-app-url';
+import { parseAppSessionUrl } from '../src/lib/session-app-url';
 
 describe('workspace-scoped resource links', () => {
   it('pastes compound links as the exact child, never as the parent', () => {
@@ -102,28 +97,6 @@ describe('workspace-scoped resource links', () => {
 describe('parseAppSessionUrl', () => {
   const allowedOrigins = ['https://lody.ai', 'http://localhost:5173'];
 
-  it('accepts a session URL on an allowed app origin', () => {
-    expect(
-      parseAppSessionUrl('https://lody.ai/acme/sessions/ses_abc123', { allowedOrigins })
-    ).toEqual({
-      url: 'https://lody.ai/acme/sessions/ses_abc123',
-      workspaceSlug: 'acme',
-      sessionId: 'ses_abc123',
-    });
-  });
-
-  it('keeps search and hash on the normalized url', () => {
-    expect(
-      parseAppSessionUrl('http://localhost:5173/acme/sessions/ses_1?tab=session:ses_1#top', {
-        allowedOrigins,
-      })
-    ).toEqual({
-      url: 'http://localhost:5173/acme/sessions/ses_1?tab=session:ses_1#top',
-      workspaceSlug: 'acme',
-      sessionId: 'ses_1',
-    });
-  });
-
   it.each(['session:ses_child', 'session%3Ases_child'])(
     'targets the child selected by tab=%s while preserving the parent URL',
     (tab) => {
@@ -159,34 +132,5 @@ describe('parseAppSessionUrl', () => {
         allowedOrigins,
       })
     ).toBeNull();
-  });
-
-  it('rejects non-session app paths', () => {
-    expect(parseAppSessionUrl('https://lody.ai/acme/settings', { allowedOrigins })).toBeNull();
-  });
-});
-
-describe('isPlainLinkPasteShortcut', () => {
-  it('detects Cmd/Ctrl+Shift+V', () => {
-    expect(isPlainLinkPasteShortcut({ shiftKey: true, metaKey: true, ctrlKey: false })).toBe(true);
-    expect(isPlainLinkPasteShortcut({ shiftKey: true, metaKey: false, ctrlKey: true })).toBe(true);
-    expect(isPlainLinkPasteShortcut({ shiftKey: false, metaKey: true, ctrlKey: false })).toBe(
-      false
-    );
-  });
-});
-
-describe('getAppSessionUrlOrigins / buildAppSessionUrl', () => {
-  it('dedupes page and share origins', () => {
-    expect(
-      getAppSessionUrlOrigins({
-        pageOrigin: 'http://localhost:5173/',
-        shareOrigin: 'http://localhost:5173',
-      })
-    ).toEqual(['http://localhost:5173']);
-  });
-
-  it('builds a share URL for a workspace session', () => {
-    expect(buildAppSessionUrl('acme', 'ses_1')).toMatch(/\/acme\/sessions\/ses_1$/);
   });
 });

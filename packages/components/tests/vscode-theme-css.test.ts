@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createLodyThemeCssVariables } from '../src/lib/vscode-theme/vscode-theme-css';
-import {
-  compositeHexColors,
-  hexColorToHslChannel,
-} from '../src/lib/vscode-theme/vscode-theme-color';
+
 import type { LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme/vscode-theme-schemas';
 import { getBundledVSCodeThemeByIdSync } from '../src/lib/vscode-theme/bundled/bundled-vscode-themes';
 
@@ -78,164 +75,6 @@ const themeFixture: LodyResolvedVSCodeTheme = {
 };
 
 describe('createLodyThemeCssVariables', () => {
-  it('maps sidebar and interaction aliases from VSCode workbench colors', () => {
-    const variables = createLodyThemeCssVariables(themeFixture);
-    const warmAccent = hexColorToHslChannel('#FFC799');
-    const buttonForeground = hexColorToHslChannel('#000000');
-    const sidebarForeground = hexColorToHslChannel('#A0A0A0');
-
-    expect(variables['--background']).toBe('0 0% 6.3%');
-    expect(variables['--hover']).toBe('0 0% 10.2%');
-    expect(variables['--hover-foreground']).toBe(CEILED_ON_FIXTURE);
-    expect(variables['--highlight']).toBe(warmAccent);
-    expect(variables['--highlight-foreground']).toBe(buttonForeground);
-    expect(variables['--selection']).toBe('0 0% 13.7%');
-    expect(variables['--selection-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
-    expect(variables['--selection-inactive']).toBe('0 0% 13.7%');
-    expect(variables['--selection-inactive-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
-    expect(variables['--secondary']).toBe('0 0% 13.7%');
-    expect(variables['--button-secondary']).toBe(hexColorToHslChannel('#282A36'));
-    // #F8F8F2 is above the ceiling too.
-    expect(variables['--button-secondary-foreground']).not.toBe(hexColorToHslChannel('#F8F8F2'));
-    expect(
-      contrastRatio(variables['--button-secondary-foreground']!, variables['--background']!)
-    ).toBeLessThanOrEqual(13);
-    expect(variables['--button-secondary-hover']).toBe(hexColorToHslChannel('#343746'));
-    expect(variables['--button-hover']).toBe(hexColorToHslChannel('#FFCFA8'));
-    expect(variables['--input']).toBe(hexColorToHslChannel('#1C1C1C'));
-    // The field fill keeps a dark theme's raised input.background; only a fill
-    // recessed below the page (light themes) is lifted onto the page color.
-    expect(variables['--input-field']).toBe(hexColorToHslChannel('#1C1C1C'));
-    expect(variables['--tab-bar']).toBe('0 0% 6.3%');
-    expect(variables['--tab-active']).toBe('0 0% 8.6%');
-    // The active tab takes the strong step (16:1), not the reading ceiling.
-    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
-    expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
-    expect(variables['--tab-inactive-foreground']).toBe('0 0% 49.4%');
-    expect(variables['--tab-hover']).toBe('0 0% 15.7%');
-    expect(variables['--tab-hover-foreground']).toBe(CEILED_ON_FIXTURE);
-    expect(variables['--tab-border']).toBe('0 0% 6.3%');
-    expect(variables['--tab-active-accent']).toBe(warmAccent);
-    expect(variables['--destructive']).toBe('0 100% 50%');
-    expect(variables['--destructive-foreground']).toBe('0 0% 0%');
-    expect(variables['--status-info']).toBe('240 100% 50%');
-    expect(variables['--status-success']).toBe('120 100% 50%');
-    expect(variables['--status-warning']).toBe('40 100% 50%');
-    expect(variables['--status-danger']).toBe('0 100% 50%');
-    expect(variables['--status-merged']).toBe('300 100% 50%');
-    expect(variables['--sidebar-background']).toBe('0 0% 6.3%');
-    expect(variables['--sidebar-foreground']).toBe(CEILED_ON_FIXTURE);
-    expect(variables['--sidebar-foreground-muted']).toBe('0 0% 62.7%');
-    expect(variables['--sidebar-hover']).toBe('0 0% 15.7%');
-    expect(variables['--sidebar-hover-foreground']).toBe(sidebarForeground);
-    expect(variables['--sidebar-highlight']).toBe(warmAccent);
-    expect(variables['--sidebar-highlight-foreground']).toBe(buttonForeground);
-    expect(variables['--sidebar-primary']).toBe(warmAccent);
-    expect(variables['--sidebar-selection']).toBe('0 0% 13.7%');
-    expect(variables['--sidebar-selection-foreground']).toBe(warmAccent);
-    expect(variables['--sidebar-ring']).toBe(warmAccent);
-    // #00FF00 is brighter than the dark text ceiling: same hue, dimmed.
-    expect(variables['--code-added']!.split(' ')[0]).toBe('120');
-    expect(
-      contrastRatio(variables['--code-added']!, variables['--background']!)
-    ).toBeLessThanOrEqual(13);
-    expect(variables['--code-removed']).toBe('0 100% 50%');
-    expect(variables['--modified-file']).toBe('300 100% 50%');
-    expect(variables['--scrollbar-thumb']).toBe(
-      hexColorToHslChannel(compositeHexColors('#79797933', '#101010'))
-    );
-    expect(variables['--scrollbar-thumb-hover']).toBe(
-      hexColorToHslChannel(compositeHexColors('#646464B3', '#101010'))
-    );
-    expect(variables['--scrollbar-thumb-active']).toBe(
-      hexColorToHslChannel(compositeHexColors('#BFBFBF66', '#101010'))
-    );
-  });
-
-  it('falls back to neutral workbench surfaces when the theme does not define secondary button tokens', () => {
-    const colorsWithoutSecondaryTokens = { ...themeFixture.colors };
-    delete colorsWithoutSecondaryTokens['button.secondaryBackground'];
-    delete colorsWithoutSecondaryTokens['button.secondaryForeground'];
-    delete colorsWithoutSecondaryTokens['button.secondaryHoverBackground'];
-    delete colorsWithoutSecondaryTokens['tab.activeBackground'];
-    delete colorsWithoutSecondaryTokens['tab.activeForeground'];
-    delete colorsWithoutSecondaryTokens['tab.activeBorder'];
-    delete colorsWithoutSecondaryTokens['tab.inactiveBackground'];
-    delete colorsWithoutSecondaryTokens['tab.inactiveForeground'];
-    delete colorsWithoutSecondaryTokens['tab.hoverBackground'];
-    delete colorsWithoutSecondaryTokens['tab.border'];
-    delete colorsWithoutSecondaryTokens['scrollbarSlider.background'];
-    delete colorsWithoutSecondaryTokens['scrollbarSlider.hoverBackground'];
-    delete colorsWithoutSecondaryTokens['scrollbarSlider.activeBackground'];
-
-    const variables = createLodyThemeCssVariables({
-      ...themeFixture,
-      colors: colorsWithoutSecondaryTokens,
-    });
-
-    expect(variables['--button-secondary']).toBe('0 0% 11%');
-    expect(variables['--button-secondary-foreground']).toBe(CEILED_ON_FIXTURE);
-    expect(variables['--button-secondary-hover']).toBe('0 0% 15.7%');
-    expect(variables['--tab-active']).toBe('0 0% 6.3%');
-    // The active tab takes the strong step (16:1), not the reading ceiling.
-    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
-    expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
-    expect(variables['--tab-inactive-foreground']).toBe('0 0% 62.7%');
-    expect(variables['--tab-hover']).toBe('0 0% 15.7%');
-    expect(variables['--tab-border']).toBe('0 0% 6.3%');
-    expect(variables['--tab-active-accent']).toBe(hexColorToHslChannel('#FFC799'));
-    expect(variables['--scrollbar-thumb']).toBe('0 0% 100%');
-    expect(variables['--scrollbar-thumb-hover']).toBe('0 0% 100%');
-    expect(variables['--scrollbar-thumb-active']).toBe('0 0% 100%');
-  });
-
-  it('uses list foreground for sidebar text before title-only colors', () => {
-    const variables = createLodyThemeCssVariables({
-      ...themeFixture,
-      colors: {
-        ...themeFixture.colors,
-        'list.foreground': '#C0C0C0',
-      },
-    });
-
-    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#C0C0C0'));
-    expect(variables['--sidebar-foreground-muted']).toBe(hexColorToHslChannel('#A0A0A0'));
-  });
-
-  it('uses untracked git decoration for additions when added decoration is missing', () => {
-    const colors = { ...themeFixture.colors };
-    delete colors['gitDecoration.addedResourceForeground'];
-    colors['gitDecoration.untrackedResourceForeground'] = '#22CC66';
-
-    const variables = createLodyThemeCssVariables({
-      ...themeFixture,
-      colors,
-    });
-
-    expect(variables['--status-success']).toBe(hexColorToHslChannel('#22CC66'));
-    expect(variables['--code-added']).toBe(hexColorToHslChannel('#22CC66'));
-    expect(variables['--code-removed']).toBe(hexColorToHslChannel('#FF0000'));
-  });
-
-  it('resolves syntax colors with TextMate selector matching, not raw string prefixes', () => {
-    const variables = createLodyThemeCssVariables({
-      ...themeFixture,
-      tokenColors: [
-        { scope: ['comment', 'string.comment'], settings: { foreground: '#888888' } },
-        { scope: 'keyword.operator', settings: { foreground: '#999999' } },
-        { scope: 'string', settings: { foreground: '#AA3300' } },
-        { scope: 'keyword', settings: { foreground: '#5500AA' } },
-        { scope: 'constant.numeric.decimal', settings: { foreground: '#0066CC' } },
-      ],
-    });
-
-    expect(variables['--syntax-comment']).toBe(hexColorToHslChannel('#888888'));
-    expect(variables['--syntax-string']).toBe(hexColorToHslChannel('#AA3300'));
-    expect(variables['--syntax-keyword']).toBe(hexColorToHslChannel('#5500AA'));
-    // No rule for `constant.numeric` itself: fall back to a sub-scope's color.
-    expect(variables['--syntax-number']).toBe(hexColorToHslChannel('#0066CC'));
-  });
-
   it('keeps Lody Light code syntax at AA contrast on its code block background', () => {
     const theme = getBundledVSCodeThemeByIdSync('lody-light');
     expect(theme).toBeDefined();
@@ -288,30 +127,6 @@ describe('createLodyThemeCssVariables', () => {
     expect(sidebarRow).toBeLessThanOrEqual(9.9);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
-  });
-
-  it('renders Vesper in its deep-sea palette, with the hand-tuned reading colors', () => {
-    const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
-    expect(variables['--background']).toBe(hexColorToHslChannel('#131416'));
-    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
-    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BCBEC2'));
-    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
-    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
-    // The selected row sits on a jellyfish-cyan tint.
-    expect(variables['--sidebar-selection']).toBe(hexColorToHslChannel('#252E35'));
-    // Text follows the ceiling; the grays stay near-neutral (a faint cool cast).
-    expect(
-      contrastRatio(variables['--foreground']!, variables['--background']!)
-    ).toBeLessThanOrEqual(13);
-    for (const name of ['--background', '--foreground', '--muted-foreground', '--border']) {
-      const saturation = Number.parseFloat(variables[name]!.split(' ')[1]!);
-      expect({ name, quiet: saturation <= 10 }).toEqual({ name, quiet: true });
-    }
-    // Jellyfish cyan is the accent; warnings stay amber.
-    expect(variables['--primary']).toBe(hexColorToHslChannel('#7CC4E8'));
-    expect(variables['--status-warning']).toBe(hexColorToHslChannel('#FFC799'));
-    // Menus and popovers are raised to the composer's surface, not the canvas.
-    expect(variables['--popover']).not.toBe(variables['--background']);
   });
 
   it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {

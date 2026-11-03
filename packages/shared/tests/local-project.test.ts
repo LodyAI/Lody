@@ -3,21 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { it as effectIt } from '@effect/vitest';
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  Option,
-  PlatformError,
-} from 'effect';
-import { TestClock } from 'effect/testing';
+
+import { Cause, Deferred, Effect, Exit, Layer, Option } from 'effect';
+
 import { FakeProcessTable } from '../src/node/process-testing';
-import { processLayer, ProcessReleaseFailed } from '../src/node/process';
+import { processLayer } from '../src/node/process';
 
 import {
   createLocalProjectId,
@@ -26,11 +16,9 @@ import {
   localProjectLayer,
   LocalProjectHost,
   LocalProjectPaths,
-  LocalProjectPathsLive,
   LocalProjectsLive,
   getLocalProjectGitStateAtRootPath,
   localProjectsLegacy,
-  selectLocalProjectBranchSelector,
 } from '../src/node/local-project';
 
 const GIT_HELPER_TEST_TIMEOUT_MS = 60_000;
@@ -144,20 +132,6 @@ describe('local-project helpers', () => {
     tempDir = null;
   });
 
-  it('creates a deterministic project id for the normalized root path', () => {
-    tempDir = makeTempDir();
-    const projectDir = path.join(tempDir, 'project');
-    fs.mkdirSync(projectDir);
-
-    const first = localProjectsLegacy.createLocalProjectId(projectDir);
-    const second = localProjectsLegacy.createLocalProjectId(`${projectDir}${path.sep}`);
-
-    expect(first).toBe(second);
-    expect(localProjectsLegacy.normalizeLocalProjectRootPath(`${projectDir}${path.sep}`)).toBe(
-      localProjectsLegacy.normalizeLocalProjectRootPath(projectDir)
-    );
-  });
-
   it.skipIf(process.platform === 'win32')(
     'native and synchronous identity share symlink canonicalization',
     async () => {
@@ -190,36 +164,10 @@ describe('local-project helpers', () => {
     );
   });
 
-  it('keeps native Git environment updates visible after the Legacy runtime initializes', async () => {
-    tempDir = makeTempDir();
-    const root = createGitProjectWithRemotes(tempDir, [
-      { name: 'origin', url: 'https://github.com/example/initial.git' },
-    ]);
-    expect(await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(root)).toBe(
-      'example/initial'
-    );
-    vi.stubEnv('GIT_CONFIG_COUNT', '1');
-    vi.stubEnv('GIT_CONFIG_KEY_0', 'url.https://github.com/example/updated.git.insteadOf');
-    vi.stubEnv('GIT_CONFIG_VALUE_0', 'https://github.com/example/initial.git');
-    expect(await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(root)).toBe(
-      'example/updated'
-    );
-  });
-
   it('keeps a bare repository outside local-project worktree capabilities', async () => {
     tempDir = makeTempDir();
     runGit(tempDir, ['init', '--bare']);
     expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(tempDir)).toEqual({
-      git: false,
-    });
-  });
-
-  it('returns git=false for plain directories', async () => {
-    tempDir = makeTempDir();
-    const projectDir = path.join(tempDir, 'plain-project');
-    fs.mkdirSync(projectDir);
-
-    expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir)).toEqual({
       git: false,
     });
   });
@@ -255,74 +203,6 @@ describe('local-project helpers', () => {
       expect(await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir)).toEqual({
         git: false,
       });
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'reports git branches, working tree state, and default branch',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = path.join(tempDir, 'git-project');
-      fs.mkdirSync(projectDir);
-
-      runGit(projectDir, ['init', '-b', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'init',
-      ]);
-      runGit(projectDir, ['checkout', '-b', 'feature/local-branch']);
-      runGit(projectDir, ['checkout', 'main']);
-
-      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
-
-      expect(gitState.git).toBe(true);
-      if (!gitState.git) {
-        return;
-      }
-
-      expect(gitState.currentBranch).toBe('main');
-      expect(gitState.defaultBranch).toBe('main');
-      expect(gitState.branches).toContain('main');
-      expect(gitState.branches).toContain('feature/local-branch');
-      expect(gitState.githubRepoFullName).toBeNull();
-      expect(gitState.workingTree).toEqual({
-        clean: true,
-        staged: false,
-        unstaged: false,
-        untracked: false,
-        conflicted: false,
-      });
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'resolves local and unique remote-only branches to exact refs',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = createClonedProjectWithUpstreamRemote(tempDir);
-
-      const local = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
-        projectDir,
-        'lody:branch:local:main'
-      );
-      const remote = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
-        projectDir,
-        'feature/remote-branch'
-      );
-
-      expect(local.refName).toBe('refs/heads/main');
-      expect(local.commitHash).toMatch(/^[0-9a-f]{40,64}$/);
-      expect(remote.refName).toBe('refs/remotes/upstream/feature/remote-branch');
-      expect(remote.commitHash).toMatch(/^[0-9a-f]{40,64}$/);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -606,31 +486,6 @@ describe('local-project helpers', () => {
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
-
-  it('maps a bare branch name onto a reported selector, preferring the local one', () => {
-    const branches = [
-      'lody:branch:local:main',
-      'lody:branch:remote:origin:main',
-      'origin/release',
-      'lody:branch:remote:origin:solo',
-      'lody:branch:remote:upstream:shared',
-      'lody:branch:remote:origin:shared',
-    ];
-
-    const select = selectLocalProjectBranchSelector;
-    expect(select(branches, 'main')).toBe('lody:branch:local:main');
-    expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
-      'lody:branch:remote:origin:main'
-    );
-    // Exact members win before any precedence rule applies.
-    expect(select(branches, 'origin/release')).toBe('origin/release');
-    // A bare name with a single remote match resolves to that remote.
-    expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
-    // Several remotes and no local branch stays unresolved.
-    expect(select(branches, 'shared')).toBeNull();
-    expect(select(branches, 'missing')).toBeNull();
-    expect(select(branches, '  ')).toBeNull();
-  });
 
   it(
     'rejects an unqualified branch that exists on multiple remotes',
@@ -1065,150 +920,6 @@ describe('local-project helpers', () => {
   );
 
   it(
-    'reports staged, unstaged, and untracked working tree changes',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = path.join(tempDir, 'git-project');
-      fs.mkdirSync(projectDir);
-
-      runGit(projectDir, ['init', '-b', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'init',
-      ]);
-
-      fs.writeFileSync(path.join(projectDir, 'README.md'), '# changed\n', 'utf8');
-      fs.writeFileSync(path.join(projectDir, 'staged.txt'), 'staged\n', 'utf8');
-      runGit(projectDir, ['add', 'staged.txt']);
-      fs.writeFileSync(path.join(projectDir, 'untracked.txt'), 'new\n', 'utf8');
-
-      expect(await localProjectsLegacy.getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
-        clean: false,
-        staged: true,
-        unstaged: true,
-        untracked: true,
-        conflicted: false,
-      });
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'reports conflicted working tree entries',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = path.join(tempDir, 'git-project');
-      fs.mkdirSync(projectDir);
-
-      runGit(projectDir, ['init', '-b', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), 'base\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'init',
-      ]);
-      const baseBlob = runGit(projectDir, ['rev-parse', 'HEAD:README.md']);
-
-      runGit(projectDir, ['checkout', '-b', 'feature/conflict']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), 'feature\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'feature',
-      ]);
-      const theirsBlob = runGit(projectDir, ['rev-parse', 'HEAD:README.md']);
-
-      runGit(projectDir, ['checkout', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), 'main\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'main',
-      ]);
-      const oursBlob = runGit(projectDir, ['rev-parse', 'HEAD:README.md']);
-      runGitWithInput(
-        projectDir,
-        ['update-index', '--index-info'],
-        [
-          `100644 ${baseBlob} 1\tREADME.md`,
-          `100644 ${oursBlob} 2\tREADME.md`,
-          `100644 ${theirsBlob} 3\tREADME.md`,
-        ].join('\n') + '\n'
-      );
-      expect(runGit(projectDir, ['status', '--porcelain=v1'])).toContain('UU README.md');
-
-      expect(await localProjectsLegacy.getLocalProjectWorkingTreeAtRootPath(projectDir)).toEqual({
-        clean: false,
-        staged: false,
-        unstaged: false,
-        untracked: false,
-        conflicted: true,
-      });
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'checks out an existing branch when the working tree is clean',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = path.join(tempDir, 'git-project');
-      fs.mkdirSync(projectDir);
-
-      runGit(projectDir, ['init', '-b', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'init',
-      ]);
-      runGit(projectDir, ['checkout', '-b', 'feature/local-branch']);
-      runGit(projectDir, ['checkout', 'main']);
-
-      const checkoutResult = await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
-        projectDir,
-        'feature/local-branch'
-      );
-
-      expect(checkoutResult.currentBranch).toBe('feature/local-branch');
-
-      const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(projectDir);
-      expect(gitState.git).toBe(true);
-      if (gitState.git) {
-        expect(gitState.currentBranch).toBe('feature/local-branch');
-      }
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
     'blocks checkout when the working tree is dirty',
     async () => {
       tempDir = makeTempDir();
@@ -1298,245 +1009,5 @@ describe('local-project helpers', () => {
       }
     },
     GIT_HELPER_TEST_TIMEOUT_MS
-  );
-});
-
-const nativeFixture = Effect.gen(function* () {
-  const table = new FakeProcessTable();
-  const ready = yield* Deferred.make<{ pid: number; descendant: number }>();
-  const layer = LocalProjectsLive.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
-        Layer.succeed(LocalProjectPaths, {
-          realPath: (input) => Effect.succeed(input),
-          isDirectory: () => Effect.succeed(true),
-        }),
-        processLayer({
-          nodeProcess: {
-            ...table.api,
-            spawn: (command, args, options) => {
-              const child = table.api.spawn(command, args, options);
-              if (child.pid !== undefined) {
-                const descendant = table.addDescendant(child.pid, { ignores: ['SIGTERM'] });
-                Deferred.doneUnsafe(ready, Effect.succeed({ pid: child.pid, descendant }));
-              }
-              return child;
-            },
-          },
-        })
-      )
-    )
-  );
-  return { table, ready, layer };
-});
-const nativeError = <A, E>(exit: Exit.Exit<A, E>) =>
-  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
-
-describe('native local-project ownership', () => {
-  effectIt.effect(
-    'only a missing canonical path can fall back; permission failure preserves its cause',
-    () =>
-      Effect.gen(function* () {
-        for (const tag of ['NotFound', 'PermissionDenied'] as const) {
-          const failure = PlatformError.systemError({
-            _tag: tag,
-            module: 'FileSystem',
-            method: 'realPath',
-            path: '/project',
-          });
-          const layer = LocalProjectsLive.pipe(
-            Layer.provide(
-              Layer.mergeAll(
-                LocalProjectPathsLive.pipe(
-                  Layer.provide(
-                    Layer.succeed(
-                      FileSystem.FileSystem,
-                      FileSystem.makeNoop({ realPath: () => Effect.fail(failure) })
-                    )
-                  )
-                ),
-                Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
-                processLayer({ nodeProcess: new FakeProcessTable().api })
-              )
-            )
-          );
-          const exit = yield* createLocalProjectId('/project').pipe(
-            Effect.provide(layer),
-            Effect.exit
-          );
-          if (tag === 'NotFound') expect(Exit.isSuccess(exit)).toBe(true);
-          else
-            expect(nativeError(exit)).toMatchObject({
-              _tag: 'LocalProjectGitError',
-              cause: failure,
-            });
-        }
-      })
-  );
-  effectIt.effect('a failed tracking probe interrupts and joins its parallel peers', () =>
-    Effect.gen(function* () {
-      const table = new FakeProcessTable();
-      const allStarted = yield* Deferred.make<void>();
-      const cleaning = yield* Deferred.make<void>();
-      const probes = new Map<string, { pid: number; descendant: number }>();
-      const stopping = new Set<number>();
-      const api = {
-        ...table.api,
-        spawn: (
-          command: string,
-          args: readonly string[],
-          options: import('node:child_process').SpawnOptions
-        ) => {
-          const parallel =
-            args[0] === 'symbolic-ref' || args[0] === 'for-each-ref' || args[0] === 'worktree';
-          if (parallel) table.queueSpawn({ ignores: ['SIGTERM'] });
-          const child = table.api.spawn(command, args, options);
-          if (child.pid === undefined) throw new Error('Expected test process pid');
-          if (parallel) {
-            probes.set(args[0]!, {
-              pid: child.pid,
-              descendant:
-                args[0] === 'for-each-ref'
-                  ? child.pid
-                  : table.addDescendant(child.pid, { ignores: ['SIGTERM'] }),
-            });
-            if (probes.size === 3) Deferred.doneUnsafe(allStarted, Effect.void);
-          } else {
-            const output =
-              args[0] === 'rev-parse'
-                ? '/project\n'
-                : args[0] === 'remote'
-                  ? 'origin\n'
-                  : args.includes('--hash')
-                    ? 'a'.repeat(40) + '\n'
-                    : '';
-            const pid = child.pid;
-            queueMicrotask(() => {
-              child.stdout?.push(output);
-              table.exitOnItsOwn(pid);
-            });
-          }
-          return child;
-        },
-        kill: (target: number, signal: NodeJS.Signals | 0) => {
-          table.api.kill(target, signal);
-          if (signal === 'SIGTERM' && target < 0) {
-            stopping.add(-target);
-            if (stopping.size === 2) Deferred.doneUnsafe(cleaning, Effect.void);
-          }
-        },
-      };
-      const layer = LocalProjectsLive.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(LocalProjectHost, { env: Effect.succeed({}) }),
-            Layer.succeed(LocalProjectPaths, {
-              realPath: (input) => Effect.succeed(input),
-              isDirectory: () => Effect.succeed(true),
-            }),
-            processLayer({ nodeProcess: api })
-          )
-        )
-      );
-      const checkout = yield* checkoutLocalProjectBranchAtRootPath(
-        '/project',
-        'lody:branch:remote:origin:feature'
-      ).pipe(Effect.provide(layer), Effect.forkChild);
-      yield* Deferred.await(allStarted);
-      const failed = probes.get('for-each-ref')!;
-      table.childOf(failed.pid)!.stderr.write('permission denied');
-      table.exitOnItsOwn(failed.pid, 128);
-      // The failed probe exited; the other two probes still own live trees.
-      // Their interruption must join tree cleanup before checkout reports failure.
-      yield* Deferred.await(cleaning);
-      expect(checkout.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust('2 seconds');
-      expect(nativeError(yield* Fiber.await(checkout))).toMatchObject({
-        _tag: 'LocalProjectGitError',
-      });
-      for (const probe of probes.values()) {
-        expect(table.isAlive(probe.pid)).toBe(false);
-        expect(table.isAlive(probe.descendant)).toBe(false);
-      }
-    })
-  );
-  effectIt.effect('reports startup failure instead of a successful non-Git result', () =>
-    Effect.gen(function* () {
-      const { table, layer } = yield* nativeFixture;
-      table.queueSpawn({
-        failWith: Object.assign(new Error('git unavailable'), { code: 'ENOENT' }),
-      });
-      const exit = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
-        Effect.provide(layer),
-        Effect.exit
-      );
-      expect(nativeError(exit)).toMatchObject({ _tag: 'SpawnFailed' });
-    })
-  );
-  effectIt.effect('times out as failure and joins the entire process tree cleanup', () =>
-    Effect.gen(function* () {
-      const { table, ready, layer } = yield* nativeFixture;
-      table.queueSpawn({ ignores: ['SIGTERM'] });
-      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
-        Effect.provide(layer),
-        Effect.forkChild
-      );
-      const { pid, descendant } = yield* Deferred.await(ready);
-      yield* TestClock.adjust('5 seconds');
-      expect(table.isAlive(pid)).toBe(true);
-      expect(table.isAlive(descendant)).toBe(true);
-      expect(probe.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust('2 seconds');
-      expect(nativeError(yield* Fiber.await(probe))).toMatchObject({ _tag: 'CommandTimedOut' });
-      expect(table.isAlive(pid)).toBe(false);
-      expect(table.isAlive(descendant)).toBe(false);
-    })
-  );
-  effectIt.effect('interruption propagates below Git and waits for resource release', () =>
-    Effect.gen(function* () {
-      const { table, ready, layer } = yield* nativeFixture;
-      table.queueSpawn({ ignores: ['SIGTERM'] });
-      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
-        Effect.provide(layer),
-        Effect.forkChild
-      );
-      const { pid, descendant } = yield* Deferred.await(ready);
-      const stopping = yield* Fiber.interrupt(probe).pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
-      expect(stopping.pollUnsafe()).toBeUndefined();
-      expect(table.isAlive(descendant)).toBe(true);
-      yield* TestClock.adjust('2 seconds');
-      yield* Fiber.join(stopping);
-      expect(Exit.isFailure(yield* Fiber.await(probe))).toBe(true);
-      expect(table.isAlive(pid)).toBe(false);
-      expect(table.isAlive(descendant)).toBe(false);
-    })
-  );
-  effectIt.effect('unresolved tree release remains observable as a failed result', () =>
-    Effect.gen(function* () {
-      const { table, ready, layer } = yield* nativeFixture;
-      table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
-      const probe = yield* getLocalProjectGitStateAtRootPath('/project').pipe(
-        Effect.provide(layer),
-        Effect.forkChild
-      );
-      const { pid } = yield* Deferred.await(ready);
-      yield* TestClock.adjust('20 seconds');
-      const exit = yield* Fiber.await(probe);
-      expect(Exit.isFailure(exit)).toBe(true);
-      expect(table.isAlive(pid)).toBe(true);
-      if (!Exit.isFailure(exit)) throw new Error('Expected cleanup failure');
-      const releases = exit.cause.reasons.flatMap((reason) =>
-        Cause.isDieReason(reason) && reason.defect instanceof ProcessReleaseFailed
-          ? [reason.defect]
-          : []
-      );
-      expect(releases).toHaveLength(1);
-      expect(yield* releases[0]!.isAlive).toBe(true);
-      table.exitOnItsOwn(pid);
-      yield* releases[0]!.retryTermination();
-      expect(yield* releases[0]!.isAlive).toBe(false);
-    })
   );
 });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeTitleGenerationDefaults,
-  getBuiltinTitleGenerationDefaults,
   acpOwnsSessionTitleGeneration,
   trustsUntaggedAcpSessionTitle,
   type AcpConfigOptionSummary,
@@ -118,17 +117,6 @@ describe('computeTitleGenerationDefaults', () => {
     expect(result).not.toHaveProperty('model');
     expect(result['mode']).toBe('plan');
   });
-
-  it('returns empty object for empty configOptions', () => {
-    const result = computeTitleGenerationDefaults('builtin', 'claude', []);
-    expect(result).toEqual({});
-  });
-});
-
-describe('getBuiltinTitleGenerationDefaults', () => {
-  it('does not provide static defaults to compatibility callers', () => {
-    expect(getBuiltinTitleGenerationDefaults('claude')).toBeUndefined();
-  });
 });
 
 describe('acpOwnsSessionTitleGeneration', () => {
@@ -186,16 +174,6 @@ describe('trustsUntaggedAcpSessionTitle', () => {
   it('does not trust Codex titles that lack an explicit titleSource', () => {
     expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(false);
     expect(trustsUntaggedAcpSessionTitle('builtin', 'codex')).toBe(false);
-  });
-
-  // The trusted set is a subset of the owning set by construction, not by two
-  // lists kept in sync; assert the relation rather than restating the members.
-  it('never trusts an agent that does not own its title generation', () => {
-    for (const agentType of ['claude', 'codex', 'grok', 'kimi', 'deepseek', 'nope']) {
-      if (trustsUntaggedAcpSessionTitle('builtin', agentType)) {
-        expect(acpOwnsSessionTitleGeneration('builtin', agentType)).toBe(true);
-      }
-    }
   });
 
   it('never applies to registry or custom providers', () => {

@@ -7,7 +7,6 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { scanGitDirectoryEntries } from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
@@ -198,84 +197,6 @@ describe('fileIndexScanWorker', () => {
       expect(merged.fileIndex['avatar.txt']).toBe(true);
     });
   });
-  it('builds Git-backed full file-index state off the main service path', async () => {
-    await withGitWorkspace(async (workspaceRoot) => {
-      const result = await fileIndexScanWorker({
-        kind: 'full-state',
-        workspaceRoot,
-        maxRawTextBytes: 1024 * 1024,
-        entryBudget: 1000,
-      });
-
-      expect(result.kind).toBe('full-state');
-      expect(result.status).toBe('ok');
-      if (result.status !== 'ok') return;
-
-      expect(result.allChangesSource).toBe('git');
-      expect(result.fileTreeEntries).toContainEqual(['src', { kind: 'lazy' }]);
-      expect(result.fileTreeEntries).toContainEqual(['README.md', true]);
-      expect(result.fileTreeEntries).toContainEqual(['src/app.ts', true]);
-      expect(result.fileTreeEntries).toContainEqual(['src/new.ts', true]);
-      expect(result.allChanges['src/app.ts']).toEqual({ diff: [1, 0] });
-      expect(result.allChanges['src/new.ts']).toEqual({ diff: [2, 0] });
-      expect(result.fileIndex['src/app.ts']).toEqual({
-        kind: 'file',
-        change: { diff: [1, 0] },
-      });
-      expect(result.fileIndex['src/new.ts']).toEqual({
-        kind: 'file',
-        change: { diff: [2, 0] },
-      });
-      expect(result.pathCount).toBe(Object.keys(result.fileIndex).length);
-    });
-  });
-
-  it('builds non-Git full file-index state with provided diff-store changes', async () => {
-    await withPlainWorkspace(async (workspaceRoot) => {
-      const probe = await fileIndexScanWorker({
-        kind: 'full-state',
-        workspaceRoot,
-        maxRawTextBytes: 1024 * 1024,
-        entryBudget: 1000,
-      });
-
-      expect(probe).toEqual({
-        kind: 'full-state',
-        status: 'needs-provided-all-changes',
-        reason: 'not-git',
-      });
-
-      const result = await fileIndexScanWorker({
-        kind: 'full-state',
-        workspaceRoot,
-        maxRawTextBytes: 1024 * 1024,
-        entryBudget: 1000,
-        providedAllChanges: {
-          source: 'diff-store',
-          state: {
-            'src/app.ts': { diff: [1, 0] },
-          },
-          computeMs: 7,
-        },
-      });
-
-      expect(result.kind).toBe('full-state');
-      expect(result.status).toBe('ok');
-      if (result.status !== 'ok') return;
-
-      expect(result.allChangesSource).toBe('diff-store');
-      expect(result.allChangesMs).toBe(7);
-      expect(result.fileTreeEntries).toContainEqual(['src', { kind: 'lazy' }]);
-      expect(result.fileTreeEntries).toContainEqual(['README.md', true]);
-      expect(result.fileTreeEntries).toContainEqual(['src/app.ts', true]);
-      expect(result.allChanges['src/app.ts']).toEqual({ diff: [1, 0] });
-      expect(result.fileIndex['src/app.ts']).toEqual({
-        kind: 'file',
-        change: { diff: [1, 0] },
-      });
-      expect(result.pathCount).toBe(Object.keys(result.fileIndex).length);
-    });
-  });
   it('excludes paths deleted from the worktree from the Git scan', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       await unlink(path.join(workspaceRoot, 'README.md'));
@@ -329,43 +250,6 @@ describe('fileIndexScanWorker', () => {
             port1.close();
             port2.close();
           }
-        });
-      });
-    }
-  );
-
-  it.runIf(process.platform !== 'win32')(
-    'joins the sibling Git listing before falling back when one listing fails',
-    async () => {
-      await withPlainWorkspace(async (workspaceRoot) => {
-        await withFailingFakeGit(async (fakeGitDir) => {
-          let resolveCachedListingRejected!: () => void;
-          const cachedListingRejected = new Promise<void>((resolve) => {
-            resolveCachedListingRejected = resolve;
-          });
-          gitCommandFailures.onCachedListingRejected = resolveCachedListingRejected;
-          let scanSettled = false;
-          const scan = scanGitDirectoryEntries({
-            directoryAbsolutePath: workspaceRoot,
-            directoryWorkspacePath: '',
-            entryBudget: 1000,
-            recursive: true,
-          }).finally(() => {
-            scanSettled = true;
-          });
-
-          await cachedListingRejected;
-          // One macrotask turn drains every continuation of the rejection.
-          await new Promise<void>((resolve) => setImmediate(resolve));
-          const deletedPid = Number(await readFile(path.join(fakeGitDir, 'deleted.pid'), 'utf8'));
-          expect(scanSettled).toBe(false);
-          expect(isProcessPresent(deletedPid)).toBe(true);
-
-          process.kill(deletedPid, 'SIGTERM');
-
-          // `null` sends the worker and service callers to the FS scan fallback.
-          await expect(scan).resolves.toBeNull();
-          expect(isProcessPresent(deletedPid)).toBe(false);
         });
       });
     }

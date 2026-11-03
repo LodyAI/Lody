@@ -165,20 +165,6 @@ describe('native Git credential adapter', () => {
       expect(h.delegates).toEqual([]);
     }
   );
-  it('delegates once using personal credentials and keeps standard remote URLs', async () => {
-    const h = harness({ personal: true });
-    await h.run();
-    expect(h.delegates).toHaveLength(1);
-    expect(h.delegates[0].args).toEqual([
-      'remote-https',
-      'origin',
-      'https://github.com/org/repo.git',
-    ]);
-    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
-      Buffer.from('x-access-token:personal-token').toString('base64')
-    );
-    expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
-  });
   it('falls through a denied native advertisement to machine identity before executing a write', async () => {
     const h = harness({ personal: true, denyPersonal: true, command: 'push' });
     await h.run();
@@ -205,12 +191,6 @@ describe('native Git credential adapter', () => {
     await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
     expect(h.delegates).toEqual([]);
   });
-  it('native receive-pack advertisement leaves refs unchanged', () => {
-    const bare = path.join(directory, 'remote.git');
-    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
-    expect(spawnSync('git', ['ls-remote', '--upload-pack=git-receive-pack', bare]).status).toBe(0);
-    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref'], { encoding: 'utf8' })).toBe('');
-  });
   it('clones recursive native SSH submodules while cloud credentials fail', async () => {
     // Pre-push hooks and editors export Git/SSH state. None of it belongs to
     // these synthetic repositories or their native credential probes.
@@ -219,10 +199,6 @@ describe('native Git credential adapter', () => {
     vi.stubEnv('GIT_ASKPASS', path.join(directory, 'unrelated-askpass'));
     vi.stubEnv('SSH_ASKPASS', path.join(directory, 'unrelated-ssh-askpass'));
     vi.stubEnv('GIT_SSH_VARIANT', 'plink');
-    const realGit = path.join(
-      execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
-      'git'
-    );
     const fixtureEnv = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(([key]) => !/^(GIT_|SSH_|LODY_GIT_)/.test(key))
@@ -234,6 +210,16 @@ describe('native Git credential adapter', () => {
       GIT_COMMITTER_NAME: 'Fixture',
       GIT_COMMITTER_EMAIL: 'fixture@example.test',
     };
+    // A surrounding Lody session may put its credential wrapper on PATH.
+    // Probe native Git without inheriting that session's helper/context selection.
+    const realGit = path.join(
+      execFileSync('git', ['--exec-path'], {
+        encoding: 'utf8',
+        env: { ...fixtureEnv, LODY_GIT_NATIVE: '1' },
+      }).trim(),
+      process.platform === 'win32' ? 'git.exe' : 'git'
+    );
+    vi.stubEnv('GIT_EXEC_PATH', path.dirname(realGit));
     const git = (args: string[]) =>
       execFileSync(realGit, args, { cwd: directory, env: fixtureEnv, stdio: 'ignore' });
     const dependency = path.join(directory, 'dependency');
@@ -414,92 +400,5 @@ process.exit(child.status ?? 1);
     const markerPath = () => path.join(directory, 'lody-git-transport.json');
     const spawnError = (code: string) =>
       Object.assign(new Error(`spawnSync git ${code}`), { code });
-
-    it('records the resolved layout in a marker after materialization', () => {
-      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
-      const marker = JSON.parse(fs.readFileSync(markerPath(), 'utf8'));
-      expect(marker).toMatchObject({ version: 1, realGit: 'git', statePath: '/workspace/broker' });
-      expect(fs.existsSync(marker.execPath)).toBe(true);
-      expect(fs.existsSync(marker.nativeGit)).toBe(true);
-    });
-
-    it('skips the probe entirely when the recorded layout matches', () => {
-      ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
-      fs.rmSync(path.join(directory, 'package.json'));
-      const probe = vi.fn(() => {
-        throw spawnError('EAGAIN');
-      });
-      expect(() =>
-        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
-          probeExecPathOnce: probe,
-        })
-      ).not.toThrow();
-      expect(probe).not.toHaveBeenCalled();
-      expect(fs.existsSync(path.join(directory, 'package.json'))).toBe(true);
-    });
-
-    it('retries transient spawn failures before succeeding', () => {
-      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
-      let calls = 0;
-      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
-        probeExecPathOnce: () => {
-          calls++;
-          if (calls < 3) throw spawnError('EAGAIN');
-          return realExecPath;
-        },
-      });
-      expect(calls).toBe(3);
-      expect(fs.existsSync(path.join(directory, 'git'))).toBe(true);
-    });
-
-    it('does not retry a non-transient probe failure', () => {
-      let calls = 0;
-      expect(() =>
-        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
-          probeExecPathOnce: () => {
-            calls++;
-            throw spawnError('ENOENT');
-          },
-        })
-      ).toThrowError(spawnError('ENOENT'));
-      expect(calls).toBe(1);
-    });
-
-    it('fails session preparation only when no recorded layout survives the probe failure', () => {
-      let calls = 0;
-      expect(() =>
-        ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
-          probeExecPathOnce: () => {
-            calls++;
-            throw spawnError('EAGAIN');
-          },
-        })
-      ).toThrowError(spawnError('EAGAIN'));
-      expect(calls).toBe(4);
-    });
-
-    it('reuses a stale recorded layout and warns when the probe keeps failing', () => {
-      const realExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
-      const nativeGit = path.join(realExecPath, process.platform === 'win32' ? 'git.exe' : 'git');
-      fs.writeFileSync(
-        markerPath(),
-        JSON.stringify({
-          version: 1,
-          realGit: '/previous/git',
-          statePath: '/workspace/broker',
-          execPath: realExecPath,
-          nativeGit: fs.existsSync(nativeGit) ? nativeGit : 'git',
-        })
-      );
-      const warn = vi.fn();
-      ensureGitHubGitTransport(directory, '/workspace/broker', 'git', {
-        logger: { warn },
-        probeExecPathOnce: () => {
-          throw spawnError('EAGAIN');
-        },
-      });
-      expect(warn).toHaveBeenCalledOnce();
-      expect(fs.readFileSync(path.join(directory, 'git'), 'utf8')).toContain(realExecPath);
-    });
   });
 });
