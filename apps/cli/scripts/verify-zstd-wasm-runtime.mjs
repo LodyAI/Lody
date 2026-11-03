@@ -12,6 +12,10 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ZSTD_INITIALIZATION_TIMEOUT_MS = 10000;
+// Hang guard only. The predicate can wait on reading zstd.wasm, and that read
+// can outlast a fixed number of event-loop turns. The product's 10 second
+// timeout stays the captured fake timer and is not a real sleep.
+const CONDITION_DEADLINE_MS = 15000;
 
 const scriptPath = fileURLToPath(import.meta.url);
 
@@ -83,11 +87,13 @@ function errorText(error) {
 }
 
 async function until(predicate, label) {
-  for (let turn = 0; turn < 200; turn += 1) {
-    if (predicate()) return;
+  const deadline = Date.now() + CONDITION_DEADLINE_MS;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`condition was not reached: ${label}`);
+    }
     await nextTurn();
   }
-  throw new Error(`condition was not reached: ${label}`);
 }
 
 function track(promise) {
@@ -137,9 +143,9 @@ function installRuntimeControls() {
   };
   WebAssembly.instantiate = (...args) => {
     instantiateCalls += 1;
-    // Register the gate before compilation finishes. The caller's poll is a
-    // bounded number of event-loop turns, and a cold wasm compile can outlast
-    // that. release() waits for the real compile; fail() does not.
+    // Register the gate before compilation finishes. release() waits for the
+    // real compile; fail() does not. The caller keeps polling until this gate
+    // exists, so a slow wasm read or compile does not end the check early.
     let compiled;
     try {
       compiled = Promise.resolve(realInstantiate(...args));
