@@ -6082,6 +6082,7 @@
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
   "sessions.androidEmulator.quality.clear": "清晰",
-  "e2ee.create.mobileDescription": "使用本机受保护的密钥存储；签名后的密钥账本之后不能改为普通工作区。",
-  "e2ee.create.discardPending": "放弃这次创建"
+  "e2ee.create.mobileDescription": "密钥保存在本机受保护的存储中。创建后不能切换模式。",
+  "e2ee.create.discardPending": "放弃已保存的请求",
+  "e2ee.create.savedRequest": "正在继续上次的创建"
 }

@@ -6093,6 +6093,7 @@
   "sessions.androidEmulator.quality.saver": "Data saver",
   "sessions.androidEmulator.quality.balanced": "Balanced",
   "sessions.androidEmulator.quality.clear": "Clear",
-  "e2ee.create.mobileDescription": "Uses this device’s protected key storage. Its signed key ledger cannot be switched to a regular workspace later.",
-  "e2ee.create.discardPending": "Discard this creation"
+  "e2ee.create.mobileDescription": "Keys stay in this device’s protected storage. This mode cannot be changed later.",
+  "e2ee.create.discardPending": "Discard saved request",
+  "e2ee.create.savedRequest": "Continuing your last creation"
 }

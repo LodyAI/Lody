@@ -28,6 +28,7 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Switch } from '@lody/ui/switch';
+import { Alert } from '@lody/ui/alert';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -79,6 +80,9 @@ export function MobileCreateWorkspaceSheet({
   const submitInFlight = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
+  // Presentation only: keeps the "continuing a saved request" notice steady
+  // through a retry instead of flashing it in for a first-time submit.
+  const [resumeNoticeShown, setResumeNoticeShown] = useState(false);
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
@@ -96,6 +100,8 @@ export function MobileCreateWorkspaceSheet({
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
   const fieldsDisabled = pendingOwned || creating;
+  const showResumeNotice = pendingOwned && resumeNoticeShown;
+  const formAlert = intentReadFailed ? t('e2ee.create.storageFailed') : createError;
 
   // Recover the exact saved intent on every open. A lost create response must
   // retry this requestId, name and handle, never mint a second device identity.
@@ -104,6 +110,7 @@ export function MobileCreateWorkspaceSheet({
     try {
       const pending = listPendingE2eeWorkspaces(localStorage, accountId)[0] ?? null;
       setPendingCreation(pending);
+      setResumeNoticeShown(Boolean(pending));
       setIntentReadFailed(false);
       setCreateError(null);
       if (pending) {
@@ -160,6 +167,7 @@ export function MobileCreateWorkspaceSheet({
       setName('');
       setEncrypted(false);
       setPendingCreation(null);
+      setResumeNoticeShown(false);
       setCreateError(null);
       resetSlug();
     }
@@ -195,6 +203,7 @@ export function MobileCreateWorkspaceSheet({
       onCreated?.(targetSlug);
     } catch (err) {
       if (encrypted) {
+        if (!isE2eeCreationNotEnabled(err)) setResumeNoticeShown(true);
         setCreateError(
           isE2eeCreationNotEnabled(err) ? t('e2ee.create.notEnabled') : t('e2ee.create.failed')
         );
@@ -246,34 +255,6 @@ export function MobileCreateWorkspaceSheet({
               : t('organization.createNewWorkspaceDescription')}
           </DrawerDescription>
 
-          {intentReadFailed ? (
-            <p role="alert" className="px-4 pb-2 text-[0.72rem] text-destructive">
-              {t('e2ee.create.storageFailed')}
-            </p>
-          ) : createError ? (
-            <p role="alert" className="px-4 pb-2 text-[0.72rem] text-destructive">
-              {createError}
-            </p>
-          ) : null}
-          {canDiscardPendingCreation(creating, pendingCreation, accountId) && pendingCreation ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (creating) return;
-                clearPendingE2eeWorkspace(localStorage, pendingCreation);
-                setPendingCreation(null);
-                setName('');
-                setEncrypted(false);
-                setCreateError(null);
-                resetSlug();
-              }}
-              disabled={creating}
-              className="mx-4 mb-2 self-start text-[0.72rem] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
-              {t('e2ee.create.discardPending', 'Discard this creation')}
-            </button>
-          ) : null}
-
           {creationAvailable ? (
             <div
               ref={keyboard.scrollRef}
@@ -281,6 +262,38 @@ export function MobileCreateWorkspaceSheet({
               className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
             >
               <div className="flex flex-col gap-4">
+                {showResumeNotice && pendingCreation ? (
+                  <Alert.Root tone="neutral" data-testid="mobile-create-workspace-resume">
+                    <Alert.Title>{t('e2ee.create.savedRequest')}</Alert.Title>
+                    <Alert.Description>{t('e2ee.create.pending')}</Alert.Description>
+                    {pendingOwned ? (
+                      <Alert.Actions>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          tone="destructive"
+                          size="small"
+                          disabled={
+                            !canDiscardPendingCreation(creating, pendingCreation, accountId)
+                          }
+                          onClick={() => {
+                            if (creating) return;
+                            clearPendingE2eeWorkspace(localStorage, pendingCreation);
+                            setPendingCreation(null);
+                            setResumeNoticeShown(false);
+                            setName('');
+                            setEncrypted(false);
+                            setCreateError(null);
+                            resetSlug();
+                          }}
+                        >
+                          {t('e2ee.create.discardPending')}
+                        </Button>
+                      </Alert.Actions>
+                    ) : null}
+                  </Alert.Root>
+                ) : null}
+
                 <div className="space-y-1.5">
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
@@ -307,7 +320,7 @@ export function MobileCreateWorkspaceSheet({
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
                     </UiField.Label>
-                    {canReset ? (
+                    {canReset && !fieldsDisabled ? (
                       <button
                         type="button"
                         onClick={resetSlug}
@@ -367,7 +380,7 @@ export function MobileCreateWorkspaceSheet({
                         {encryptionSupported
                           ? t(
                               'e2ee.create.mobileDescription',
-                              'Uses this device’s protected key storage. Its signed key ledger cannot be switched to a regular workspace later.'
+                              'Keys stay in this device’s protected storage. This mode cannot be changed later.'
                             )
                           : t(
                               'e2ee.create.unsupported',
@@ -385,6 +398,14 @@ export function MobileCreateWorkspaceSheet({
                   </div>
                 ) : null}
               </div>
+            </div>
+          ) : null}
+
+          {formAlert != null ? (
+            <div className="shrink-0 px-4 pb-3">
+              <Alert.Root tone="danger">
+                <Alert.Description>{formAlert}</Alert.Description>
+              </Alert.Root>
             </div>
           ) : null}
 
@@ -409,16 +430,6 @@ export function MobileCreateWorkspaceSheet({
             >
               {creationBlocked ? t('common.close', 'Close') : t('common.cancel', 'Cancel')}
             </Button>
-            {intentReadFailed ? (
-              <p role="alert" className="px-4 pb-2 text-[0.72rem] text-destructive">
-                {t('e2ee.create.storageFailed')}
-              </p>
-            ) : createError ? (
-              <p role="alert" className="px-4 pb-2 text-[0.72rem] text-destructive">
-                {createError}
-              </p>
-            ) : null}
-
             {creationAvailable ? (
               <Button
                 type="button"
