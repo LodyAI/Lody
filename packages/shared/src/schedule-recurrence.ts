@@ -58,6 +58,13 @@ export const SCHEDULE_WEEKDAYS: readonly ScheduleWeekday[] = [0, 1, 2, 3, 4, 5, 
 export const SCHEDULE_MINUTE_STEPS = [5, 10, 15, 20, 30] as const;
 /** Hour steps offered for "every N hours"; all divide the day evenly. */
 export const SCHEDULE_HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12] as const;
+/**
+ * Bounds for a typed ("Custom") step. A step that does not divide the clock is
+ * stored as an anchored interval by `recurrenceToTrigger`; the caps only keep
+ * the field to sizes the other rules do not already name better (a day, a week).
+ */
+export const SCHEDULE_CUSTOM_MINUTES_MAX = 1440;
+export const SCHEDULE_CUSTOM_HOURS_MAX = 168;
 
 const CRON_DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 const WORKWEEK: readonly ScheduleWeekday[] = [1, 2, 3, 4, 5];
