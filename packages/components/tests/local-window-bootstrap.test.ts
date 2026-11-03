@@ -285,6 +285,38 @@ describe('session snapshot adoption', () => {
     await repo.destroy();
   });
 
+  it('retains persisted pending updates while adopting a bootstrap snapshot', async () => {
+    const remote = new LoroDoc();
+    remote.setPeerId(1n);
+    remote.getText('text').insert(0, 'base|');
+    const base = remote.export({ mode: 'snapshot' });
+    const beforeA = remote.oplogVersion();
+    remote.getText('text').insert(5, 'A');
+    const updateA = remote.export({ mode: 'update', from: beforeA });
+    const beforeB = remote.oplogVersion();
+    remote.getText('text').insert(6, 'B');
+    const updateB = remote.export({ mode: 'update', from: beforeB });
+
+    const persisted = LoroDoc.fromSnapshot(base);
+    persisted.import(updateB);
+    expect(persisted.exportPendingUpdates()).toBeDefined();
+
+    const storage: StorageAdapter = {
+      loadMeta: async () => undefined,
+      loadDoc: async () => persisted,
+      save: async () => {},
+    };
+    const open = createSessionSnapshotLoader(storage);
+    const repo = await LoroRepo.create({ storageAdapter: storage });
+    const { doc } = await open(repo, 'session-one', async () => remoteSnapshot());
+    expect(doc.getText('text').toString()).toBe('base|');
+    expect(doc.exportPendingUpdates()).toBeDefined();
+    doc.import(updateA);
+    expect(doc.getText('text').toString()).toBe('base|AB');
+    expect(doc.exportPendingUpdates()).toBeUndefined();
+    await repo.destroy();
+  });
+
   it('keeps an already owned replica and notifies its subscribers of the merge', async () => {
     const { storage } = storageFixture();
     const open = createSessionSnapshotLoader(storage);
