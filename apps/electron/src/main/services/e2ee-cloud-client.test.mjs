@@ -739,3 +739,55 @@ void test('access loss authority belongs to a credential response, never an exce
     )
   }
 })
+
+// The relay refuses every call while the deployment has account pairing switched
+// off, and new requests past the hourly limit. The new device must be able to say
+// which, instead of a generic failure.
+for (const [serverCode, code] of [
+  ['e2ee_account_pairing_disabled', 'pairing-unavailable'],
+  ['e2ee_account_pairing_rate_limited', 'pairing-rate-limited']
+])
+  void test(`account pairing relay keeps ${serverCode} as ${code}`, async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              {
+                status: 'error',
+                errorMessage: 'synthetic-private-cause',
+                errorData: { code: serverCode }
+              },
+              { status: 560 }
+            )
+          )
+          const lookupId = '11'.repeat(16)
+          for (const operation of [
+            client.pairingSubmit({
+              lookupId,
+              requestHex: '00',
+              requestTagHex: '22'.repeat(32),
+              direction: 'requester-shows',
+              deviceName: 'Synthetic desktop',
+              expiresAt: 1,
+              workspaces: []
+            }),
+            client.pairingRead({ lookupId }),
+            client.pairingClaim({ lookupId }),
+            client.pairingDecline({ requestId: 'request-1' }),
+            client.pairingPublish({
+              lookupId,
+              approvalHex: '00',
+              approvalTagHex: '22'.repeat(32),
+              invitations: []
+            })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure.code, code)
+            assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+        })
+      )
+    )
+  })

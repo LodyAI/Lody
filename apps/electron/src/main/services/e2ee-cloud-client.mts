@@ -193,6 +193,20 @@ export class E2eeCloudDiagnosticError extends BackendError {
   }
 }
 
+/** Account pairing relay refusals the new device explains (see `PAIRING_REFUSALS`):
+ * the deployment has account pairing switched off, or the account submitted too
+ * many new requests this hour. Only the mapped code leaves; the server text does not. */
+type AccountPairingRelayRefusal = 'pairing-unavailable' | 'pairing-rate-limited'
+const accountPairingRefusals = new Map<string, AccountPairingRelayRefusal>([
+  ['e2ee_account_pairing_disabled', 'pairing-unavailable'],
+  ['e2ee_account_pairing_rate_limited', 'pairing-rate-limited']
+])
+export class E2eeAccountPairingRefusedError extends BackendError {
+  constructor(readonly code: AccountPairingRelayRefusal) {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 function requestFailure(error: unknown): BackendError {
   // Terminal types from authentication, transport or decoding are not authority.
   if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
@@ -214,6 +228,8 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
+  const refusal = accountPairingRefusals.get(code)
+  if (refusal) return new E2eeAccountPairingRefusedError(refusal)
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
