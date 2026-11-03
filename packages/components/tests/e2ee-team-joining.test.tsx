@@ -158,8 +158,12 @@ describe('encrypted team joining', () => {
       prepareMemberJoin: async () => {
         throw new Error('must not replace saved request');
       },
-      claimMemberJoin: async () => ({ state: 'committed', ready: installed }),
+      claimMemberJoin: async () => {
+        claims++;
+        return { state: 'committed', ready: installed };
+      },
     };
+    let claims = 0;
     vi.setSystemTime(3000);
     const props = {
       offer,
@@ -179,6 +183,23 @@ describe('encrypted team joining', () => {
     // Key delivery needs an administrator device; the joining member is told so.
     expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
     expect(button('e2ee.team.submit')).toBeUndefined();
+    // Committed but not ready: the member claims again 3 s later, not 10 s.
+    expect(claims).toBe(1);
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(2);
+    // The fast cadence is bounded; after two minutes it returns to 10 s.
+    for (let elapsed = 3_000; elapsed < 120_000; elapsed += 3_000) {
+      await act(async () => vi.advanceTimersByTime(3_000));
+      await settle();
+    }
+    const slow = claims;
+    await act(async () => vi.advanceTimersByTime(3_000));
+    await settle();
+    expect(claims).toBe(slow);
+    await act(async () => vi.advanceTimersByTime(7_000));
+    await settle();
+    expect(claims).toBe(slow + 1);
     installed = true;
     await act(async () => window.dispatchEvent(new Event('online')));
     await settle();
@@ -224,7 +245,11 @@ describe('encrypted team joining', () => {
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
     let state = 'pending';
-    let delivery: { requestId: string; state: 'pending' | 'delivered' | 'failed'; code?: string }[] =
+    let delivery: {
+      requestId: string;
+      state: 'pending' | 'delivering' | 'delivered' | 'failed';
+      code?: string;
+    }[] =
       [];
     const retried: string[] = [];
     const confirmation = deferred<{
@@ -276,6 +301,11 @@ describe('encrypted team joining', () => {
     // Admission and key delivery are separate: the admitted applicant stays visible.
     const row = () => container.querySelector(`[data-key-delivery-id="${request.requestId}"]`);
     expect(row()?.textContent).toContain(request.applicantName);
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    // A round in flight is still shown as sending.
+    delivery = [{ requestId: request.requestId, state: 'delivering' }];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
     expect(row()?.textContent).toContain('e2ee.team.keySending');
     delivery = [{ requestId: request.requestId, state: 'failed', code: 'e2ee_management_retry' }];
     await act(async () => vi.advanceTimersByTime(10_000));

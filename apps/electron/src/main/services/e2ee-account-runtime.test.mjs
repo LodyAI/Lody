@@ -11,7 +11,9 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Effect, Scope, Exit, Result } from 'effect'
+import { Context, Effect, Layer, Scope, Exit, Result } from 'effect'
+import { KeyMailbox } from '@lody/e2ee-core/services'
+import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
 import { WorkspaceKeyRoundFailure } from '@lody/e2ee-core'
 import {
   Bytes,
@@ -2602,6 +2604,12 @@ async function memberIpcFixture(options = {}) {
           keyEntered.resolve()
           await keyGate.promise
         }),
+      // A joining member's claim installs through the receive-only round.
+      receiveKeys: () =>
+        Effect.promise(async () => {
+          keyEntered.resolve()
+          await keyGate.promise
+        }),
       beginCloseWorkspace: () =>
         Effect.sync(() => {
           closed.push(label)
@@ -2839,10 +2847,10 @@ void test(
     // keyRound never settles until keyGate opens: the approval must not wait for it.
     const f = await memberApprovalFixture()
     const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
-    assert.deepEqual(plain(approved), { admitted: true, keyPending: true, keyDelivery: 'pending' })
+    assert.deepEqual(plain(approved), { admitted: true, keyPending: true, keyDelivery: 'delivering' })
     await f.keyEntered.promise
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
-      { requestId: approvalRequest, state: 'pending' }
+      { requestId: approvalRequest, state: 'delivering' }
     ])
     // The only renderer window goes away while the key round is still running.
     f.owner().readers.get('team').delete(1)
@@ -3267,4 +3275,219 @@ void test('an unrelated unfinished per-workspace pairing blocks only that worksp
   const pending = await Effect.runPromise(newDevice.bootstrap.pendingPersonalJoin(f.workspaceId))
   assert.equal(pending.offer.pairingSessionId, offer.pairingSessionId)
   void genesisHash
+})
+
+/** Two real accounts (custody, bootstrap, host and account lock) behind real E2eeIpc,
+ * sharing a synthetic relay: one ledger, member requests and a reference key mailbox. */
+async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
+  const owner = await nativeAccountFixture(t)
+  const member = await nativeAccountFixture(t)
+  member.identity.userId = 'member'
+  const created = await createAccountWorkspace(owner.api, 'team')
+  const hexOf = (bytes) => Buffer.from(bytes).toString('hex')
+  const genesisHash = created.creation.genesisHashHex
+  const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(genesisHash, 'hex')))
+  const records = [Buffer.from(created.creation.genesisRecordHex, 'hex')]
+  const view = () =>
+    Result.getOrThrow(
+      verifyLedger({
+        anchor: genesis,
+        records,
+        checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)) }
+      })
+    )
+  const history = () =>
+    Effect.andThen(
+      latency('history'),
+      Effect.sync(() => ({
+        workspaceId: 'team',
+        genesisHash,
+        startIndex: 0,
+        recordsHex: records.map(hexOf),
+        checkpoint: { length: records.length, headHash: hexOf(hashRecordBytes(records.at(-1)).toBytes()) },
+        nextCursor: null,
+        position: `p1:team:${records.length}:fixture`
+      }))
+    )
+  const scope = Effect.runSync(Scope.make())
+  t.after(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+  const directory = await mkdtemp(join(tmpdir(), 'two-device-mailbox-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const mailbox = await Effect.runPromise(
+    makeSqliteKeyMailbox({
+      path: join(directory, 'mailbox.sqlite'),
+      mode: 'create',
+      genesis,
+      ledger: () => Effect.sync(view)
+    }).pipe(Scope.provide(scope))
+  )
+  const port = async (publicKeyHex) => {
+    const service = Context.get(
+      await Effect.runPromise(
+        Layer.buildWithScope(
+          referenceKeyMailbox(
+            mailbox,
+            Result.getOrThrow(Bytes.signingPublicKey(Buffer.from(publicKeyHex, 'hex')))
+          ),
+          scope
+        )
+      ),
+      KeyMailbox
+    )
+    // Every mailbox call pays the relay's latency, like a real HTTPS round trip.
+    return Object.fromEntries(
+      Object.entries(service).map(([name, method]) => [
+        name,
+        (...args) => Effect.andThen(latency(`mailbox.${name}`), method(...args))
+      ])
+    )
+  }
+  const requests = new Map()
+  const staging = () => ({
+    stageGroup: () => Effect.die('no rotation'),
+    readGroup: () => Effect.succeed(null),
+    deleteGroup: () => Effect.void
+  })
+  const offer = await owner.api.withDesktopE2eeAccount(
+    (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
+    'team',
+    false
+  )
+  const ownerPort = await port(offer.endorser)
+  let memberPort
+  const relayed = (name, value) => Effect.andThen(latency(name), Effect.sync(value))
+  const ownerCloud = {
+    accountId: 'account',
+    client: {
+      memberPending: () =>
+        relayed('memberPending', () => ({
+          invitations: [],
+          items: [...requests.values()]
+            .filter((request) => request.state === 'pending')
+            .map((request) => ({ ...request, applicantName: 'Member', applicantEmail: 'm@x.test' })),
+          hasMore: false,
+          seatPreview: { status: 'not_billed', reason: 'covered' }
+        })),
+      memberRead: ({ requestId }) => relayed('memberRead', () => ({ ...requests.get(requestId) })),
+      appendRecord: (pending) =>
+        relayed('appendRecord', () => {
+          records.push(Buffer.from(pending.recordHex, 'hex'))
+          for (const request of requests.values()) request.state = 'committed'
+          return { status: 'committed' }
+        }),
+      history,
+      contentStreamsToken: () => relayed('contentStreamsToken', () => ({ token: 't' })),
+      mailbox: () => ownerPort,
+      staging
+    }
+  }
+  const memberCloud = {
+    accountId: 'member',
+    client: {
+      accountIdentity: () =>
+        relayed('accountIdentity', () => ({ accountId: 'member', cryptoUserId: 'bb'.repeat(32) })),
+      memberSubmit: ({ keyPackageHex }) =>
+        relayed('memberSubmit', () => {
+          const proof = memberJoining.decodeMemberKeyPackage(keyPackageHex)
+          const requestId = hexOf(proof.request.requestId.toBytes())
+          const request = {
+            id: requestId,
+            workspaceId: 'team',
+            accountId: 'member',
+            keyPackageHex,
+            signingPublicKey: hexOf(proof.request.signingPublicKey.toBytes()),
+            requestId,
+            source: 'email',
+            state: 'pending',
+            expiresAt: 9_000_000_000_000
+          }
+          requests.set(requestId, request)
+          return { ...request }
+        }),
+      memberClaim: ({ requestId }) => relayed('memberClaim', () => ({ ...requests.get(requestId) })),
+      history,
+      mailbox: () => memberPort,
+      staging
+    }
+  }
+  const ipc = async (fixture, cloud, id) => {
+    const sender = Object.assign(new EventEmitter(), { id })
+    const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+      '../ipc-service-deps': {
+        getIpcServiceDeps: () => ({
+          authService: { getCachedSessionIdentity: () => ({ ...fixture.identity }) }
+        })
+      },
+      'electron-ipc-decorator': {
+        IpcService: class {},
+        IpcMethod: () => (_target, _name, descriptor) => descriptor,
+        getIpcContext: () => ({ event: { sender } })
+      },
+      '../../platform': { isLocalPlatform: () => false },
+      '../../services/e2ee-bootstrap.mjs': {},
+      '../../services/e2ee-account-runtime': {
+        ...fixture.api,
+        desktopE2eeCloudClient: async () => cloud
+      },
+      '../assert-sender': { assertProductWindowSender: () => {} }
+    })
+    return new E2eeIpc()
+  }
+  const approver = await ipc(owner, ownerCloud, 1)
+  const joiner = await ipc(member, memberCloud, 2)
+  return {
+    offer,
+    approver,
+    joiner,
+    async submit() {
+      const submitted = await joiner.prepareMemberJoin(offer)
+      memberPort = await port(submitted.signingPublicKey)
+      return submitted
+    }
+  }
+}
+void test('an email-invited member of another account reaches ready after approval returns keyPending', { timeout: 20_000 }, async (t) => {
+  const f = await twoDeviceMemberJoin(t)
+  await f.approver.open('team')
+  const submitted = await f.submit()
+  // The approver's worker sees the request, then admits it automatically.
+  assert.equal((await f.approver.memberJoinRequests('team')).items.length, 1)
+  const approved = await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+  assert.equal(approved.admitted, true)
+  assert.equal(approved.keyPending, true)
+  await f.approver.keyDeliveryIdle('account', 'team')
+  const delivery = (await f.approver.memberKeyDeliveries('team')).items
+  // The member's join page claims every 10 s; one claim after delivery must install the key.
+  const claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+  assert.deepEqual(
+    { delivery: JSON.parse(JSON.stringify(delivery)), claimed: { ...claimed } },
+    {
+      delivery: [{ requestId: submitted.requestId, state: 'delivered' }],
+      claimed: { ready: true, state: 'committed' }
+    }
+  )
+})
+// Observed on the packaged B run (R16 clean13): ~0.4 s Convex token + ~1.9 s query per relay
+// call. The member retries claims 3 s apart while committed; acceptance waits 60 s.
+const RELAY_ROUND_TRIP_S = 2.3
+void test('an admitted member reaches ready within the 60 s acceptance window at the observed relay cost', { timeout: 20_000 }, async (t) => {
+  let serial = 0
+  const f = await twoDeviceMemberJoin(t, {
+    latency: () =>
+      Effect.sync(() => {
+        serial++
+      })
+  })
+  await f.approver.open('team')
+  const submitted = await f.submit()
+  await f.approver.memberJoinRequests('team')
+  await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+  // From the approval result: background delivery, then the member's next claim.
+  serial = 0
+  await f.approver.keyDeliveryIdle('account', 'team')
+  const claimed = await f.joiner.claimMemberJoin('team', submitted.requestId)
+  assert.equal(claimed.ready, true)
+  const seconds = serial * RELAY_ROUND_TRIP_S + 3
+  t.diagnostic(`${serial} serial relay calls, about ${seconds.toFixed(1)} s`)
+  assert.ok(seconds <= 60, `${serial} serial relay calls take about ${seconds.toFixed(1)} s`)
 })
