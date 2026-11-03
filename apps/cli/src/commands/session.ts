@@ -10,7 +10,6 @@ import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from 
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
-  machineSupportsSessionLiveActivity,
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   OPERATION_INBOX_PROTOCOL_VERSION,
@@ -4626,7 +4625,12 @@ export async function readSessionLiveStatusesMany(args: {
       // Older daemons reject the activity flag, so only ask machines advertising it.
       const includeActivity = await args.manager.repo
         ?.getDocMeta(getMachineRoomId(machineId))
-        .then((record) => machineSupportsSessionLiveActivity(record?.meta as MachineMeta))
+        .then((record) =>
+          machineSupportsProtocolCapability(
+            record?.meta as MachineMeta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
+          )
+        )
         .catch(() => false);
       try {
         const responses = await withMachineRpcClient(

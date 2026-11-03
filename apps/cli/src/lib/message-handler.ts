@@ -412,6 +412,7 @@ import {
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
+import { truncateToolTitleForHistory } from '@lody/shared';
 import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
@@ -756,7 +757,7 @@ export class MessageHandler {
    */
   private readonly liveActivityBySession = new Map<
     SessionId,
-    { lastOutputAt: number; currentAction?: { toolCallId: string; title: string } }
+    { lastOutputAt: number; actionToolCallId?: string; actionTitle?: string }
   >();
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
@@ -4782,16 +4783,21 @@ export class MessageHandler {
       title?: string | null;
       status?: string | null;
     };
-    let currentAction = previous?.currentAction;
+    let actionToolCallId = previous?.actionToolCallId;
+    let actionTitle = previous?.actionTitle;
     if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
       const finished = update.status === 'completed' || update.status === 'failed';
-      if (finished && currentAction?.toolCallId === update.toolCallId) currentAction = undefined;
-      else if (!finished && update.toolCallId && update.title)
-        currentAction = { toolCallId: update.toolCallId, title: update.title.slice(0, 200) };
+      if (finished && actionToolCallId === update.toolCallId) {
+        actionToolCallId = undefined;
+        actionTitle = undefined;
+      } else if (!finished && update.toolCallId && update.title) {
+        actionToolCallId = update.toolCallId;
+        actionTitle = Array.from(truncateToolTitleForHistory(update.title)).slice(0, 200).join('');
+      }
     }
     this.liveActivityBySession.set(sessionId, {
       lastOutputAt: Date.now(),
-      ...(currentAction ? { currentAction } : {}),
+      ...(actionTitle ? { actionToolCallId, actionTitle } : {}),
     });
   }
 
@@ -4810,26 +4816,24 @@ export class MessageHandler {
       const total = await history.count();
       let turnStartedAt: number | undefined;
       let queuedInputs = 0;
-      // Queued inputs follow the running turn; stop at it or after a bounded scan.
-      for (let index = total - 1; index >= Math.max(0, total - 50); index -= 1) {
-        const read = await history.readAt(index);
-        if (read.state !== 'ready') continue;
-        if (read.turn.id === execution.activeTurnId) {
-          const started = Date.parse(read.turn.timestamp);
+      // Shallow rows only: queued inputs follow the running turn, within a bounded tail.
+      const rows = await history.readDirectory(Math.max(0, total - 50), total);
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index]?.scalars;
+        if (!row) continue;
+        if (row.id === execution.activeTurnId) {
+          const started = Date.parse(row.timestamp);
           if (Number.isFinite(started)) turnStartedAt = started;
           break;
         }
-        if (
-          read.turn.role === 'user' &&
-          (read.turn.status === 'pending' || read.turn.status === 'pending_apply')
-        )
+        if (row.role === 'user' && (row.status === 'pending' || row.status === 'pending_apply'))
           queuedInputs += 1;
       }
       const tracked = this.liveActivityBySession.get(sessionId);
       return {
         ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
         ...(tracked ? { lastOutputAt: tracked.lastOutputAt } : {}),
-        ...(tracked?.currentAction ? { currentAction: tracked.currentAction.title } : {}),
+        ...(tracked?.actionTitle ? { currentAction: tracked.actionTitle } : {}),
         queuedInputs,
       };
     } catch (error) {

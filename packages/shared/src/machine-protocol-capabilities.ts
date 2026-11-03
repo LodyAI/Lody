@@ -602,13 +602,3 @@ export function machineSupportsAndroidEmulatorQuality(
     1
   );
 }
-
-/** Whether `session/live-status` accepts `includeActivity`; older daemons reject it. */
-export function machineSupportsSessionLiveActivity(
-  machine: MachineProtocolCapabilityCarrier | null | undefined
-): boolean {
-  return machineSupportsProtocolCapability(
-    machine,
-    MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
-  );
-}

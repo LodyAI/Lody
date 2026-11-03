@@ -211,7 +211,11 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       { id: 'u2', role: 'user', status: 'pending', timestamp: '2026-11-03T01:05:00.000Z' },
       { id: 'u3', role: 'user', status: 'pending', timestamp: '2026-11-03T01:06:00.000Z' },
     ];
-    const daemon = (history: { count: () => Promise<number>; readAt: unknown }) => {
+    const daemon = (history: {
+      count: () => Promise<number>;
+      readAt: unknown;
+      readDirectory?: unknown;
+    }) => {
       const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
       const internals = handler as unknown as Record<string, unknown> & {
         workspaceDocument: { getOrCreateSessionDoc: unknown };
@@ -236,7 +240,13 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     };
     const history = {
       count: async () => rows.length,
-      readAt: async (index: number) => ({ state: 'ready', turn: rows[index] }),
+      readAt: async () => {
+        throw new Error('Activity must not materialize turn bodies');
+      },
+      readDirectory: async (from: number, to: number) =>
+        rows
+          .slice(from, to)
+          .map((scalars, offset) => ({ position: from + offset, state: 'ready', scalars })),
     };
 
     it('answers requested activity from the running turn and queued inputs', async () => {
