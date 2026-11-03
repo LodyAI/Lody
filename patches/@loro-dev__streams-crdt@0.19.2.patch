@@ -350,3 +350,110 @@ index 6768860ab31b380e6e058a564439b779f6bfef89..43a3511703a58dd7ef3bfb43aa92eab9
  		return {
  			cursor: saved,
  			streamCursor: bootstrapCursor
+diff --git a/dist/zstd-core-nJ4Lg1a0.js b/dist/zstd-core-nJ4Lg1a0.js
+--- a/dist/zstd-core-nJ4Lg1a0.js
++++ b/dist/zstd-core-nJ4Lg1a0.js
+@@ -123,6 +123,7 @@
+ 	function instantiateAsync() {
+ 		if (filePathOrBuf && filePathOrBuf.byteLength > 0) return WebAssembly.instantiate(filePathOrBuf, info).then(receiveInstantiationResult, function(reason) {
+ 			err("wasm compile failed: " + reason);
++			throw reason;
+ 		});
+ 		else if (typeof WebAssembly.instantiateStreaming === "function" && typeof filePathOrBuf === "string" && typeof fetch === "function") return fetch(filePathOrBuf, { credentials: "same-origin" }).then(function(response) {
+ 			return WebAssembly.instantiateStreaming(response, info).then(receiveInstantiationResult, function(reason) {
+@@ -139,7 +140,12 @@
+ 		err("Module.instantiateWasm callback failed with error: " + e);
+ 		return false;
+ 	}
+-	instantiateAsync();
++	var instantiation = instantiateAsync();
++	if (instantiation != null && typeof instantiation.then === "function") {
++		instantiation.catch(function(reason) {
++			rejectZstdInitialization(reason);
++		});
++	}
+ 	return {};
+ }
+ var ExitStatus = class {
+@@ -317,12 +323,27 @@
+ 		step((generator = generator.apply(thisArg, _arguments || [])).next());
+ 	});
+ };
+-const initialized = new Promise((resolve) => {
+-	Module.onRuntimeInitialized = resolve;
+-});
+-const waitInitialized = () => __awaiter$1(void 0, void 0, void 0, function* () {
+-	yield initialized;
+-});
++let zstdInitialization = null;
++function rejectZstdInitialization(reason) {
++	const attempt = zstdInitialization;
++	if (attempt == null || attempt.settled) return;
++	attempt.settled = true;
++	clearTimeout(attempt.timer);
++	attempt.reject(reason instanceof Error ? reason : new Error(String(reason)));
++}
++function resolveZstdInitialization() {
++	const attempt = zstdInitialization;
++	if (attempt == null || attempt.settled) return;
++	attempt.settled = true;
++	clearTimeout(attempt.timer);
++	attempt.resolve();
++}
++const ZSTD_INITIALIZATION_TIMEOUT_MS = 10000;
++const waitInitialized = () => {
++	const attempt = zstdInitialization;
++	if (attempt == null) return Promise.reject(new Error("zstd wasm initialization was not started"));
++	return attempt.promise;
++};
+ //#endregion
+ //#region ../../node_modules/.pnpm/@bokuweb+zstd-wasm@0.0.27/node_modules/@bokuweb/zstd-wasm/dist/web/errors/index.js
+ const isError = (code) => {
+@@ -501,8 +522,30 @@
+ };
+ const init = (path) => __awaiter(void 0, void 0, void 0, function* () {
+ 	const url = new URL(`./zstd.wasm`, import.meta.url).href;
++	// A failed attempt leaves Emscripten's run dependency incremented, so a later
++	// attempt would never reach onRuntimeInitialized. The runtime has not started.
++	if (!calledRun) runDependencies = 0;
++	let resolveAttempt;
++	let rejectAttempt;
++	const promise = new Promise((resolve, reject) => {
++		resolveAttempt = resolve;
++		rejectAttempt = reject;
++	});
++	const attempt = {
++		settled: false,
++		promise,
++		resolve: resolveAttempt,
++		reject: rejectAttempt,
++		timer: setTimeout(() => {
++			rejectZstdInitialization(new Error("zstd wasm initialization timed out"));
++		}, ZSTD_INITIALIZATION_TIMEOUT_MS)
++	};
++	zstdInitialization = attempt;
++	Module.onRuntimeInitialized = () => {
++		resolveZstdInitialization();
++	};
+ 	Module["init"](path !== null && path !== void 0 ? path : url);
+-	yield waitInitialized();
++	yield attempt.promise;
+ });
+ //#endregion
+ //#region src/zstd-core.ts
+@@ -532,7 +575,14 @@
+ 	}
+ }
+ async function getZstdModule() {
+-	return await (modulePromise ??= loadZstdModule());
++	if (modulePromise == null) {
++		const attempt = loadZstdModule();
++		modulePromise = attempt;
++		void attempt.then(() => {}, () => {
++			if (modulePromise === attempt) modulePromise = void 0;
++		});
++	}
++	return await modulePromise;
+ }
+ async function compressInCurrentThread(snapshot) {
+ 	return (await getZstdModule()).compress(snapshot);
