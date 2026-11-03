@@ -6,6 +6,10 @@ PR: [#2279](https://github.com/LodyAI/Lody/pull/2279)
 
 [English](2026-11-03-workspace-close-retry.md)
 
+## 摘要
+
+可恢复的渲染器关闭失败不能永久阻止同一工作区重新打开。重试清理时，仍保留原来的 owner 和退役栅栏。
+
 ## 决定
 
 RuntimeProvider 跨导航保留两个内容关闭 owner。已成功的清理不再重复执行，失败的一次尝试不作为最终结果缓存。

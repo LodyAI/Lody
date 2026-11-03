@@ -6,6 +6,11 @@ PR: [#2279](https://github.com/LodyAI/Lody/pull/2279)
 
 [中文](2026-11-03-workspace-close-retry.zh.md)
 
+## Abstract
+
+A recoverable renderer close failure must not permanently prevent the same workspace
+from reopening. Retrying cleanup preserves its original owner and retirement fence.
+
 ## Decision
 
 RuntimeProvider retains both content-close owners across navigation. Successful
