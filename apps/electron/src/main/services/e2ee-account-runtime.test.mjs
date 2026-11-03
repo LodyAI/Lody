@@ -2665,6 +2665,8 @@ async function memberIpcFixture(options = {}) {
         return cloud
       },
       releaseDesktopE2eeReader: () => {},
+      // Only errors the real boundary projected carry a public loss; none here.
+      publicAccessLoss: () => null,
       runDesktopE2eeOperation: async (accountId, work) => {
         if (identity.userId !== accountId) throw new Error('e2ee_account_mismatch')
         const result = await Effect.runPromise(work).catch((error) => {
@@ -2801,7 +2803,11 @@ async function memberApprovalFixture(keyRound, ledger = { relayHasAdmission: tru
       history: () =>
         ledger.historyFails
           ? Effect.fail(new Error('synthetic relay history unavailable'))
-          : Effect.succeed({ checkpoint: {}, nextCursor: null, admission: ledger.relayHasAdmission }),
+          : Effect.succeed({
+              checkpoint: {},
+              nextCursor: null,
+              admission: ledger.relayHasAdmission
+            }),
       memberPending: () =>
         Effect.succeed({ invitations: [], items: [], hasMore: false, seatPreview: null })
     },
@@ -2870,68 +2876,76 @@ void test(
   }
 )
 
-void test('a committed admission missing from the local verified ledger is never reported delivered; a later poll ingests it first', { timeout: 5000 }, async () => {
-  // Distribution selects targets from the local verified ledger: without the
-  // admission a key round succeeds with zero recipients.
-  const ledger = { relayHasAdmission: false, historyFails: true }
-  let rounds = 0
-  const f = await memberApprovalFixture(
-    () =>
-      Effect.sync(() => {
-        rounds++
-      }),
-    ledger
-  )
-  let now = 1_000
-  f.ipc.keyDeliveryNow = () => now
-  const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
-  assert.equal(approved.admitted, true)
-  await f.ipc.keyDeliveryIdle('A', 'team')
-  const lagging = plain((await f.ipc.memberKeyDeliveries('team')).items)
-  assert.equal(lagging.length, 1)
-  assert.notEqual(lagging[0].state, 'delivered')
-  // The relay now serves the admission; the next due poll ingests before distributing.
-  ledger.historyFails = false
-  ledger.relayHasAdmission = true
-  now += 10_000
-  await f.ipc.memberJoinRequests('team')
-  await f.ipc.keyDeliveryIdle('A', 'team')
-  assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
-    { requestId: approvalRequest, state: 'delivered' }
-  ])
-  assert.ok(rounds >= 1)
-})
+void test(
+  'a committed admission missing from the local verified ledger is never reported delivered; a later poll ingests it first',
+  { timeout: 5000 },
+  async () => {
+    // Distribution selects targets from the local verified ledger: without the
+    // admission a key round succeeds with zero recipients.
+    const ledger = { relayHasAdmission: false, historyFails: true }
+    let rounds = 0
+    const f = await memberApprovalFixture(
+      () =>
+        Effect.sync(() => {
+          rounds++
+        }),
+      ledger
+    )
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    assert.equal(approved.admitted, true)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    const lagging = plain((await f.ipc.memberKeyDeliveries('team')).items)
+    assert.equal(lagging.length, 1)
+    assert.notEqual(lagging[0].state, 'delivered')
+    // The relay now serves the admission; the next due poll ingests before distributing.
+    ledger.historyFails = false
+    ledger.relayHasAdmission = true
+    now += 10_000
+    await f.ipc.memberJoinRequests('team')
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
+      { requestId: approvalRequest, state: 'delivered' }
+    ])
+    assert.ok(rounds >= 1)
+  }
+)
 for (const [name, nested] of [
   ['member removal', () => new E2eeMemberRemovedError()],
   ['device revocation', () => new E2eeDeviceRevokedError()],
   ['a missing binding', () => Object.assign(new Error('synthetic'), { code: 'missing-binding' })],
   ['a closed workspace', () => Object.assign(new Error('synthetic'), { code: 'closed' })]
 ])
-  void test(`${name} nested in a key-round failure ends delivery from this device without retries`, { timeout: 5000 }, async () => {
-    let rounds = 0
-    const f = await memberApprovalFixture(() =>
-      Effect.suspend(() => {
-        rounds++
-        return Effect.fail(
-          new WorkspaceKeyRoundFailure({
-            receive: Result.succeed({}),
-            distribution: Result.fail(nested()),
-            reportsAfterSend: Result.succeed({}),
-            cursors: {}
-          })
-        )
-      })
-    )
-    let now = 1_000
-    f.ipc.keyDeliveryNow = () => now
-    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
-    await f.ipc.keyDeliveryIdle('A', 'team')
-    assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [])
-    now += 10 * 60_000
-    await f.ipc.memberJoinRequests('team')
-    await f.ipc.keyDeliveryIdle('A', 'team')
-    assert.equal(rounds, 1)
-  })
+  void test(
+    `${name} nested in a key-round failure ends delivery from this device without retries`,
+    { timeout: 5000 },
+    async () => {
+      let rounds = 0
+      const f = await memberApprovalFixture(() =>
+        Effect.suspend(() => {
+          rounds++
+          return Effect.fail(
+            new WorkspaceKeyRoundFailure({
+              receive: Result.succeed({}),
+              distribution: Result.fail(nested()),
+              reportsAfterSend: Result.succeed({}),
+              cursors: {}
+            })
+          )
+        })
+      )
+      let now = 1_000
+      f.ipc.keyDeliveryNow = () => now
+      await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+      await f.ipc.keyDeliveryIdle('A', 'team')
+      assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [])
+      now += 10 * 60_000
+      await f.ipc.memberJoinRequests('team')
+      await f.ipc.keyDeliveryIdle('A', 'team')
+      assert.equal(rounds, 1)
+    }
+  )
 
 void test('passive cache inspection stays account/product-window bound without opening a reader or cloud call', async () => {
   const f = await memberIpcFixture()

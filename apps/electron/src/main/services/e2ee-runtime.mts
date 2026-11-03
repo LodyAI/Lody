@@ -236,6 +236,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
+        keyDeliveryTarget: (device: string) => Effect.Effect<boolean, unknown>
         observe: (
           checkpoint: ObservedCheckpoint,
           proof?: readonly E2eeWorkspaceHistoryPage[]
@@ -1453,6 +1454,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           rpc,
           sharing,
           refreshSharingLedger: refreshManagementHistory,
+          // Same selection as KeyDistributor: an admitted device of an active member.
+          keyDeliveryTarget: (device: string) =>
+            Effect.map(verified.current(), (view) => {
+              const state = view.inspectState()
+              const admitted = state.devices.get(device)
+              return Boolean(admitted && state.members.has(hex(admitted.membershipId.toBytes())))
+            }),
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1861,6 +1869,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
+      /** Whether this device's verified ledger makes `device` a key distribution target. */
+      keyDeliveryTarget: (workspaceId: string, device: string) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.keyDeliveryTarget(device))),
       ingestLedgerRecords: (workspaceId: string, page: E2eeWorkspaceHistoryPage) =>
         run(
           Effect.suspend(() => {

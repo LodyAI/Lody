@@ -153,18 +153,57 @@ const KEY_DELIVERY_READER = 0
 const KEY_DELIVERY_RETRY_MS = 10_000
 const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
 const KEY_DELIVERY_RETAINED = 32
-/** Access loss ends delivery from this device; other failures retry on a later due poll. */
-const TERMINAL_KEY_DELIVERY = new Set(['e2ee_member_removed', 'e2ee_device_revoked'])
+/** Access loss, a missing binding or a closed workspace ends delivery from this device;
+ * other failures retry on a later due poll. */
+const TERMINAL_KEY_DELIVERY = new Set([
+  'e2ee_member_removed',
+  'e2ee_device_revoked',
+  'e2ee_missing-binding',
+  'e2ee_closed'
+])
+const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'closed'])
+/** The admission is not in this device's verified ledger yet, so no round targets it. */
+const KEY_DELIVERY_NOT_INGESTED = 'e2ee_admission_not_ingested'
 type MemberKeyDelivery = {
   state: 'pending' | 'delivered' | 'failed'
+  /** Signing key from the verified KeyPackage; '' if it could not be decoded. */
+  device: string
   code?: string
   attempts: number
   retryAt: number
 }
 /** Public reason code only: never key bytes, tokens, causes or plaintext. */
 const keyDeliveryCode = (cause: unknown) => {
+  const loss = accessLoss(cause)
+  if (loss) return `e2ee_${loss}`
   const message = cause instanceof Error ? cause.message : ''
   return /^e2ee_[a-z0-9_-]{1,64}$/.test(message) ? message : 'e2ee_key_delivery_failed'
+}
+/** A key round reports phase failures inside WorkspaceKeyRoundFailure Results, which the
+ * account boundary's public projection does not unwrap. Find a terminal cause before it. */
+function terminalKeyRoundCause(error: unknown): Error | null {
+  const pending: unknown[] = [error]
+  for (let visited = 0; pending.length > 0 && visited < 64; visited++) {
+    const node = pending.shift()
+    if (!node || typeof node !== 'object') continue
+    if (node instanceof E2eeMemberRemovedError || node instanceof E2eeDeviceRevokedError)
+      return node
+    const code = (node as { code?: unknown }).code ?? (node as { reason?: unknown }).reason
+    if (typeof code === 'string' && TERMINAL_KEY_DELIVERY_CODES.has(code))
+      return Object.assign(new Error(`e2ee_${code}`), { code })
+    for (const key of ['cause', 'failure', 'receive', 'distribution', 'reportsAfterSend'])
+      pending.push((node as Record<string, unknown>)[key])
+  }
+  return null
+}
+const keyDeliveryDevice = (keyPackageHex: string) => {
+  try {
+    return Buffer.from(
+      decodeMemberKeyPackage(keyPackageHex).request.signingPublicKey.toBytes()
+    ).toString('hex')
+  } catch {
+    return ''
+  }
 }
 const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
   requestId,
@@ -200,10 +239,15 @@ export class E2eeIpc extends IpcService {
   protected keyDeliveryIdle(accountId: string, workspaceId: string) {
     return this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.running ?? Promise.resolve()
   }
-  private trackKeyDelivery(accountId: string, workspaceId: string, requestId: string) {
+  private trackKeyDelivery(
+    accountId: string,
+    workspaceId: string,
+    requestId: string,
+    device: string
+  ) {
     const slot = this.keyDeliverySlot(accountId, workspaceId)
     slot.requests.delete(requestId)
-    slot.requests.set(requestId, { state: 'pending', attempts: 0, retryAt: 0 })
+    slot.requests.set(requestId, { state: 'pending', device, attempts: 0, retryAt: 0 })
     while (slot.requests.size > KEY_DELIVERY_RETAINED) {
       const settled = [...slot.requests].find(([, delivery]) => delivery.state === 'delivered')
       slot.requests.delete(settled?.[0] ?? slot.requests.keys().next().value!)
@@ -246,26 +290,42 @@ export class E2eeIpc extends IpcService {
           delivery.state = 'pending'
           delete delivery.code
         }
+        const retry = (delivery: MemberKeyDelivery, code: string) => {
+          delivery.attempts += 1
+          delivery.state = 'failed'
+          delivery.code = code
+          delivery.retryAt =
+            this.keyDeliveryNow() +
+            Math.min(
+              KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
+              KEY_DELIVERY_RETRY_MAX_MS
+            )
+        }
+        let targets: Set<string>
         try {
-          await this.deliverMemberKeys(accountId, workspaceId)
+          targets = await this.deliverMemberKeys(
+            accountId,
+            workspaceId,
+            new Set(covered.map((delivery) => delivery.device))
+          )
         } catch (cause) {
           this.pairingFailure = cause
           const code = keyDeliveryCode(cause)
-          const now = this.keyDeliveryNow()
-          for (const delivery of covered) {
-            delivery.attempts += 1
-            delivery.state = 'failed'
-            delivery.code = code
-            delivery.retryAt =
-              now +
-              Math.min(
-                KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
-                KEY_DELIVERY_RETRY_MAX_MS
-              )
+          // Terminal: this device can no longer deliver; drop the slot, never retry.
+          if (TERMINAL_KEY_DELIVERY.has(code)) {
+            if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
+              this.keyDeliveries.delete(`${accountId}\n${workspaceId}`)
+            return
           }
+          for (const delivery of covered) retry(delivery, code)
           return
         }
+        // Only a device the verified ledger made a target of this round was delivered to.
         for (const delivery of covered) {
+          if (!targets.has(delivery.device)) {
+            retry(delivery, KEY_DELIVERY_NOT_INGESTED)
+            continue
+          }
           delivery.state = 'delivered'
           delivery.attempts = 0
         }
@@ -282,8 +342,9 @@ export class E2eeIpc extends IpcService {
     return running
   }
   /** One key round under a main-owned reader, so closing every window cannot stop it.
-   * Distribution still targets only verified ledger members inside the native host. */
-  private async deliverMemberKeys(accountId: string, workspaceId: string) {
+   * Ingests relay history first, then returns which `devices` the local verified
+   * ledger makes distribution targets; only those were covered by the round. */
+  private async deliverMemberKeys(accountId: string, workspaceId: string, devices: Set<string>) {
     const scope = this.memberScope(workspaceId)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== accountId) throw new Error('e2ee_account_mismatch')
@@ -298,17 +359,32 @@ export class E2eeIpc extends IpcService {
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     try {
+      try {
+        await this.ingestForKeyDelivery(accountId, workspaceId, scope, cloud)
+      } catch (cause) {
+        // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
+        if (TERMINAL_KEY_DELIVERY.has(keyDeliveryCode(cause))) throw cause
+        this.pairingFailure = cause
+      }
+      const targets = new Set<string>()
+      for (const device of devices)
+        if (device && (await scope((owner) => owner.host.keyDeliveryTarget(workspaceId, device))))
+          targets.add(device)
+      if (targets.size === 0) return targets
       const work = await scope((owner) =>
         Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) =>
-          owner.host.keyRound(
-            workspaceId,
-            (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
-            (signal) => cloud.client.staging({ workspaceId, credential }, signal),
-            (signal) => (request) => cloud.client.history(request, signal)
-          )
+          owner.host
+            .keyRound(
+              workspaceId,
+              (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
+              (signal) => cloud.client.staging({ workspaceId, credential }, signal),
+              (signal) => (request) => cloud.client.history(request, signal)
+            )
+            .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
         )
       )
       await runDesktopE2eeOperation(accountId, work)
+      return targets
     } finally {
       try {
         const cleanup = await scope((owner) =>
@@ -329,6 +405,33 @@ export class E2eeIpc extends IpcService {
       } catch (cause) {
         this.pairingFailure = cause
       }
+    }
+  }
+  /** Main-owned ledger ingest: the renderer reader that ran the approval may be gone. */
+  private async ingestForKeyDelivery(
+    accountId: string,
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const status = await scope((owner) => owner.host.status(workspaceId))
+    const after = status.position ?? undefined
+    let cursor: string | undefined
+    let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
+    for (let index = 0; index < 256; index++) {
+      const page = await Effect.runPromise(
+        cloud.client.history({
+          workspaceId,
+          ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+        })
+      )
+      checkpoint ??= page.checkpoint
+      const ingest = await scope((owner) =>
+        Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page))
+      )
+      await runDesktopE2eeOperation(accountId, ingest)
+      if (!page.nextCursor) return
+      cursor = page.nextCursor
     }
   }
   private readerAccount(workspaceId: string, reader: number) {
@@ -607,7 +710,12 @@ export class E2eeIpc extends IpcService {
       return { admitted: false, keyPending: true }
     }
     // Delivery continues in main and cannot undo admission; its state is readable below.
-    const keyDelivery = this.trackKeyDelivery(access.accountId, workspaceId, requestId)
+    const keyDelivery = this.trackKeyDelivery(
+      access.accountId,
+      workspaceId,
+      requestId,
+      keyDeliveryDevice(material.keyPackageHex)
+    )
     return { admitted: true, keyPending: true, keyDelivery }
   }
   @IpcMethod()
