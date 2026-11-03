@@ -3847,7 +3847,12 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status' | 'machine/preview-control' | 'machine/automation-control';
+          method: 'machine/status';
+          timeoutMs: number;
+          params: { includeDisk?: true };
+        }
+      | {
+          method: 'machine/preview-control' | 'machine/automation-control';
           timeoutMs: number;
           params: {};
         }
@@ -4359,6 +4364,13 @@ export class LoroStreamsMachineRpcClient {
       let request: LoroStreamsRpcRequest;
       switch (args.method) {
         case 'machine/status':
+          // Forward only the capability-gated flag; older daemons get the empty params.
+          request = {
+            ...envelope,
+            method: args.method,
+            params: args.params.includeDisk ? { includeDisk: true } : {},
+          };
+          break;
         case 'machine/preview-control':
         case 'machine/automation-control':
           request = { ...envelope, method: args.method, params: {} };
