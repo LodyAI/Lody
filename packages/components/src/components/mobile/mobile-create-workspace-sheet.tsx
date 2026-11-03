@@ -10,10 +10,12 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
   createPreparedE2eeWorkspace,
+  e2eeCreationAvailability,
   e2eeCreationIntent,
   isE2eeCreationNotEnabled,
 } from '@/lib/create-e2ee-workspace';
 import {
+  clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
@@ -77,8 +79,12 @@ export function MobileCreateWorkspaceSheet({
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const creationAvailable = creationAvailability?.canCreateFree === true;
-  const creationBlocked = creationAvailability?.canCreateFree === false;
+  // A submitted request may already have consumed the free slot and taken the
+  // slug. Resume must not be blocked by checks that only apply to a new workspace.
+  const creationState = e2eeCreationAvailability(pendingCreation, creationAvailability);
+  const resumable = creationState.resumable;
+  const creationAvailable = creationState.canCreate;
+  const creationBlocked = creationState.blocked;
   const encryptionSupported = Boolean(platform.e2eeWorkspaces?.prepareCreation);
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
@@ -103,13 +109,11 @@ export function MobileCreateWorkspaceSheet({
     }
   }, [accountId, open, setSlug]);
 
+  const slugReady = resumable || (!!slug && !error && !isChecking && isAvailable);
   const canSubmit =
     creationAvailable &&
     !!name.trim() &&
-    !!slug &&
-    !error &&
-    !isChecking &&
-    isAvailable &&
+    slugReady &&
     !creating &&
     !intentReadFailed &&
     (!encrypted || encryptionSupported);
@@ -128,9 +132,9 @@ export function MobileCreateWorkspaceSheet({
      `creating` is true bridges that window cleanly — the canSubmit
      check above already rules out re-submitting from this state, so
      hiding the message has no functional risk. */
-  const showError = !creating && error;
-  const showCheckingHint = !creating && slug && isChecking;
-  const showAvailableHint = !creating && slug && isAvailable && !error;
+  const showError = !creating && !resumable && error;
+  const showCheckingHint = !creating && !resumable && slug && isChecking;
+  const showAvailableHint = !creating && !resumable && slug && isAvailable && !error;
 
   const handleClose = (next: boolean) => {
     onOpenChange(next);
@@ -228,6 +232,22 @@ export function MobileCreateWorkspaceSheet({
             <p role="alert" className="px-4 pb-2 text-[0.72rem] text-destructive">
               {createError}
             </p>
+          ) : null}
+          {pendingCreation ? (
+            <button
+              type="button"
+              onClick={() => {
+                clearPendingE2eeWorkspace(localStorage, pendingCreation);
+                setPendingCreation(null);
+                setName('');
+                setEncrypted(false);
+                setCreateError(null);
+                resetSlug();
+              }}
+              className="mx-4 mb-2 self-start text-[0.72rem] font-medium text-muted-foreground hover:text-foreground"
+            >
+              {t('e2ee.create.discardPending', 'Discard this creation')}
+            </button>
           ) : null}
 
           {creationAvailable ? (
@@ -382,7 +402,11 @@ export function MobileCreateWorkspaceSheet({
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >
-                {creating ? t('common.creating', 'Creating...') : t('common.create', 'Create')}
+                {creating
+                  ? t('common.creating', 'Creating...')
+                  : resumable
+                    ? t('e2ee.create.resume', 'Continue saved creation')
+                    : t('common.create', 'Create')}
               </Button>
             ) : null}
           </div>

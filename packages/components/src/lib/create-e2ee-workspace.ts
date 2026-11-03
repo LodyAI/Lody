@@ -32,6 +32,21 @@ export function e2eeCreationErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+/** A pending request has already been submitted: its slug and free slot may
+ * belong to that request, so new-workspace checks must not block continuation. */
+export function e2eeCreationAvailability(
+  pending: PendingE2eeWorkspace | null,
+  availability: { canCreateFree?: boolean } | null | undefined
+) {
+  const resumable = Boolean(pending);
+  return {
+    resumable,
+    canCreate: resumable || availability?.canCreateFree === true,
+    blocked: !resumable && availability?.canCreateFree === false,
+    slugCheckApplies: !resumable,
+  };
+}
+
 /** Reuse the device's saved request instead of minting a second identity after a
  * lost response. The caller persists the returned intent before any host call. */
 export function e2eeCreationIntent(
