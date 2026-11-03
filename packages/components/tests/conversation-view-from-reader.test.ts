@@ -2,7 +2,12 @@ import { writeStoredField } from './conversation-view-fixtures';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, type LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
-import { createHistoryWriter } from '@lody/shared';
+import {
+  createHistoryWriter,
+  resolveSessionAcpRuntimeConfig,
+  resolveSessionConversationConfig,
+  resolveSessionConversationSourceFence,
+} from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,
@@ -13,6 +18,7 @@ import {
 } from '@lody/shared/session-data';
 import {
   createConversationViewFromReader,
+  collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
 import {
@@ -41,6 +47,118 @@ const backends: Backend[] = [
     },
   },
 ];
+
+it.each(['complete', 'prompt-only', 'absent'] as const)(
+  'caches body-independent configuration sources with unchanged results: %s',
+  async (configKind) => {
+    const history = buildFixtureHistory(3);
+    if (configKind === 'complete') {
+      history[4]!.inputConfig = {
+        ...history[4]!.inputConfig,
+        agentRoleId: null,
+        mcpServerIds: [],
+        configOptionValues: { plan_mode: false },
+      };
+    } else if (configKind === 'prompt-only') {
+      history[4]!.inputConfig = { prompt: 'Synthetic legacy input' };
+    } else {
+      delete history[4]!.inputConfig;
+    }
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      scheduleIdle: idle.scheduleIdle,
+    });
+    try {
+      await flushReaderChanges();
+      idle.runAll();
+      await view.ready;
+      const sources = collectConversationConfigSources(view, 4);
+      expect(collectConversationConfigSources(view, 4)).toBe(sources);
+      for (const position of [4, 5]) {
+        const turn = view.turn(position)!;
+        const source = sources.find((entry) => entry.id === turn.id)!;
+        expect(source).toStrictEqual({
+          id: turn.id,
+          role: turn.role,
+          inputConfig: turn.inputConfig,
+        });
+        expect(source).not.toBe(turn);
+      }
+      const complete = await data.history.readAll();
+      expect(resolveSessionConversationConfig(sources)).toEqual(
+        resolveSessionConversationConfig(complete)
+      );
+      expect(resolveSessionConversationSourceFence(sources)).toEqual(
+        resolveSessionConversationSourceFence(complete)
+      );
+      const runtime = {
+        acpSessionId: 'synthetic-agent-session',
+        basedOnUserTurnId: 'u-2',
+        revision: 1,
+        configOptionValues: { plan_mode: false },
+      };
+      expect(resolveSessionAcpRuntimeConfig(sources, [], runtime)).toEqual(
+        resolveSessionAcpRuntimeConfig(complete, [], runtime)
+      );
+
+      data.writer.updateEntry('u-2', (entry) => ({
+        ...entry,
+        inputConfig: { ...entry.inputConfig, modelId: 'updated-model', mcpServerIds: [] },
+      }));
+      await flushReaderChanges();
+      const updated = collectConversationConfigSources(view, 4);
+      expect(updated).not.toBe(sources);
+      expect(resolveSessionConversationConfig(updated)).toEqual(
+        resolveSessionConversationConfig(await data.history.readAll())
+      );
+      expect(resolveSessionConversationConfig(updated).modelId).toBe('updated-model');
+      expect(collectConversationConfigSources(view, 4)).toBe(updated);
+    } finally {
+      view.dispose();
+      data.dispose();
+      doc.free();
+    }
+  }
+);
+
+it('keeps older configuration sources lazy while reusing their index rows', async () => {
+  const history = buildFixtureHistory(3);
+  history[4]!.inputConfig = { ...history[4]!.inputConfig, agentRoleId: null };
+  const doc = buildSessionDoc(history);
+  const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+  const idle = createManualIdle();
+  const view = createConversationViewFromReader(data.history, {
+    sessionId: FIXTURE_SESSION_ID,
+    tailKeep: 2,
+    scheduleIdle: idle.scheduleIdle,
+  });
+  try {
+    await flushReaderChanges();
+    idle.runAll();
+    await view.ready;
+    const expected = resolveSessionConversationConfig(await data.history.readAll());
+    for (const position of [0, 2]) {
+      Object.defineProperty(view.index(position)!, 'inputConfig', {
+        get() {
+          throw new Error('Older configuration must remain unread');
+        },
+      });
+    }
+    const sources = collectConversationConfigSources(view, 4);
+    expect(sources[0]).toBe(view.index(0));
+    expect(sources[1]).toBe(view.index(2));
+    expect(resolveSessionConversationConfig(sources)).toEqual(expected);
+    expect(collectConversationConfigSources(view, 4)).toBe(sources);
+  } finally {
+    view.dispose();
+    data.dispose();
+    doc.free();
+  }
+});
 
 it('reveals adjacent reverse pages without replacing retained rows or bodies and keeps edits observable', async () => {
   const history = buildFixtureHistory(60);
