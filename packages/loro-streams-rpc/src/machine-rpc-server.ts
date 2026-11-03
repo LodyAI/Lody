@@ -469,6 +469,7 @@ type RpcServerDeps = {
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
+    includeActivity?: boolean;
   }) => Promise<LoroSessionLiveStatusRpcResponse>;
   steerSession?: (args: {
     sessionId: SessionId;
@@ -1574,6 +1575,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const response = await this.deps.getSessionLiveStatus({
             sessionId: request.params.sessionId as SessionId,
+            ...(request.params.includeActivity ? { includeActivity: true } : {}),
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;

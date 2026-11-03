@@ -1918,6 +1918,49 @@ describe('target Machine availability from presence', () => {
       reason: 'Target Machine is offline: target-machine',
     });
   });
+
+  it('asks only daemons advertising sessionLiveActivity for activity', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionLiveStatus: async (options: Record<string, unknown>) => {
+          requests.push(options);
+          return {
+            type: 'session/live-status_response',
+            machineId: target.machineId,
+            sessionId,
+            success: true,
+            state: 'running',
+            observedAtMs: 1,
+            ...(options.includeActivity
+              ? { activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 } }
+              : {}),
+          };
+        },
+      } as never)
+    );
+    const read = (capabilities: Record<string, number> | undefined) =>
+      readSessionLiveStatusesMany({
+        ...target,
+        sessions,
+        manager: {
+          ...presence([target.machineId]),
+          repo: {
+            getDocMeta: async () =>
+              capabilities ? { meta: { protocolCapabilities: capabilities } } : undefined,
+          } as never,
+        },
+      });
+
+    // An older daemon rejects the unknown request field, so it is never sent.
+    expect((await read(undefined)).get(sessionId)).not.toHaveProperty('activity');
+    expect(requests[0]).not.toHaveProperty('includeActivity');
+
+    expect((await read({ sessionLiveActivity: 1 })).get(sessionId)).toMatchObject({
+      activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 },
+    });
+    expect(requests[1]).toMatchObject({ includeActivity: true });
+  });
 });
 
 describe('prepared command attachment inputs', () => {

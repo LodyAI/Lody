@@ -144,7 +144,12 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/live-status'),
-    params: z.object({ sessionId: z.string().trim().min(1) }).strict(),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        includeActivity: z.literal(true).optional(),
+      })
+      .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('file/download-chunk'),
@@ -430,6 +435,20 @@ export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemb
 
 const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
 
+/**
+ * What a busy Session is doing, read on demand by its owning daemon and never
+ * published on presence. Sent only when the request asked with `includeActivity`.
+ */
+export const SessionLiveActivitySchema = z
+  .object({
+    turnStartedAt: z.number().finite().nonnegative().optional(),
+    lastOutputAt: z.number().finite().nonnegative().optional(),
+    currentAction: z.string().max(200).optional(),
+    queuedInputs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
+
 export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -440,6 +459,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
       state: SessionLiveStateSchema,
       observedAtMs: z.number().finite().nonnegative(),
       reason: z.string().trim().min(1).optional(),
+      activity: SessionLiveActivitySchema.optional(),
     })
     .strict(),
   z

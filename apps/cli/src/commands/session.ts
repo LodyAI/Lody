@@ -8,6 +8,7 @@ import {
 import { getDaemonWorkspace } from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
   machineSupportsProtocolCapability,
@@ -4606,6 +4607,8 @@ export type SessionLiveStatusBatchItem = {
   fresh: boolean;
   observedAt?: number;
   reason?: string;
+  /** Present only when the owning daemon supports and could read it. */
+  activity?: SessionLiveActivity;
 };
 
 /** Reuse one Machine RPC client for every Session owned by that Machine. */
@@ -4613,7 +4616,9 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
+  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'> & {
+    repo?: Pick<LoroDocumentManager['repo'], 'getDocMeta'>;
+  };
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
@@ -4658,6 +4663,16 @@ export async function readSessionLiveStatusesMany(args: {
         return;
       }
       const unknownPresence = presence === 'unknown';
+      // Older daemons reject the activity flag, so only ask machines advertising it.
+      const includeActivity = await args.manager.repo
+        ?.getDocMeta(getMachineRoomId(machineId))
+        .then((record) =>
+          machineSupportsProtocolCapability(
+            record?.meta as MachineMeta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
+          )
+        )
+        .catch(() => false);
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },
@@ -4668,6 +4683,7 @@ export async function readSessionLiveStatusesMany(args: {
                 response: await client.requestSessionLiveStatus({
                   sessionId: session.id,
                   timeoutMs: 10_000,
+                  ...(includeActivity ? { includeActivity: true } : {}),
                 }),
               }))
             )
@@ -4682,6 +4698,9 @@ export async function readSessionLiveStatusesMany(args: {
               ? { observedAt: response.observedAtMs }
               : {}),
             ...(!response?.success && response?.error ? { reason: response.error } : {}),
+            ...(response?.success === true && response.activity
+              ? { activity: response.activity }
+              : {}),
           });
         }
       } catch (error) {

@@ -234,6 +234,7 @@ describe('MessageHandler machine registration', () => {
       sessionInputAttachments: 1,
       sessionCollaborationControl: 1,
       bugReportClientLog: 1,
+      sessionLiveActivity: 1,
     });
 
     await handler.cleanup();
