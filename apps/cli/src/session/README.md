@@ -17,6 +17,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 
 ## Automation ownership
 
+Builtin Codex archive and restore observations synchronize the exact native thread after runtime release, with visible warnings on native failure. Account ownership, duplicate handling and first-version limits are recorded in the [native archive decision](../../../../.agents/notes/proposed/feature/2026-11-03-codex-native-session-archive.md).
+
 [Session authority](session-automation-authority.ts) admits actions requested by
 [Automations](../automations/README.md). Execution stages typed outcomes before
 Inbox release; the durable source reconciles release without replaying requests.

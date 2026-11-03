@@ -751,6 +751,7 @@ export class MessageHandler {
   // and stay as independent tracking. All other per-session state lives in this.store.
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
+  private readonly archiveReconcileAgain = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   /**
    * Latest output time and running tool title per Session, for on-demand live
@@ -4339,11 +4340,14 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
-          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
-          // Revoke media before unrelated ACP/Browser cleanup can fail.
-          void this.iosSimulatorService.closeSession(sessionId);
-          void this.androidEmulatorService.closeSession(sessionId);
-          void this.handleSessionArchived(sessionId);
+          const archived = (event.patch as Partial<SessionMeta>).isArchived;
+          if (typeof archived !== 'boolean') return;
+          if (archived) {
+            // Revoke media before unrelated ACP/Browser cleanup can fail.
+            void this.iosSimulatorService.closeSession(sessionId);
+            void this.androidEmulatorService.closeSession(sessionId);
+          }
+          void this.handleSessionArchiveChanged(sessionId);
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
       ),
@@ -4472,22 +4476,41 @@ export class MessageHandler {
     return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
   }
 
-  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
+  private async handleSessionArchiveChanged(sessionId: SessionId): Promise<void> {
     if (this.archiveInFlight.has(sessionId)) {
-      return;
-    }
-    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
+      this.archiveReconcileAgain.add(sessionId);
       return;
     }
     this.archiveInFlight.add(sessionId);
     try {
-      await this.releaseArchivedSessionRuntime(sessionId);
+      if (!(await this.isSessionOwnedByThisMachine(sessionId))) return;
+      do {
+        this.archiveReconcileAgain.delete(sessionId);
+        try {
+          const current = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+          if (!current?.meta || isLoroRepoDocDeleted(current)) break;
+          if ((current.meta as SessionMeta).isArchived === true) {
+            await this.releaseArchivedSessionRuntime(sessionId);
+          } else {
+            try {
+              await this.sessionManager.syncNativeSessionArchive(sessionId, false);
+            } catch (error) {
+              this.sessionManager.reportNativeArchiveFailure(sessionId, error);
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `[${sessionId}] Archive state reconciliation failed: ${formatErrorMessage(error)}`
+          );
+        }
+      } while (this.archiveReconcileAgain.has(sessionId));
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
       );
     } finally {
       this.archiveInFlight.delete(sessionId);
+      this.archiveReconcileAgain.delete(sessionId);
     }
     void this.worktreeGc.schedule();
   }
@@ -4525,7 +4548,15 @@ export class MessageHandler {
       }
     }
 
-    await this.sessionManager.archiveSession(sessionId);
+    const warning = await this.sessionManager.archiveSession(sessionId);
+    if (warning) {
+      // Reopen after cleanup, so warning persistence cannot race document destruction.
+      try {
+        await this.recordAgentWarning(sessionId, warning);
+      } finally {
+        await this.workspaceDocument.cleanSessionDoc(sessionId);
+      }
+    }
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
