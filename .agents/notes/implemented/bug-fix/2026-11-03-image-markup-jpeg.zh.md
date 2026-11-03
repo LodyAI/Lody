@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2272](https://github.com/LodyAI/Lody/pull/2272)
 
 [English](2026-11-03-image-markup-jpeg.md)
 
