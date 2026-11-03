@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2279](https://github.com/LodyAI/Lody/pull/2279)
 
 [English](2026-11-03-workspace-close-retry.md)
 
