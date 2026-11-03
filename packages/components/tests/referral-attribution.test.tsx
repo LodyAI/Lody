@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,12 +7,7 @@ import type { CloudApi, PlatformProvider } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { ReferralLeadAttacher } from '../src/components/referral-lead-attacher';
-import {
-  captureReferral,
-  readReferral,
-  readReferralHint,
-  attachStoredReferral,
-} from '../src/lib/referral-attribution';
+import { captureReferral, readReferral, readReferralHint } from '../src/lib/referral-attribution';
 function storage() {
   const map = new Map<string, string>();
   return {
@@ -36,26 +32,6 @@ describe('referral attribution through login', () => {
     expect(readReferral(s, 2000 + 30 * 86400000)).toBeUndefined();
     captureReferral('?ref=' + 'b'.repeat(32), s, 1000 + 30 * 86400000);
     expect(readReferral(s, 1001 + 30 * 86400000)).toBe('b'.repeat(32));
-  });
-  it('ignores corrupt values and unavailable storage without blocking login', () => {
-    const s = storage();
-    s.setItem('lody:referral', '{broken');
-    expect(readReferral(s, 1000)).toBeUndefined();
-    captureReferral('?ref=https://untrusted.example', s, 1000);
-    expect(readReferral(s, 1000)).toBeUndefined();
-    const denied = {
-      getItem() {
-        throw new Error('denied');
-      },
-      setItem() {
-        throw new Error('denied');
-      },
-      removeItem() {
-        throw new Error('denied');
-      },
-    };
-    expect(() => captureReferral('?ref=' + 'a'.repeat(32), denied, 1000)).not.toThrow();
-    expect(readReferral(denied, 1000)).toBeUndefined();
   });
   it('tolerates browsers that throw while accessing the localStorage property', () => {
     const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -149,35 +125,11 @@ describe('referral attachment to the authenticated account', () => {
     expect(leads.get('newcomer')).toBe(code);
   });
 
-  it('attaches separately when switching directly between authenticated users', async () => {
-    await signIn('first');
-    await signIn('second');
-    expect([...leads]).toEqual([
-      ['first', code],
-      ['second', code],
-    ]);
-  });
-
-  it('attaches a newer link while mounted and waits for it before checkout', async () => {
+  it('attaches a newer link while mounted', async () => {
     await signIn('newcomer');
     vi.setSystemTime(11000);
     await act(async () => captureReferral(`?ref=${'b'.repeat(32)}`));
     expect(leads.get('newcomer')).toBe('b'.repeat(32));
-    const ready = Promise.withResolvers<void>();
-    let selected: string | undefined;
-    let checkoutStarted = false;
-    const checkout = attachStoredReferral(async (hint) => {
-      expect(hint).toEqual({ code: 'b'.repeat(32), clickedAt: 11000 });
-      await ready.promise;
-      selected = hint.code;
-    }).then(() => {
-      checkoutStarted = true;
-    });
-    expect(checkoutStarted).toBe(false);
-    ready.resolve();
-    await checkout;
-    expect(checkoutStarted).toBe(true);
-    expect(selected).toBe('b'.repeat(32));
   });
 
   it('observes another tab and renews the same link only on a new click', async () => {

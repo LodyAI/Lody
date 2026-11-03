@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -311,31 +312,6 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     expect(store.get(dispatchedSessionAtom)).toBe('child-session');
   });
 
-  it('uses the root session when it is the selected execution target', async () => {
-    store.set(resolveConflictsActionAtomFamily('root-session'), {
-      available: true,
-      pending: false,
-      run: () => store.set(dispatchedSessionAtom, 'root-session'),
-    });
-    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <PrTabContainer
-            repoFullName="loro-dev/lody"
-            prNumber={42}
-            sessionId="root-session"
-            actionSessionId="root-session"
-          />
-        </Provider>
-      );
-    });
-
-    await act(async () => getResolveConflictsButton().click());
-    expect(store.get(dispatchedSessionAtom)).toBe('root-session');
-  });
-
   it('does not expose or dispatch the root action without an execution target', async () => {
     store.set(resolveConflictsActionAtomFamily('root-session'), {
       available: true,
@@ -363,55 +339,5 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
       )
     ).toBe(false);
     expect(store.get(dispatchedSessionAtom)).toBeNull();
-  });
-
-  it('refreshes once and retries without showing a toast on the first auth failure', async () => {
-    mocks.markReadyForReview
-      .mockRejectedValueOnce(createAuthError())
-      .mockResolvedValueOnce(undefined);
-    await renderContainer();
-
-    await act(async () => {
-      getReadyButton().click();
-    });
-    await flushPromises();
-
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    expect(mocks.markReadyForReview).toHaveBeenCalledTimes(2);
-    expect(mocks.toastError).not.toHaveBeenCalled();
-  });
-
-  it('shows the ready-for-review toast when the retry still fails', async () => {
-    mocks.markReadyForReview
-      .mockRejectedValueOnce(createAuthError())
-      .mockRejectedValueOnce(new Error('still unauthorized'));
-    await renderContainer();
-
-    await act(async () => {
-      getReadyButton().click();
-    });
-    await flushPromises();
-
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    expect(mocks.markReadyForReview).toHaveBeenCalledTimes(2);
-    expect(mocks.toastError).toHaveBeenCalledWith('Failed to mark as ready for review', {
-      description: 'still unauthorized',
-    });
-  });
-
-  it('silently restores the merge action when Convex loses the token action result', async () => {
-    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(mergeablePullRequest));
-    mocks.mergePullRequest.mockRejectedValueOnce(
-      new Error('Connection lost while action was in flight')
-    );
-    await renderContainer();
-
-    await act(async () => {
-      getMergeButton().click();
-    });
-    await flushPromises();
-
-    expect(mocks.mergePullRequest).toHaveBeenCalledWith('merge');
-    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

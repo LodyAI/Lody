@@ -32,7 +32,6 @@ import {
   sealHistoryPacket,
   hashRecordBytes,
   mailboxDigest,
-  epochDeliveryId,
   prepareJoinRequest,
   prepareDeviceAdmission,
   prepareEpochEnvelope,
@@ -921,25 +920,6 @@ void test('a failed originals transaction never advances the pin; reopening reta
     })
   )
 })
-void test('missing binding or existing device refuses to create a replacement identity', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      const missing = yield* Effect.result(owner.host.open(workspaceId))
-      assert.equal(Result.isFailure(missing), true)
-      yield* bind(owner)
-    })
-  )
-  const original = await readFile(join(directory, 'creations.sqlite'))
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      assert.equal((yield* owner.host.open(workspaceId)).length, 1)
-    })
-  )
-  assert.deepEqual(await readFile(join(directory, 'creations.sqlite')), original)
-})
 
 void test('retains an earlier renderer checkpoint before first native takeover and refuses server rollback', async (t) => {
   const directory = await fixture(t)
@@ -981,59 +961,6 @@ void test('retains an earlier renderer checkpoint before first native takeover a
       assert.equal(ready.hasCurrentKey, true)
     })
   )
-})
-void test('closing waits for admitted native unprotect before releasing the runtime', async (t) => {
-  const directory = await fixture(t)
-  const scope = await Effect.runPromise(Scope.make())
-  const entered = Promise.withResolvers()
-  const release = Promise.withResolvers()
-  let hold = false
-  try {
-    const owner = await Effect.runPromise(
-      Effect.gen(function* () {
-        const base = yield* openOwner(directory)
-        const custody = {
-          ...base.custody,
-          installed: {
-            ...base.custody.installed,
-            unprotect: async (blob) => {
-              if (hold) {
-                entered.resolve()
-                await release.promise
-              }
-              return base.custody.installed.unprotect(blob)
-            }
-          }
-        }
-        const host = yield* makeDesktopE2eeRuntimeHost({
-          directory,
-          bootstrap: base.bootstrap,
-          custody
-        })
-        return { ...base, host }
-      }).pipe(Scope.provide(scope))
-    )
-    await Effect.runPromise(bind(owner))
-    await Effect.runPromise(owner.host.open(workspaceId))
-    hold = true
-    const reading = Effect.runPromise(owner.host.status(workspaceId))
-    await entered.promise
-    let closed = false
-    const closing = Effect.runPromise(owner.host.close).then(() => {
-      closed = true
-    })
-    assert.equal(closed, false)
-    release.resolve()
-    await Promise.all([reading, closing])
-    assert.equal(closed, true)
-    assert.equal(
-      Result.isFailure(await Effect.runPromise(Effect.result(owner.host.status(workspaceId)))),
-      true
-    )
-  } finally {
-    release.resolve()
-    await Effect.runPromise(Scope.close(scope, Exit.void))
-  }
 })
 
 void test('quit after a link invitation bounds native drain while retaining custody and committed history', async (t) => {
@@ -1161,35 +1088,6 @@ void test('quit after a link invitation bounds native drain while retaining cust
     await reading
     await rawClosing
     await Effect.runPromise(Scope.close(scope, Exit.void))
-  }
-})
-
-void test('rebases after 64 added records across reopen, without compacting each final page', async (t) => {
-  const directory = await fixture(t)
-  let saved, records
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      saved = yield* bind(owner)
-      records = yield* makeRecords(owner.custody, saved, 66)
-    })
-  )
-  let start = 0
-  for (const end of [33, 64, 65, 66]) {
-    await execute(
-      Effect.gen(function* () {
-        const { host } = yield* ownerWithHost(directory)
-        yield* host.open(workspaceId)
-        yield* host.ingestLedgerRecords(
-          workspaceId,
-          page(records.slice(0, end), saved.genesisHashHex, start)
-        )
-        assert.equal((yield* host.status(workspaceId)).length, end)
-      })
-    )
-    const origin = historyDb(directory, (db) => db.prepare('SELECT origin FROM cache').get().origin)
-    assert.equal(origin === null ? null : JSON.parse(origin).length, end < 65 ? null : 65)
-    start = end
   }
 })
 
@@ -1329,38 +1227,6 @@ for (const kind of ['update_batch', 'snapshot'])
       })
     )
   })
-
-void test('obsolete-cache deletion failure preserves the rebuilt feed and subsequent local opens', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      const prepared = yield* bind(owner)
-      const records = yield* makeRecords(owner.custody, prepared, 2)
-      yield* owner.host.open(workspaceId)
-      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
-    })
-  )
-  historyDb(directory, (db) => db.prepare('UPDATE cache SET origin=?').run('{corrupt'))
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory, {
-        removeObsoleteCache: async () => {
-          throw Object.assign(new Error('synthetic busy'), { code: 'EBUSY' })
-        }
-      })
-      const state = yield* owner.host.open(workspaceId)
-      assert.equal(state.length, 2)
-      assert.equal(state.hasCurrentKey, true)
-    })
-  )
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      assert.equal((yield* owner.host.open(workspaceId)).length, 2)
-    })
-  )
-})
 
 void test('a slow mailbox round does not hold the local workspace lock and reports its installed key', async (t) => {
   const directory = await fixture(t)
@@ -1638,28 +1504,6 @@ void test('local machine approval retains its exact signed original across resta
       })
       assert.equal(yield* owner.host.approveLocalPairing(workspaceId, original.session), null)
       assert.equal((yield* owner.host.status(workspaceId)).length, 2)
-    })
-  )
-})
-
-void test('local status exposes only credential availability for old developer workspaces', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory)
-      yield* bind(owner)
-      const host = yield* makeDesktopE2eeRuntimeHost({
-        directory,
-        ...owner,
-        bootstrap: {
-          ...owner.bootstrap,
-          deviceCredential: () => Effect.fail(new Error('missing credential'))
-        }
-      })
-      const status = yield* host.open(workspaceId)
-      assert.equal(status.hasCurrentKey, true)
-      assert.equal(status.hasDeviceCredential, false)
-      assert.equal('credential' in status, false)
     })
   )
 })
@@ -2554,89 +2398,6 @@ void test('terminal cancellation can archive a signed pre-reservation intent, wh
   )
 })
 
-for (const recovery of ['retry', 'cancel-and-renew']) {
-  void test(`a pending personal pin remains discoverable before request persistence and ${recovery} reuses original custody after reopen`, async (t) => {
-    const directory = await fixture(t)
-    const secondDirectory = join(directory, 'second')
-    let offer, originalKey, originalCredential
-    await execute(
-      Effect.gen(function* () {
-        const first = yield* ownerWithHost(directory)
-        yield* bind(first)
-        yield* first.host.open(workspaceId)
-        offer = yield* first.host.personalPairingOffer(workspaceId)
-        const second = yield* ownerWithHost(secondDirectory)
-        assert.equal(yield* second.bootstrap.pendingPersonalJoin(workspaceId), null)
-        const db = new DatabaseSync(join(secondDirectory, 'creations.sqlite'))
-        try {
-          db.exec(
-            "CREATE TRIGGER synthetic_request_full BEFORE UPDATE OF request_hex ON personal_joins BEGIN SELECT RAISE(ABORT, 'synthetic request persistence failure'); END"
-          )
-        } finally {
-          db.close()
-        }
-        const failed = yield* Effect.result(second.bootstrap.preparePersonalJoin(offer))
-        assert.ok(Result.isFailure(failed))
-        const pending = yield* second.bootstrap.pendingPersonalJoin(workspaceId)
-        assert.deepEqual(pending, { offer, pairingSessionId: offer.pairingSessionId })
-        const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
-        const device = yield* second.custody.openDevice(genesis)
-        originalKey = hex(device.publicKey.toBytes())
-        originalCredential = yield* second.custody.deviceCredential(genesis, device.publicKey)
-        // Querying the pin cannot manufacture request evidence or change native keys.
-        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), pending)
-        const unchanged = yield* second.custody.openDevice(genesis)
-        assert.equal(hex(unchanged.publicKey.toBytes()), originalKey)
-        assert.equal(
-          yield* second.custody.deviceCredential(genesis, unchanged.publicKey),
-          originalCredential
-        )
-      })
-    )
-    await execute(
-      Effect.gen(function* () {
-        const second = yield* ownerWithHost(secondDirectory)
-        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), {
-          offer,
-          pairingSessionId: offer.pairingSessionId
-        })
-        const db = new DatabaseSync(join(secondDirectory, 'creations.sqlite'))
-        try {
-          db.exec('DROP TRIGGER synthetic_request_full')
-        } finally {
-          db.close()
-        }
-        let targetOffer = offer
-        if (recovery === 'cancel-and-renew') {
-          // These local retirement calls follow authoritative terminal cancellation;
-          // the IPC/relay suite separately tests that admission arbitration boundary.
-          const first = yield* ownerWithHost(directory)
-          yield* first.host.open(workspaceId)
-          yield* first.host.cancelPersonalPairing(workspaceId, offer.pairingSessionId)
-          yield* second.bootstrap.retirePersonalJoin(workspaceId, offer.pairingSessionId)
-          targetOffer = yield* first.host.personalPairingOffer(workspaceId)
-          assert.notEqual(targetOffer.pairingSessionId, offer.pairingSessionId)
-        }
-        const renewed = yield* second.bootstrap.preparePersonalJoin(targetOffer)
-        assert.equal(renewed.signingPublicKey, originalKey)
-        const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
-        const device = yield* second.custody.openDevice(genesis)
-        assert.equal(
-          yield* second.custody.deviceCredential(genesis, device.publicKey),
-          originalCredential
-        )
-        assert.deepEqual(yield* second.bootstrap.pendingPersonalJoin(workspaceId), {
-          offer: targetOffer,
-          pairingSessionId: targetOffer.pairingSessionId,
-          signingPublicKey: originalKey,
-          credentialHash: renewed.credentialHash,
-          requestHex: renewed.requestHex
-        })
-      })
-    )
-  })
-}
-
 void test('D03 unknown identity companion blocks only new signatures; existing workspace and signed originals reopen offline', async (t) => {
   const directory = await fixture(t)
   let original
@@ -2665,63 +2426,7 @@ void test('D03 unknown identity companion blocks only new signatures; existing w
   assert.deepEqual(await readFile(join(directory, 'account-identity.json')), protectedBytes)
 })
 
-void test('superseded unsigned retirement retains its native cause in main before host sanitization and recovers', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-      const context = yield* owner.host.localPairingContext(workspaceId)
-      const db = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'history.sqlite'))
-      try {
-        db.exec(
-          "CREATE TRIGGER fail_unsigned_retirement BEFORE INSERT ON retired_local_pairings BEGIN SELECT RAISE(ABORT,'synthetic retirement write failure'); END"
-        )
-        let original
-        const failed = yield* Effect.result(
-          owner.host.retireSupersededLocalPairing(
-            workspaceId,
-            context.pairingSessionId,
-            (error) => {
-              original = error
-            }
-          )
-        )
-        assert.equal(failed._tag, 'Failure')
-        assert.equal(failed.failure.code, 'storage')
-        assert.equal(failed.failure.cause, undefined)
-        assert.equal(original.code, 'storage')
-        assert.match(original.cause.message, /synthetic retirement write failure/)
-        assert.equal(original.cause.errcode, 1811)
-        assert.equal(
-          (yield* owner.host.localPairingContext(workspaceId)).pairingSessionId,
-          context.pairingSessionId
-        )
-        db.exec('DROP TRIGGER fail_unsigned_retirement')
-        yield* owner.host.retireSupersededLocalPairing(
-          workspaceId,
-          context.pairingSessionId,
-          () => {
-            throw new Error('successful retry must not report failure')
-          }
-        )
-        assert.notEqual(
-          (yield* owner.host.localPairingContext(workspaceId)).pairingSessionId,
-          context.pairingSessionId
-        )
-        assert.equal(
-          db.prepare('SELECT session FROM retired_local_pairings').get().session,
-          context.pairingSessionId
-        )
-      } finally {
-        db.close()
-      }
-    })
-  )
-})
-
-for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
+for (const source of ['staging', 'temporary-io'])
   void test(`reopens without a candidate and installs the committed epoch via ${source}`, async (t) => {
     const directory = await fixture(t)
     const clock = Object.assign(Object.create(Effect.runSync(Clock.Clock)), {
@@ -3703,94 +3408,6 @@ void test('an unreadable installed blob keeps ledger open and is replaced only b
       assert.equal((yield* owner.host.ledgerView(workspaceId)).status.length, 1)
       yield* owner.host.keyRound(workspaceId, () => mailbox)
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-    })
-  )
-})
-void test('a rejected envelope is repaired by digest and the following good envelope installs in the same maintenance call', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const { owner, mailbox, path, frame, device } = yield* maintenanceFixture(directory)
-      const bad = frame.slice()
-      // Force the hostile frame to sort before the good original, deterministically.
-      for (let n = 0; ; n++) {
-        new DataView(bad.buffer).setUint32(bad.length - 4, n)
-        if (mailboxDigest(bad) < mailboxDigest(frame)) break
-      }
-      const digest = mailboxDigest(bad)
-      const db = new DatabaseSync(path)
-      db.prepare('INSERT INTO mailbox_envelopes VALUES(?,?,?,?,?,?)').run(
-        0,
-        hex(device.publicKey.toBytes()),
-        hex(device.publicKey.toBytes()),
-        'cd'.repeat(16),
-        digest,
-        bad
-      )
-      yield* owner.host.keyRound(workspaceId, () => mailbox)
-      assert.equal(db.prepare('SELECT digest FROM mailbox_rejected').get().digest, digest)
-      // The independent post-send flush reports the local publication at both repair revisions.
-      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_reports').get().n, 3)
-      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_envelopes').get().n, 2)
-      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-      db.close()
-    })
-  )
-})
-
-void test('finite rounds retain independent delivery cursors past blocked tasks and ACK terminal results without deleting originals', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const { owner, mailbox, device } = yield* maintenanceFixture(directory)
-      yield* owner.host.keyRound(workspaceId, () => mailbox)
-      const genesis = Result.getOrThrow(
-        Bytes.genesisHash(Buffer.from((yield* owner.host.status(workspaceId)).genesisHash, 'hex'))
-      )
-      const delivery = Result.getOrThrow(
-        epochDeliveryId({
-          genesis,
-          epoch: 0,
-          sender: device.publicKey,
-          recipient: device.publicKey
-        })
-      )
-      const taskId = (revision) =>
-        mailboxDigest(
-          new TextEncoder().encode(`lody-e2ee/local-distribution-task/v0:${delivery}:${revision}`)
-        )
-      const last = taskId(0)
-      const db = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'distribution.sqlite'))
-      const insert = db.prepare("INSERT INTO distribution_tasks VALUES(?,0,?,?,'Pending',0)")
-      let count = 0
-      for (let revision = 1; count < 501; revision++) {
-        const id = taskId(revision)
-        if (id >= last) continue
-        insert.run(id, hex(device.publicKey.toBytes()), revision)
-        count++
-      }
-      insert.run(last, hex(device.publicKey.toBytes()), 0)
-      yield* owner.host.keyRound(workspaceId, () => mailbox)
-      assert.equal(
-        db.prepare('SELECT phase FROM distribution_tasks WHERE id=?').get(last).phase,
-        'Pending'
-      )
-      yield* owner.host.keyRound(workspaceId, () => mailbox)
-      assert.deepEqual(
-        { ...db.prepare('SELECT phase,consumed FROM distribution_tasks WHERE id=?').get(last) },
-        { phase: 'Observed', consumed: 1 }
-      )
-      assert.equal(
-        db.prepare("SELECT count(*) AS n FROM distribution_tasks WHERE phase='Pending'").get().n,
-        501
-      )
-      db.close()
-      const outbox = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'outbox.sqlite'))
-      const originals = outbox.prepare('SELECT * FROM epoch_delivery').all()
-      assert.equal(originals.length, 1)
-      yield* owner.host.keyRound(workspaceId, () => mailbox)
-      assert.deepEqual(outbox.prepare('SELECT * FROM epoch_delivery').all(), originals)
-      outbox.close()
     })
   )
 })

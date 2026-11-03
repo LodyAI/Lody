@@ -42,6 +42,7 @@ import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
+import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
@@ -78,12 +79,28 @@ const styles = stylex.create({
   },
 
   header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
+  questionBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  questionHeader: {
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
   question: {
     flexGrow: 1,
     flexShrink: 1,
     minWidth: 0,
-    fontWeight: 600,
-    whiteSpace: 'pre-wrap',
+    fontWeight: 400,
+    whiteSpace: 'normal',
     overflowWrap: 'anywhere',
   },
   // Everything beside the question sits on its first line, however many it wraps to.
@@ -684,6 +701,10 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
 
   if (!question) return null;
 
+  const questionHeader = question.header.trim();
+  const showQuestionHeader =
+    questionHeader.length > 0 && questionHeader !== question.question.trim();
+
   const noteInputProps = {
     value: isReadonly && question.note?.isSecret && draft.note ? '••••••••' : (draft.note ?? ''),
     disabled,
@@ -743,7 +764,19 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
       onPointerUp={finishSwipe}
     >
       <div {...stylex.props(styles.header)}>
-        <span {...stylex.props(styles.question)}>{question.question}</span>
+        <div {...stylex.props(styles.questionBlock)}>
+          {showQuestionHeader ? (
+            <span {...stylex.props(styles.questionHeader)}>{questionHeader}</span>
+          ) : null}
+          <div {...stylex.props(styles.question)}>
+            <MarkdownRenderer
+              text={question.question}
+              size="sm"
+              className="[&>p:first-child]:font-semibold [&_p]:whitespace-pre-line"
+              allowImages={false}
+            />
+          </div>
+        </div>
         <div {...stylex.props(styles.headerMeta)}>
           {total > 1 ? (
             <span {...stylex.props(styles.count)}>

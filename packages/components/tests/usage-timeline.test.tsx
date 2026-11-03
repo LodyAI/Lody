@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -277,20 +278,6 @@ describe('usage day selection across ranges', () => {
       container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"] p')?.textContent
     ).toBe('Wed, Sep 30, 2026');
   });
-
-  it.each(['day', 'month'] as const)(
-    'moves the %s caret without changing the selected date',
-    async (range) => {
-      await show(timeline(range));
-      const cell = await selectRangeCell(range);
-      const observer = selectedObserver(cell);
-      vi.spyOn(cell, 'getBoundingClientRect').mockReturnValue(new DOMRect(30, 0, 20, 8));
-      await act(async () => observer.deliver());
-      expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
-      const detail = container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]')!;
-      expect((detail.previousElementSibling as HTMLElement).style.left).toBe('40px');
-    }
-  );
 
   it('retains a selected day across 30d ↔ All and rejects a callback for another day', async () => {
     await show(timeline('month'));

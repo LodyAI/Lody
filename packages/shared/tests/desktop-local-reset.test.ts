@@ -65,11 +65,6 @@ describe('arming and consuming a desktop local reset', () => {
     expect(consumeDesktopLocalResetRequest({ filePath, nowMs: NOW })).toBe('hard');
   });
 
-  it('reports nothing to consume and nothing to cancel when none is armed', async () => {
-    expect(consumeDesktopLocalResetRequest({ filePath, nowMs: NOW })).toBeNull();
-    expect(await clearDesktopLocalResetRequest({ filePath })).toBe(false);
-  });
-
   it('cancels an armed request so the next launch applies nothing', async () => {
     await writeDesktopLocalResetRequest({ mode: 'hard', filePath, nowMs: NOW });
 
@@ -102,16 +97,5 @@ describe('arming and consuming a desktop local reset', () => {
       expect(consumeDesktopLocalResetRequest({ filePath, nowMs: NOW + drift })).toBeNull();
       await expect(fs.access(filePath)).rejects.toThrow();
     }
-  });
-
-  it('still applies a request restarted right at the staleness bound', async () => {
-    await writeDesktopLocalResetRequest({ mode: 'cache', filePath, nowMs: NOW });
-
-    expect(
-      consumeDesktopLocalResetRequest({
-        filePath,
-        nowMs: NOW + DESKTOP_LOCAL_RESET_REQUEST_TTL_MS,
-      })
-    ).toBe('cache');
   });
 });

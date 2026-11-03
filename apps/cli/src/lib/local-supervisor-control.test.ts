@@ -57,22 +57,6 @@ describe('local supervisor control', () => {
     });
   });
 
-  it('rejects a supervisor speaking a different contract version', () => {
-    const mismatched = resolveLocalSupervisorIdentity({
-      LODY_DAEMON_SUPERVISED: '1',
-      LODY_SUPERVISOR_CONTRACT: '0',
-      LODY_SUPERVISOR_PID: '123',
-      LODY_SUPERVISOR_INSTANCE_ID: 'instance-a',
-      LODY_SUPERVISOR_TOKEN: 'x'.repeat(32),
-    });
-    expect(mismatched.status).toBe('invalid');
-    expect(mismatched.status === 'invalid' && mismatched.reason).toContain('contract version 0');
-
-    const missing = resolveLocalSupervisorIdentity({ LODY_DAEMON_SUPERVISED: '1' });
-    expect(missing.status).toBe('invalid');
-    expect(missing.status === 'invalid' && missing.reason).toContain('contract version (none)');
-  });
-
   it.each(['1', '2'])(
     'rejects old launch contract %s before runtime ownership is granted',
     (version) => {

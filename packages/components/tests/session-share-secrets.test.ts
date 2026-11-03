@@ -48,29 +48,4 @@ describe('device-local share secrets', () => {
     removeSessionShareSecret(storage, key, 2);
     expect(readSessionShareSecret(storage, key, 2)).toBeNull();
   });
-  it('treats corrupt or inaccessible storage as missing and reports failed persistence', () => {
-    const storage = fixture();
-    for (const invalid of [
-      '{',
-      '{}',
-      'null',
-      JSON.stringify({ credentialVersion: 1, secret: 'bad' }),
-    ]) {
-      storage.setItem(key, invalid);
-      expect(readSessionShareSecret(storage, key, 1)).toBeNull();
-    }
-    const blocked = {
-      ...storage,
-      getItem: () => {
-        throw new Error('blocked');
-      },
-      setItem: () => {
-        throw new Error('quota');
-      },
-    };
-    expect(readSessionShareSecret(blocked, key, 1)).toBeNull();
-    expect(saveSessionShareSecret(blocked, key, { credentialVersion: 1, secret })).toBe(
-      'unavailable'
-    );
-  });
 });

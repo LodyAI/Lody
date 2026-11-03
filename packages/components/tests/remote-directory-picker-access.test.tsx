@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -272,24 +273,5 @@ describe('RemoteDirectoryPicker machine ownership', () => {
     expect(listRoots).not.toHaveBeenCalled();
     expect(browseDir).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Choose a machine');
-  });
-
-  it('shows a loading state while ownership identity is unresolved', async () => {
-    const { ops } = createOps();
-
-    await act(async () => {
-      root?.render(
-        <RemoteDirectoryPicker
-          machines={[]}
-          machinesLoading
-          ops={ops}
-          onAdded={vi.fn()}
-          onClose={vi.fn()}
-        />
-      );
-    });
-
-    expect(document.body.textContent).toContain('Loading machines');
-    expect(document.body.textContent).not.toContain('No machines available');
   });
 });

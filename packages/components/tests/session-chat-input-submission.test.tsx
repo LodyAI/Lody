@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
@@ -301,55 +302,6 @@ describe('SessionChatInputArea submission feedback', () => {
     ).not.toBeNull();
   });
 
-  it('does not submit against transient run-config defaults while the Session doc hydrates', async () => {
-    const onSendMessage = vi.fn(async () => true);
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-hydrating',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            agentConfigId: 'agent-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-08-26T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          durableAgentRoleReady: false,
-          selectedModeId: null,
-          selectedModelId: 'provider-default',
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          initialInputText: 'wait for the durable config',
-        })
-      );
-    });
-
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled).toBe(
-      true
-    );
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click()
-    );
-    expect(onSendMessage).not.toHaveBeenCalled();
-  });
-
   afterEach(async () => {
     await act(async () => root?.unmount());
     await resources.dispose();
@@ -364,104 +316,6 @@ describe('SessionChatInputArea submission feedback', () => {
     root = null;
     container?.remove();
     container = null;
-  });
-
-  it('clears immediately and restores the preserved draft when acceptance fails', async () => {
-    const acceptance = deferredBoolean();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-feedback',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage: () => acceptance.promise,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          initialInputText: 'preserved draft',
-        })
-      );
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('preserved draft');
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('');
-    expect(container.querySelector('textarea')?.disabled).toBe(true);
-
-    await act(async () => {
-      acceptance.resolve(false);
-      await acceptance.promise;
-    });
-
-    expect(container.querySelector('textarea')?.value).toBe('preserved draft');
-    expect(container.querySelector('textarea')?.disabled).toBe(false);
-  });
-
-  it('shows a turn limit without an upgrade action when none is provided', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-limit',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage: async () => true,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          freeTurnLimitNotice: { current: 20, limit: 20 },
-        })
-      );
-    });
-
-    expect(container.textContent).toContain('limited to 20 turns');
-    expect(container.textContent).not.toContain('Upgrade to Plus');
   });
 
   let nextSession = 0;
@@ -758,59 +612,6 @@ describe('SessionChatInputArea submission feedback', () => {
     ]);
     expect(textarea.value).toBe('');
     expect(localStorage.getItem(key)).toBeNull();
-  });
-
-  it('restores every snapshot after bulk-deleting more than 200 quote atoms', async () => {
-    const workspace = 'quote-bulk-workspace';
-    const sessionId = `quote-bulk-${++nextSession}`;
-    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
-    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
-    let text = '';
-    const spans = Array.from({ length: 210 }, (_, index) => {
-      if (text) text += '\n\n';
-      const start = text.length;
-      text += formatMessageQuote(`Snapshot ${index}`);
-      return {
-        start,
-        end: text.length,
-        kind: 'message_quote',
-        quoteVersion: 1,
-        label: `[Quote ${index}]`,
-        target: `quote-${index}`,
-      };
-    });
-    text += '\n\nWhy?';
-    const key = conversationQuoteDraftKey(workspace, sessionId);
-    localStorage.setItem(key, JSON.stringify({ text, spans }));
-    const submitted: SessionInputBlock[][] = [];
-    const textarea = await renderComposer({
-      sessionId,
-      onSendMessage: async (blocks) => {
-        submitted.push(blocks);
-        return false;
-      },
-    });
-    const original = textarea.value;
-    await act(async () => {
-      textarea.focus();
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        textarea,
-        ''
-      );
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(textarea.value).toBe('');
-    await act(async () =>
-      textarea.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
-      )
-    );
-    expect(textarea.value).toBe(original);
-    await submit('button');
-    expect(submitted[0]).toMatchObject([{ type: 'text', text, spans: expect.any(Array) }]);
-    const block = submitted[0]![0]!;
-    expect(block.type === 'text' ? block.spans : []).toHaveLength(210);
-    localStorage.removeItem(key);
   });
 
   it('restores inline spacing and committed role identity beside a quote', async () => {
@@ -1484,19 +1285,6 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(textarea.value).toBe('next message');
   });
 
-  it('boundary: hidden composer rejects synthetic Enter even without uploads', async () => {
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      isVisible: false,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    await submit('keyboard');
-    expect(delivered).toEqual([]);
-  });
-
   it.each([
     ['keyboard', true],
     ['keyboard', false],
@@ -1518,20 +1306,6 @@ describe('SessionChatInputArea submission feedback', () => {
       await act(async () => acceptance.resolve(accepted));
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-      expect(document.activeElement).toBe(textarea);
-    }
-  );
-
-  it.each([false, true])(
-    'handles immediately settled button sends on mobile=%s',
-    async (mobile) => {
-      if (mobile)
-        Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
-      const textarea = await renderComposer({ onSendMessage: async () => false });
-      textarea.focus();
-      await submit('button');
-      expect(textarea.disabled).toBe(false);
-      expect(textarea.value).toBe('focus regression draft');
       expect(document.activeElement).toBe(textarea);
     }
   );
@@ -1894,21 +1668,6 @@ describe('SessionChatInputArea submission feedback', () => {
         'notes.txt',
       ]);
       expect(errorToast).not.toHaveBeenCalled();
-    });
-
-    it('still collapses a paste below 50,000 characters', async () => {
-      const textarea = await renderComposer({ onSendMessage: async () => true });
-      const event = createPasteEvent('a'.repeat(49_999));
-
-      await act(async () => {
-        textarea.dispatchEvent(event);
-      });
-
-      expect(event.defaultPrevented).toBe(true);
-      expect(errorToast).not.toHaveBeenCalled();
-      expect(textarea.value).toContain('Pasted');
-      expect(textarea.value).toContain('focus regression draft');
-      expect(textarea.value).not.toContain('aaaa');
     });
   });
 

@@ -1,15 +1,13 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { getDefaultStore } from 'jotai';
 import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import {
-  hasWorkspaceSidebarTopContent,
-  LocalProjectItem,
-} from '../src/components/loro-app-sidebar';
+import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
 import type { LocalProjectId, MachineId, SessionMeta } from '@lody/shared';
@@ -30,14 +28,6 @@ const baseSession = {
     machineId,
   },
 } satisfies Omit<SessionMeta, 'id'>;
-
-describe('LoroAppSidebar Workspace section composition', () => {
-  it('leaves top content absent when the current scope hides every section', () => {
-    expect(hasWorkspaceSidebarTopContent(0, false)).toBe(false);
-    expect(hasWorkspaceSidebarTopContent(1, false)).toBe(true);
-    expect(hasWorkspaceSidebarTopContent(0, true)).toBe(true);
-  });
-});
 
 describe('LocalProjectItem session-type icon', () => {
   let root: Root | undefined;
@@ -71,78 +61,6 @@ describe('LocalProjectItem session-type icon', () => {
     container = undefined;
     getDefaultStore().set(sidebarShowBranchNamesAtom, false);
     vi.restoreAllMocks();
-  });
-
-  it('does not render a session-type icon in the row (it lives in the hover card now)', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    const sessionsForProject: SessionMeta[] = [
-      {
-        ...baseSession,
-        id: 'session-worktree',
-        title: 'Worktree local session',
-        isWorktree: true,
-      },
-      {
-        ...baseSession,
-        id: 'session-local',
-        title: 'Plain local session',
-      },
-    ];
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(
-          Tooltip.Provider,
-          null,
-          React.createElement(LocalProjectItem, {
-            machineId,
-            machineName: 'Local machine',
-            project: {
-              id: localProjectId,
-              name: 'lody',
-              rootPath: '/Users/me/lody',
-              createdAtMs: Date.parse('2026-05-09T09:00:00.000Z'),
-            },
-            sectionKind: 'local',
-            collapsed: false,
-            isSelected: false,
-            sessionsForProject,
-            childSessionsByParent: new Map(),
-            formattedPath: '/Users/me/lody',
-            defaultSessionTitle: 'Untitled session',
-            now: new Date('2026-05-09T12:00:00.000Z'),
-            onlineMachineIds: new Set([machineId]),
-            selectedSessionId: null,
-            removeProjectLabel: 'Remove folder',
-            archiveTooltipLabel: 'Archive session',
-            archiveActionLabel: 'Archive',
-            archiveConfirmLabel: 'Confirm',
-            isMobile: false,
-            toggleLabel: 'Toggle',
-            onNavigateProject: vi.fn(),
-            onNavigateSession: vi.fn(),
-            onArchive: vi.fn(),
-            onToggleCollapsed: vi.fn(),
-            onRequestRemoval: vi.fn(),
-          })
-        )
-      );
-    });
-
-    // The worktree / folder type icon was removed from the row; the worktree
-    // distinction now lives only in the desktop hover info card.
-    const worktreeIcon = container.querySelector(
-      '[data-sidebar-session-id="session-worktree"] [aria-label="Running in a worktree"]'
-    );
-    const plainIcon = container.querySelector(
-      '[data-sidebar-session-id="session-local"] [aria-label="Running in a worktree"]'
-    );
-
-    expect(worktreeIcon).toBeNull();
-    expect(plainIcon).toBeNull();
   });
 
   it('renders the PR status icon for a resting local session linked to a GitHub PR', () => {

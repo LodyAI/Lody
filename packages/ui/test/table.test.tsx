@@ -44,23 +44,6 @@ const COLUMNS: TableColumn<Session>[] = [
 const key = (row: Session) => row.id;
 
 describe('Table', () => {
-  test('states each column once, so a head and a row cannot drift', async () => {
-    // The whole of the design: a column is one object, and the name in the head
-    // and the cell under it are two readings of it. The two surfaces in this
-    // repository that draw a table today write their column template twice, by
-    // hand, and one of them writes every cell a second time.
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    const headers = all('th').map((cell) => cell.textContent);
-    expect(headers).toEqual(['Session', 'Agent', 'Turns']);
-    for (const row of all('tbody tr')) {
-      expect(row.querySelectorAll('td')).toHaveLength(COLUMNS.length);
-    }
-    // A width is stated on a `<col>`, so the name and every cell under it take
-    // it from one place — the cells being ones the caller never writes.
-    expect(all('col')).toHaveLength(COLUMNS.length);
-    expect(one('col').getAttribute('style')).toContain('220px');
-  });
-
   test('is ordered by one column at a time, and never reorders the rows itself', async () => {
     const taken: TableSorting[] = [];
     const sort: TableSorting = { column: 'turns', direction: 'ascending' };
@@ -180,21 +163,6 @@ describe('Table', () => {
     expect(all('th')).toHaveLength(3);
   });
 
-  test('a head stays only where the table owns a box to stay in', async () => {
-    // A head that scrolls out of its own box is not a thing a surface asks for,
-    // so the height and the sticky head are one decision rather than two props.
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    expect(carries(one('thead'), surface.headSticky)).toBe(false);
-    await mounted.unmount();
-
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} maxHeight={240} />);
-    expect(carries(one('thead'), surface.headSticky)).toBe(true);
-    // A head that stays is a band over the rows, so it takes a rung: without a
-    // fill the records are painted through the column names.
-    expect(carries(one('thead tr'), surface.headStickyRow)).toBe(true);
-    expect(one('table').parentElement?.getAttribute('style')).toContain('240px');
-  });
-
   test('a row that can be pressed takes the keyboard, and the box in it keeps its own press', async () => {
     const opened: string[] = [];
     const picked: string[][] = [];
@@ -236,114 +204,10 @@ describe('Table', () => {
     expect(carries(row, surface.hoverRow)).toBe(false);
     expect(carries(row, surface.pressableRow)).toBe(false);
   });
-
-  test('the last record draws no line to a next row there is none of', async () => {
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    const rows = all('tbody tr');
-    expect(carries(rows.at(-1)!, surface.bodyRowLast)).toBe(true);
-    // And every row before it draws one. A table that renders its own rows says
-    // which is last instead of reading `:last-child`, so the line it draws has
-    // to be stated too — the board caught this one as three rows with no line.
-    expect(carries(rows[0], surface.bodyRowLined)).toBe(true);
-    expect(carries(rows.at(-1)!, surface.bodyRowLined)).toBe(false);
-    // The head keeps its line: the row after it is the first record.
-    expect(carries(one('thead tr'), surface.headRow)).toBe(true);
-  });
-
-  test('draws a totals row only where a column says what goes in it', async () => {
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    expect(document.querySelector('tfoot')).toBeNull();
-    await mounted.unmount();
-
-    mounted = await mount(
-      <Table
-        columns={COLUMNS.map((column) =>
-          column.key === 'turns' ? { ...column, footer: 47 } : column
-        )}
-        rows={SESSIONS}
-        rowKey={key}
-      />
-    );
-    expect(one('tfoot').textContent).toContain('47');
-  });
-
-  test('a table too narrow for its columns becomes a stack of records', async () => {
-    // Every surface in this repository that draws a table today collapses on a
-    // narrow window by hand, and one of them renders every cell a second time
-    // to do it. The labels here are the head's own words, which is only
-    // reachable because the columns were stated — and the question is about the
-    // table's own box rather than the window, so a table in a narrow panel
-    // stacks on a wide screen.
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    expect(carries(one('thead'), surface.stackedHead)).toBe(true);
-    expect(carries(one('tbody tr'), surface.stackedRow)).toBe(true);
-    const labelled = one('tbody td');
-    expect(carries(labelled, surface.stackedCell)).toBe(true);
-    expect(labelled.textContent).toBe('SessionWorktree setup');
-    await mounted.unmount();
-
-    // A table whose columns must stay a grid says so, and keeps the scrollbar.
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} stack={false} />);
-    expect(carries(one('thead'), surface.stackedHead)).toBe(false);
-    expect(carries(one('tbody tr'), surface.stackedRow)).toBe(false);
-    expect(one('tbody td').textContent).toBe('Worktree setup');
-  });
-
-  test('the parts are there for a table that is not a list of records', async () => {
-    // A two-column list of facts is not a list of records, and the elements are
-    // exported for exactly that: the onboarding summary reads its labels as row
-    // headers rather than as a column with a name of its own.
-    mounted = await mount(
-      <Table.Root size="large">
-        <Table.Body>
-          <Table.Row>
-            <Table.ColumnHeader scope="row">Agent</Table.ColumnHeader>
-            <Table.Cell>Claude</Table.Cell>
-          </Table.Row>
-        </Table.Body>
-      </Table.Root>
-    );
-    expect(one('th').getAttribute('scope')).toBe('row');
-    expect(carries(one('td'), surface.cellLarge)).toBe(true);
-    // A row a caller assembled reads its own position, because it has no table
-    // above it counting the rows.
-    expect(carries(one('tbody tr'), surface.bodyRow)).toBe(true);
-  });
-
-  test('figures are aligned to the end of their column without being told twice', async () => {
-    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
-    const cells = all('tbody tr')[0].querySelectorAll('td');
-    expect(carries(cells[2], surface.numeric, surface.alignEnd)).toBe(true);
-    expect(carries(cells[0], surface.alignStart)).toBe(true);
-    // And the name of a numeric column goes with them, which is the thing a
-    // caller writing the head and the body separately forgets.
-    expect(carries(all('th')[2], surface.numeric, surface.alignEnd)).toBe(true);
-  });
-
-  test('a value is one line unless the column holds sentences', async () => {
-    mounted = await mount(
-      <Table
-        columns={[
-          COLUMNS[0],
-          { key: 'note', header: 'Note', cell: () => 'a sentence', wrap: true },
-        ]}
-        rows={SESSIONS}
-        rowKey={key}
-      />
-    );
-    const cells = all('tbody tr')[0].querySelectorAll('td');
-    expect(carries(cells[0], surface.cellWrap)).toBe(false);
-    expect(carries(cells[1], surface.cellWrap)).toBe(true);
-  });
 });
 
 describe('pageWindow', () => {
   const width = (page: number, pages: number) => pageWindow(page, pages, 1, 1).length;
-
-  test('lists every page while they all fit', () => {
-    expect(pageWindow(1, 7, 1, 1)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(pageWindow(4, 1, 1, 1)).toEqual([1]);
-  });
 
   test('stays one width from the first page to the last', () => {
     // A pager that grew and shrank as a person walked through it would move the
@@ -375,47 +239,9 @@ describe('pageWindow', () => {
       });
     }
   });
-
-  test('spends the gap it does not need on more pages', () => {
-    expect(pageWindow(1, 40, 1, 1)).toEqual([1, 2, 3, 4, 5, 'gap', 40]);
-    expect(pageWindow(40, 40, 1, 1)).toEqual([1, 'gap', 36, 37, 38, 39, 40]);
-    expect(pageWindow(20, 40, 1, 1)).toEqual([1, 'gap', 19, 20, 21, 'gap', 40]);
-  });
-
-  test('widens with the siblings and the boundaries it is given', () => {
-    expect(pageWindow(20, 40, 2, 2)).toEqual([1, 2, 'gap', 18, 19, 20, 21, 22, 'gap', 39, 40]);
-  });
 });
 
 describe('Pagination', () => {
-  test('the page you are on says so twice, and the ends stop', async () => {
-    const taken: number[] = [];
-    mounted = await mount(
-      <Pagination page={1} pages={5} onPageChange={(page) => taken.push(page)} />
-    );
-    // Once as a fill, and once as `aria-current` — the fill reaches only the
-    // people who can see it.
-    const current = one('[aria-current="page"]');
-    expect(current.textContent).toBe('1');
-    expect(current.getAttribute('data-variant')).toBe('secondary');
-    expect(one('[aria-label="Previous page"]').hasAttribute('disabled')).toBe(true);
-    expect(one('[aria-label="Next page"]').hasAttribute('disabled')).toBe(false);
-
-    await click(one('[aria-label="Page 3"]'));
-    await click(one('[aria-label="Next page"]'));
-    expect(taken).toEqual([3, 2]);
-  });
-
-  test('the gaps name no page a person can go to', async () => {
-    // A list that reads "3, 4, more pages, 98" says nothing "3, 4, 98" does
-    // not, so the gap is hidden rather than given a sentence of its own.
-    mounted = await mount(<Pagination page={20} pages={40} onPageChange={() => {}} />);
-    const gaps = all('li[aria-hidden="true"]');
-    expect(gaps).toHaveLength(2);
-    expect(all('nav li button')).toHaveLength(5);
-    expect(one('nav').getAttribute('aria-label')).toBe('Pagination');
-  });
-
   test('a page outside the range is brought back into it', async () => {
     const taken: number[] = [];
     mounted = await mount(

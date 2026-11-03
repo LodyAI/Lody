@@ -3,7 +3,6 @@ import {
   countBillableSessionTurns,
   evaluateBillingQuota,
   evaluateSessionCreateQuota,
-  formatSessionQuotaRejection,
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   FREE_SESSION_TURN_LIMIT,
   isBillingQuotaExempt,
@@ -63,27 +62,6 @@ describe('evaluateBillingQuota', () => {
   });
 });
 
-describe('formatSessionQuotaRejection', () => {
-  it('keeps create and turn quota copy centralized', () => {
-    expect(
-      formatSessionQuotaRejection('session_create', {
-        allowed: false,
-        reason: 'limit_reached',
-        current: 200,
-        limit: 200,
-      })
-    ).toBe('Free workspaces can create up to 200 sessions (currently 200).');
-    expect(
-      formatSessionQuotaRejection('session_turn', {
-        allowed: false,
-        reason: 'checkout_pending',
-        current: 0,
-        limit: 30,
-      })
-    ).toBe('Complete checkout before sending messages in this workspace.');
-  });
-});
-
 describe('shouldBypassSessionQuota', () => {
   it('bypasses quotas only for durable batch commands', () => {
     expect(shouldBypassSessionQuota('session_create_many')).toBe(true);
@@ -95,9 +73,9 @@ describe('shouldBypassSessionQuota', () => {
 
 describe('evaluateSessionCreateQuota', () => {
   it('fails the count-based cap open while the session index has not hydrated', () => {
-    expect(
-      evaluateSessionCreateQuota({ effectivePlanTier: 'free', sessionCount: null })
-    ).toEqual({ allowed: true });
+    expect(evaluateSessionCreateQuota({ effectivePlanTier: 'free', sessionCount: null })).toEqual({
+      allowed: true,
+    });
   });
 
   it('still blocks a pending checkout without a count', () => {

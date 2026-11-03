@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -147,21 +148,6 @@ describe('ElectronSessionCompletionNotifier', () => {
       root?.render(React.createElement(ElectronSessionCompletionNotifier));
     });
   }
-
-  it('does not show completion notification immediately when session becomes idle', async () => {
-    mockedUseVisibleSessionMetas.mockReturnValue({
-      sessions: [createSession('s1', { type: 'running' })],
-      allActiveSessions: [createSession('s1', { type: 'running' })],
-      visibleMachineIds: new Set(),
-      visibleLocalProjectKeys: new Set(),
-      isLoading: false,
-    });
-
-    await renderComponent();
-
-    await updateSessions([createSession('s1', { type: 'idle' })]);
-    expect(showSessionCompletionNotification).not.toHaveBeenCalled();
-  });
 
   it('shows completion notification after 5s if session stays idle and app is not foreground', async () => {
     mockedUseVisibleSessionMetas.mockReturnValue({

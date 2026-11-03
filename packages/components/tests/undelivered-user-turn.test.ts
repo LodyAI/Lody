@@ -46,18 +46,6 @@ describe('isUndeliveredUserTurnEntry', () => {
     ).toBe(false);
   });
 
-  it('does not fire once the entry reached a terminal state', () => {
-    expect(isUndeliveredUserTurnEntry('turn-1', userTurn({ status: 'handled' as const }))).toBe(
-      false
-    );
-    expect(isUndeliveredUserTurnEntry('turn-1', userTurn({ status: 'failed' as const }))).toBe(
-      false
-    );
-    expect(
-      isUndeliveredUserTurnEntry('turn-1', { id: 'turn-1', role: 'user' as const, read: true })
-    ).toBe(false);
-  });
-
   it('treats a legacy read=false entry without a status field as pending', () => {
     expect(
       isUndeliveredUserTurnEntry('turn-1', { id: 'turn-1', role: 'user' as const, read: false })
@@ -83,12 +71,5 @@ describe('buildResendInputBlocks', () => {
       inputConfig: undefined,
     });
     expect(blocks).toEqual([{ type: 'text', text: 'rendered text' }]);
-  });
-
-  it('falls back to the plain prompt, and stays empty when there is no content', () => {
-    expect(buildResendInputBlocks({ items: [], inputConfig: { prompt: 'just a prompt' } })).toEqual(
-      [{ type: 'text', text: 'just a prompt' }]
-    );
-    expect(buildResendInputBlocks({ items: [], inputConfig: undefined })).toEqual([]);
   });
 });

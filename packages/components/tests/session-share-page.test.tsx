@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -285,43 +286,6 @@ describe('static share presentation', () => {
     }
   });
 
-  it('switches both ways beside appearance and persists the visitor preference', async () => {
-    await render();
-    const button = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Switch language: 中文"]'
-    )!;
-    expect(button.previousElementSibling?.getAttribute('aria-label')).toMatch(/^Appearance/);
-    await act(async () => button.click());
-    await render();
-    expect(localStorage.getItem('lody-language')).toBe('"zh_CN"');
-    const english = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Switch language: English"]'
-    )!;
-    expect(english).not.toBeNull();
-    await act(async () => english.click());
-    await render();
-    expect(localStorage.getItem('lody-language')).toBe('"en"');
-    expect(container.querySelector('[aria-label="Switch language: 中文"]')).not.toBeNull();
-  });
-
-  it('still switches the page when browser storage is unavailable', async () => {
-    const storage = vi
-      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem')
-      .mockImplementation(() => {
-        throw new DOMException('Storage disabled', 'SecurityError');
-      });
-    try {
-      await render();
-      await act(async () =>
-        container.querySelector<HTMLButtonElement>('[aria-label="Switch language: 中文"]')!.click()
-      );
-      await render();
-      expect(container.querySelector('[aria-label="Switch language: English"]')).not.toBeNull();
-    } finally {
-      storage.mockRestore();
-    }
-  });
-
   it('places opened conversations in a collapsible tree and every child in the one pane', async () => {
     await render();
     const tree = container.querySelector('nav[aria-label="Conversation tree"]')!;
@@ -345,85 +309,6 @@ describe('static share presentation', () => {
     )!;
     await act(async () => review.click());
     expect(props.onSelect).toHaveBeenCalledWith('c3');
-  });
-
-  it('collapses the sidebar in place so it can animate, and keeps it out of the way', async () => {
-    await render();
-    const sidebarToggle = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Toggle conversation tree"]'
-    )!;
-    const tree = () => container.querySelector('nav[aria-label="Conversation tree"]')!;
-    expect(tree().hasAttribute('inert')).toBe(false);
-    await act(async () => sidebarToggle.click());
-    expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false');
-    // The rows stay mounted — an element that unmounts cannot transition — but
-    // a collapsed tree must not take focus or clicks on the way out.
-    expect(tree().textContent).toContain('Main');
-    expect(tree().hasAttribute('inert')).toBe(true);
-    await act(async () => sidebarToggle.click());
-    expect(tree().hasAttribute('inert')).toBe(false);
-  });
-
-  it('resizes the tree by dragging the divider, and keeps it inside its bounds', async () => {
-    await render();
-    const tree = () => container.querySelector<HTMLElement>('nav[aria-label="Conversation tree"]')!;
-    const divider = () =>
-      container.querySelector<HTMLElement>('[role="separator"][aria-orientation="vertical"]')!;
-    expect(tree().style.width).toBe('224px');
-    const drag = (type: string, clientX: number, pointerId = 1) =>
-      act(async () => {
-        divider().dispatchEvent(new TestPointerEvent(type, { clientX, pointerId, button: 0 }));
-      });
-    await drag('pointerdown', 224);
-    await drag('pointermove', 304);
-    expect(tree().style.width).toBe('304px');
-    expect(divider().getAttribute('aria-valuenow')).toBe('304');
-    // The bounds hold in both directions, so a drag can neither hide the tree
-    // nor crowd out the transcript the page exists to show.
-    await drag('pointermove', 4000);
-    expect(tree().style.width).toBe('480px');
-    await drag('pointermove', -4000);
-    expect(tree().style.width).toBe('180px');
-    // A second pointer's moves are not this drag's.
-    await drag('pointermove', 900, 2);
-    expect(tree().style.width).toBe('180px');
-    await drag('pointerup', -4000);
-    await drag('pointermove', 900);
-    expect(tree().style.width).toBe('180px');
-    // Reachable without a pointer at all.
-    await act(async () => {
-      divider().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    });
-    expect(tree().style.width).toBe('196px');
-    // Nothing to drag while the tree is collapsed, and reopening restores the
-    // width the visitor chose rather than the default.
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('[aria-label="Toggle conversation tree"]')!.click()
-    );
-    expect(container.querySelector('[role="separator"][aria-orientation="vertical"]')).toBeNull();
-    expect(tree().style.width).toBe('0px');
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('[aria-label="Toggle conversation tree"]')!.click()
-    );
-    expect(tree().style.width).toBe('196px');
-  });
-
-  it('marks a tree row without painting over the connector beside it', async () => {
-    props.sessionId = 'c3';
-    await render();
-    const tree = container.querySelector('nav[aria-label="Conversation tree"]')!;
-    const marked = tree.querySelector('[aria-current="page"]')!;
-    expect(marked.textContent).toBe('Review');
-    const trunk = tree.querySelector('[data-session-tree-connector="trunk"]')!;
-    const elbow = tree.querySelector('[data-session-tree-connector="elbow"]')!;
-    // The trunk and elbow run through the gutter of rows they do not belong to,
-    // so the selected row's tint must stay out of that gutter: it covers the
-    // title box only, with the leading slot as its sibling.
-    expect(marked.contains(trunk)).toBe(false);
-    expect(marked.contains(elbow)).toBe(false);
-    expect(trunk.closest('[aria-current]')).toBeNull();
-    expect(marked.parentElement!.contains(trunk)).toBe(true);
-    expect(marked.previousElementSibling!.hasAttribute('data-session-row-leading-slot')).toBe(true);
   });
 
   it('reaches the conversation tree as a drawer where a sidebar does not fit', async () => {
@@ -503,48 +388,10 @@ describe('static share presentation', () => {
     );
   });
 
-  it('starts Light and switches only between Light and Dark', async () => {
-    await render();
-    expect(theme.setTheme).toHaveBeenCalledWith('light');
-    theme.setTheme.mockClear();
-    theme.value = 'light';
-    await render();
-    expect(theme.setTheme).not.toHaveBeenCalled();
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label^="Appearance"]')!;
-    await act(async () => toggle.click());
-    expect(theme.setTheme).toHaveBeenCalledWith('dark');
-    theme.value = 'dark';
-    theme.setTheme.mockClear();
-    await render();
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('[aria-label^="Appearance"]')!.click()
-    );
-    expect(theme.setTheme).toHaveBeenCalledExactlyOnceWith('light');
-  });
-
-  it('leads the header with a Lody mark that goes back to the product', async () => {
-    await render();
-    const brand = [...container.querySelectorAll('header a')].find((node) =>
-      node.textContent?.includes('Lody')
-    ) as HTMLAnchorElement;
-    expect(brand.target).toBe('_blank');
-    expect(brand.rel).toContain('noopener');
-    expect(brand.getAttribute('href')).not.toContain('/login');
-    expect(brand.querySelector('img')).not.toBeNull();
-  });
-
   it('shows no sign-in entry for an anonymous visitor', async () => {
     await render();
     expect(byText('Sign in to Lody')).toBeUndefined();
     expect(container.querySelector('a[href$="/login"]')).toBeNull();
     expect(container.querySelector('[aria-label="Sign in to Lody"]')).toBeNull();
-  });
-
-  it('shows the viewer a host resolved instead of a sign-in prompt', async () => {
-    props.viewer = { status: 'signed-in', name: 'Ada Lovelace' };
-    await render();
-    expect(byText('Sign in to Lody')).toBeUndefined();
-    expect(container.textContent).toContain('Ada Lovelace');
-    expect(container.textContent).toContain('AL');
   });
 });

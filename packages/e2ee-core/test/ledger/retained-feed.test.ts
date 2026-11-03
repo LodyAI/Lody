@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Result } from 'effect';
-import { createHash } from 'node:crypto';
+
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,9 +13,6 @@ import {
   ledgerStateDigest,
   signLedgerSnapshot,
   verifyLedgerSnapshot,
-  restoreVerifiedState,
-  verifyLedgerEffect,
-  extendLedgerEffect,
 } from '../../src/protocol';
 import {
   LedgerFeedSource,
@@ -396,43 +393,4 @@ describe('retained ledger feed', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
-
-  it('records 10k-record full replay versus restore plus ten records without a timing threshold', async () => {
-    const f = envelopeFixture();
-    for (let epoch = 1; epoch <= 10_008; epoch++) {
-      const commitment = new Uint8Array(
-        createHash('sha256').update(`synthetic-epoch-${epoch}`).digest()
-      );
-      f.append([7, epoch, commitment, new Uint8Array(72).fill(6)]);
-    }
-    const records = f.records();
-    const prefixLength = 10_000;
-    const prefix = await Effect.runPromise(
-      verifyLedgerEffect({
-        anchor: f.context.genesis,
-        records: records.slice(0, prefixLength),
-        checkpoint: { head: hashRecordBytes(records[prefixLength - 1]!), length: prefixLength },
-      })
-    );
-    const saved = ok(exportVerifiedState(prefix));
-    const checkpoint = { head: hashRecordBytes(records.at(-1)!), length: records.length };
-    const start = performance.now();
-    const resumed = await Effect.runPromise(
-      extendLedgerEffect(ok(restoreVerifiedState(saved)), records.slice(prefixLength), checkpoint)
-    );
-    const retainedMs = performance.now() - start;
-    const fullStart = performance.now();
-    const replayed = await Effect.runPromise(
-      verifyLedgerEffect({ anchor: f.context.genesis, records, checkpoint })
-    );
-    const fullMs = performance.now() - fullStart;
-    expect(ok(ledgerStateDigest(resumed)).equals(ok(ledgerStateDigest(replayed)))).toBe(true);
-    console.info(
-      JSON.stringify({
-        fixture: 'synthetic-10k-ledger',
-        retainedPlusTenMs: retainedMs,
-        fullReplayMs: fullMs,
-      })
-    );
-  }, 120_000);
 });

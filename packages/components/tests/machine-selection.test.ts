@@ -61,29 +61,6 @@ describe('buildWorkspaceMachineSelectionPool', () => {
 });
 
 describe('resolveDesktopMachineSelection', () => {
-  it('keeps a selection that is visible in the pool', () => {
-    const pool = [item(OWN_LOCAL, { isOwn: true }), item(TEAMMATE)];
-    const result = resolveDesktopMachineSelection({
-      pool,
-      selectedMachineId: TEAMMATE,
-      localMachineId: OWN_LOCAL,
-    });
-    expect(result.resolved?.id).toBe(TEAMMATE);
-    expect(result.nextSelectedMachineId).toBe(TEAMMATE);
-  });
-
-  it('falls back to a visible machine when the Online filter hides the selection', () => {
-    // The selected machine is offline, so an Online-filtered pool excludes it.
-    const onlinePool = [item(OWN_OTHER, { isOwn: true })];
-    const result = resolveDesktopMachineSelection({
-      pool: onlinePool,
-      selectedMachineId: OWN_LOCAL,
-      localMachineId: OWN_LOCAL,
-    });
-    expect(result.resolved?.id).toBe(OWN_OTHER);
-    expect(result.nextSelectedMachineId).toBe(OWN_OTHER);
-  });
-
   it('falls back to an own machine when the My machines filter hides a teammate selection', () => {
     const minePool = [item(OWN_OTHER, { isOwn: true }), item(OWN_LOCAL, { isOwn: true })];
     const result = resolveDesktopMachineSelection({

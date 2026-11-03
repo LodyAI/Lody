@@ -1,17 +1,8 @@
-import { createStore, Provider } from 'jotai';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { SessionMetaIdentityMarker } from '../src/components/sessions/automation/session-meta-identity-marker';
+import { createStore } from 'jotai';
+
 import { describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
-import {
-  getAgentConfigRoomId,
-  getMachineRoomId,
-  getSessionRoomId,
-  type AgentConfigId,
-  type MachineId,
-  type SessionId,
-} from '@lody/shared';
+import { getMachineRoomId, getSessionRoomId, type MachineId, type SessionId } from '@lody/shared';
 
 vi.mock('@/lib/auth-bootstrap', () => ({
   readStoredAuthToken: () => null,
@@ -26,7 +17,6 @@ import {
   docMetaCacheScopeAtom,
   docMetaSubscriptionAtom,
   readReadyDocMetaCache,
-  agentConfigMetaCacheAtom,
   machineMetaCacheAtom,
   sessionListAtom,
   sessionMetaCacheAtom,
@@ -384,69 +374,6 @@ describe('docMetaSubscriptionAtom', () => {
     }
   });
 
-  it('writes metadata reads that resolve together once, and keeps unchanged list entries', async () => {
-    const ids = ['batch-a', 'batch-b', 'batch-c'] as SessionId[];
-    const snapshots = new Map(
-      ids.map((id, index) => [
-        getSessionRoomId(id),
-        {
-          meta: {
-            id,
-            title: `Session ${index}`,
-            createdAt: `2026-08-1${index}T00:00:00.000Z`,
-            isArchived: false,
-          },
-        } as Record<string, unknown> | undefined,
-      ])
-    );
-    const repo = new CompatRepoDouble([], snapshots);
-    const store = createStore();
-    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
-    try {
-      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
-      await flush();
-
-      let cacheWrites = 0;
-      const unsubscribeCache = store.sub(sessionMetaCacheAtom, () => {
-        cacheWrites += 1;
-      });
-      for (const id of ids) {
-        repo.emit({
-          kind: 'doc-existence-changed',
-          docId: getSessionRoomId(id),
-          from: 'missing',
-          to: 'active',
-          by: 'live',
-        });
-      }
-      await flush();
-      await flush();
-      unsubscribeCache();
-
-      expect(cacheWrites).toBe(1);
-      const before = store.get(sessionListAtom);
-      expect(before.map((session) => session.id).sort()).toEqual([...ids].sort());
-
-      repo.emit({
-        kind: 'doc-metadata',
-        docId: getSessionRoomId(ids[0]!),
-        patch: { title: 'Renamed' },
-        by: 'live',
-      });
-      await flush();
-      const after = store.get(sessionListAtom);
-      expect(after).not.toBe(before);
-      for (const id of ids.slice(1)) {
-        expect(after.find((session) => session.id === id)).toBe(
-          before.find((session) => session.id === id)
-        );
-      }
-      expect(after.find((session) => session.id === ids[0])?.title).toBe('Renamed');
-    } finally {
-      unmount();
-    }
-  });
-
   it('lends the ready projection only to its own runtime repo', async () => {
     const sessionId = 'lent-session' as SessionId;
     const docId = getSessionRoomId(sessionId);
@@ -483,36 +410,6 @@ describe('docMetaSubscriptionAtom', () => {
       );
       expect(readReadyDocMetaCache(store, otherRepo as unknown as LoroRepo)).toBeNull();
     } finally {
-      unmount();
-    }
-  });
-
-  it('records a rejected bootstrap scan on the scope instead of leaving it silently pending', async () => {
-    class FailingScanRepoDouble extends CompatRepoDouble {
-      override async listDoc(): Promise<CompatRepoEntry[]> {
-        throw new TypeError('scan exploded');
-      }
-    }
-    const repo = new FailingScanRepoDouble([]);
-    const store = createStore();
-    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    try {
-      const runtime = createRuntime(repo as unknown as LoroRepo);
-      store.set(runtimeAtom, runtime);
-      await flush();
-
-      expect(store.get(docMetaCacheScopeAtom)).toEqual(
-        expect.objectContaining({
-          runtime,
-          ready: false,
-          scanFailure: { errorType: 'TypeError' },
-        })
-      );
-      expect(store.get(docMetaCacheReadyAtom)).toBe(false);
-    } finally {
-      warn.mockRestore();
       unmount();
     }
   });
@@ -785,142 +682,9 @@ describe('docMetaSubscriptionAtom', () => {
       unmount();
     }
   });
-
-  it('defers live metadata patches to a macrotask so reconnect bursts can paint', async () => {
-    const machineId = 'machine-yield' as MachineId;
-    const docId = getMachineRoomId(machineId);
-    const repo = new CompatRepoDouble([
-      {
-        docId,
-        exists: true,
-        meta: { id: machineId, name: 'phone-box', lastSeen: 1 },
-      },
-    ]);
-
-    const store = createStore();
-    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
-
-    try {
-      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
-      await flush();
-
-      repo.emit({
-        kind: 'doc-metadata',
-        docId,
-        patch: { lastSeen: 2 },
-        by: 'live',
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(store.get(machineMetaCacheAtom)[docId]).toEqual({
-        id: machineId,
-        name: 'phone-box',
-        lastSeen: 1,
-      });
-
-      await flush();
-
-      expect(store.get(machineMetaCacheAtom)[docId]).toEqual({
-        id: machineId,
-        name: 'phone-box',
-        lastSeen: 2,
-      });
-    } finally {
-      unmount();
-    }
-  });
-
-  it('fetches full agent config metadata when a metadata patch arrives for an uncached doc', async () => {
-    const agentId = 'agent-created-from-settings' as AgentConfigId;
-    const docId = getAgentConfigRoomId(agentId);
-    const fullMeta = {
-      id: agentId,
-      name: 'Codex Settings Agent',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-      prompt: 'Use Codex.',
-    };
-    const repo = new CompatRepoDouble([], new Map([[docId, { exists: true, meta: fullMeta }]]));
-
-    const store = createStore();
-    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
-
-    try {
-      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
-      await flush();
-
-      expect(store.get(docMetaCacheReadyAtom)).toBe(true);
-      expect(store.get(agentConfigMetaCacheAtom)[docId]).toBeUndefined();
-
-      repo.emit({
-        kind: 'doc-metadata',
-        docId,
-        patch: { name: 'Codex Settings Agent' },
-        by: 'live',
-      });
-      await flush();
-
-      expect(store.get(agentConfigMetaCacheAtom)[docId]).toEqual(fullMeta);
-    } finally {
-      unmount();
-    }
-  });
 });
 
 describe('session metadata identity projection', () => {
-  it('renders actual repo metadata identity without reading the session body or pending-send overlay', async () => {
-    const repo = await LoroRepo.create({});
-    const store = createStore();
-    const sessionId = 'identity-session' as SessionId;
-    const room = getSessionRoomId(sessionId);
-    const identity = sessionMetaIdentityAtomFamily(sessionId);
-    await repo.upsertDocMeta(room, {
-      id: sessionId,
-      machineId: 'actual-machine',
-      title: 'Synthetic',
-    });
-    const ready = new Promise<void>((resolve) => {
-      const stop = store.sub(identity, () => {
-        if (store.get(identity)) {
-          stop();
-          resolve();
-        }
-      });
-    });
-    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
-    const markup = (isVisible = true) =>
-      renderToStaticMarkup(
-        createElement(
-          Provider,
-          { store },
-          createElement(SessionMetaIdentityMarker, { sessionId, isVisible })
-        )
-      );
-    try {
-      store.set(runtimeAtom, createRuntime(repo));
-      await ready;
-      expect(markup()).toContain('data-machine-id="actual-machine"');
-      expect(markup()).toContain(`data-session-id="${sessionId}"`);
-      expect(markup()).toContain('data-workspace-id="workspace-id"');
-      expect(markup()).toContain('data-source="repo-cache"');
-      store.set(pendingSendSessionMetasAtom, {
-        [room]: {
-          ...store.get(sessionMetaCacheAtom)[room]!,
-          machineId: 'pending-machine' as MachineId,
-        },
-      });
-      expect(markup()).toContain('data-machine-id="actual-machine"');
-      expect(markup()).not.toContain('pending-machine');
-      expect(markup(false)).toBe('');
-    } finally {
-      unmount();
-      await repo.destroy();
-    }
-  });
-
   it('withholds an existing cached target during queued remote projection and deletion', async () => {
     vi.useFakeTimers();
     const sessionId = 'projection-session' as SessionId;

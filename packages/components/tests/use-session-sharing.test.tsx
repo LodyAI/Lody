@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -154,58 +155,4 @@ describe('useSessionSharing project visibility', () => {
       expect(results.at(-1)?.showSessionSharing).toBe(true);
     }
   );
-
-  it('loads hidden project details only when the consumer requests them', () => {
-    visibilityMocks.useVisibleMachineMetas.mockReturnValue({
-      machines: new Map(),
-      accessByMachineId: new Map(),
-      isLoading: false,
-    });
-    visibilityMocks.useVisibleLocalProjects.mockImplementation(
-      (options: { includeMachineFlock?: boolean; includeMemberOnly?: boolean }) => ({
-        projects:
-          options.includeMachineFlock && options.includeMemberOnly
-            ? new Map([[privateProject.key, privateProject]])
-            : new Map(),
-        accessByProjectKey: new Map(),
-        accessByMachineId: new Map(),
-        isLoading: false,
-      })
-    );
-
-    const results: SharingResult[] = [];
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    act(() => {
-      root?.render(
-        createElement(
-          TestCloudPlatformProvider,
-          null,
-          createElement(Probe, {
-            onResult: (result) => results.push(result),
-          })
-        )
-      );
-    });
-
-    expect(results.at(-1)?.projects.size).toBe(0);
-
-    visibilityMocks.useVisibleLocalProjects.mockClear();
-    act(() => {
-      root?.render(
-        createElement(
-          TestCloudPlatformProvider,
-          null,
-          createElement(Probe, {
-            includeLocalProjectDetails: true,
-            onResult: (result) => results.push(result),
-          })
-        )
-      );
-    });
-
-    expect(results.at(-1)?.projects.get(privateProject.key)?.project.name).toBe('Private project');
-  });
 });

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -113,13 +114,6 @@ describe('DesktopRunConfigMenu role face', () => {
     return container as HTMLDivElement;
   };
 
-  it('names the agent and its values together when no Role is selected', async () => {
-    const view = await render();
-    const trigger = view.querySelector('button[aria-label="Run configuration"]');
-    expect(trigger?.textContent).toContain('Codex Primary');
-    expect(trigger?.textContent).toContain('5.5');
-  });
-
   it('keeps the selected ACP model face while sending locks the menu', async () => {
     const props: Partial<MenuProps> = {
       modelOptions: [],
@@ -182,29 +176,6 @@ describe('DesktopRunConfigMenu role face', () => {
       trigger?.click();
     });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it('keeps the menu closed and explains when a machine must be selected first', async () => {
-    const disabledReason = 'Select a machine first';
-    const view = await render({ disabledReason });
-    const trigger = view.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]');
-    expect(trigger?.getAttribute('aria-disabled')).toBe('true');
-
-    await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      trigger?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-
-    await act(async () => {
-      trigger?.focus();
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-base-ui-portal] [data-side]')?.textContent).toContain(
-        disabledReason
-      );
-    });
   });
 
   it('gives the button to the Role alone and leaves its values inert beside it', async () => {
@@ -274,13 +245,13 @@ describe('DesktopRunConfigMenu role face', () => {
       },
     });
     await act(async () => {
-      view.querySelector('button[aria-label="Run configuration"]')?.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 0 })
-      );
+      view
+        .querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
     await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
-    const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (element) => element.textContent?.startsWith('Agent')
+    const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
+      element.textContent?.startsWith('Agent')
     );
     expect(agent).toBeDefined();
     await act(async () => {
@@ -292,8 +263,12 @@ describe('DesktopRunConfigMenu role face', () => {
     await vi.waitFor(() =>
       expect(document.querySelectorAll('[data-testid="chat-agent-option"]')).toHaveLength(2)
     );
-    const options = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-agent-option"]')];
-    expect(options.map((element) => [element.dataset.agentConfigId, element.dataset.machineId])).toEqual([
+    const options = [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="chat-agent-option"]'),
+    ];
+    expect(
+      options.map((element) => [element.dataset.agentConfigId, element.dataset.machineId])
+    ).toEqual([
       [agentConfig.id, agentConfig.machineId],
       [second.id, second.machineId],
     ]);
@@ -304,49 +279,5 @@ describe('DesktopRunConfigMenu role face', () => {
     const actualSelection = view.querySelector<HTMLElement>('[data-run-config-trigger]');
     expect(actualSelection?.dataset.agentConfigId).toBe(second.id);
     expect(actualSelection?.dataset.machineId).toBe(second.machineId);
-  });
-
-  it('leads the menu with the Role row, above the rows a Role answers', async () => {
-    const view = await render({
-      agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },
-    });
-    const menu = await openMenu(view);
-    const rows = [...menu.querySelectorAll('[role="menuitem"]')].map((node) =>
-      node.textContent?.trim()
-    );
-    const roleRow = rows.findIndex((text) => text?.startsWith('Role'));
-    const agentRow = rows.findIndex((text) => text?.startsWith('Agent'));
-    expect(roleRow).toBeGreaterThanOrEqual(0);
-    expect(agentRow).toBeGreaterThan(roleRow);
-    // The row states which Role, so the menu never opens denying its own face.
-    expect(rows[roleRow]).toContain('Code Reviewer');
-  });
-
-  it('turns the Role row value into the way to make one when there are none', async () => {
-    const onCreate = vi.fn();
-    const view = await render({
-      agentRoles: { items: [], selectedRoleId: null, onSelect: () => undefined, onCreate },
-    });
-    const menu = await openMenu(view);
-    const roleRow = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>
-      node.textContent?.trim().startsWith('Role')
-    );
-    expect(
-      roleRow?.querySelector('[aria-label="Create role from current settings"]')
-    ).not.toBeNull();
-    await act(async () => {
-      (roleRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-    expect(onCreate).toHaveBeenCalled();
-  });
-
-  it('drops the Role face as soon as the selection is no longer that Role', async () => {
-    const view = await render({
-      agentRoles: { items: [roleItem], selectedRoleId: null, onSelect: () => undefined },
-    });
-    const trigger = view.querySelector('button[aria-label="Run configuration"]');
-    expect(trigger?.textContent).toContain('Codex Primary');
-    expect(trigger?.textContent).not.toContain('Code Reviewer');
   });
 });

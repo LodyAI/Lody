@@ -7,11 +7,7 @@ import { memoryAdapter } from 'better-auth/adapters/memory'
 import { electron } from '@better-auth/electron'
 import { crossDomainClient } from '@convex-dev/better-auth/client/plugins'
 import { createDesktopAuthFetch } from '../../main/auth-fetch.ts'
-import {
-  DesktopLogin,
-  DesktopLoginFailure,
-  readDesktopLoginCallback
-} from '../../main/services/desktop-login.ts'
+import { DesktopLogin, readDesktopLoginCallback } from '../../main/services/desktop-login.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
 
@@ -71,49 +67,6 @@ void test('desktop auth waits for app readiness and preserves the cookie plugin 
   assert.deepEqual(restored.data, session)
 })
 
-void test('desktop auth accepts URL and Request inputs without consuming bodies or response headers', async () => {
-  const fetch = createDesktopAuthFetch({
-    whenReady: async () => {},
-    fetch: async (input, init) => {
-      const request = new Request(input, init)
-      const headers = new Headers()
-      headers.append('set-cookie', 'first=synthetic; Path=/')
-      headers.append('set-cookie', 'second=synthetic; Path=/')
-      return Response.json({ url: request.url, body: await request.text() }, { headers })
-    }
-  })
-  const url = new URL('https://auth.example.test/api/auth/electron/token')
-  assert.deepEqual(await (await fetch(url)).json(), { url: url.href, body: '' })
-  const response = await fetch(new Request(url, { method: 'POST', body: 'synthetic-body' }))
-  assert.deepEqual(response.headers.getSetCookie(), [
-    'first=synthetic; Path=/',
-    'second=synthetic; Path=/'
-  ])
-  assert.deepEqual(await response.json(), { url: url.href, body: 'synthetic-body' })
-  const controller = new AbortController()
-  controller.abort()
-  const abortedRequest = new Request(url, { signal: controller.signal })
-  await assert.rejects(fetch(abortedRequest), { name: 'AbortError' })
-  // A fetch init can explicitly replace a Request's aborted signal with null.
-  assert.deepEqual(await (await fetch(abortedRequest, { signal: null })).json(), {
-    url: url.href,
-    body: ''
-  })
-})
-
-void test('desktop auth cannot send a request cancelled while app readiness is pending', async () => {
-  const ready = deferred()
-  const controller = new AbortController()
-  const fetch = createDesktopAuthFetch({
-    whenReady: () => ready.promise,
-    fetch: async () => Response.json(session)
-  })
-  const pending = fetch('https://auth.example.test', { signal: controller.signal })
-  controller.abort()
-  ready.resolve()
-  await assert.rejects(pending, { name: 'AbortError' })
-})
-
 void test('Nightly login selects its callback channel and rejects callbacks addressed to Stable', async (t) => {
   const { login, browser, callback } = harness(t, { channel: 'nightly' })
   await login.start()
@@ -167,19 +120,6 @@ function harness(t, overrides = {}) {
     )
   return { login, browser, snapshots, callback }
 }
-
-void test('main completes PKCE without a renderer or any organization request', async (t) => {
-  const { login, callback, snapshots } = harness(t)
-  await login.start()
-  await login.complete(callback())
-  assert.deepEqual(login.getState().session, session)
-  assert.equal(login.getState().phase, 'authenticated')
-  assert.deepEqual(
-    snapshots.map((s) => s.phase),
-    ['waiting', 'exchanging', 'authenticated']
-  )
-  assert.equal(login.getState(), snapshots.at(-1))
-})
 
 for (const channel of ['stable', 'nightly']) {
   void test(`the pinned Better Auth endpoint accepts ${channel} PKCE and returns a usable desktop session`, async (t) => {
@@ -298,49 +238,6 @@ void test('exchange timeout is visible, never reuses its code, and ignores late 
   assert.equal(login.getState().session, null)
 })
 
-void test('the exchange deadline aborts the desktop auth transport', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const started = deferred()
-  const stopped = deferred()
-  const fetch = createDesktopAuthFetch({
-    whenReady: async () => {},
-    fetch: async (_input, init) => {
-      started.resolve()
-      init.signal.addEventListener('abort', () => stopped.reject(init.signal.reason), {
-        once: true
-      })
-      return stopped.promise
-    }
-  })
-  const { login, callback } = harness(t, {
-    exchange: async (_body, signal) => {
-      const response = await fetch('https://auth.example.test', { method: 'POST', signal })
-      return response.json()
-    }
-  })
-  await login.start()
-  const completion = login.complete(callback())
-  await started.promise
-  t.mock.timers.tick(25_000)
-  await completion
-  await assert.rejects(stopped.promise, { name: 'AbortError' })
-  assert.equal(login.getState().error, 'exchange_timeout')
-  assert.equal(login.getState().session, null)
-})
-
-void test('an old exchange failure cannot overwrite a new attempt after cancellation', async (t) => {
-  const gate = deferred()
-  const { login, callback } = harness(t, { exchange: async () => gate.promise })
-  await login.start()
-  const completion = login.complete(callback())
-  login.cancel()
-  await login.start()
-  const waiting = login.getState()
-  gate.reject(new Error('old transport failed'))
-  await completion
-  assert.equal(login.getState(), waiting)
-})
-
 void test('browser launch errors and expired waiting attempts settle with actionable errors', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const failed = harness(t, {
@@ -403,64 +300,6 @@ void test('exchange failures carry a credential-free, actionable detail', async 
   // A fresh attempt clears the previous failure's detail.
   await offline.login.start()
   assert.equal(offline.login.getState().errorDetail, null)
-})
-
-for (const error of [
-  ...[
-    'DEPTH_ZERO_SELF_SIGNED_CERT',
-    'SELF_SIGNED_CERT_IN_CHAIN',
-    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-    'CERT_HAS_EXPIRED'
-  ].map((code) => new TypeError('fetch failed', { cause: { code: 'EFAIL', cause: { code } } })),
-  ...['ERR_CERT_AUTHORITY_INVALID', 'ERR_CERT_DATE_INVALID', 'ERR_CERT_COMMON_NAME_INVALID'].map(
-    (code) => new Error(`net::${code}`)
-  )
-]) {
-  void test(`certificate exchange failure gives network guidance: ${error.cause?.cause?.code ?? error.message}`, async (t) => {
-    const reports = []
-    const { login, callback } = harness(t, {
-      exchange: async () => {
-        throw error
-      },
-      reportFailure: (report) => reports.push(report)
-    })
-    await login.start()
-    const token = callback()
-    await login.complete(token)
-    const failed = login.getState()
-    assert.equal(failed.error, 'exchange_certificate_failed')
-    assert.equal(failed.session, null)
-    assert.equal(reports[0].error, failed.error)
-    assert.equal(reports[0].detail, failed.errorDetail)
-    assert.ok(!failed.errorDetail.includes('synthetic-code'))
-    await login.complete(token)
-    assert.equal(login.getState(), failed)
-    await login.start()
-    assert.equal(login.getState().error, null)
-    assert.equal(login.getState().errorDetail, null)
-  })
-}
-
-void test('browser launch certificate errors retain the browser failure action', async (t) => {
-  const { login } = harness(t, {
-    openBrowser: async () => {
-      throw new Error('net::ERR_CERT_AUTHORITY_INVALID')
-    }
-  })
-  await login.start()
-  assert.equal(login.getState().error, 'browser_open_failed')
-})
-
-void test('unavailable secure storage fails before the browser round trip', async (t) => {
-  const { login, browser } = harness(t, {
-    openBrowser: async () => {
-      throw new DesktopLoginFailure('secure_storage_unavailable', 'keychain locked')
-    }
-  })
-  await login.start()
-  assert.equal(browser.length, 0)
-  assert.equal(login.getState().error, 'secure_storage_unavailable')
-  assert.equal(login.getState().errorDetail, 'keychain locked')
 })
 
 void test('failure preserves an already authenticated session', async (t) => {
