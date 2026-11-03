@@ -13,8 +13,8 @@ for (const previewScale of [1, 0.65]) {
   }) => {
     test.skip(browserName !== 'webkit', 'Exercises WebKit SVG rasterization');
     await page.goto('/iframe.html?id=sessions-chatsharecard--markdown-palette&viewMode=story');
-    const result = await page.evaluate(async (previewScale) => {
-      document.body.innerHTML = `<div style="transform:scale(${previewScale});transform-origin:top left"><div id="capture" style="box-sizing:border-box;width:392px;padding:16px;background:#183f60;font:15px Arial">
+    const result = await page.evaluate(async (scale) => {
+      document.body.innerHTML = `<div style="transform:scale(${scale});transform-origin:top left"><div id="capture" style="box-sizing:border-box;width:392px;padding:16px;background:#183f60;font:15px Arial">
         <div style="position:relative;padding:24px 20px;background:white;border-radius:22px;box-shadow:0 28px 70px -20px rgba(2,10,18,.6)">
           <div style="position:absolute;left:260px;top:20px;width:32px;height:18px;background:rgb(255,0,255)"></div>
           <h2 style="font-size:17px">Exporting a clear conversation</h2>
