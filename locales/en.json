@@ -6095,5 +6095,8 @@
   "sessions.androidEmulator.quality.clear": "Clear",
   "e2ee.create.mobileDescription": "Keys stay in this device’s protected storage. This mode cannot be changed later.",
   "e2ee.create.discardPending": "Discard saved request",
-  "e2ee.create.savedRequest": "Continuing your last creation"
+  "e2ee.create.savedRequest": "Continuing your last creation",
+  "e2ee.create.discardConfirmTitle": "Discard saved creation request?",
+  "e2ee.create.discardConfirmDescription": "This removes the only saved request for this workspace on this device. It cannot be undone.",
+  "e2ee.create.discardConfirmAction": "Discard request"
 }

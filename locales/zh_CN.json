@@ -6084,5 +6084,8 @@
   "sessions.androidEmulator.quality.clear": "清晰",
   "e2ee.create.mobileDescription": "密钥保存在本机受保护的存储中。创建后不能切换模式。",
   "e2ee.create.discardPending": "放弃已保存的请求",
-  "e2ee.create.savedRequest": "正在继续上次的创建"
+  "e2ee.create.savedRequest": "正在继续上次的创建",
+  "e2ee.create.discardConfirmTitle": "放弃已保存的创建请求？",
+  "e2ee.create.discardConfirmDescription": "这会删除本机为这个工作区保存的唯一创建请求，且无法撤销。",
+  "e2ee.create.discardConfirmAction": "放弃请求"
 }

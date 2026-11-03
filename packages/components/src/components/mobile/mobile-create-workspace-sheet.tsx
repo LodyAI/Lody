@@ -11,13 +11,14 @@ import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
   canDiscardPendingCreation,
   canResumePendingCreation,
+  clearConfirmedPendingCreation,
   createPreparedE2eeWorkspace,
   e2eeCreationAvailability,
   e2eeCreationIntent,
   isE2eeCreationNotEnabled,
+  pendingCreationRemoved,
 } from '@/lib/create-e2ee-workspace';
 import {
-  clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
@@ -29,6 +30,7 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Switch } from '@lody/ui/switch';
 import { Alert } from '@lody/ui/alert';
+import { AlertDialog } from '@/ui/dialog';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -80,6 +82,7 @@ export function MobileCreateWorkspaceSheet({
   const submitInFlight = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   // Presentation only: keeps the "continuing a saved request" notice steady
   // through a retry instead of flashing it in for a first-time submit.
   const [resumeNoticeShown, setResumeNoticeShown] = useState(false);
@@ -178,6 +181,7 @@ export function MobileCreateWorkspaceSheet({
     submitInFlight.current = true;
     setCreating(true);
     setCreateError(null);
+    let submitted: PendingE2eeWorkspace | null = null;
     try {
       if (encrypted) {
         const port = platform.e2eeWorkspaces;
@@ -191,6 +195,7 @@ export function MobileCreateWorkspaceSheet({
         // Persist before producing a device identity or sending a request. A lost
         // response retries these exact fields on this device.
         savePendingE2eeWorkspace(localStorage, intent);
+        submitted = intent;
         setPendingCreation(intent);
         const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
         handleClose(false);
@@ -203,7 +208,15 @@ export function MobileCreateWorkspaceSheet({
       onCreated?.(targetSlug);
     } catch (err) {
       if (encrypted) {
-        if (!isE2eeCreationNotEnabled(err)) setResumeNoticeShown(true);
+        const removed = Boolean(
+          submitted && pendingCreationRemoved(localStorage, accountId, submitted.requestId)
+        );
+        if (removed) {
+          setPendingCreation(null);
+          setResumeNoticeShown(false);
+        } else if (!isE2eeCreationNotEnabled(err)) {
+          setResumeNoticeShown(true);
+        }
         setCreateError(
           isE2eeCreationNotEnabled(err) ? t('e2ee.create.notEnabled') : t('e2ee.create.failed')
         );
@@ -278,13 +291,7 @@ export function MobileCreateWorkspaceSheet({
                           }
                           onClick={() => {
                             if (creating) return;
-                            clearPendingE2eeWorkspace(localStorage, pendingCreation);
-                            setPendingCreation(null);
-                            setResumeNoticeShown(false);
-                            setName('');
-                            setEncrypted(false);
-                            setCreateError(null);
-                            resetSlug();
+                            setDiscardConfirmOpen(true);
                           }}
                         >
                           {t('e2ee.create.discardPending')}
@@ -445,6 +452,40 @@ export function MobileCreateWorkspaceSheet({
               </Button>
             ) : null}
           </div>
+
+          <AlertDialog.Root open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
+            <AlertDialog.Content>
+              <AlertDialog.Header>
+                <AlertDialog.Title>
+                  {t('e2ee.create.discardConfirmTitle', 'Discard saved creation request?')}
+                </AlertDialog.Title>
+                <AlertDialog.Description>
+                  {t(
+                    'e2ee.create.discardConfirmDescription',
+                    'This removes the only saved request for this workspace on this device. It cannot be undone.'
+                  )}
+                </AlertDialog.Description>
+              </AlertDialog.Header>
+              <AlertDialog.Footer>
+                <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+                <AlertDialog.Action
+                  variant="destructive"
+                  onClick={() => {
+                    if (!clearConfirmedPendingCreation(localStorage, pendingCreation, true)) return;
+                    setPendingCreation(null);
+                    setResumeNoticeShown(false);
+                    setName('');
+                    setEncrypted(false);
+                    setCreateError(null);
+                    resetSlug();
+                    setDiscardConfirmOpen(false);
+                  }}
+                >
+                  {t('e2ee.create.discardConfirmAction', 'Discard request')}
+                </AlertDialog.Action>
+              </AlertDialog.Footer>
+            </AlertDialog.Content>
+          </AlertDialog.Root>
         </div>
       </DrawerContent>
     </Drawer>

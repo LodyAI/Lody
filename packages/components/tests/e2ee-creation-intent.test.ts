@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   canDiscardPendingCreation,
   canResumePendingCreation,
+  clearConfirmedPendingCreation,
   e2eeCreationAvailability,
   e2eeCreationIntent,
+  pendingCreationRemoved,
 } from '../src/lib/create-e2ee-workspace';
 import {
   clearPendingE2eeWorkspace,
@@ -94,5 +96,31 @@ describe('pending creation account ownership', () => {
   it('disables discard while a submit is creating', () => {
     expect(canDiscardPendingCreation(false, pending, 'account-A')).toBe(true);
     expect(canDiscardPendingCreation(true, pending, 'account-A')).toBe(false);
+  });
+});
+
+describe('pending removal and destructive confirmation', () => {
+  const pending = {
+    accountId: 'account-A',
+    requestId: 'saved-request-remove',
+    name: 'Saved workspace',
+    slug: 'saved-slug',
+  };
+
+  it('reports removal only after storage no longer holds the request', () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, pending);
+    expect(pendingCreationRemoved(localStorage, 'account-A', pending.requestId)).toBe(false);
+    clearPendingE2eeWorkspace(localStorage, pending);
+    expect(pendingCreationRemoved(localStorage, 'account-A', pending.requestId)).toBe(true);
+  });
+
+  it('does not clear the request until the discard is confirmed', () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, pending);
+    expect(clearConfirmedPendingCreation(localStorage, pending, false)).toBe(false);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(1);
+    expect(clearConfirmedPendingCreation(localStorage, pending, true)).toBe(true);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(0);
   });
 });

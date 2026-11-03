@@ -1,6 +1,7 @@
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
 import {
   clearPendingE2eeWorkspace,
+  listPendingE2eeWorkspaces,
   saveE2eeGenesisPin,
   retainWorkspaceModeProof,
   type PendingE2eeWorkspace,
@@ -30,6 +31,34 @@ export function e2eeCreationErrorCode(error: unknown): string | undefined {
     typeof data.code === 'string'
     ? data.code
     : undefined;
+}
+
+/** True only after storage no longer holds the exact submitted request. A read
+ * failure keeps the component locked because storage remains authoritative. */
+export function pendingCreationRemoved(
+  storage: Storage,
+  accountId: string | null,
+  requestId: string
+): boolean {
+  if (!accountId) return false;
+  try {
+    return !listPendingE2eeWorkspaces(storage, accountId).some(
+      (request) => request.requestId === requestId
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Destructive discard runs only after the explicit confirmation. */
+export function clearConfirmedPendingCreation(
+  storage: Storage,
+  pending: PendingE2eeWorkspace | null,
+  confirmed: boolean
+): boolean {
+  if (!confirmed || !pending) return false;
+  clearPendingE2eeWorkspace(storage, pending);
+  return true;
 }
 
 /** Only the account that saved this request may resume or discard it. */
