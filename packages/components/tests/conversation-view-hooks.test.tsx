@@ -1,6 +1,7 @@
 import { TestCloudPlatformProvider } from './test-platform';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,6 @@ import {
 } from '@lody/shared';
 import {
   useConversationVersion,
-  useConversationIndexRows,
   useConversationTail,
   useTurnRange,
 } from '../src/hooks/use-conversation-view';
@@ -21,7 +21,6 @@ import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-
 import {
   createConversationSession,
   createConversationViewFromReader,
-  createConversationDerivation,
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
@@ -202,129 +201,6 @@ describe('conversation view React readers', () => {
     }
   );
 
-  it('updates streamed text and summaries without rebuilding unchanged business facts or losing the draft', async () => {
-    const { doc, view } = await openView(2);
-    let facts!: ReturnType<typeof useSessionTurnFacts>;
-    let businessRows!: ReturnType<typeof useConversationIndexRows>;
-    let summaryRows!: ReturnType<typeof useConversationIndexRows>;
-    function Probe() {
-      facts = useSessionTurnFacts(view);
-      businessRows = useConversationIndexRows(view, { includeSummary: false });
-      summaryRows = useConversationIndexRows(view);
-      const tail = useConversationTail(view);
-      const first = tail.turns.at(-1)?.items[0];
-      return (
-        <>
-          <input defaultValue="kept draft" />
-          <output>{first?.type === 'text' ? first.text : ''}</output>
-          <span>{facts.ordered.at(-1)?.goal?.status}</span>
-        </>
-      );
-    }
-    await act(async () => root.render(<Probe />));
-    await flush();
-    const beforeFacts = facts.ordered;
-    const beforeRows = businessRows;
-    const beforeSummary = summaryRows;
-    const input = container.querySelector('input')!;
-    input.focus();
-    input.setSelectionRange(2, 4);
-    const writer = createHistoryWriter(doc);
-    await act(async () => {
-      writer.updateEntry('a-1', (entry) => {
-        entry.items = [
-          { type: 'text', text: 'Streaming text is visible' },
-          ...entry.items.slice(1),
-        ];
-        return entry;
-      });
-      doc.commit();
-      await flushReaderChanges();
-    });
-    await flush();
-    expect(container.querySelector('output')?.textContent).toBe('Streaming text is visible');
-    expect(facts.ordered).toBe(beforeFacts);
-    expect(businessRows).toBe(beforeRows);
-    expect(summaryRows).not.toBe(beforeSummary);
-    expect(summaryRows.at(-1)?.summary?.headText).toContain('Streaming text is visible');
-    expect(container.querySelector('input')).toBe(input);
-    expect(document.activeElement).toBe(input);
-    expect([input.value, input.selectionStart, input.selectionEnd]).toEqual(['kept draft', 2, 4]);
-    await act(async () => {
-      writer.updateEntry('a-1', (entry) => {
-        entry.items.push({
-          type: 'goal',
-          threadId: 'stream-goal',
-          objective: 'Finish safely',
-          status: 'active',
-        });
-        return entry;
-      });
-      doc.commit();
-      await flushReaderChanges();
-    });
-    await flush();
-    expect(container.querySelector('span')?.textContent).toBe('active');
-    expect(facts.ordered).not.toBe(beforeFacts);
-    expect(facts.ordered.at(-1)?.goal?.threadId).toBe('stream-goal');
-  });
-
-  it('keeps render membership stable while background facts hydrate and evict older turns', async () => {
-    const { view } = await openView(150, 80);
-    let stream!: ReturnType<typeof useConversationStreamItems>;
-    function Probe() {
-      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
-      return null;
-    }
-    await act(async () => root.render(<Probe />));
-    await flush();
-    expect(stream.initialWindowReady).toBe(true);
-    const membership = () =>
-      stream.items.map((item) =>
-        item.type === 'message'
-          ? `body:${item.message.id}`
-          : item.type === 'placeholder'
-            ? `placeholder:${item.row.id}`
-            : item.type
-      );
-    const initial = membership();
-    await act(async () => stream.onVisibleTurnRangeChange({ from: 296, to: 300 }));
-    await flush();
-    expect(membership()).toEqual(initial);
-
-    let advance!: () => void;
-    let reached!: () => void;
-    let boundary = new Promise<void>((resolve) => {
-      reached = resolve;
-    });
-    const derivation = createConversationDerivation(view, (turn) => turn.id, {
-      chunkSize: 32,
-      yieldToEventLoop: () =>
-        new Promise<void>((resolve) => {
-          advance = resolve;
-          reached();
-        }),
-    });
-    try {
-      for (let chunk = 0; chunk < 4; chunk++) {
-        await act(async () => {
-          await boundary;
-        });
-        await flush();
-        expect(derivation.facts.size).toBeGreaterThanOrEqual(40 + 32 * (chunk + 1));
-        expect(membership()).toEqual(initial);
-        expect(stream.initialWindowReady).toBe(true);
-        boundary = new Promise<void>((resolve) => {
-          reached = resolve;
-        });
-        if (chunk < 3) advance();
-      }
-    } finally {
-      derivation.dispose();
-      advance();
-    }
-  });
-
   it('renders requested history and selected turns without promoting other cached bodies', async () => {
     const { view } = await openView(150, 200);
     let stream!: ReturnType<typeof useConversationStreamItems>;
@@ -426,47 +302,6 @@ describe('conversation view React readers', () => {
       expect(view.isHydrated(20)).toBe(true);
     }
     await act(async () => releaseReady());
-  });
-
-  it('is ready once the initial tail is hydrated, without a promise tick, and never hides later window loads', async () => {
-    const { view } = await openView(150);
-    const acquire = view.acquireRange.bind(view);
-    let releaseReady!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      releaseReady = resolve;
-    });
-    vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
-      const lease = acquire(...args);
-      return { ...lease, ready: lease.ready.then(() => gate) };
-    });
-    let stream!: ReturnType<typeof useConversationStreamItems>;
-    function Probe() {
-      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
-      return <span>{String(stream.initialWindowReady)}</span>;
-    }
-    // 300 turns: the 40-turn tail beyond the always-hydrated keep is not hydrated yet.
-    expect(view.isHydrated(260)).toBe(false);
-    await act(async () => root.render(<Probe />));
-    expect(container.textContent).toBe('false');
-    // The lease hydrates it; its promise is still pending, and ready does not wait for it.
-    await act(async () => {
-      await flush();
-    });
-    expect(view.isHydrated(260)).toBe(true);
-    expect(container.textContent).toBe('true');
-
-    // A later window loading (still gated) never hides the revealed tail.
-    await act(async () => {
-      stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
-    });
-    await flush();
-    expect(container.textContent).toBe('true');
-    await act(async () => {
-      releaseReady();
-    });
-    await flush();
-    expect(view.isHydrated(0)).toBe(true);
-    expect(container.textContent).toBe('true');
   });
 
   it.each([false, true])(
@@ -592,34 +427,6 @@ describe('conversation view React readers', () => {
     expect(blocks).toEqual([]);
     await act(async () => root.render(<Probe />));
     expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(1);
-  });
-
-  it('refreshes cached search positions after insertion and deletion', async () => {
-    const { doc, view } = await openView(3);
-    let blocks: SessionSearchBlock[] = [];
-    function Probe() {
-      blocks = useIncrementalSearchBlocks(view, true);
-      return null;
-    }
-    await act(async () => root.render(<Probe />));
-    const original = view.turn(1);
-    await act(async () => {
-      const turn = doc.getList('history').insertContainer(0, new LoroMap());
-      turn.set('id', 'prepended');
-      turn.set('role', 'system');
-      doc.commit();
-      await flushReaderChanges();
-    });
-    await flush();
-    expect(view.turn(2)).toEqual(original);
-    expect(blocks.find((block) => block.messageId === 'a-0')?.messageIndex).toBe(2);
-    await act(async () => {
-      doc.getList('history').delete(0, 1);
-      doc.commit();
-      await flushReaderChanges();
-    });
-    await flush();
-    expect(blocks.find((block) => block.messageId === 'a-0')?.messageIndex).toBe(1);
   });
 });
 

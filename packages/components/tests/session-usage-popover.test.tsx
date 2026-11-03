@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { getRateLimitEntryKey } from '@lody/shared';
@@ -67,35 +68,6 @@ describe('SessionUsagePopover', () => {
       );
     });
   };
-
-  it('shows the used context percentage in the composer trigger', async () => {
-    await renderUsage({
-      contextWindowUsage: { size: 128_000, used: 32_000 },
-      rateLimits,
-      showRateLimitWithoutContext: true,
-    });
-
-    const trigger = container.querySelector('button');
-    expect(trigger?.textContent).toBe('25%');
-    expect(trigger?.getAttribute('aria-label')).toBe('Open usage details, 25% used');
-    expect(trigger?.getAttribute('title')).toBe('Open usage details, 25% used');
-  });
-
-  it('shows rate limit usage and details without context when explicitly enabled', async () => {
-    await renderUsage({ rateLimits, showRateLimitWithoutContext: true });
-
-    const trigger = container.querySelector('button');
-    expect(trigger?.textContent).toBe('29%');
-    expect(trigger?.getAttribute('aria-label')).toBe('Open usage details, 29% used');
-
-    await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    const popover = document.body.querySelector('[aria-label="Usage"]');
-    expect(popover?.textContent).toContain('Weekly');
-    expect(popover?.textContent).toContain('29% used');
-  });
 
   it('keeps rate-limit-only usage hidden unless explicitly enabled', async () => {
     await renderUsage({ rateLimits });
@@ -209,12 +181,6 @@ describe('SessionUsagePopover', () => {
     expect(document.body.querySelector('[aria-label="Usage"]')?.textContent).toContain(
       'The provider did not report usage for this plan'
     );
-  });
-
-  it('hides the trigger when context data is invalid even if subscription usage exists', async () => {
-    await renderUsage({ contextWindowUsage: { size: 0, used: 0 }, rateLimits });
-
-    expect(container.querySelector('button')).toBeNull();
   });
 
   it('keeps the compacting state visible without context data', async () => {

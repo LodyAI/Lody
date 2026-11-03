@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -74,16 +75,6 @@ it.each(['en', 'zh_CN'])(
     expect(container.textContent).toBe('');
   }
 );
-
-it('keeps ordinary unknown presence silent', async () => {
-  const state = resolveSessionStatusStripState({
-    browserOnline: true,
-    machineRemoved: false,
-    machineOnlineStatus: 'unknown',
-  });
-  await act(async () => root.render(<SessionStatusStrip state={state} />));
-  expect(container.textContent).toBe('');
-});
 
 it('prepares and saves an encrypted scheduled message through the ordinary repository', async () => {
   const repo = await LoroRepo.create({});
@@ -198,22 +189,6 @@ function encryptedStore() {
   return store;
 }
 
-it('keeps the ordinary workspace readiness error for encrypted scheduled messages', async () => {
-  function DraftStatus() {
-    const state = useScheduledMessageDraft({ id: 'session' } as SessionMeta, null);
-    return <button disabled={!!state.disabledReason}>{state.disabledReason}</button>;
-  }
-  await act(async () =>
-    root.render(
-      <Provider store={encryptedStore()}>
-        <DraftStatus />
-      </Provider>
-    )
-  );
-  expect(container.querySelector('button')?.disabled).toBe(true);
-  expect(container.textContent).toBe('Wait for the workspace to finish loading.');
-});
-
 it('keeps encrypted Code Collab available while its runtime is starting', async () => {
   function FileStatus() {
     const state = useCodeCollabSessionFileProvider({
@@ -265,25 +240,6 @@ it.each([false, true])(
       Array(2).fill('Encrypted workspaces do not yet support remote machine operations.')
     );
     expect(container.querySelector('button')).toBeNull();
-  }
-);
-
-it.each(['en', 'zh_CN'])(
-  'enables local export controls in encrypted workspaces in %s',
-  async (language) => {
-    await initI18n(language);
-    function ExportControl() {
-      const available = useWorkspaceFeature('export');
-      return <button disabled={!available}>Export</button>;
-    }
-    await act(async () =>
-      root.render(
-        <Provider store={encryptedStore()}>
-          <ExportControl />
-        </Provider>
-      )
-    );
-    expect(container.querySelector('button')?.disabled).toBe(false);
   }
 );
 

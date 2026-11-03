@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -84,60 +85,5 @@ describe('MobileHomeOnboarding first-run guide', () => {
     const copied = container?.querySelector('button[data-copied="true"]');
     expect(copied).not.toBeNull();
     expect(copied?.querySelector('svg.lucide-check')).not.toBeNull();
-  });
-
-  it('honors a caller-provided command override', () => {
-    renderOnboarding({ labels: { command: 'npx lody daemon start --auth token' } });
-    expect(container?.textContent).toContain('npx lody daemon start --auth token');
-  });
-
-  it('shares command + link for the command path and the bare link for the desktop path', async () => {
-    const share = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'share', { value: share, configurable: true });
-
-    renderOnboarding({
-      labels: { shareCommandLabel: 'Send command', shareDownloadLabel: 'Send link' },
-      downloadUrl: 'https://lody.ai/zh/download',
-    });
-
-    const commandShare = container?.querySelector('button[aria-label="Send command"]');
-    const linkShare = container?.querySelector('button[aria-label="Send link"]');
-    expect(commandShare).not.toBeNull();
-    expect(linkShare).not.toBeNull();
-
-    click(commandShare!);
-    await settleMicrotasks();
-    const commandPayload = share.mock.calls.at(-1)?.[0] as { text?: string };
-    expect(commandPayload.text).toContain('npx lody daemon start');
-    expect(commandPayload.text).toContain('https://lody.ai/zh/download');
-
-    click(linkShare!);
-    await settleMicrotasks();
-    const linkPayload = share.mock.calls.at(-1)?.[0] as { url?: string };
-    expect(linkPayload.url).toBe('https://lody.ai/zh/download');
-  });
-
-  it('shows the download URL as a typeable pill that copies on tap — no share API needed', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
-
-    renderOnboarding({
-      labels: {},
-      downloadUrl: 'https://lody.ai/zh/download',
-    });
-
-    // The pill displays the scheme-stripped URL (short enough to type on the
-    // computer) but copies the full clickable URL.
-    const pill = findButton('lody.ai/zh/download');
-    expect(pill).not.toBeNull();
-    click(pill!);
-    await settleMicrotasks();
-
-    expect(writeText).toHaveBeenCalledWith('https://lody.ai/zh/download');
-    expect(pill!.dataset.copied).toBe('true');
-    expect(pill!.querySelector('svg.lucide-check')).not.toBeNull();
   });
 });

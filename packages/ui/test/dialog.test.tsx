@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/portal-container';
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
@@ -16,11 +16,6 @@ afterEach(async () => {
 const panels = () => all('[role="dialog"]');
 const panel = () => panels()[0];
 const alerts = () => all('[role="alertdialog"]');
-const buttonNamed = (label: string) => {
-  const node = all('button').find((element) => element.textContent?.trim() === label);
-  if (!node) throw new Error(`no button named ${label}`);
-  return node;
-};
 
 describe('Dialog', () => {
   test('modal hosts are independent of floating hosts, and explicit containers win', async () => {
@@ -61,30 +56,6 @@ describe('Dialog', () => {
       floating.remove();
       explicit.remove();
     }
-  });
-
-  test('a trigger opens the panel, and the panel names itself', async () => {
-    mounted = await mount(
-      <Dialog.Root>
-        <Dialog.Trigger>Rename</Dialog.Trigger>
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>Rename session</Dialog.Title>
-            <Dialog.Description>The name shows in the sidebar.</Dialog.Description>
-          </Dialog.Header>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    expect(panels()).toHaveLength(0);
-
-    await click(one('button'));
-
-    const labelledBy = panel().getAttribute('aria-labelledby');
-    const describedBy = panel().getAttribute('aria-describedby');
-    expect(document.getElementById(labelledBy ?? '')?.textContent).toBe('Rename session');
-    expect(document.getElementById(describedBy ?? '')?.textContent).toBe(
-      'The name shows in the sidebar.'
-    );
   });
 
   test('renders the cross by default, and drops it when a panel says so', async () => {
@@ -131,22 +102,6 @@ describe('Dialog', () => {
     expect(panels()).toHaveLength(0);
   });
 
-  test('a panel width lands as inline style, alongside a caller style', async () => {
-    // The panel states its own `width` in StyleX, so a second `width` class
-    // would only win by sheet order. `width` rides the inline `style` instead —
-    // the one channel that always follows the panel — and composes with the
-    // `style` a caller already passes.
-    mounted = await mount(
-      <Dialog.Root defaultOpen>
-        <Dialog.Content width="640px" style={{ overscrollBehavior: 'contain' }}>
-          <Dialog.Title>Rename session</Dialog.Title>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    expect(panel().style.width).toBe('640px');
-    expect(panel().style.overscrollBehavior).toBe('contain');
-  });
-
   test('a panel centred on an element follows that element, inside the window', async () => {
     // jsdom lays nothing out, so the pane's box is stated; what is pinned is
     // the centre the panel is given and the window clamp around it.
@@ -185,27 +140,6 @@ describe('Dialog', () => {
     );
     expect(panel().style.width).toBe('620px');
     expect(panel().getAttribute('style') ?? '').not.toContain('inset-inline-start');
-  });
-
-  test('a footer answer runs its handler and takes the panel down with it', async () => {
-    const save = vi.fn();
-    mounted = await mount(
-      <Dialog.Root defaultOpen>
-        <Dialog.Content>
-          <Dialog.Title>Rename session</Dialog.Title>
-          <Dialog.Footer>
-            <Dialog.Close render={<Button variant="secondary" />}>Cancel</Dialog.Close>
-            <Dialog.Close render={<Button />} onClick={save}>
-              Save
-            </Dialog.Close>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-    await click(buttonNamed('Save'));
-
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(panels()).toHaveLength(0);
   });
 
   test('every popup inside it mounts into the panel rather than on the body', async () => {

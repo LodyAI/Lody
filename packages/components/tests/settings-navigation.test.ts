@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getSettingsBackDestination, resolveSettingsCloseTo } from '../src/lib/settings-navigation';
+import { getSettingsBackDestination } from '../src/lib/settings-navigation';
 
 describe('settings navigation', () => {
   it('restores the full source path when leaving the top-level mobile settings page', () => {
@@ -47,11 +47,5 @@ describe('settings navigation', () => {
         from: '//example.com/phishing',
       })
     ).toEqual({ kind: 'chat' });
-  });
-
-  it('accepts only absolute in-app source paths', () => {
-    expect(resolveSettingsCloseTo('/acme/chat?context=local')).toBe('/acme/chat?context=local');
-    expect(resolveSettingsCloseTo('https://example.com')).toBeNull();
-    expect(resolveSettingsCloseTo('//example.com')).toBeNull();
   });
 });

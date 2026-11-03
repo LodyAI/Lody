@@ -29,7 +29,9 @@ context/message-flow.md "Upstream".
   selection and separately keyed note through durable permission history. Core forms
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
-  Claude single-question forms retain their request-message prompt.
+  Claude single-question forms retain their request-message prompt. The shared bridge
+  maps recognized Droid AskUser labels and custom answers back to its option IDs and
+  companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that

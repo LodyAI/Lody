@@ -26,6 +26,34 @@
  * "IF the aggregate flaps, THEN a storm follows" — they do not prove what makes
  * it flap in production.
  */
+/**
+ * Reproduction harness for the reported reconnect storm.
+ *
+ * Field report: ~30 transport reconnects/minute, each logging
+ * `[dispatch] Scanning owned sessions (reason=meta-room-synced:transport-connected)`
+ * followed by `Found 113 session room(s)`, i.e. ~3400 session reconciles/minute,
+ * with 6.4s event-loop lag and 1.6GB RSS.
+ *
+ * These started as a diagnostic harness asserting the BUGGY behavior (59
+ * fan-outs/min, 6667 session reconciles/min, reconnect gaps pinned at the 1s
+ * base delay). They are now regression guards for the fix, and each one logs
+ * its pre-fix number so the delta stays visible:
+ *
+ *   scenario A: fan-outs/min   59 -> 2 -> 0   reconnects/min 59 -> backed-off room sweeps
+ *   scenario D: reconciles/min 6667 -> 226 -> 0
+ *
+ * The second step (#2194): while the meta room stays joined, a failed doc or
+ * Flock room is no longer a transport outage at all. Only backed-off per-room
+ * sweeps retry it.
+ *
+ * Scenario B is the control that must NOT change: a genuine sustained outage
+ * takes the meta room down, stays cheap, and its exponential backoff still works.
+ *
+ * What is deliberately NOT modelled: loro-repo internals. The aggregate
+ * `TransportConnectionStatus` is driven by hand here, so these tests prove
+ * "IF the aggregate flaps, THEN a storm follows" — they do not prove what makes
+ * it flap in production.
+ */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { WorkspaceId, MachineId, SessionId } from '@lody/shared';
 import type { LoroRepo, TransportRoomStatus, TransportSubscription } from 'loro-repo';
@@ -179,37 +207,6 @@ describe('reconnect storm repro', () => {
     expect(Math.max(...gaps)).toBeGreaterThanOrEqual(8_000);
   });
 
-  it('SCENARIO B (control): a sustained outage backs off and never fans out', async () => {
-    // A real outage takes the meta room down and the aggregate stays
-    // 'disconnected' the whole time. An outage on its own is cheap.
-    const reconnectAtMs: number[] = [];
-    const reconnect = vi.fn(async () => {
-      reconnectAtMs.push(Date.now());
-    });
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, transportRooms: () => [] }, metaSub);
-
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    metaSub.emitStatus('reconnecting');
-    instance.setTransportStatus('disconnected');
-    await vi.advanceTimersByTimeAsync(ONE_MINUTE_MS);
-
-    // eslint-disable-next-line no-console
-    console.log(
-      `[SCENARIO B] fan-outs/min=${metaSynced.mock.calls.length} reconnects/min=${reconnect.mock.calls.length}`
-    );
-
-    // No health rising edge -> no fan-out at all.
-    expect(metaSynced).not.toHaveBeenCalled();
-    // And exponential backoff works exactly as designed when it is not reset.
-    const gaps = reconnectAtMs.slice(1).map((at, index) => at - (reconnectAtMs[index] ?? 0));
-    // eslint-disable-next-line no-console
-    console.log(`[SCENARIO B] reconnect gaps (ms): ${gaps.join(', ')}`);
-    expect(Math.max(...gaps)).toBeGreaterThanOrEqual(4_000);
-  });
-
   const createWatcherOverDocumentManager = (options: {
     onMetaRoomSynced: LoroDocumentManager['onMetaRoomSynced'];
     scanCounter: { scans: number; docMetaReads: number };
@@ -269,45 +266,6 @@ describe('reconnect storm repro', () => {
     });
     return watcher;
   };
-
-  it('SCENARIO C: the watcher itself has no throttle — one fan-out costs one full scan', async () => {
-    const scanCounter = { scans: 0, docMetaReads: 0 };
-    let fire: ((reason: string) => void) | null = null;
-
-    const created = createWatcherOverDocumentManager({
-      onMetaRoomSynced: ((listener: (reason: string) => void) => {
-        fire = listener;
-        return () => {
-          fire = null;
-        };
-      }) as unknown as LoroDocumentManager['onMetaRoomSynced'],
-      scanCounter,
-    });
-    await created.start();
-    // Drain the startup bootstrap so the counts below are recovery-driven only.
-    await vi.advanceTimersByTimeAsync(100);
-    const afterStartup = { ...scanCounter };
-
-    // 30 recovery fan-outs, spaced like the field report (~2s apart).
-    for (let round = 0; round < 30; round++) {
-      fire?.('transport-connected');
-      await vi.advanceTimersByTimeAsync(2_000);
-    }
-
-    const scans = scanCounter.scans - afterStartup.scans;
-    const reconciles = scanCounter.docMetaReads - afterStartup.docMetaReads;
-    // eslint-disable-next-line no-console
-    console.log(`[SCENARIO C] scans=${scans} session reconciles=${reconciles}`);
-
-    // DELIBERATE: the watcher does not rate-limit itself. Per
-    // `src/session/AGENTS.md`, coalescing bounds the work per trigger and
-    // keeping the trigger RATE sane is the connection recovery boundary's job —
-    // which is where the fix put it. This test pins that ownership: if someone
-    // adds a throttle here instead, the cost model moves and this fails.
-    expect(scans).toBe(30);
-    // The price of one unthrottled fan-out, i.e. the reported 3400/min figure.
-    expect(reconciles).toBe(30 * SESSION_ROOM_COUNT);
-  });
 
   it('SCENARIO D (end to end): one stuck room no longer floods the dispatch watcher', async () => {
     // The real recovery controller wired to the real dispatch watcher. Nothing

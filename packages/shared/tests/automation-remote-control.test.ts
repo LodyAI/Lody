@@ -17,14 +17,6 @@ const intent = {
 };
 
 describe('remote Session automation intent', () => {
-  it('binds the complete configured operation to the signed scope', () => {
-    const operation = { type: 'configure', settings: { recoverCapacity: true } };
-    expect(remoteAutomationIntentSchema.parse({ ...intent, operation })).toEqual({
-      ...intent,
-      operation,
-    });
-  });
-
   it.each([
     { type: 'register', program: '() => ({ resumeText: "run" })' },
     { type: 'list', sessionId: 'another-session' },

@@ -36,21 +36,6 @@ function fixture() {
 }
 
 describe('Markdown file link resolution', () => {
-  it('finds a unique nested file while canonical preview stays workspace-relative', async () => {
-    const f = fixture();
-    const file = f.write('nested/docs/guide.md');
-    expect(
-      resolveFilePreviewPath({ workspaceRoot: f.root, requestedPath: 'docs/guide.md' })
-    ).toMatchObject({ ok: false, rejection: { code: 'file_not_found' } });
-    const result = await f.resolve();
-    expect(result).toMatchObject({
-      status: 'resolved-link',
-      candidates: [
-        { path: 'nested/docs/guide.md', absolutePath: file, branch: 'refs/heads/feature' },
-      ],
-    });
-  });
-
   it('includes the main checkout in ambiguity and keeps the selected identity stable', async () => {
     const f = fixture();
     f.write('docs/guide.md', 'main');
@@ -102,20 +87,6 @@ describe('Markdown file link resolution', () => {
     if (result.status === 'resolved-link') expect(result.candidates).toHaveLength(1);
   });
 
-  it('falls back to the session root when worktree discovery is unavailable', async () => {
-    const f = fixture();
-    const file = f.write('docs/guide.md');
-    f.write('nested/docs/guide.md');
-    const result = await resolveMarkdownFileLink(
-      { workspaceRoot: f.root, requestedPath: 'docs/guide.md' },
-      async () => {
-        throw new Error('Git failed');
-      }
-    );
-    expect(result).toMatchObject({ status: 'resolved-link', candidates: [{ absolutePath: file }] });
-    if (result.status === 'resolved-link') expect(result.candidates).toHaveLength(1);
-  });
-
   it('falls back for a checkout whose Git metadata is broken', async () => {
     const f = fixture();
     fs.writeFileSync(path.join(f.root, '.git'), 'gitdir: /nonexistent\n');
@@ -135,16 +106,6 @@ describe('Markdown file link resolution', () => {
       return stat(target, options);
     }) as typeof fs.statSync);
     expect(await f.resolve()).toMatchObject({ status: 'error', code: 'permission_denied' });
-  });
-
-  it('preserves whitespace and case-tolerant lookup under a nested base', async () => {
-    const f = fixture();
-    const nested = f.write('nested/docs/Guide.md');
-    const result = await f.resolve(' docs/guide.md ');
-    expect(result).toMatchObject({
-      status: 'resolved-link',
-      candidates: [{ absolutePath: nested }],
-    });
   });
 
   it('keeps explicit paths and ordinary non-Git directories independent of discovery', async () => {

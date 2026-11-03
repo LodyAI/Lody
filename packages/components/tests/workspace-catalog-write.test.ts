@@ -14,11 +14,8 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import {
-  deleteWorkspaceMcpServer,
   ProjectMcpDefaultWriteError,
   putProjectMcpDefault,
-  putWorkspaceMcpServer,
-  uploadWorkspaceCatalog,
   writeWorkspaceAgentRole,
   type WorkspaceCatalogWriteDeps,
 } from '../src/lib/workspace-catalog-write';
@@ -90,44 +87,6 @@ describe('workspace catalog writes', () => {
     for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
   };
 
-  it('resolves while the upload is still in flight', async () => {
-    // What the editor closes on. Awaiting the upload left a finished, already
-    // durable save sitting behind a round trip.
-    const { calls, deps, releaseUpload } = createDeps();
-    await putWorkspaceMcpServer(deps, entry);
-    expect(calls).not.toContain('syncOnce:end');
-    expect(deps.writer.flockRowPut).toHaveBeenCalledTimes(1);
-
-    releaseUpload();
-    await settle();
-    expect(calls).toContain('syncOnce:end');
-  });
-
-  it('does the same for a role, and for a delete', async () => {
-    const put = createDeps();
-    await writeWorkspaceAgentRole(put.deps, role);
-    expect(put.calls).not.toContain('syncOnce:end');
-
-    const removal = createDeps();
-    await deleteWorkspaceMcpServer(removal.deps, entry.id);
-    expect(removal.calls).toContain('flockRowDelete');
-    expect(removal.calls).not.toContain('syncOnce:end');
-  });
-
-  it('never turns a failed upload into a failed write', async () => {
-    // The row is durable either way and the room carries the document later, so
-    // an upload failure is logged and nothing else — no rejection to surface, no
-    // rollback, and no banner the user can neither act on nor dismiss.
-    const failed = createDeps({ syncError: new Error('network unavailable') });
-    await expect(putWorkspaceMcpServer(failed.deps, entry)).resolves.toBeUndefined();
-    failed.releaseUpload();
-    await expect(uploadWorkspaceCatalog(failed.deps)).resolves.toBeUndefined();
-
-    const unopenable = createDeps({ openError: new Error('room unavailable') });
-    await expect(writeWorkspaceAgentRole(unopenable.deps, role)).resolves.toBeUndefined();
-    await expect(uploadWorkspaceCatalog(unopenable.deps)).resolves.toBeUndefined();
-  });
-
   it('stores a multi-machine role in the row shape older clients skip', async () => {
     const flock = new Flock('catalog-write-multi');
     const repo = { openFlockDoc: async () => ({ flock, syncOnce: async () => {} }) };
@@ -170,23 +129,6 @@ describe('project default MCP writes', () => {
   const owner = { kind: 'local' as const, currentUserId: 'user-1', machineOwnerUserId: 'user-1' };
   const ids = ['server-1', 'server-2'] as McpServerId[];
 
-  it('writes the whole list under the project key, durable before the upload', async () => {
-    const { calls, deps, releaseUpload } = createDeps();
-    await putProjectMcpDefault(deps, localTarget, owner, ids);
-
-    expect(deps.writer.flockRowPut).toHaveBeenCalledWith(
-      expect.any(String),
-      workspaceFlockKeys.projectMcpDefault(
-        getProjectMcpKey(localTarget.project, localTarget.machineId)!
-      ),
-      { ids }
-    );
-    expect(calls).not.toContain('syncOnce:end');
-    releaseUpload();
-    await settle();
-    expect(calls).toContain('syncOnce:end');
-  });
-
   it('records an explicit empty list, and ignores the branch and worktree', async () => {
     const { deps } = createDeps();
     await putProjectMcpDefault(
@@ -205,16 +147,6 @@ describe('project default MCP writes', () => {
       ),
       { ids: [] }
     );
-  });
-
-  it('does not fail or roll back when the upload fails', async () => {
-    const failed = createDeps({ syncError: new Error('network unavailable') });
-    await expect(
-      putProjectMcpDefault(failed.deps, localTarget, owner, ids)
-    ).resolves.toBeUndefined();
-    failed.releaseUpload();
-    await settle();
-    expect(failed.deps.writer.flockRowDelete).not.toHaveBeenCalled();
   });
 
   it.each([

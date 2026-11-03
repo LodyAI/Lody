@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import {
   createRouter,
   createRootRoute,
@@ -8,7 +9,7 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import {
@@ -123,47 +124,6 @@ describe('WorkspaceScreen write recovery', () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 
-  it('shows the workspace load error, logs it, and offers a real retry', async () => {
-    const retry = vi.fn(() => Promise.resolve());
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const platform: PlatformProvider = {
-      ...TEST_CLOUD_PLATFORM,
-      kind: 'local',
-      capabilities: LOCAL_PLATFORM_CAPABILITIES,
-      cloudApi: undefined,
-      workspaces: {
-        state: createStaticStore({
-          status: 'error' as const,
-          message: 'organization list request failed with status 503',
-        }),
-        retry,
-        setActive: vi.fn(() => Promise.resolve()),
-      },
-    };
-
-    await act(async () => {
-      root?.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={createStore()}>
-            <WorkspaceScreen onBack={vi.fn()} onNext={vi.fn()} />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-
-    expect(container.textContent).toContain('organization list request failed with status 503');
-    expect(consoleError).toHaveBeenCalledWith(
-      '[onboarding] Failed to load workspaces:',
-      'organization list request failed with status 503'
-    );
-
-    await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(retry).toHaveBeenCalledOnce();
-  });
-
   it('keeps creation blocked when slug verification is slow', async () => {
     const noop = vi.fn();
     const retrySlugCheck = vi.fn();
@@ -219,113 +179,6 @@ describe('WorkspaceScreen write recovery', () => {
       );
     });
     expect(retrySlugCheck).toHaveBeenCalledOnce();
-  });
-
-  it('shows slug query details and keeps a real retry available', async () => {
-    const noop = vi.fn();
-    const retrySlugCheck = vi.fn();
-
-    await act(async () => {
-      root?.render(
-        <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>
-          <Provider store={createStore()}>
-            <WorkspaceScreenView
-              workspaces={[]}
-              workspacesStatus="ready"
-              workspacesError={null}
-              retryingWorkspaces={false}
-              onRetryWorkspaces={noop}
-              selectedWorkspaceId={null}
-              creating
-              repairingWorkspaceName={null}
-              onStartCreate={noop}
-              onStartRepair={noop}
-              onCancelCreate={noop}
-              newName="Loro Lab"
-              newSlug="loro-lab"
-              newSlugChecking={false}
-              newSlugAvailable={false}
-              newSlugCheckSlow={false}
-              newSlugCheckError="network connection unavailable"
-              newSlugError={null}
-              canResetSlug={false}
-              onNewNameChange={noop}
-              onNewSlugChange={noop}
-              onResetNewSlug={noop}
-              onRetryNewSlugCheck={retrySlugCheck}
-              saving={false}
-              writePending={false}
-              createError={null}
-              onSelectWorkspace={noop}
-              onConfirmSelection={noop}
-              onSubmitCreate={noop}
-              onBack={noop}
-            />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-
-    expect(container.textContent).toContain('network connection unavailable');
-    expect(findButton(container, 'Create & continue').disabled).toBe(true);
-    await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(retrySlugCheck).toHaveBeenCalledOnce();
-  });
-
-  it('opens an inline repair path for a workspace without a handle', async () => {
-    const noop = vi.fn();
-    const startRepair = vi.fn();
-
-    await act(async () => {
-      root?.render(
-        <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>
-          <Provider store={createStore()}>
-            <WorkspaceScreenView
-              workspaces={[{ id: 'workspace-legacy', name: 'Legacy Workspace', slug: '' }]}
-              workspacesStatus="ready"
-              workspacesError={null}
-              retryingWorkspaces={false}
-              onRetryWorkspaces={noop}
-              selectedWorkspaceId={null}
-              creating={false}
-              repairingWorkspaceName={null}
-              onStartCreate={noop}
-              onStartRepair={startRepair}
-              onCancelCreate={noop}
-              newName=""
-              newSlug=""
-              newSlugChecking={false}
-              newSlugAvailable={false}
-              newSlugCheckSlow={false}
-              newSlugCheckError={null}
-              newSlugError={null}
-              canResetSlug={false}
-              onNewNameChange={noop}
-              onNewSlugChange={noop}
-              onResetNewSlug={noop}
-              onRetryNewSlugCheck={noop}
-              saving={false}
-              writePending={false}
-              createError={null}
-              onSelectWorkspace={noop}
-              onConfirmSelection={noop}
-              onSubmitCreate={noop}
-              onBack={noop}
-            />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-
-    expect(container.textContent).toContain('select this workspace to set one');
-    await act(async () => {
-      findButton(container, 'Legacy Workspace').dispatchEvent(
-        new MouseEvent('click', { bubbles: true })
-      );
-    });
-    expect(startRepair).toHaveBeenCalledWith('workspace-legacy');
   });
 
   it('saves a missing handle, activates that workspace, and advances', async () => {

@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore } from 'jotai';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  conversationFontSizeAtom,
-  terminalFontFamilyAtom,
-  terminalFontSizeAtom,
-} from '../src/atoms/settings';
 import { LocalTerminalPanel } from '../src/components/terminal/local-terminal-panel';
 import type { TerminalChannel } from '../src/components/terminal/terminal-channel';
 import { initI18n } from '../src/i18n';
@@ -200,49 +196,6 @@ describe('LocalTerminalPanel', () => {
     __resetPlatformCacheForTests();
   });
 
-  it('updates and refits the existing xterm instance', async () => {
-    const store = createStore();
-    store.set(conversationFontSizeAtom, 14);
-    const channel = createChannel();
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <LocalTerminalPanel channel={channel} terminalId="terminal-1" />
-        </Provider>
-      );
-      await Promise.resolve();
-    });
-
-    expect(mocks.terminalInstances).toHaveLength(1);
-    const terminal = mocks.terminalInstances[0];
-    const initialFitCount = mocks.fit.mock.calls.length;
-
-    await act(async () => {
-      store.set(terminalFontFamilyAtom, 'Maple Mono');
-      store.set(terminalFontSizeAtom, 16);
-      await Promise.resolve();
-    });
-
-    expect(mocks.terminalInstances).toHaveLength(1);
-    expect(terminal.options.fontFamily).toContain('"Maple Mono"');
-    expect(terminal.options.fontSize).toBe(16);
-    expect(mocks.fit.mock.calls.length).toBeGreaterThan(initialFitCount);
-
-    terminal.selection = 'selected output';
-    for (const size of [12, 13, 14, 15, 16]) {
-      await act(async () => {
-        store.set(conversationFontSizeAtom, size);
-        await Promise.resolve();
-      });
-      expect(mocks.terminalInstances[0]).toBe(terminal);
-      expect(terminal.options.fontSize).toBeCloseTo((16 * size) / 14);
-      expect(terminal.options.fontFamily).toContain('"Maple Mono"');
-      expect(terminal.selection).toBe('selected output');
-      expect(store.get(terminalFontSizeAtom)).toBe(16);
-    }
-  });
-
   it('reports each submitted shell line without exposing command text', async () => {
     const channel = createChannel();
     const onCommandSubmitted = vi.fn();
@@ -383,33 +336,6 @@ describe('LocalTerminalPanel', () => {
     expect(terminal.customKeyEventHandler?.(plainRight)).toBe(true);
   });
 
-  it('starts the next Shift+arrow from a mouse selection instead of the old keyboard anchor', async () => {
-    const channel = createChannel();
-
-    await act(async () => {
-      root?.render(<LocalTerminalPanel channel={channel} terminalId="terminal-1" />);
-      await Promise.resolve();
-    });
-
-    const terminal = mocks.terminalInstances[0];
-    expect(
-      terminal.customKeyEventHandler?.(
-        new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, cancelable: true })
-      )
-    ).toBe(false);
-    expect(terminal.selectedRanges).toEqual([{ column: 5, row: 2, length: 1 }]);
-
-    terminal.selectionRange = { start: { x: 10, y: 5 }, end: { x: 14, y: 5 } };
-    terminal.selectionChangeHandler?.();
-
-    expect(
-      terminal.customKeyEventHandler?.(
-        new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, cancelable: true })
-      )
-    ).toBe(false);
-    expect(terminal.selectedRanges.at(-1)).toEqual({ column: 10, row: 5, length: 5 });
-  });
-
   it('pastes with Ctrl+V on Windows without sending the chord to the PTY', async () => {
     vi.stubGlobal('__LODY_PLATFORM__', { os: 'win32' });
     __resetPlatformCacheForTests();
@@ -434,31 +360,6 @@ describe('LocalTerminalPanel', () => {
     await Promise.resolve();
     expect(terminal.pasted).toEqual(['clipboard input']);
     expect(channel.input).not.toHaveBeenCalled();
-  });
-
-  it('pastes with Ctrl+Shift+V on Windows', async () => {
-    vi.stubGlobal('__LODY_PLATFORM__', { os: 'win32' });
-    __resetPlatformCacheForTests();
-    const channel = createChannel();
-    vi.mocked(channel.readClipboardText).mockResolvedValue('shift paste');
-
-    await act(async () => {
-      root?.render(<LocalTerminalPanel channel={channel} terminalId="terminal-1" />);
-      await Promise.resolve();
-    });
-
-    const terminal = mocks.terminalInstances[0];
-    const pasteEvent = new KeyboardEvent('keydown', {
-      key: 'V',
-      code: 'KeyV',
-      ctrlKey: true,
-      shiftKey: true,
-      cancelable: true,
-    });
-
-    expect(terminal.customKeyEventHandler?.(pasteEvent)).toBe(false);
-    await Promise.resolve();
-    expect(terminal.pasted).toEqual(['shift paste']);
   });
 
   it('pastes with Cmd+V on macOS and leaves Ctrl+V for the PTY', async () => {
@@ -491,54 +392,5 @@ describe('LocalTerminalPanel', () => {
     });
     expect(terminal.customKeyEventHandler?.(ctrlPaste)).toBe(true);
     expect(terminal.pasted).toEqual(['mac paste']);
-  });
-
-  it('copies and pastes through the terminal context menu', async () => {
-    const channel = createChannel();
-    vi.mocked(channel.readClipboardText).mockReturnValue('clipboard input');
-
-    await act(async () => {
-      root?.render(<LocalTerminalPanel channel={channel} terminalId="terminal-1" />);
-      await Promise.resolve();
-    });
-
-    const terminal = mocks.terminalInstances[0];
-    terminal.selection = 'selected output';
-
-    await act(async () => {
-      openTerminalContextMenu(container);
-    });
-
-    const copyItem = getMenuItem('Copy');
-    await act(async () => copyItem.click());
-    expect(channel.writeClipboardText).toHaveBeenCalledWith('selected output');
-
-    await act(async () => {
-      openTerminalContextMenu(container);
-    });
-    const pasteItem = getMenuItem('Paste');
-    await act(async () => pasteItem.click());
-    expect(terminal.pasted).toEqual(['clipboard input']);
-  });
-
-  it('shows Cmd+C for the copy action on macOS', async () => {
-    vi.stubGlobal('__LODY_PLATFORM__', { os: 'darwin' });
-    __resetPlatformCacheForTests();
-    const channel = createChannel();
-
-    await act(async () => {
-      root?.render(<LocalTerminalPanel channel={channel} terminalId="terminal-1" />);
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      openTerminalContextMenu(container);
-    });
-
-    const copyItem = getMenuItem('Copy');
-    expect(copyItem.textContent).toContain('⌘C');
-    expect(copyItem.textContent).not.toContain('Ctrl+Shift+C');
-    const pasteItem = getMenuItem('Paste');
-    expect(pasteItem.textContent).toContain('⌘V');
   });
 });

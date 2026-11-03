@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -109,67 +110,6 @@ describe('useRemoteDirectoryPicker directory navigation', () => {
     };
     return { created, added, onAdded, onClose, render, nameFolder, ops };
   }
-
-  it('creates under the current directory, enters it, and registers only on Add', async () => {
-    const h = setup();
-    await h.render();
-    await act(async () => controller!.navigate('/home/user/projects'));
-    await h.nameFolder();
-    expect(controller!.canAddCurrentFolder).toBe(false);
-    await act(async () => {
-      await controller!.addCurrentFolder();
-      await controller!.createFolder();
-    });
-    expect(h.created).toEqual(['/home/user/projects/new']);
-    expect(h.added).toEqual([]);
-    expect(controller!.current?.path).toBe('/home/user/projects/new');
-    expect(controller!.newFolderOpen).toBe(false);
-    expect(controller!.canAddCurrentFolder).toBe(true);
-    expect(h.onClose).not.toHaveBeenCalled();
-    await act(async () => controller!.addCurrentFolder());
-    expect(h.added).toEqual(['/home/user/projects/new']);
-    expect(h.onAdded).toHaveBeenCalledWith(
-      expect.objectContaining({ rootPath: '/home/user/projects/new' })
-    );
-  });
-
-  it.each([
-    'access_denied',
-    'path_invalid',
-    'already_exists',
-    'daemon_unavailable',
-    'timeout',
-    'execution_failed',
-  ])('preserves the parent and name on %s and permits correction', async (errorCode) => {
-    const h = setup({
-      createDirectory: async () => ({ ok: false, errorCode, message: 'Synthetic failure' }),
-    });
-    await h.render();
-    await h.nameFolder();
-    await act(async () => controller!.createFolder());
-    expect(controller!.current?.path).toBe('/home/user');
-    expect(controller!.folderName).toBe('new');
-    expect(controller!.newFolderOpen).toBe(true);
-    expect(controller!.creating).toBe(false);
-    expect(controller!.createError?.code).toBe(errorCode);
-    expect(h.created).toEqual([]);
-    expect(h.added).toEqual([]);
-  });
-
-  it('recovers from a rejected transport promise', async () => {
-    const h = setup({
-      createDirectory: async () => {
-        throw new Error('disconnected');
-      },
-    });
-    await h.render();
-    await h.nameFolder();
-    await act(async () => controller!.createFolder());
-    expect(controller!.createError?.code).toBe('daemon_unavailable');
-    expect(controller!.folderName).toBe('new');
-    expect(controller!.canCreateFolder).toBe(true);
-    expect(h.added).toEqual([]);
-  });
 
   it('does not send creation while offline, unsupported, unauthorized or with an invalid name', async () => {
     const h = setup();

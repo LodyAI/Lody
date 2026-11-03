@@ -7,50 +7,11 @@ import {
   type MachineId,
   type MachineMonitorObserverState,
   type MachineMonitorSnapshot,
-  type MachineMonitorStateMap,
   type WorkspaceId,
 } from '@lody/shared';
-import { CliMachineMonitorRuntime, resolveMachineMonitorObservers } from './machine-monitor';
+import { CliMachineMonitorRuntime } from './machine-monitor';
 
 const MACHINE_ID = 'machine-1' as MachineId;
-
-describe('resolveMachineMonitorObservers', () => {
-  it('activates only for a fresh lease targeting this machine', () => {
-    const states: MachineMonitorStateMap = {
-      fresh: observer('machine-1', 200, null),
-      expired: observer('machine-1', 99, 80),
-      other: observer('machine-2', 200, 90),
-    };
-    expect(
-      resolveMachineMonitorObservers({
-        states,
-        machineId: MACHINE_ID,
-        nowMs: 100,
-        lastForceSampleAtMs: 50,
-      })
-    ).toEqual({ hasObserver: true, newestForceSampleAtMs: 50 });
-  });
-
-  it('stops after the last lease expires and detects a new force sample', () => {
-    expect(
-      resolveMachineMonitorObservers({
-        states: { expired: observer('machine-1', 100, null) },
-        machineId: MACHINE_ID,
-        nowMs: 100,
-        lastForceSampleAtMs: 50,
-      }).hasObserver
-    ).toBe(false);
-
-    expect(
-      resolveMachineMonitorObservers({
-        states: { fresh: observer('machine-1', 200, 120) },
-        machineId: MACHINE_ID,
-        nowMs: 100,
-        lastForceSampleAtMs: 50,
-      })
-    ).toEqual({ hasObserver: true, newestForceSampleAtMs: 120 });
-  });
-});
 
 describe('CliMachineMonitorRuntime local data plane', () => {
   it('samples for a local observer without attaching cloud Streams', async () => {

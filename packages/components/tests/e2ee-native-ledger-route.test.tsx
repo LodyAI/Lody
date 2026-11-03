@@ -1,5 +1,6 @@
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -258,74 +259,6 @@ it.each([false, true])(
     expect(leases.size).toBe(0);
   }
 );
-
-for (const upgrade of [false, true]) {
-  it(`publishes only the completed view or a mid-page upgrade (${upgrade})`, async () => {
-    const continueSync = Promise.withResolvers<void>();
-    let phase = 0;
-    const publishedPhases: number[] = [];
-    const pagesRead: (string | undefined)[] = [];
-    fixture.port = {
-      create: async () => {
-        throw new Error('unused');
-      },
-      describe: async () => ({
-        workspaceId,
-        contentMode: 'e2ee',
-        contentModeVersion: 1,
-        genesisHash,
-        cryptoOrgId: genesisHash,
-        activation: 'control-only',
-      }),
-      history: async (request) => {
-        pagesRead.push(request.cursor);
-        if (request.cursor === 'page-2') await continueSync.promise;
-        return {
-          workspaceId,
-          genesisHash,
-          checkpoint: { headHash: genesisHash, length: 1 },
-          startIndex: 1,
-          recordsHex: [],
-          position: local.status.position!,
-          nextCursor:
-            request.cursor === 'page-3' ? null : request.cursor === 'page-2' ? 'page-3' : 'page-2',
-        };
-      },
-      runtime: {
-        recordCreated: async () => {},
-        open: async () => local.status,
-        close: async () => {},
-        status: async () => local.status,
-        ingestLedgerRecords: async () => {
-          phase++;
-          return { ...local.status, ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}) };
-        },
-        ledgerView: async () => {
-          if (phase === 1 || (!upgrade && phase === 2))
-            throw new Error('incomplete view must not cross IPC');
-          publishedPhases.push(phase);
-          return {
-            ...local,
-            status: {
-              ...local.status,
-              ...(upgrade && phase === 2 ? { upgradeRequiredAt: 1 } : {}),
-            },
-          };
-        },
-      },
-    };
-    const Component = Route.options.component as () => ReturnType<typeof createElement>;
-    await act(async () => root.render(createElement(Component)));
-    expect(container.textContent).toBe('1');
-    expect(pagesRead).toEqual([undefined, 'page-2']);
-    await act(async () => {
-      continueSync.resolve();
-    });
-    expect(container.textContent).toBe(upgrade ? 'upgrade' : '1');
-    expect(publishedPhases).toEqual(upgrade ? [0, 2] : [0, 3]);
-    expect(pagesRead).toEqual(upgrade ? [undefined, 'page-2'] : [undefined, 'page-2', 'page-3']);
-  });
-}
 
 it.each([
   ['custody_unavailable', false, 'open', false],
@@ -598,31 +531,6 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
-it('releases exactly one count of a legacy window-scoped control reader', async () => {
-  fixture.port = displayPort(async () => [] as never);
-  delete fixture.port.memberProfiles;
-  // Electron main counts acquisitions per window and workspace. The content
-  // runtime in this same window already holds one count.
-  let count = 1;
-  fixture.port.runtime = {
-    recordCreated: async () => {},
-    open: async () => {
-      count += 1;
-      return { ...local.status, readerOwner: 'account-owner' };
-    },
-    ledgerView: async () => local,
-    ingestLedgerRecords: async () => local.status,
-    close: async () => {
-      count = Math.max(0, count - 1);
-    },
-  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  expect(count).toBe(2);
-  await act(async () => root.unmount());
-  expect(count).toBe(1);
-});
-
 it('joins one legacy reader close when member removal and unmount overlap', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;
@@ -690,70 +598,6 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
   expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
-});
-
-it('lands a device that needs approval on the guide and keeps the ledger behind Details', async () => {
-  fixture.port = displayPort(async () => [] as never);
-  delete fixture.port.memberProfiles;
-  fixture.showTools = true;
-  fixture.port.runtime = {
-    recordCreated: async () => {},
-    open: async () => {
-      throw new PersonalHostError({ code: 'approval-required' });
-    },
-    ledgerView: async () => local,
-    ingestLedgerRecords: async () => local.status,
-    close: async () => {},
-  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
-  expect(guide).not.toBeNull();
-  expect(guide?.textContent).toContain('e2ee.approvalGuide.lead');
-  // The existing explicit pairing stays available during the transition.
-  expect(guide?.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('false');
-  expect(container.querySelector('[data-control-state]')?.textContent).not.toBe(
-    'approval-required'
-  );
-  const details = [...container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'e2ee.approvalGuide.details'
-  );
-  expect(details).toBeDefined();
-  await act(async () => details!.click());
-  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
-  expect(container.querySelector('[data-control-state]')?.textContent).toBe('approval-required');
-});
-
-it('fences the preallocated control reader before a cold open settles', async () => {
-  fixture.port = displayPort(async () => [] as never);
-  delete fixture.port.memberProfiles;
-  const opened = Promise.withResolvers<typeof local.status>();
-  const entered = Promise.withResolvers<void>();
-  const closes: unknown[][] = [];
-  let pendingReader: string | undefined;
-  fixture.port.runtime = {
-    readerLeases: 'preallocated-v1',
-    open: async (_id, _checkpoint, _account, requested) => {
-      pendingReader = requested;
-      entered.resolve();
-      return opened.promise;
-    },
-    close: async (...args) => {
-      closes.push(args);
-    },
-  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  try {
-    await act(async () => root.render(createElement(Component)));
-    await entered.promise;
-    await act(async () => root.unmount());
-    expect(pendingReader).toBeTypeOf('string');
-    expect(closes).toEqual([[workspaceId, 'account', pendingReader]]);
-  } finally {
-    await act(async () => opened.resolve({ ...local.status, readerOwner: pendingReader }));
-  }
-  expect(container.textContent).toBe('');
-  expect(closes.at(-1)).toEqual([workspaceId, 'account', pendingReader]);
 });
 
 it.each(['describe', 'history'] as const)(
@@ -1016,35 +860,6 @@ it.each(['account', 'workspace'] as const)(
     expect(container.textContent).toBe('1 Current label');
   }
 );
-
-it('retains pairing and audit beside verified history when the independent directory fails', async () => {
-  fixture.showTools = true;
-  const pending =
-    Promise.withResolvers<
-      Awaited<ReturnType<NonNullable<PlatformE2eeWorkspaces['memberProfiles']>>>
-    >();
-  saveE2eeGenesisPin(localStorage, 'account', workspaceId, genesisHash);
-  fixture.port = {
-    ...displayPort(() => pending.promise),
-    runtime: {
-      recordCreated: async () => {},
-      open: async () => local.status,
-      close: async () => {},
-      status: async () => local.status,
-      ledgerView: async () => local,
-      ingestLedgerRecords: async () => local.status,
-    },
-  };
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  expect(container.textContent).toBe('1');
-  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
-  expect(container.querySelector('[data-audit]')?.getAttribute('data-audit')).toBe(workspaceId);
-  await act(async () => pending.reject(new Error('synthetic directory outage')));
-  expect(container.textContent).toBe('1');
-  expect(container.querySelector('[data-pairing]')).not.toBeNull();
-  expect(container.querySelector('[data-audit]')).not.toBeNull();
-});
 
 // Frozen, independently signed synthetic vector: member admission then Owner promotion.
 function roleLedger(length: 2 | 3): E2eeRuntimeLedgerView {

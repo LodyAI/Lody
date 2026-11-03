@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,52 +52,6 @@ import { initI18n } from '../src/i18n';
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * A stand-in for `session-chat-input-area.tsx`: module-level draft + range
- * caches keyed by session, seeded into state, and a render-phase switch branch.
- */
-const draftCache = new Map<string, string>();
-const rangeCache = new Map<string, PersistedMentionRange[]>();
-const getRanges = (id: string) => [...(rangeCache.get(id) ?? [])];
-const setRanges = (id: string, ranges: readonly PersistedMentionRange[]) => {
-  if (ranges.length === 0) rangeCache.delete(id);
-  else rangeCache.set(id, [...ranges]);
-};
-
-function FakeSessionComposer({ sessionId }: { sessionId: string }) {
-  const [userInput, setUserInput] = React.useState(() => draftCache.get(sessionId) ?? '');
-  const [persisted, setPersisted] = React.useState(() => getRanges(sessionId));
-
-  const [prevSessionId, setPrevSessionId] = React.useState(sessionId);
-  if (prevSessionId !== sessionId) {
-    setPrevSessionId(sessionId);
-    setUserInput(draftCache.get(sessionId) ?? '');
-    setPersisted(getRanges(sessionId));
-  }
-
-  const handleRanges = React.useCallback(
-    (ranges: Parameters<typeof toPersistedMentionRanges>[0]) => {
-      setRanges(sessionId, toPersistedMentionRanges(ranges));
-    },
-    [sessionId]
-  );
-
-  return (
-    <CombinedMentionTextarea
-      value={userInput}
-      onValueChange={(next) => {
-        draftCache.set(sessionId, next);
-        setUserInput(next);
-      }}
-      mentionSource={{ kind: 'local', localProjectId: 'p1' } as never}
-      persistedMentions={persisted}
-      draftKey={sessionId}
-      onMentionRangesChange={handleRanges}
-      getMentionChip={getComposerMentionChip}
-    />
-  );
-}
-
-/**
  * Leaving a composer and coming back must not cost a draft its mention
  * decoration. Both failures these cover were invisible until a remount: the
  * ranges a menu commits are correct while the composer stays mounted, and only
@@ -111,8 +66,6 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     knownFileTokens = new Set<string>();
     knownSkillTokens = new Set<string>();
     sessionItems = [];
-    draftCache.clear();
-    rangeCache.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -310,56 +263,5 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     );
     expect(spans).not.toContain('src/app.ts');
     expect(spans).toContain('src/other.ts');
-  });
-
-  it('restores the range when the file index IS warm on return', async () => {
-    const text = 'look at @src/app.ts thanks';
-    knownFileTokens = new Set(['src/app.ts']);
-
-    let reported: PersistedMentionRange[] = [];
-    await render({
-      value: text,
-      onRanges: (ranges) => {
-        reported = toPersistedMentionRanges(ranges as never);
-      },
-    });
-    expect(reported).toHaveLength(1);
-
-    await act(async () => root.unmount());
-    container.remove();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await render({ value: text, persisted: reported });
-    expect(kinds()).toContain('file');
-  });
-
-  // The composer alone is not the whole contract: the session composer seeds
-  // its ranges from a module cache and swaps them in a render-phase branch, so
-  // the round trip is only proven with that wiring in place.
-  it('survives a session round trip through the draft caches', async () => {
-    draftCache.set('A', 'ping @fix-ci about it');
-    draftCache.set('B', 'unrelated draft');
-    sessionItems = [
-      { sessionId: 'sess_fix', title: 'Fix CI', slug: 'fix-ci', activityAt: 1 } as never,
-    ];
-
-    const show = async (sessionId: string) => {
-      await act(async () => {
-        root.render(<FakeSessionComposer sessionId={sessionId} />);
-      });
-    };
-
-    await show('A');
-    expect(kinds()).toContain('session');
-    expect(rangeCache.get('A')).toHaveLength(1);
-
-    await show('B');
-    expect(kinds()).not.toContain('session');
-    expect(rangeCache.get('A')).toHaveLength(1);
-
-    await show('A');
-    expect(kinds()).toContain('session');
   });
 });

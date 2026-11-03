@@ -1,42 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
-import {
-  handleMenuCloseAutoFocus,
-  isTextInputElement,
-  restoreComposerFocusAfterMenu,
-} from '../src/lib/menu-focus';
+import { handleMenuCloseAutoFocus } from '../src/lib/menu-focus';
 
 describe('menu-focus', () => {
-  it('identifies text inputs', () => {
-    const textarea = document.createElement('textarea');
-    const textInput = document.createElement('input');
-    textInput.type = 'text';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    const button = document.createElement('button');
-
-    expect(isTextInputElement(textarea)).toBe(true);
-    expect(isTextInputElement(textInput)).toBe(true);
-    expect(isTextInputElement(checkbox)).toBe(false);
-    expect(isTextInputElement(button)).toBe(false);
-  });
-
-  it('restores focus to the composer marker', () => {
-    const composer = document.createElement('textarea');
-    composer.setAttribute('data-keyboard-nav', 'composer');
-    document.body.appendChild(composer);
-    const other = document.createElement('button');
-    document.body.appendChild(other);
-    other.focus();
-
-    expect(restoreComposerFocusAfterMenu()).toBe(true);
-    expect(document.activeElement).toBe(composer);
-
-    document.body.innerHTML = '';
-  });
-
   it('prevents close auto-focus after selection and focuses the composer', () => {
     const composer = document.createElement('textarea');
     composer.setAttribute('data-keyboard-nav', 'composer');

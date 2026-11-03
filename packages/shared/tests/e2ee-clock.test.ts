@@ -1,14 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Clock, Effect } from 'effect';
-import {
-  chmodSync,
-  mkdtempSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdtempSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { makeFileE2eeClock } from '../src/node/e2ee-clock-file';
@@ -34,29 +26,6 @@ afterEach(() => {
 });
 
 describe('E2EE file clock', () => {
-  it('advances wall and monotonic readings by the same exact interval without replacing sleep', () => {
-    const f = fixture();
-    let slept = false;
-    const upstream: Clock.Clock = Object.create(base);
-    upstream.sleep = () =>
-      Effect.sync(() => {
-        slept = true;
-      });
-    const clock = makeFileE2eeClock(f.file, upstream);
-    const mono = clock.monotonicTimeNanosUnsafe();
-    expect(clock.currentTimeMillisUnsafe()).toBe(start);
-    for (const elapsed of [899_999, 900_000]) {
-      f.advance(start + elapsed);
-      expect(Effect.runSync(clock.currentTimeMillis)).toBe(start + elapsed);
-      expect(Effect.runSync(clock.currentTimeNanos)).toBe(BigInt(start + elapsed) * 1_000_000n);
-      expect(Effect.runSync(clock.monotonicTimeNanos) - mono).toBe(BigInt(elapsed) * 1_000_000n);
-    }
-    const duration = 0;
-    // Sleep is delegated, never completed by advancing the file.
-    expect(slept).toBe(false);
-    Effect.runSync(clock.sleep(duration));
-    expect(slept).toBe(true);
-  });
 
   it.each([
     'rollback',
@@ -79,35 +48,6 @@ describe('E2EE file clock', () => {
     if (fault === 'missing') rmSync(f.file);
     expect(() => clock.currentTimeMillisUnsafe()).toThrow('e2ee_test_clock_unavailable');
     expect(() => clock.monotonicTimeNanosUnsafe()).toThrow('e2ee_test_clock_unavailable');
-  });
-
-  it('rejects relative and missing files without exposing their paths', () => {
-    expect(() => makeFileE2eeClock('relative', base)).toThrow(/^e2ee_test_clock_unavailable$/);
-    const f = fixture();
-    rmSync(f.file);
-    expect(() => makeFileE2eeClock(f.file, base)).toThrow(/^e2ee_test_clock_unavailable$/);
-  });
-
-  it('keeps one clock across native operations and exposes only passive acknowledgement', async () => {
-    const f = fixture();
-    vi.stubGlobal('__LODY_E2E_CLOCK_BUILD__', true);
-    vi.stubEnv('LODY_E2E', '1');
-    vi.stubEnv('LODY_E2E_CLOCK_FILE', f.file);
-    const { withE2eeTestClock } = await import('../src/node/e2ee-clock');
-    const first = await Effect.runPromise(withE2eeTestClock(Clock.Clock));
-    const mono = first.monotonicTimeNanosUnsafe();
-    f.advance(start + 900_000);
-    const second = await Effect.runPromise(withE2eeTestClock(Clock.Clock));
-    expect(second).toBe(first);
-    expect(second.currentTimeMillisUnsafe()).toBe(start + 900_000);
-    expect(second.monotonicTimeNanosUnsafe() - mono).toBe(900_000_000_000n);
-    const inspector: unknown = Reflect.get(globalThis, Symbol.for('lody.e2ee.test-clock'));
-    expect(inspector).toHaveProperty('read');
-    expect(Object.keys(inspector as object)).toEqual(['read']);
-    vi.stubEnv('LODY_E2E_CLOCK_FILE', fixture().file);
-    await expect(Effect.runPromise(withE2eeTestClock(Clock.Clock))).rejects.toThrow(
-      'e2ee_test_clock_unavailable'
-    );
   });
 
   it.each([

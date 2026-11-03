@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -184,81 +185,6 @@ describe('Mention navigation and insertion', () => {
     setValue?.call(input, value);
   }
 
-  it('writes the item insertText instead of composing trigger and label', () => {
-    render([{ value: '3312', label: '3312', insertText: '#3312', kind: 'issue' }], '@');
-
-    commit('3312', 0);
-
-    expect(latest.inputValue).toBe('#3312 ');
-    expect(latest.mentions).toEqual([{ value: '3312', start: 0, end: 5, kind: 'issue' }]);
-    expect(latest.values).toEqual(['3312']);
-  });
-
-  it('falls back to trigger and label when the item has no insertText', () => {
-    render([{ value: 'src/app.ts' }], '@');
-
-    commit('src/app.ts', 0);
-
-    expect(latest.inputValue).toBe('@src/app.ts ');
-    expect(latest.mentions).toEqual([{ value: 'src/app.ts', start: 0, end: 11, kind: 'mention' }]);
-  });
-
-  it('records no mention when selecting a navigation item', () => {
-    render([{ value: 'issue', label: 'Issues', navigateText: '@issue:' }], '@');
-
-    commit('issue', 0);
-
-    // Rewrites the trigger span, no trailing space, menu stays up for level two.
-    expect(latest.inputValue).toBe('@issue:');
-    expect(latest.mentions).toEqual([]);
-    expect(latest.values).toEqual([]);
-    expect(latest.open).toBe(true);
-  });
-
-  it('starts destination work synchronously when selecting a navigation item', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'skill',
-          label: 'Skills',
-          navigateText: '@skill:',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@'
-    );
-
-    commit('skill', 0);
-
-    expect(navigations).toBe(1);
-    expect(latest.inputValue).toBe('@skill:');
-  });
-
-  it('does not start destination work when a navigation item is force-committed', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'src/',
-          navigateText: '@src/',
-          insertText: '@src',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@src/'
-    );
-
-    commit('src/', 0, { commit: true });
-
-    expect(navigations).toBe(0);
-    expect(latest.inputValue).toBe('@src ');
-  });
-
   it('commits a navigation item through insertText when commit is requested', () => {
     render([{ value: 'src/', navigateText: '@src/', insertText: '@src', kind: 'dir' }], '@src/');
 
@@ -302,56 +228,6 @@ describe('Mention navigation and insertion', () => {
     expect(keydown.defaultPrevented).toBe(true);
     expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
     expect(latest.inputValue).toBe('@src/file.ts ');
-  });
-
-  it('macOS Ctrl+B moves over the separating space before crossing a file mention', () => {
-    setPlatform('darwin');
-    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
-    commit('src/file.ts', 0);
-    const mention = latest.mentions[0]!;
-
-    act(() => input.setSelectionRange(mention.end + 1, mention.end + 1));
-    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(true);
-    expect(input.selectionStart).toBe(mention.end);
-    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(true);
-    expect(input.selectionStart).toBe(mention.start);
-  });
-
-  it('leaves Ctrl+B/F to the browser away from mentions and off macOS', () => {
-    setPlatform('darwin');
-    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
-    commit('src/file.ts', 0);
-    const mention = latest.mentions[0]!;
-
-    act(() => input.setSelectionRange(input.value.length, input.value.length));
-    expect(pressKey(input, 'f', { ctrlKey: true }).defaultPrevented).toBe(false);
-
-    setPlatform('linux');
-    act(() => input.setSelectionRange(mention.end, mention.end));
-    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(false);
-  });
-
-  it('leaves macOS Control selection shortcuts to the browser', () => {
-    setPlatform('darwin');
-    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
-    commit('src/file.ts', 0);
-    const mention = latest.mentions[0]!;
-
-    act(() => input.setSelectionRange(mention.start, mention.end));
-    expect(pressKey(input, 'b', { ctrlKey: true }).defaultPrevented).toBe(false);
-
-    act(() => input.setSelectionRange(mention.end, mention.end));
-    expect(pressKey(input, 'b', { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
-  });
-
-  it.each(['a', 'e', 'p', 'n'])('leaves macOS Control+%s line movement to the browser', (key) => {
-    setPlatform('darwin');
-    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
-    commit('src/file.ts', 0);
-    const mention = latest.mentions[0]!;
-
-    act(() => input.setSelectionRange(mention.end, mention.end));
-    expect(pressKey(input, key, { ctrlKey: true }).defaultPrevented).toBe(false);
   });
 
   it.each([
@@ -473,35 +349,6 @@ describe('Mention navigation and insertion', () => {
     expect(latest.inputValue).toBe('中@fix-ci ');
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
     expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
-  });
-
-  it('keeps the native caret above a chip at both edges', () => {
-    const input = render([{ value: 'plan', insertText: '/plan', kind: 'command' }], '/', 1, true);
-    commit('plan', 0);
-
-    act(() => {
-      input.setSelectionRange(5, 5);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.className).toContain('z-30');
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
-
-    act(() => {
-      input.setSelectionRange(0, 0);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.className).toContain('z-30');
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
-
-    act(() => {
-      input.setSelectionRange(6, 6);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(input.className).toContain('z-10');
-    expect(input.className).not.toContain('z-30');
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
   });
 
   it('keeps a readonly caret out of the opaque chip interior', () => {

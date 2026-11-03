@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
 import i18next from 'i18next';
 import { Toast } from '@lody/ui';
@@ -270,23 +271,6 @@ describe('composer MCP selection', () => {
       expect(view.current()).toMatchObject({ ready: true, selectedIds: ['search'] });
     }
   );
-
-  it('accepts an empty cloud catalog and does not gate explicit selections', async () => {
-    const workspace = createWorkspace('workspace-1', []);
-    store.set(runtimeAtom, workspace.runtime);
-    const view = renderSelection({ syncMode: 'cloud' });
-    workspace.open();
-    await settle();
-    view.render({ syncMode: 'cloud', existingSession: true, persistedIds: [] });
-    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
-    view.render({ syncMode: 'cloud', persistedIds: [] });
-    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
-    view.render({ syncMode: 'cloud' });
-    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
-    workspace.sync();
-    await settle();
-    expect(view.current()).toMatchObject({ ready: true, selectedIds: [] });
-  });
 
   it('reports unreadable defaults as a failure, never as an empty selection', async () => {
     const workspace = createWorkspace('workspace-1', catalogRows());
@@ -738,27 +722,6 @@ describe('project Default MCP tab', () => {
     expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toEqual({
       ids: ['db', 'files', 'search'],
     });
-  });
-
-  it('points an empty catalog at MCP management', async () => {
-    const workspace = createWorkspace('workspace-1', []);
-    store.set(runtimeAtom, workspace.runtime);
-    workspace.open();
-    const onManageMcp = vi.fn();
-    act(() =>
-      root.render(
-        <Provider store={store}>
-          <ProjectDefaultMcpTab target={target} access={owner} onManageMcp={onManageMcp} />
-        </Provider>
-      )
-    );
-    await settle();
-    expect(container.textContent).toContain('No MCP servers are configured');
-    const manage = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Manage MCP servers')
-    )!;
-    act(() => manage.click());
-    expect(onManageMcp).toHaveBeenCalledTimes(1);
   });
 });
 

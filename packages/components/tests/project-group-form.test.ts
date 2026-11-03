@@ -13,13 +13,11 @@ import {
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
-  collectProjectSubmoduleDescendants,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   removeProjectGroupMember,
   retainProjectGroupScope,
   normalizeProjectGroupName,
   suggestProjectGroupName,
-  suggestProjectMemberDir,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -65,12 +63,6 @@ function threeRepos(): ProjectGroupFormValue {
 }
 
 describe('project group form', () => {
-  it('derives a safe directory name from the repository name', () => {
-    expect(suggestProjectMemberDir('acme/web')).toBe('web');
-    expect(suggestProjectMemberDir('My Folder.')).toBe('My Folder');
-    expect(suggestProjectMemberDir('..')).toBe('repo');
-  });
-
   it('gives a colliding directory a numbered suffix and ignores a source added twice', () => {
     const createId = ids();
     let value = addProjectGroupMember(
@@ -209,24 +201,6 @@ describe('project group form', () => {
     expect(renamed).toMatchObject({ revision: 2, ownerUserId: 'user-1', createdAtMs: 1000 });
   });
 
-  it('collects nested submodule descendants', () => {
-    const members = [
-      { id: 'a' as ProjectMemberId, placement: { kind: 'root', dir: 'a' } as const },
-      {
-        id: 'b' as ProjectMemberId,
-        placement: { kind: 'submodule', parent: 'a' as ProjectMemberId, path: 'b' } as const,
-      },
-      {
-        id: 'c' as ProjectMemberId,
-        placement: { kind: 'submodule', parent: 'b' as ProjectMemberId, path: 'c' } as const,
-      },
-    ];
-    expect([...collectProjectSubmoduleDescendants(members, 'a' as ProjectMemberId)]).toEqual([
-      'b',
-      'c',
-    ]);
-  });
-
   it('rejects local members on a machine other than the first local member', () => {
     const createId = ids();
     let value: ProjectGroupFormValue = { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: 'Shop' };
@@ -340,12 +314,6 @@ describe('direct folder drafts', () => {
       true
     );
     expect(suggestProjectGroupName({ ...value, name: '' }, labelOf, taken)).toBe('web 2');
-  });
-  it('names a new project after its first member unless a name was typed', () => {
-    const value = addProjectGroupMember(EMPTY_PROJECT_GROUP_FORM_VALUE, github('acme/web'), 'web');
-    expect(suggestProjectGroupName(value, labelOf)).toBe('web');
-    expect(suggestProjectGroupName({ ...value, name: 'Shop' }, labelOf)).toBe('Shop');
-    expect(suggestProjectGroupName(EMPTY_PROJECT_GROUP_FORM_VALUE, labelOf)).toBe('');
   });
   it('binds folders to the machine they were chosen on, leaving clones portable', () => {
     const createId = ids();

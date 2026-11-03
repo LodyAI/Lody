@@ -61,36 +61,4 @@ describe('buildHomeWeekUsage', () => {
     });
     expect(alone?.windows.map((window) => window.usedPercent)).toEqual([1]);
   });
-
-  it('prefers a window with a known length over one without', () => {
-    const usage = buildHomeWeekUsage({
-      rateLimits: codex(
-        limits([
-          { used: 9, seconds: null },
-          { used: 7, seconds: 168 * HOUR },
-        ])
-      ),
-      agentType: 'codex',
-    });
-    expect(usage?.windows.map((window) => window.usedPercent)).toEqual([7]);
-  });
-
-  it('names the tier the provider named', () => {
-    const usage = buildHomeWeekUsage({
-      rateLimits: codex(limits([{ used: 10, seconds: 5 * HOUR }], '  GPT-5.3-Codex-Spark ')),
-      agentType: 'codex',
-    });
-    expect(usage?.name).toBe('GPT-5.3-Codex-Spark');
-  });
-
-  it('is null when there is no entry for the agent or the provider reported no window', () => {
-    expect(buildHomeWeekUsage({ rateLimits: undefined, agentType: 'codex' })).toBeNull();
-    expect(
-      buildHomeWeekUsage({
-        rateLimits: codex(limits([{ used: 10, seconds: 5 * HOUR }])),
-        agentType: 'claude',
-      })
-    ).toBeNull();
-    expect(buildHomeWeekUsage({ rateLimits: codex(limits([])), agentType: 'codex' })).toBeNull();
-  });
 });

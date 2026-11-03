@@ -20,10 +20,12 @@ highlighting an action, while keyboard opening and arrow navigation focus rows.
 Both the row and the switch toggle the preference without dismissing the menu.
 
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
-including independent optional notes and secret masking. Its dedicated
+including distinct short headers, independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
 replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
-describes the shared parsing and persistence boundary.
+describes the shared parsing and persistence boundary. Question text renders as
+Markdown without loading images; this also renders the plan-review detail carried
+in a DSH form. See the [DSH question decision](../../../../../.agents/notes/implemented/feature/2026-09-20-dsh-user-questions.md).
 
 | File                                         | Responsibility                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
@@ -153,8 +155,12 @@ are captured in page coordinates to preserve centering and crop edges, and cross
 Source context is staged as an expandable text reference and screenshots as
 ordinary image attachments, awaiting the user's send. The session composer also
 offers markup on existing image drafts, replacing their pixels only after acceptance.
+Accepted image markup is encoded as JPEG on a white background, reducing quality
+when necessary to fit the 5 MiB image limit. Attachments sent without accepting
+markup keep their original format; document selection captures continue to use PNG.
 See the [document-selection decision](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
-and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md).
+and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md),
+and the [JPEG markup decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 
 `session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
 PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local

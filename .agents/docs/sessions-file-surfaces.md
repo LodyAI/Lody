@@ -229,7 +229,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   the surface discards unfinished preparation. Context uses existing expandable
   text drafts and images use existing attachments. These are captured snapshots,
   without revision-aware source navigation. Existing image drafts can be marked
-  up and replaced after acceptance. See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
+  up and replaced after acceptance. Markup exports a size-bounded JPEG on white;
+  attachments sent without accepting markup keep their original format, and document crops stay PNG.
+  See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+  and [markup JPEG decision](../notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the

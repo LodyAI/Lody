@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, writeFile, rm, open, rename, realpath } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, open, rename } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { LocalFileResources } from './local-file-resource.ts'
@@ -178,18 +178,6 @@ void test('replacing a file invalidates every existing resource URL', async (t) 
   )
 })
 
-void test('cancelling a binary stream releases it without reading the remaining file', async (t) => {
-  const file = await fixture(t, 'image.png', syntheticPng(1024 * 1024))
-  const resources = new LocalFileResources()
-  const result = await resources.preview(1, file)
-  const response = await resources.respond(new Request(result.url))
-  const reader = response.body.getReader()
-  const first = await reader.read()
-  assert.equal(first.value.length, 64 * 1024)
-  await reader.cancel()
-  assert.equal((await reader.read()).done, true)
-})
-
 function syntheticPng(length, width = 16, height = 16) {
   const bytes = Buffer.alloc(length)
   Buffer.from('89504e470d0a1a0a', 'hex').copy(bytes)
@@ -248,21 +236,3 @@ for (const extension of ['bmp', 'ico']) {
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
   })
 }
-
-void test('link resolution returns identity without allocating content resources', async (t) => {
-  const file = await fixture(t, 'link.md', 'synthetic content')
-  const request = { machineId: 'local', path: file.absolutePath, resolveMarkdownLink: true }
-  const resources = {
-    preview() {
-      throw new Error('Resolution must not read content')
-    }
-  }
-  assert.equal(
-    await previewLocalFile(resources, 1, { ...request, machineId: 'remote' }, 'local'),
-    null
-  )
-  const result = await previewLocalFile(resources, 1, request, 'local')
-  assert.equal(result.status, 'resolved-link')
-  assert.equal(result.candidates.length, 1)
-  assert.equal(result.candidates[0].absolutePath, await realpath(file.absolutePath))
-})

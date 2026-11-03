@@ -365,9 +365,14 @@ function resolveInstalledNodePtyBinaryDir(packageName) {
  * install across its `os`/`cpu` fields without `--force`; the download itself is
  * platform-agnostic. Installed into a throwaway prefix so the workspace tree is untouched.
  */
-function fetchNativeBinaryPackage(packageName, version) {
+export function fetchNativeBinaryPackage(
+  packageName,
+  version,
+  spawn = spawnSync,
+  baseEnvironment = process.env
+) {
   const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-binding-'))
-  const result = spawnSync(
+  const result = spawn(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
     [
       'install',
@@ -380,7 +385,12 @@ function fetchNativeBinaryPackage(packageName, version) {
       '--ignore-scripts',
       '--force'
     ],
-    { stdio: 'inherit' }
+    {
+      stdio: 'inherit',
+      // This child alone must revalidate the registry packument. The harness
+      // exports prefer-offline; a stale cache would otherwise hide new versions.
+      env: { ...baseEnvironment, npm_config_prefer_offline: 'false' }
+    }
   )
 
   const packageDir = path.join(downloadDir, 'node_modules', ...packageName.split('/'))
