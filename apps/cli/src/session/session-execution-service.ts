@@ -680,6 +680,8 @@ export type SessionExecutionServiceDeps = {
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    /** The input's history turn; an agent author adds a provenance header. */
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
@@ -2400,6 +2402,7 @@ export class SessionExecutionService {
         this.deps.buildAcpPromptBlocks({
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
+          userTurnId: options.userTurnId,
           inputBlocks,
           issuePRMentions: options.inputConfig.issuePRMentions,
         })
@@ -7003,6 +7006,7 @@ export class SessionExecutionService {
             await self.deps.buildAcpPromptBlocks({
               workspaceId: message.workspaceId,
               sessionId,
+              userTurnId: message.userTurnId,
               inputBlocks: sessionInputBlocks,
               issuePRMentions: acpSessionConfig.issuePRMentions,
               replayPromptText:
