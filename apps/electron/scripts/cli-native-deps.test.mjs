@@ -22,11 +22,32 @@ import {
   stageLoroRuntimePackage
 } from './cli-native-deps.mjs'
 import { probeRoostRuntime } from './roost-runtime-probe.mjs'
+import { assertPackagedCliWasmAssets } from './eb-after-pack.mjs'
 
 const publishedSource = path.resolve(
   import.meta.dirname,
   '../../cli/node_modules/@loro-dev/roost-node'
 )
+
+test('packaged CLI WASM assets match the staged bytes', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-wasm-stage-'))
+  const source = path.join(directory, 'staged')
+  const packed = path.join(directory, 'app.asar.unpacked/resources/cli')
+  try {
+    await mkdir(path.join(source, 'assets'), { recursive: true })
+    assert.throws(() => assertPackagedCliWasmAssets(source, packed), /no staged WASM/)
+    const bytes = Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])
+    const file = 'fixture-wasm.WASM'
+    await writeFile(path.join(source, 'assets', file), bytes)
+    assert.throws(() => assertPackagedCliWasmAssets(source, packed), /missing WASM asset/)
+    await cp(source, packed, { recursive: true })
+    assertPackagedCliWasmAssets(source, packed)
+    await writeFile(path.join(packed, 'assets', file), Buffer.from([0]))
+    assert.throws(() => assertPackagedCliWasmAssets(source, packed), /differs from staged bytes/)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 async function postinstallFixture(directory, { installerExit = 0, sparkleExit = 0 } = {}) {
   const scripts = path.join(directory, 'scripts')

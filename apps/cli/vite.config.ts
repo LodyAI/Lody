@@ -2,8 +2,8 @@ import { builtinModules } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import wasm from 'vite-plugin-wasm';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
+import { nodeWasmAssets } from './scripts/node-wasm-assets.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,15 +78,13 @@ export default defineConfig(({ mode }) => ({
   // Node 22 supports native top-level await, including wasm initialization.
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
-  plugins: [wasm(), devinRuntimeContractPlugin()],
+  plugins: [nodeWasmAssets(), devinRuntimeContractPlugin()],
   define: inlineEnv,
   resolve: {
     alias: {
       // loro-crdt >=1.13 routes the `node` condition to its CJS nodejs entry,
-      // which locates loro_wasm_bg.wasm via __dirname + fs and cannot be inlined
-      // into this ESM bundle (rejected: externalizing — the electron-embedded CLI
-      // ships dist/ only, with no node_modules to resolve loro-crdt from).
-      // Pin the ESM bundler entry so vite-plugin-wasm embeds the wasm like 1.12.x.
+      // whose CJS wrapper cannot be inlined into this ESM bundle. Keep the ESM
+      // wrapper and emit its unchanged WASM as a file beside the CLI assets.
       'loro-crdt': 'loro-crdt/bundler',
       '@/pkg': path.resolve(__dirname, 'package.json'),
       '@': path.resolve(__dirname, 'src'),

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 import {
+  stagedCliDir,
   stagedRoostBindingPath,
   stagedRoostDir,
   stagedNodePtyBindingPath,
@@ -36,6 +37,20 @@ function assertPackagedDeepSeekAssets(packedCliDir) {
     )
   }
   console.log('[embedded-cli] DeepSeek Harness adapter and presets are packaged')
+}
+
+export function assertPackagedCliWasmAssets(sourceDir, packedDir) {
+  const sourceAssets = path.join(sourceDir, 'assets')
+  const packedAssets = path.join(packedDir, 'assets')
+  const files = fs.readdirSync(sourceAssets).filter((name) => name.toLowerCase().endsWith('.wasm'))
+  if (files.length === 0) throw new Error('[embedded-cli] no staged WASM assets')
+  for (const file of files) {
+    const packed = path.join(packedAssets, file)
+    if (!fs.existsSync(packed)) throw new Error(`[embedded-cli] missing WASM asset: ${file}`)
+    if (!fs.readFileSync(path.join(sourceAssets, file)).equals(fs.readFileSync(packed))) {
+      throw new Error(`[embedded-cli] WASM asset differs from staged bytes: ${file}`)
+    }
+  }
 }
 
 /**
@@ -106,6 +121,7 @@ export default async function afterPack(context) {
   if (!fs.existsSync(cliEntry)) {
     throw new Error(`[embedded-cli] missing expected path: ${cliEntry}`)
   }
+  assertPackagedCliWasmAssets(stagedCliDir, packedCliDir)
   assertPackagedDeepSeekAssets(packedCliDir)
   // beforePack staged both native bindings for this exact target, so mirror their
   // staged-relative locations rather than guessing the per-platform file names here.
