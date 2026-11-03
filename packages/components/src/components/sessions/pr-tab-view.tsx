@@ -11,6 +11,7 @@ import {
   GitPullRequestArrow,
   GitPullRequestClosed,
   Github,
+  Layers2,
   MinusCircle,
   RefreshCcw,
   ShieldAlert,
@@ -172,6 +173,50 @@ const styles = stylex.create({
     columnGap: space[2],
     minWidth: 0,
   },
+  stackCard: { marginBlock: space[3], fontSize: '0.875rem' },
+  stackHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    padding: '12px 14px 8px',
+    color: colors.secondaryLabel,
+  },
+  stackHeaderTitle: { color: colors.label, fontWeight: 600 },
+  stackPosition: { marginInlineStart: 'auto', fontVariantNumeric: 'tabular-nums' },
+  stackList: { listStyle: 'none', margin: 0, padding: '0 8px 4px' },
+  stackRow: { margin: 0, padding: 0 },
+  stackLink: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    padding: '8px 6px',
+    borderRadius: radius.medium,
+    color: colors.label,
+    textDecoration: 'none',
+    ':hover': { backgroundColor: 'color-mix(in oklab, transparent, currentColor 5%)' },
+    ':focus-visible': { outline: `2px solid ${colors.accent}`, outlineOffset: '-2px' },
+  },
+  stackCurrent: {
+    backgroundColor: 'color-mix(in oklab, transparent, currentColor 6%)',
+    fontWeight: 600,
+  },
+  stackIcon: { flexShrink: 0, width: 16, height: 16, marginTop: '2px' },
+  stackOpen: { color: 'hsl(var(--github-open))' },
+  stackMerged: { color: 'hsl(var(--github-merged))' },
+  stackClosed: { color: 'hsl(var(--github-closed))' },
+  stackDraft: { color: 'hsl(var(--github-draft))' },
+  stackTitle: { minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.4 },
+  stackNumber: { color: colors.secondaryLabel, fontWeight: 400, marginInlineStart: space[1] },
+  stackFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    boxShadow: `inset 0 1px 0 ${colors.separator}`,
+    padding: '10px 14px',
+    color: colors.secondaryLabel,
+    fontSize: '0.9em',
+  },
+  stackMeta: { padding: '0 14px 10px', color: colors.secondaryLabel },
   statePill: {
     boxSizing: 'border-box',
     display: 'inline-flex',
@@ -1989,6 +2034,89 @@ export const PrTabView = memo(function PrTabView({
               <h2 {...stylex.props(styles.title, embedded && styles.titleEmbedded)}>{pr.title}</h2>
               <PrStateLine pr={pr} />
               <PrMetaLine pr={pr} />
+              {pr.stack && (
+                <section
+                  aria-label={t('sessions.prTab.stack', 'Pull request stack')}
+                  {...stylex.props(styles.card, styles.stackCard)}
+                >
+                  <div {...stylex.props(styles.stackHeader)}>
+                    <Layers2 {...stylex.props(styles.glyph14)} aria-hidden />
+                    <span {...stylex.props(styles.stackHeaderTitle)}>
+                      {t('sessions.prTab.stack', 'Pull request stack')}
+                    </span>
+                    <span {...stylex.props(styles.stackPosition)}>
+                      {pr.stack.position} / {pr.stack.size}
+                    </span>
+                  </div>
+                  {pr.stack.pullRequests ? (
+                    <ol {...stylex.props(styles.stackList)}>
+                      {[...pr.stack.pullRequests].reverse().map((entry) => {
+                        const status = entry.merged
+                          ? 'merged'
+                          : entry.state === 'closed'
+                            ? 'closed'
+                            : entry.draft
+                              ? 'draft'
+                              : 'open';
+                        const meta = PR_STATUS_META[status];
+                        const Icon = meta.icon;
+                        const statusStyle = {
+                          open: styles.stackOpen,
+                          merged: styles.stackMerged,
+                          closed: styles.stackClosed,
+                          draft: styles.stackDraft,
+                        }[status];
+                        const statusLabel = t(meta.labelKey, meta.labelFallback);
+                        return (
+                          <li key={entry.number} {...stylex.props(styles.stackRow)}>
+                            <a
+                              href={`https://github.com/${repoFullName}/pull/${entry.number}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-current={entry.number === pr.number ? 'page' : undefined}
+                              aria-label={`${statusLabel}: ${entry.title} #${entry.number}`}
+                              {...stylex.props(
+                                styles.stackLink,
+                                entry.number === pr.number && styles.stackCurrent
+                              )}
+                            >
+                              <Icon
+                                {...stylex.props(styles.stackIcon, statusStyle)}
+                                strokeWidth={2}
+                                aria-hidden
+                              />
+                              <span {...stylex.props(styles.stackTitle)}>
+                                {entry.title}
+                                <span {...stylex.props(styles.stackNumber)}>#{entry.number}</span>
+                              </span>
+                            </a>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : (
+                    <p {...stylex.props(styles.stackMeta)}>
+                      {t(
+                        'sessions.prTab.stackUnavailable',
+                        'Stack details are unavailable. Open this pull request on GitHub to see the full stack.'
+                      )}
+                    </p>
+                  )}
+                  <div {...stylex.props(styles.stackFooter)}>
+                    <GitMerge {...stylex.props(styles.glyph14)} aria-hidden />
+                    <span>
+                      {t('sessions.prTab.stackBase', 'Base: {{branch}}', {
+                        branch: pr.stack.baseRef,
+                      })}
+                    </span>
+                  </div>
+                  {!pr.merged && pr.state === 'open' && (
+                    <div {...stylex.props(styles.stackMeta)}>
+                      {t('sessions.prTab.stackMergeOnGithub', 'Merge this stack on GitHub.')}
+                    </div>
+                  )}
+                </section>
+              )}
               {pr.body ? (
                 embedded ? (
                   <div {...stylex.props(styles.description, styles.descriptionEmbedded)}>

@@ -86,3 +86,119 @@ it('counts an E2E turn dispatch only when its frame was actually appended', asyn
     await dispatcher.close();
   }
 });
+
+it.each([
+  { name: 'single-send control', duplicate: false, separatePrepare: false, frames: 1, fail: false },
+  {
+    name: 'same prepared send twice',
+    duplicate: true,
+    separatePrepare: false,
+    frames: 1,
+    fail: false,
+  },
+  {
+    name: 'two preparations of the same original',
+    duplicate: true,
+    separatePrepare: true,
+    frames: 1,
+    fail: false,
+  },
+  {
+    name: 'duplicate between chunk appends',
+    duplicate: true,
+    separatePrepare: false,
+    frames: 2,
+    fail: false,
+  },
+  {
+    name: 'rejected append with a duplicate',
+    duplicate: true,
+    separatePrepare: false,
+    frames: 1,
+    fail: true,
+  },
+])(
+  'preserves dispatch accounting: $name',
+  async ({ name, duplicate, separatePrepare, frames, fail }) => {
+    // Keep the SDK receipt deadline inert: all ordering comes from explicit signals.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const completed = Promise.withResolvers<void>();
+    type Report = { effects: { turnStarts: number; pendingDispatches: number } };
+    const reports: Report[] = [];
+    vi.stubGlobal('window', {
+      __LODY_E2E_CLIENT_LOSS__: true,
+      ipc: { send: (_channel: string, payload: Report) => reports.push(payload) },
+    });
+    const trace = vi.spyOn(console, 'debug').mockImplementation((_tag, event) => {
+      if (event?.stage === 'append-complete') completed.resolve();
+    });
+    const appended: { id: string; frame: string }[] = [];
+    const originalFrames = Array.from({ length: frames }, (_, i) => (i ? 'cd' : 'ab').repeat(200));
+    const client = {
+      ensureJsonStream: async () => undefined,
+      readJsonLive: (
+        _stream: string,
+        _state: unknown,
+        _batch: unknown,
+        options: { signal: AbortSignal }
+      ) =>
+        new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+      appendJson: async (_stream: string, value: { id: string; frame: string }) => {
+        if (appended.length === frames - 1) {
+          entered.resolve();
+          await release.promise;
+        }
+        if (fail) throw new Error('token rejected');
+        appended.push(value);
+      },
+    } as unknown as LoroStreamsJsonStreamClient;
+    const dispatcher = createEncryptedDispatchLegacy({
+      workspaceId: `dispatch-accounting-${name}`,
+      prepare: async () => ({ ...original('33'.repeat(16)), frames: originalFrames }),
+      accept: async () => ({}) as never,
+      client: async () => client,
+    });
+    let sending: Promise<unknown> | undefined;
+    try {
+      const prepared = await dispatcher.prepare('machine-1', input('one'));
+      sending = prepared.send().catch(() => null);
+      await entered.promise;
+      if (duplicate) {
+        const other = separatePrepare
+          ? await dispatcher.prepare('machine-1', input('one'))
+          : prepared;
+        // Exercise the real SDK pending-request rejection, not a stubbed send.
+        expect(await other.send()).toBeNull();
+        expect(reports.at(-1)?.effects.pendingDispatches).toBe(1);
+      }
+      release.resolve();
+      if (fail) expect(await sending).toBeNull();
+      else await completed.promise;
+      expect(appended).toEqual(
+        fail ? [] : originalFrames.map((frame) => ({ id: '33'.repeat(16), frame }))
+      );
+      expect(reports.at(-1)?.effects.turnStarts).toBe(fail ? 0 : 1);
+      if (!fail) {
+        // A rejected duplicate after append must not count another turn either.
+        expect(await prepared.send()).toBeNull();
+        expect(reports.at(-1)?.effects).toMatchObject({ turnStarts: 1, pendingDispatches: 1 });
+      }
+      await dispatcher.close();
+      await sending;
+      expect(reports.at(-1)?.effects).toMatchObject({
+        turnStarts: fail ? 0 : 1,
+        pendingDispatches: 0,
+      });
+      await expect(prepared.send()).rejects.toThrow('e2ee_rpc_closed');
+      expect(appended).toHaveLength(fail ? 0 : frames);
+    } finally {
+      release.resolve();
+      await dispatcher.close();
+      await sending;
+      trace.mockRestore();
+      vi.useRealTimers();
+    }
+  }
+);

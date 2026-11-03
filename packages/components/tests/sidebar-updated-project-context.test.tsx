@@ -111,6 +111,41 @@ describe('SidebarUpdatedSessionList project context', () => {
     });
   }
 
+  it('places resting PRs on the branch line while keeping unread and archive on the title line', () => {
+    render(
+      [
+        makeItem({
+          id: 'pr',
+          kind: 'github',
+          branchName: 'feature',
+          prUrl: 'https://github.com/example/repo/pull/42',
+        }),
+        makeItem({
+          id: 'unread',
+          kind: 'github',
+          branchName: 'feature',
+          prUrl: 'https://github.com/example/repo/pull/43',
+          hasUnreadMessages: true,
+        }),
+        makeItem({
+          id: 'no-branch',
+          kind: 'github',
+          prUrl: 'https://github.com/example/repo/pull/44',
+        }),
+      ],
+      false,
+      undefined,
+      { branchNames: true }
+    );
+    const slot = (id: string) =>
+      container!.querySelector(`[data-sidebar-updated-id="${id}"] [data-session-row-end-slot]`)!;
+    expect(slot('pr').classList.contains('items-end')).toBe(true);
+    expect(slot('pr').querySelector('[aria-label="Open pull request #42"]')).not.toBeNull();
+    expect(slot('unread').querySelector('[data-session-row-indicator]')).not.toBeNull();
+    expect(slot('unread').querySelector('[aria-label="Open pull request #43"]')).not.toBeNull();
+    expect(slot('no-branch').classList.contains('items-center')).toBe(true);
+  });
+
   it('does not show a project line unless Updated mode asks for it', () => {
     render(
       [

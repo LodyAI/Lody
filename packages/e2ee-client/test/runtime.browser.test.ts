@@ -19,6 +19,101 @@ const good = async (page: Page, action: string) => {
   return result.value;
 };
 
+it.each(
+  (['chromium', 'webkit'] as const).flatMap((engine) =>
+    (['first', 'saved-snapshot', 'fork', 'rollback'] as const).map((scenario) => ({
+      engine,
+      scenario,
+    }))
+  )
+)(
+  'claim continuity preserves pre-approval evidence: $scenario in $engine',
+  async ({ engine, scenario }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-claim-continuity-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      const launch = () =>
+        browser.launchPersistentContext(join(directory, 'profile'), { headless: true });
+      context = await launch();
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async (fixtureScenario) => {
+        localStorage.setItem('empty-local-originals', 'true');
+        if (fixtureScenario !== 'saved-snapshot')
+          localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot();
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      }, scenario);
+      expect((await raw(page, 'addMachine')).ok).toBe(true);
+      expect(await good(page, 'observeCheckpoint')).toMatchObject({ length: 2 });
+      if (scenario === 'fork') expect((await raw(page, 'forkBeforeApproval')).ok).toBe(true);
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      if (scenario === 'rollback') {
+        await page.evaluate(() => localStorage.setItem('truncate-approval-history', 'true'));
+        expect((await call(page, 'claim')).ok).toBe(false);
+        await page.evaluate(() => localStorage.removeItem('truncate-approval-history'));
+      }
+      await good(page, 'claim');
+      if (scenario === 'fork') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        return;
+      }
+      if (scenario === 'saved-snapshot') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        await good(page, 'close');
+        await context.close();
+        context = await launch();
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        await page.evaluate(async () => {
+          localStorage.setItem('qualify-approval-history', 'true');
+          await (globalThis as Surface).HostFixture.boot('open-existing');
+          await (globalThis as Surface).HostFixture.bootRuntime();
+        });
+        await good(page, 'claim');
+      }
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
+      await good(page, 'close');
+      await context.close();
+      context = await launch();
+      page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async () => {
+        localStorage.setItem('synthetic-offline', 'true');
+        await (globalThis as Surface).HostFixture.boot('open-existing');
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      await good(page, 'close');
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
 let controlRouteBundle: Promise<string> | undefined;
 const testRequire = createRequire(import.meta.url);
 function bundleControlRoute() {
@@ -174,7 +269,7 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await raw(page, 'events')).value).toEqual([]);
       expect((await raw(page, 'approve')).ok).toBe(true);
       expect(await good(page, 'claim')).toMatchObject({ ready: true, status: 'approved' });
-      expect((await call(page, 'wrongCheckpoint')).reason).toBe('conflict');
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
       expect(await good(page, 'open')).toMatchObject({
         deviceKind: 'personal',
         hasCurrentKey: false,
@@ -221,7 +316,10 @@ it.each(['chromium', 'webkit'] as const)(
         hasCurrentKey: false,
         writeEpoch: 0,
       });
-      expect((await call(page, 'seal')).reason).toBe('missing-read-key');
+      expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
+      expect((await raw(page, 'graceExpired')).ok).toBe(true);
+      expect((await call(page, 'seal')).reason).toBe('key-update-required');
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       expect((await raw(page, 'stageCurrent')).ok).toBe(true);
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });

@@ -34,11 +34,13 @@ explanation and the recovery share one card.
   prompt prefix. The composer draft and selected run-config edits remain untouched. Nothing
   is scheduled on render.
 - Derive reservation, activation and creation identities from workspace, conversation and
-  reset instant. Repeated clicks and uncertain durable-write retries converge on the same
+  reset instant and failed user turn. Repeated clicks and uncertain durable-write retries converge on the same
   reservation. A conflicting payload is rejected rather than overwriting an edited
   reservation. Existing reservations become the row's receipt and open the schedule detail,
   including sent/cancelled states; cancellation and offline catch-up follow the
   [scheduled-message contract](../../proposed/feature/2026-10-27-scheduled-messages.md).
+- The automatic Session recovery setting suppresses a new manual shortcut while leaving existing reservations accessible. Unassociated legacy reservations follow the [discard decision](../bug-fix/2026-10-30-discard-unassociated-quota-reservations.md).
+- Protected workspaces do not run Automation; their authorized scheduled messages continue through the Schedule owner directly.
 - Preserve ownership, complete-message protocol and protected-workspace gates. The
   quota/history subscription is a leaf inside the failure banner, not the composer or the
   conversation tree. The machine-owned scheduler remains the execution owner; no renderer

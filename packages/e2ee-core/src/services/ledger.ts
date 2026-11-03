@@ -74,6 +74,22 @@ export class LedgerFeedSource extends Context.Service<
 >()('@lody/e2ee-core/LedgerFeedSource') {}
 
 /**
+ * Optional workspace-scoped RAM invalidation at a feed's verified publication boundary.
+ * No callback runs for an unchanged head/count, a rejected page or transport-only progress.
+ *
+ * @category Application ports
+ */
+export class LedgerFeedInvalidation extends Context.Service<
+  LedgerFeedInvalidation,
+  {
+    /** Synchronously retire dependent RAM grants without throwing or starting I/O.
+     * Called after durable append, in the same non-yielding segment that publishes
+     * the new verified view; it supplies no authority, keys or freshness. */
+    invalidate(): void;
+  }
+>()('@lody/e2ee-core/LedgerFeedInvalidation') {}
+
+/**
  * Supplies the newest genuine (library-verified) ledger view the application
  * has. Typically backed by a {@link LedgerFeedSource}-driven feed.
  *
@@ -107,6 +123,18 @@ export class LedgerPinStore extends Context.Service<
     read(): Effect.Effect<LedgerCheckpoint | null, LocalStoreError>;
     /** Atomically persist and verify the checkpoint; callers have already established continuation. */
     write(checkpoint: LedgerCheckpoint): Effect.Effect<void, LocalStoreError>;
+    /** Optional bounded local observation journal. Absence retains strict current-key writes.
+     * Bytes contain timing metadata only, never keys or ledger authority. CAS must be atomic,
+     * binding-checked, durable and return false without mutation on a mismatch. */
+    readonly writeGrace?: {
+      /** Read an owned observation blob, or null on first use; failure is never absence. */
+      read(): Effect.Effect<Uint8Array | null, LocalStoreError>;
+      /** Replace only the exact prior blob (null means absent); success follows durable readback. */
+      compareAndSet(
+        expected: Uint8Array | null,
+        next: Uint8Array
+      ): Effect.Effect<boolean, LocalStoreError>;
+    };
   }
 >()('@lody/e2ee-core/LedgerPinStore') {}
 

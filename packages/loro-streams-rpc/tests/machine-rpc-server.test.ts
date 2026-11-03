@@ -1,5 +1,12 @@
+import { AndroidEmulatorRemoteResponseSchema } from '@lody/shared';
+import { getAndroidEmulatorViewerSecretContext } from '../src/rpc-secret';
 import { IosSimulatorRemoteResponseSchema } from '@lody/shared';
-import { createRpcSecretRecipient, getIosSimulatorViewerSecretContext } from '../src/rpc-secret';
+import { remoteAutomationEncryptedResponseSchema } from '@lody/shared/automations';
+import {
+  createRpcSecretRecipient,
+  getAutomationResponseSecretContext,
+  getIosSimulatorViewerSecretContext,
+} from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   AgentConfigId,
@@ -771,6 +778,94 @@ describe('LoroStreamsMachineRpcServer', () => {
       }
     }
   );
+
+  it('routes scoped automation control through the owner envelope and rejects a different owner', async () => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const wire: unknown[] = [];
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_streamId: string, value: unknown) => {
+        wire.push(value);
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    const machineId = 'machine-1' as MachineId;
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId,
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      getAutomationControl: async () => ({
+        type: 'machine/automation-control_response',
+        machineId,
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      }),
+      controlAutomation: async (params) => ({
+        type: 'session/automation-control_response',
+        sessionId: params.sessionId,
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      }),
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId,
+      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+    });
+    await server.start();
+    try {
+      expect(await client.requestAutomationControlHandshake()).toMatchObject({
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      });
+      const request = {
+        sessionId: 'session-1',
+        ownerSessionId: 'session-1',
+        requesterUserId: 'user-1',
+        operation: { type: 'settings' as const },
+        proof: previewProof,
+        responseRecipient: await createRpcSecretRecipient(),
+      };
+      expect(await client.requestSessionAutomationControl(request)).toEqual({
+        type: 'session/automation-control_response',
+        sessionId: 'session-1',
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const reply = wire.at(-1) as { result: CodeCollabV2RpcContentEnvelope };
+      const protectedResult = remoteAutomationEncryptedResponseSchema.parse(
+        await decryptCodeCollabV2RpcPayload(reply.result, request.sessionId)
+      );
+      const context = getAutomationResponseSecretContext({
+        workspaceId: 'workspace-1',
+        machineId,
+        sessionId: request.sessionId,
+        requestId: request.proof.requestId,
+      });
+      expect(
+        JSON.parse(await request.responseRecipient.decrypt(protectedResult.payload, context))
+      ).toMatchObject({
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const otherRecipient = await createRpcSecretRecipient();
+      await expect(otherRecipient.decrypt(protectedResult.payload, context)).rejects.toThrow();
+      expect(JSON.stringify(wire)).not.toContain('synthetic-preview-proof');
+      expect(
+        await client.requestSessionAutomationControl({
+          ...request,
+          ownerSessionId: 'other-session',
+        })
+      ).toMatchObject({ success: false });
+    } finally {
+      client.stop();
+      server.stop();
+    }
+  });
 
   it.each([
     'session/preview-create',
@@ -3614,6 +3709,108 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+
+  it('aborts in-flight capability work when a token auth failure stops the loop', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const authError = new LoroStreamsTokenAuthError('synthetic revoked token', 403, '{}');
+    let refreshSignal: AbortSignal | undefined;
+    let refreshStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async () => {}),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (_streamId, _state, onBatch) => {
+        await onBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'refresh-in-flight',
+              method: 'machine/acp-capabilities-refresh',
+              rpcVersion: '1',
+              machineId,
+              workspaceId,
+              replyTo: 'workspace-1:rpc:res:machine-1',
+              sentAt: Date.now(),
+              expiresAt: Date.now() + 5000,
+              params: { configId },
+            },
+          ],
+          nextOffset: '1',
+          cursor: 'cursor-1',
+          upToDate: true,
+        });
+        await started;
+        throw authError;
+      }),
+    };
+    const onFatalAuthFailure = vi.fn();
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(
+        ({ signal }) =>
+          new Promise<MachineAcpCapabilitiesRefreshResponse>(() => {
+            refreshSignal = signal;
+            refreshStarted();
+          })
+      ),
+      onFatalAuthFailure,
+    });
+
+    await server.start();
+    await vi.waitFor(() => expect(onFatalAuthFailure).toHaveBeenCalledWith(authError));
+    expect(refreshSignal?.aborted).toBe(true);
+  });
+
+  it('keeps listening when recreating a missing request stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 2) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+      });
+
+      await server.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(2));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      // Start, the failed recreate, then the retried recreate.
+      expect(ensureCalls).toBe(3);
+      server.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 it('round trips typed simulator commands and isolates unavailable and denied controls', async () => {
@@ -3996,6 +4193,124 @@ it('negotiates the encrypted checkpoint watch method through the real Machine RP
   }
 });
 
+it('keeps stop and steer responsive while automation proof verification is blocked', async () => {
+  const fake = createFakeStreamClient();
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    signalStarted = resolve;
+  });
+  let releaseAutomation!: () => void;
+  const release = new Promise<void>((resolve) => {
+    releaseAutomation = resolve;
+  });
+  let active = 0;
+  const machineId = 'synthetic-machine' as MachineId;
+  const sessionId = 'synthetic-session' as SessionId;
+  const recipient = await createRpcSecretRecipient();
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    getAutomationControl: async () => ({
+      type: 'machine/automation-control_response',
+      machineId,
+      success: true,
+      runtimeNonce: previewProof.runtimeNonce,
+    }),
+    controlAutomation: async () => {
+      if (++active === 4) signalStarted();
+      await release;
+      return {
+        type: 'session/automation-control_response',
+        sessionId,
+        success: true,
+        result: { type: 'settings', settings: {} },
+      };
+    },
+    cancelSession: async () => ({ type: 'session/cancel_response', sessionId, success: true }),
+    steerSession: async ({ userTurnId }) => ({
+      type: 'session/steer_response',
+      sessionId,
+      userTurnId,
+      applied: true,
+      disposition: 'applied',
+    }),
+  });
+  const base = {
+    jsonrpc: '2.0',
+    rpcVersion: '1',
+    workspaceId: 'synthetic-workspace',
+    machineId,
+    replyTo: 'synthetic-replies',
+    sentAt: 1,
+    expiresAt: 30_001,
+  };
+  try {
+    await server.start();
+    fake.pushBatch({
+      messages: await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => ({
+          ...base,
+          id: `automation-${index}`,
+          method: 'session/automation-control',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            requesterUserId: 'user',
+            operation: { type: 'settings' },
+            proof: { ...previewProof, requestId: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${index}` },
+            responseKey: recipient.publicKey,
+          }),
+        }))
+      ),
+      upToDate: true,
+    });
+    await started;
+    fake.pushBatch({
+      messages: [
+        { ...base, id: 'stop', method: 'session/cancel', params: { sessionId, turnId: 'turn' } },
+        {
+          ...base,
+          id: 'steer',
+          method: 'session/steer',
+          params: {
+            sessionId,
+            expectedTurnId: 'turn',
+            userTurnId: 'new-turn',
+            userId: 'user',
+            timestamp: '2026-01-01',
+            inputConfig: { prompt: 'continue' },
+          },
+        },
+        { ...base, id: 'handshake', method: 'machine/automation-control', params: {} },
+      ],
+      upToDate: true,
+    });
+    await fake.waitForAppendedCount(3);
+    expect(fake.appended.map(({ value }) => value)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'stop', result: expect.objectContaining({ success: true }) }),
+        expect.objectContaining({
+          id: 'steer',
+          result: expect.objectContaining({ applied: true }),
+        }),
+        expect.objectContaining({
+          id: 'handshake',
+          result: expect.objectContaining({ success: true }),
+        }),
+      ])
+    );
+    releaseAutomation();
+    await fake.waitForAppendedCount(7);
+  } finally {
+    releaseAutomation();
+    server.stop();
+  }
+});
+
 it.each([1, 16])(
   'keeps send and control replies independent of %i saturated history-read handlers across batches',
   async (capacity) => {
@@ -4115,3 +4430,95 @@ it.each([1, 16])(
     }
   }
 );
+
+it('round trips Android commands and isolates unavailable and denied controls', async () => {
+  const wire: unknown[] = [];
+  const recipient = await createRpcSecretRecipient();
+  const requests = createFakeStreamClient(),
+    responses = createFakeStreamClient();
+  const forward =
+    (destination: ReturnType<typeof createFakeStreamClient>) =>
+    async (_streamId: string, value: unknown) => {
+      wire.push(value);
+      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+      return '1';
+    };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId: 'w' as WorkspaceId,
+    machineId: 'm' as MachineId,
+    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    controlAndroidEmulator: async (params) => {
+      if (params.proof.requestToken !== 'synthetic-preview-proof') throw new Error('Access denied');
+      return {
+        type: 'android-emulator/control_response',
+        sessionId: params.sessionId,
+        success: true,
+        preview:
+          params.command.action === 'start'
+            ? {
+                operationId: 'op',
+                id: params.command.id,
+                phase: 'ready',
+                transport: 'remote',
+                viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+              }
+            : undefined,
+      };
+    },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: 'w',
+    machineId: 'm',
+    streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+  });
+  await server.start();
+  try {
+    const result = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'start', id: 'Pixel_8' },
+      proof: previewProof,
+      responseRecipient: recipient,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      preview: {
+        phase: 'ready',
+        viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+        id: 'Pixel_8',
+      },
+    });
+    expect(JSON.stringify(wire)).not.toContain('synthetic-viewer-secret');
+    expect(JSON.stringify(wire)).not.toContain('https://viewer.example');
+    expect(AndroidEmulatorRemoteResponseSchema.safeParse(result).success).toBe(false);
+    const envelopeResponse = wire.find(
+      (v): v is { result: unknown } => typeof v === 'object' && v !== null && 'result' in v
+    );
+    const envelope = AndroidEmulatorRemoteResponseSchema.parse(envelopeResponse?.result).preview
+      ?.viewerUrlEnvelope;
+    if (!envelope) throw Error('Missing encrypted viewer capability');
+    const context = getAndroidEmulatorViewerSecretContext({
+      workspaceId: 'w',
+      machineId: 'm',
+      sessionId: 's',
+      requestId: previewProof.requestId,
+    });
+    await expect((await createRpcSecretRecipient()).decrypt(envelope, context)).rejects.toThrow();
+    await expect(recipient.decrypt(envelope, context + 'other-request')).rejects.toThrow();
+
+    const denied = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'list' },
+      proof: { ...previewProof, requestToken: 'forged' },
+      responseRecipient: recipient,
+    });
+    expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
+  } finally {
+    client.stop();
+    server.stop();
+  }
+});

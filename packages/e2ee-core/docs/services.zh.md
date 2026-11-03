@@ -23,6 +23,7 @@
 | [`RecoveryVaultStore`](#recoveryvaultstore) | 后端 | 你的 vault 存储客户端 | `RecoveryVaults` |
 | [`WorkspaceScope`](#workspacescope) | 应用 | `Layer.succeed(WorkspaceScope, { genesis })` | 全部 |
 | [`LedgerViewSource`](#ledgerviewsource) | 应用 | `LedgerFeed.viewSource`，或你自己的已验证视图 | `VerifiedLedger` |
+| [`LedgerFeedInvalidation`](#ledgerfeedinvalidation) | 应用（可选） | 工作区 RAM 缓存 owner | `LedgerFeed` 已验证视图发布 |
 | [`EpochPublicationSource`](#epochpublicationsource) | 应用 | 查找当前纪元的发布记录 | `KeyDistributor` |
 | [`LedgerSync`](#ledgersync) | 应用 | 你的 feed 同步（`LedgerFeedSource` 分页 → `LedgerFeed.accept`，检查点独立选择） | `WorkspaceControl`、`E2eeWorkspace` |
 | `RecoveryVaultLocalStore` | 本地存储 | 支持比较并交换的本地键值存储 | `RecoveryVaults` |
@@ -128,6 +129,13 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 `{ genesis }`：本次组合服务的工作区。所有存储和流程都绑定到它，为其他工作区创建的存储会被拒绝。
 
+### LedgerFeedInvalidation
+
+可选的工作区级 `invalidate(): void`。构建 `LedgerFeed` 时捕获该端口，在持久追加成功后，
+与发布已变化的 verified head/count 同一个不让出执行的同步段里，使依赖的 RAM grant 失效。
+该方法不得抛错或启动 I/O。head/count 未变、只有游标变化或页面被拒绝时都不调用。
+它不授予权限，也不改变账本格式；没有依赖 RAM 缓存的宿主无需提供。
+
 ### LedgerViewSource
 
 `current()` 返回应用持有的最新*真实*账本视图，通常是 `LedgerFeed.viewSource`。`VerifiedLedger` 会检查每个视图：由库验证、属于本工作区、延续本设备此前看到的内容，并包含持久化的钉。
@@ -216,6 +224,8 @@ logout 和安装替换保留旧交换。Receive/key/outbox、repair、snapshot j
 双 tab 竞争、未知结果、原生事务故障及关闭。这是浏览器引擎证据；strict durability 仅为提示，
 WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器或用户不会清除存储；
 持久身份保护丢失仍由宿主按已批准 custody 合同处理。
+
+`LedgerPinStore.writeGrace` 可选地存储有界、仅含计时信息的字节，使用原子 CAS 并持久读回。SQLite 和 IndexedDB 在已绑定 pin 旁实现，读取返回独立副本，冲突不修改行。缺失或损坏的观察记录、未知的时钟连续性不能在已有 pin 重开时授予新宽限。该日志不包含 key，也不是账本/写入权限；不提供时禁用旧 key 宽限。
 
 ## 浏览器保管与安装
 

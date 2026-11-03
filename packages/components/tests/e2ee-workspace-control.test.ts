@@ -830,3 +830,64 @@ it('keeps the prepared credential hash immutable before invoking the cloud creat
   await expect(port.create(original)).rejects.toThrow('synthetic temporary outage');
   expect(received).toEqual([original, original]);
 });
+
+it('checks observed checkpoints against the verified view when native originals are sparse', () => {
+  const fixture = historyFixture();
+  const storage = new MemoryStorage();
+  const prefix = appendLedgerHistory(null, fixture.firstPage, fixture.expected);
+  const before = appendLedgerHistory(prefix, fixture.secondPage, fixture.expected);
+  retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', before);
+  const extended = appendLedgerHistory(
+    null,
+    {
+      ...fixture.firstPage,
+      recordsHex: [
+        ...fixture.firstPage.recordsHex,
+        ...fixture.secondPage.recordsHex,
+        bytesToHex(fixture.third),
+      ],
+      checkpoint: { length: 3, headHash: bytesToHex(hashRecordBytes(fixture.third).toBytes()) },
+      nextCursor: null,
+    },
+    fixture.expected
+  );
+  // Native snapshot origins intentionally omit raw records; the genuine view
+  // still proves the same prefix after qualification from signed originals.
+  expect(
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...extended, records: [] })
+  ).toBe(true);
+  expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')?.length).toBe(3);
+  const fork = historyFixture(8);
+  const forked = appendLedgerHistory(
+    null,
+    {
+      ...fork.firstPage,
+      recordsHex: [
+        ...fork.firstPage.recordsHex,
+        ...fork.secondPage.recordsHex,
+        bytesToHex(fork.third),
+      ],
+      checkpoint: { length: 3, headHash: bytesToHex(hashRecordBytes(fork.third).toBytes()) },
+      nextCursor: null,
+    },
+    fork.expected
+  );
+  expect(() =>
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...forked, records: [] })
+  ).toThrow('Ledger history changed');
+  expect(() =>
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...prefix, records: [] })
+  ).toThrow('Ledger history rolled back');
+  resetObservedLedgerProgress(storage, 'account', 'workspace-1');
+  expect(
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...extended, records: [] })
+  ).toBe(true);
+  expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')?.length).toBe(3);
+});
+
+it('shows a portable continuity conflict as stopped verification rather than a network failure', () => {
+  expect(classifyE2eeControlFailure(new PersonalHostError({ code: 'history-conflict' }))).toEqual({
+    kind: 'progress-conflict',
+    code: 'history-conflict',
+  });
+});

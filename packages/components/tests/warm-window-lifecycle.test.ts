@@ -7,11 +7,16 @@ const nativeState = vi.hoisted(() => ({
   nextId: 1,
   unloadResponse: 0,
   unloadPrompts: 0,
+  unloadDecision: null as Promise<{ response: number }> | null,
 }));
 // Resolve Electron from its owning app; components does not depend on Electron at runtime.
 vi.mock('../../../apps/electron/node_modules/electron', () => ({
   app: { focus() {} },
   dialog: {
+    showMessageBox: () => {
+      nativeState.unloadPrompts += 1;
+      return nativeState.unloadDecision ?? Promise.resolve({ response: nativeState.unloadResponse });
+    },
     showMessageBoxSync: () => {
       nativeState.unloadPrompts += 1;
       return nativeState.unloadResponse;
@@ -172,6 +177,7 @@ vi.mock('../../../apps/electron/src/main/window', () => ({
 afterEach(() => {
   nativeState.unloadResponse = 0;
   nativeState.unloadPrompts = 0;
+  nativeState.unloadDecision = null;
   setWindowWarmupEnabled(false);
   setAppQuitting(true);
   for (const window of productWindows) window.destroy();
@@ -510,5 +516,87 @@ describe('renderer unload confirmation', () => {
       await expect(quit).resolves.toBe(true);
       expect(main.destroyed).toBe(true);
     }
+  });
+
+  it('bounds a quit close even when Electron never emits an unresponsive event', async () => {
+    vi.useFakeTimers();
+    const main = productWindow({ main: true });
+    main.hung = true;
+    let completed = false;
+    const quit = closeProductWindowsForQuit().then((result) => {
+      completed = result;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(completed).toBe(true);
+      expect(main.destroyed).toBe(true);
+    } finally {
+      main.destroy();
+      await quit;
+    }
+    expect(main.listenerCount('unresponsive')).toBe(0);
+    expect(main.contents.listenerCount('render-process-gone')).toBe(0);
+  });
+
+  it('keeps the quit deadline live while an invitation page veto awaits an unanswered sheet', async () => {
+    vi.useFakeTimers();
+    const first = productWindow({ main: true });
+    await expect(closeProductWindowsForQuit()).resolves.toBe(true);
+    expect(first.destroyed).toBe(true);
+    const reopened = productWindow({ main: true, veto: true });
+    // The synthetic invitation has completed; an independent dirty editor still vetoes unload.
+    const decision = Promise.withResolvers<{ response: number }>();
+    nativeState.unloadDecision = decision.promise;
+    let outcome: boolean | undefined;
+    let unconfirmed = false;
+    const quit = closeProductWindowsForQuit(() => { unconfirmed = true; }).then(value => { outcome = value; });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(outcome).toBe(true);
+      expect(unconfirmed).toBe(true);
+      expect(reopened.destroyed).toBe(true);
+      const replacement = productWindow({ main: true, veto: true });
+      decision.resolve({ response: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(replacement.destroyed).toBe(false);
+    } finally {
+      decision.resolve({ response: 0 });
+      reopened.destroy();
+      await quit;
+    }
+  });
+
+  it('settles a destroyed quit window even when its closed event is missing', async () => {
+    vi.useFakeTimers();
+    const main = productWindow({ main: true });
+    main.hung = true;
+    let completed = false;
+    const quit = closeProductWindowsForQuit().then(value => { completed = value; });
+    main.destroyed = true;
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(completed).toBe(true);
+    } finally {
+      main.emit('closed');
+      await quit;
+    }
+  });
+
+  it('does not apply a late Leave answer to a different document', async () => {
+    vi.useFakeTimers();
+    const main = productWindow({ main: true, veto: true });
+    const decision = Promise.withResolvers<{ response: number }>();
+    nativeState.unloadDecision = decision.promise;
+    const quit = closeProductWindowsForQuit();
+    await vi.advanceTimersByTimeAsync(0);
+    main.contents.emit('did-start-navigation', {}, 'file:///synthetic/new-document', false, true);
+    await expect(quit).resolves.toBe(false);
+    decision.resolve({ response: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    main.close();
+    expect(main.destroyed).toBe(false);
+    expect(isAppQuitting()).toBe(false);
   });
 });

@@ -1,4 +1,7 @@
+import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -122,6 +125,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { useNativeSideRail } from '../mobile/native-side-rail';
@@ -154,6 +158,7 @@ import {
   getSidePanelTabSelection,
   getSidePanelTabCloseFallback,
   getSidePanelTabStateAfterClose,
+  getEffectiveSidePanelTabSplit,
   getSideSessionPanelTabId,
   isViewerTabId,
   parseSideSessionPanelTabId,
@@ -161,8 +166,14 @@ import {
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
+  type SidePanelTabSplit,
 } from './session-side-panel-tab-bar';
 import { getSessionTabCloseTarget, type SessionTabFocusRegion } from './session-tab-close-target';
+import {
+  SIDE_PANEL_SPLIT_RATIO_DEFAULT,
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from './side-panel-split-handle';
 import {
   MobileSessionTabButton,
   MobileSessionTabSheet,
@@ -187,7 +198,10 @@ import { SessionFileContentView, type SessionFileSaveViewState } from './session
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
-import { SessionIosSimulatorPanel } from './ios-simulator/session-ios-simulator-panel';
+import {
+  SessionDevicePreviewPanel,
+  SessionIosSimulatorPanel,
+} from './ios-simulator/session-ios-simulator-panel';
 import { getIosSimulatorPanelAvailability } from '@/lib/ios-simulator/ios-simulator-model';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
@@ -199,6 +213,7 @@ import {
   type MobileProjectFileBrowserHandle,
 } from '@/components/files/mobile-project-file-browser';
 import { buildSessionLink } from '@lody/shared/session-link';
+import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
@@ -500,6 +515,7 @@ const MOBILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
 const EMPTY_LOCAL_PROJECTS: Record<LocalProjectId, LocalProjectMeta> = {};
 const MOBILE_PR_VIEWER_ID = 'mobile-viewer:pr';
 const MOBILE_BROWSER_VIEWER_ID = 'mobile-viewer:browser';
+const MOBILE_ANDROID_EMULATOR_VIEWER_ID = 'mobile-viewer:android-emulator';
 const MOBILE_IOS_SIMULATOR_VIEWER_ID = 'mobile-viewer:ios-simulator';
 const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
 
@@ -508,6 +524,8 @@ const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
    conversation) is unreadably cramped at the default ~25% split. Honored only
    when the window is wide enough; see DesktopSessionDetailLayout. */
 const PR_SIDEBAR_MIN_WIDTH_PX = 500;
+/** Two device screens side by side need roughly two portrait phones' width. */
+const DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX = 720;
 
 const detailStyles = stylex.create({
   projectInfo: {
@@ -671,6 +689,27 @@ const detailStyles = stylex.create({
   invisibleFill: {
     visibility: 'hidden',
     pointerEvents: 'none',
+  },
+  // Split device panels slide between full width and their half.
+  splitSlide: {
+    transitionProperty: 'left, right',
+    transitionDuration: {
+      default: '220ms',
+      '@media (prefers-reduced-motion: reduce)': '0ms',
+    },
+    transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+  },
+  splitStart: {
+    // StyleX evaluates this at build time and cannot resolve a constant
+    // imported from a non-`.stylex` module, so the variable name is spelled
+    // out; it must match SIDE_PANEL_SPLIT_RATIO_VAR.
+    right: 'calc((1 - var(--side-panel-split, 0.5)) * 100%)',
+  },
+  splitEnd: {
+    left: 'calc(var(--side-panel-split, 0.5) * 100%)',
+    borderInlineStartWidth: '1px',
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: 'hsl(var(--border) / 0.7)',
   },
   sidebarBody: {
     position: 'relative',
@@ -1033,6 +1072,7 @@ function SessionChatSurface({
   const openBrowser = useStableCallback(() => props.onOpenBrowser?.());
   const openExistingBrowser = useStableCallback(() => props.onOpenExistingBrowser?.());
   const openIosSimulator = useStableCallback(() => props.onOpenIosSimulator?.());
+  const openAndroidEmulator = useStableCallback(() => props.onOpenAndroidEmulator?.());
   const forkLastAssistant = useStableCallback(
     (...args: Parameters<NonNullable<SessionChatInterfaceProps['onForkLastAssistant']>>) =>
       props.onForkLastAssistant?.(...args)
@@ -1064,6 +1104,7 @@ function SessionChatSurface({
       onOpenBrowser={props.onOpenBrowser ? openBrowser : undefined}
       onOpenExistingBrowser={props.onOpenExistingBrowser ? openExistingBrowser : undefined}
       onOpenIosSimulator={props.onOpenIosSimulator ? openIosSimulator : undefined}
+      onOpenAndroidEmulator={props.onOpenAndroidEmulator ? openAndroidEmulator : undefined}
       onForkLastAssistant={props.onForkLastAssistant ? forkLastAssistant : undefined}
       onVisualAnnotationReferencesSubmitted={
         props.onVisualAnnotationReferencesSubmitted ? annotationReferencesSubmitted : undefined
@@ -1111,10 +1152,12 @@ const SessionDetail = ({
   });
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
     bottomBorder: true,
     insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
   });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
@@ -1165,9 +1208,18 @@ const SessionDetail = ({
   const [openedSidebarTabs, setOpenedSidebarTabs] = useState<SidebarTab[]>(
     () => initialTabState.sidePanel.tabs
   );
+  /* Two fixed panels the user dragged together; both render side by side
+     whenever either is selected. Closing either dissolves it. */
+  const [sidePanelSplit, setSidePanelSplit] = useState<readonly [SidebarTab, SidebarTab] | null>(
+    () => initialTabState.sidePanel.split
+  );
+  /** The start half's share of a split; kept per member pair, not persisted. */
+  const [sidePanelSplitRatio, setSidePanelSplitRatio] = useState(SIDE_PANEL_SPLIT_RATIO_DEFAULT);
+  const [sidePanelSplitResizing, setSidePanelSplitResizing] = useState(false);
   /* One-shot request for DesktopSessionDetailLayout to widen the sidebar for
-     the PR tab; `seq` bumps per request so repeats are not dropped. */
-  const [prSidebarWidthRequest, setPrSidebarWidthRequest] = useState<{
+     the PR tab or a device split; `seq` bumps per request so repeats are not
+     dropped. */
+  const [sidebarWidthRequest, setSidebarWidthRequest] = useState<{
     seq: number;
     minWidthPx: number;
   } | null>(null);
@@ -1441,6 +1493,8 @@ const SessionDetail = ({
     setActiveSidebarTab(nextInitialTabState.sidePanel.tab);
     setActiveSideSessionId(nextInitialTabState.sidePanel.sideSessionId);
     setOpenedSidebarTabs(nextInitialTabState.sidePanel.tabs);
+    setSidePanelSplit(nextInitialTabState.sidePanel.split);
+    setSidePanelSplitRatio(SIDE_PANEL_SPLIT_RATIO_DEFAULT);
     setDraftTabsState(readPersistedDraftTabs(sessionId));
     setPendingDraftChildSessionIds({});
     setPendingForks(readPendingWorktreeForks(sessionId));
@@ -1924,20 +1978,8 @@ const SessionDetail = ({
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
-  // Simulator follows the selected conversation unless explicitly opened by a
-  // Side Chat. Keep that origin while the side panel switches away from the chat.
-  const [iosSimulatorTarget, setIosSimulatorTarget] = useState<{
-    parentId: SessionId;
-    tabId: SessionId | undefined;
-    sessionId: SessionId;
-  } | null>(null);
-  const simulatorOwnerSession =
-    iosSimulatorTarget?.parentId === sessionId &&
-    iosSimulatorTarget.tabId === activeBrowserSession?.id
-      ? ([activeBrowserSession, ...visibleSideSessions].find(
-          (candidate) => candidate?.id === iosSimulatorTarget.sessionId
-        ) ?? activeBrowserSession)
-      : activeBrowserSession;
+  // Device previews belong to the main conversation, across child and draft tabs.
+  const simulatorOwnerSession = activeSession;
   const iosSimulatorMachine = useAtomValue(
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
@@ -1945,6 +1987,20 @@ const SessionDetail = ({
     simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
       ? simulatorOwnerSession
       : null;
+  const activeAndroidEmulatorSession =
+    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+      ? simulatorOwnerSession
+      : null;
+  const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);
+  useIosSimulatorPreviewRequest(
+    activeAndroidEmulatorSession ? `android:${activeAndroidEmulatorSession.id}` : undefined,
+    activeAndroidEmulatorSession?.androidEmulatorPreviewRequestId,
+    !isMobile,
+    () => {
+      activateSidebarTab('android-emulator');
+      revealRightSidebar();
+    }
+  );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
   const activeSessionProject = activeSession?.project;
@@ -3052,7 +3108,18 @@ const SessionDetail = ({
     [router, workspaceSlug]
   );
 
-  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const confirmAndArchiveSession = useArchiveSessionWithConfirmation(archiveSession);
+  const archiveSessionWithConfirmation = useCallback(
+    async (...args: Parameters<typeof confirmAndArchiveSession>) => {
+      try {
+        return await confirmAndArchiveSession(...args);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return false;
+      }
+    },
+    [confirmAndArchiveSession]
+  );
   const requestArchiveConfirmation = useArchiveConfirmationRequest();
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {
@@ -3164,11 +3231,19 @@ const SessionDetail = ({
   }, [activeSession, currentWorkspaceId, deleteArchivedSession, handleBackToList, repoFullName, t]);
 
   const handleCopyUrl = useCallback(
-    async (successMessage?: string, failureMessage?: string) => {
+    async (
+      successMessage?: string,
+      failureMessage?: string,
+      linkFormat: 'https' | 'deeplink' = 'https'
+    ) => {
       try {
-        if (!currentWorkspaceId || !activeSessionTabId) throw new Error('Session is not ready');
+        if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
+          throw new Error('Session is not ready');
+        }
         await navigator.clipboard.writeText(
-          buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+          linkFormat === 'deeplink'
+            ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+            : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
         );
         captureSessionDetailEvent('session/share_link_copied');
         toast.success(successMessage ?? t('sessions.urlCopied', 'Session URL copied to clipboard'));
@@ -3177,7 +3252,7 @@ const SessionDetail = ({
         toast.error(failureMessage ?? t('sessions.copyFailed', 'Unable to copy'));
       }
     },
-    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId]
+    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId, workspaceSlug]
   );
 
   const handleRequestShareSession = useCallback(
@@ -3915,7 +3990,7 @@ const SessionDetail = ({
         const sidebarEmpty =
           activeSidebarTab === null && activeSideSessionId === null && activeViewerTabId === null;
         if (!isSidebarOpen || sidebarEmpty) {
-          setPrSidebarWidthRequest((current) => ({
+          setSidebarWidthRequest((current) => ({
             seq: (current?.seq ?? 0) + 1,
             minWidthPx: PR_SIDEBAR_MIN_WIDTH_PX,
           }));
@@ -4004,17 +4079,15 @@ const SessionDetail = ({
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
 
-  const handleOpenIosSimulatorForSession = useCallback(
-    (targetSessionId: SessionId) => {
-      setIosSimulatorTarget({
-        parentId: sessionId,
-        tabId: activeBrowserSession?.id,
-        sessionId: targetSessionId,
-      });
-      handleOpenIosSimulator();
-    },
-    [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
-  );
+  const handleOpenAndroidEmulator = useCallback(() => {
+    if (isMobile) {
+      setAndroidEmulatorOpen(true);
+    } else {
+      revealRightSidebar();
+      activateSidebarTab('android-emulator');
+      semanticRouterRef.current?.activate('side-panel');
+    }
+  }, [isMobile, revealRightSidebar, activateSidebarTab]);
 
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
@@ -4458,6 +4531,13 @@ const SessionDetail = ({
         kind: 'ios-simulator',
       });
     }
+    if (activeAndroidEmulatorSession) {
+      options.push({
+        id: 'android-emulator',
+        label: t('sessions.detailTabs.androidEmulator', 'Android Emulator'),
+        kind: 'android-emulator',
+      });
+    }
     if (latestPr && repoFullName && latestPrNumber != null) {
       options.push({
         id: 'pr',
@@ -4466,7 +4546,15 @@ const SessionDetail = ({
       });
     }
     return options;
-  }, [activeBrowserSession, activeIosSimulatorSession, latestPr, latestPrNumber, repoFullName, t]);
+  }, [
+    activeBrowserSession,
+    activeIosSimulatorSession,
+    activeAndroidEmulatorSession,
+    latestPr,
+    latestPrNumber,
+    repoFullName,
+    t,
+  ]);
   const sideChatOption = useMemo<SessionSidePanelOption | null>(() => {
     const launcherState = getSideChatLauncherState({
       providerSupportsFork: Boolean(
@@ -4564,6 +4652,35 @@ const SessionDetail = ({
     visibleSideSessions,
   ]);
   const sidePanelTabIds = useMemo(() => sidePanelTabs.map((tab) => tab.id), [sidePanelTabs]);
+  const effectiveSidePanelSplit = useMemo(
+    () =>
+      getEffectiveSidePanelTabSplit(sidePanelSplit, visibleOpenedSidebarTabs) as
+        | readonly [SidebarTab, SidebarTab]
+        | null,
+    [sidePanelSplit, visibleOpenedSidebarTabs]
+  );
+  const handleSidePanelTabsSplit = useCallback(
+    (split: SidePanelTabSplit, draggedTabId: string) => {
+      // A swap keeps each screen's width; a new pair starts even.
+      const swapped =
+        effectiveSidePanelSplit?.[0] === split[1] && effectiveSidePanelSplit[1] === split[0];
+      setSidePanelSplitRatio((ratio) => (swapped ? 1 - ratio : SIDE_PANEL_SPLIT_RATIO_DEFAULT));
+      setSidePanelSplit(split as readonly [SidebarTab, SidebarTab]);
+      handleSidebarTabSelect(draggedTabId as SidebarTab);
+      setSidebarWidthRequest((current) => ({
+        seq: (current?.seq ?? 0) + 1,
+        minWidthPx: DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX,
+      }));
+    },
+    [effectiveSidePanelSplit, handleSidebarTabSelect]
+  );
+  const handleSidePanelTabUnsplit = useCallback(
+    (tabId: string) => {
+      setSidePanelSplit(null);
+      handleSidebarTabSelect(tabId as SidebarTab);
+    },
+    [handleSidebarTabSelect]
+  );
 
   const handleCloseSidebarTab = useCallback(
     (tabId: SidebarTab) => {
@@ -4573,6 +4690,8 @@ const SessionDetail = ({
         tabId
       ) as SidebarTab | null;
       setOpenedSidebarTabs((current) => current.filter((candidate) => candidate !== tabId));
+      // Reopening a closed member must not silently re-form its old split.
+      setSidePanelSplit((current) => (current?.includes(tabId) ? null : current));
       if (!sidebarOpen) {
         setIsSidebarOpen(false);
       }
@@ -5095,6 +5214,7 @@ const SessionDetail = ({
         tab: activeSidebarTab,
         tabs: openedSidebarTabs,
         sideSessionId: activeSideSessionId,
+        split: sidePanelSplit,
       },
     });
   }, [
@@ -5107,6 +5227,7 @@ const SessionDetail = ({
     isSidebarOpen,
     openedSidebarTabs,
     sessionId,
+    sidePanelSplit,
   ]);
 
   // Side Chat always stays available: it launches another session rather than
@@ -5437,6 +5558,14 @@ const SessionDetail = ({
         active: false,
       });
     }
+    if (activeAndroidEmulatorSession) {
+      list.push({
+        id: MOBILE_ANDROID_EMULATOR_VIEWER_ID,
+        label: t('sessions.detailTabs.androidEmulator', 'Android Emulator'),
+        kind: 'android-emulator',
+        active: false,
+      });
+    }
     if (canShowGitHubActions && latestPr && latestPrNumber != null && latestPrRepoFullName) {
       list.push({
         id: MOBILE_PR_VIEWER_ID,
@@ -5464,6 +5593,7 @@ const SessionDetail = ({
     latestPrRepoFullName,
     activeBrowserSession,
     activeIosSimulatorSession,
+    activeAndroidEmulatorSession,
     viewerTabItems,
     effectiveActiveViewerTabId,
     mobileFileViewerOpen,
@@ -5521,6 +5651,10 @@ const SessionDetail = ({
         if (activeBrowserSession) handleOpenBrowser(activeBrowserSession.id);
         return;
       }
+      if (id === MOBILE_ANDROID_EMULATOR_VIEWER_ID) {
+        if (activeAndroidEmulatorSession) setAndroidEmulatorOpen(true);
+        return;
+      }
       if (id === MOBILE_IOS_SIMULATOR_VIEWER_ID) {
         if (activeIosSimulatorSession) handleOpenIosSimulator();
         return;
@@ -5544,6 +5678,7 @@ const SessionDetail = ({
       latestPrRepoFullName,
       activeBrowserSession,
       activeIosSimulatorSession,
+      activeAndroidEmulatorSession,
       handleOpenPrTab,
       handleOpenBrowser,
       handleOpenIosSimulator,
@@ -6177,6 +6312,14 @@ const SessionDetail = ({
         void handleCopyUrl();
       },
     });
+    mobileMenuActions.push({
+      id: 'copy-deeplink',
+      icon: <Link {...stylex.props(detailStyles.icon14)} />,
+      label: t('sessions.copyDeepLink', 'Copy deeplink'),
+      onClick: () => {
+        void handleCopyUrl(undefined, undefined, 'deeplink');
+      },
+    });
     // Share-as-image arms message selection inside the chat surface, so it is
     // only offered while that surface is the one on screen: a draft has no
     // conversation and a viewer tab covers the rows being picked.
@@ -6380,7 +6523,8 @@ const SessionDetail = ({
                   )}
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
-                  onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
+                  onOpenIosSimulator={() => handleOpenIosSimulator()}
+                  onOpenAndroidEmulator={() => handleOpenAndroidEmulator()}
                   onOpenBrowser={
                     previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
                   }
@@ -6797,6 +6941,50 @@ const SessionDetail = ({
             </VaulDrawerBody>
           </DrawerContent>
         </Drawer>
+        {/* Android owns its mobile drawer independently of iOS and Browser. */}
+        <Drawer
+          direction="right"
+          repositionInputs={isNativeAppShell()}
+          open={Boolean(androidEmulatorOpen && activeAndroidEmulatorSession)}
+          onOpenChange={(open) => {
+            if (!open) setAndroidEmulatorOpen(false);
+          }}
+        >
+          <DrawerContent
+            nativeKeyboardInset
+            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            data-sidebar-swipe-open-disabled
+          >
+            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+              {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
+            </DrawerTitle>
+            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+              {activeAndroidEmulatorSession && (
+                <SessionDevicePreviewPanel
+                  platform="android"
+                  session={activeAndroidEmulatorSession}
+                  active={Boolean(androidEmulatorOpen)}
+                  controlsLayout="menu"
+                  onAttachScreenshot={(file) =>
+                    handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
+                  }
+                  leadingSlot={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon
+                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      onClick={() => setAndroidEmulatorOpen(false)}
+                      aria-label={t('common.back', 'Back')}
+                    >
+                      <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                    </Button>
+                  }
+                />
+              )}
+            </VaulDrawerBody>
+          </DrawerContent>
+        </Drawer>
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
         {dirtyForkDialog}
@@ -6876,11 +7064,44 @@ const SessionDetail = ({
       />
     ) : null;
 
+  // A split shows both of its panels whenever either one is selected.
+  const fixedPanelSplitVisible =
+    effectiveSidePanelSplit !== null &&
+    activeSidebarTab !== null &&
+    effectiveSidePanelSplit.includes(activeSidebarTab);
+  const getFixedPanelPlacement = (tabId: SidebarTab): 'full' | 'start' | 'end' | 'hidden' => {
+    if (fixedPanelSplitVisible && effectiveSidePanelSplit?.includes(tabId)) {
+      return effectiveSidePanelSplit[0] === tabId ? 'start' : 'end';
+    }
+    return activeSidebarTab === tabId ? 'full' : 'hidden';
+  };
+  const iosSimulatorPlacement = getFixedPanelPlacement('ios-simulator');
+  const androidEmulatorPlacement = getFixedPanelPlacement('android-emulator');
+  const getFixedPanelFillClassName = (placement: ReturnType<typeof getFixedPanelPlacement>) =>
+    stylex.props(
+      detailStyles.absoluteFill,
+      !sidePanelSplitResizing && detailStyles.splitSlide,
+      placement === 'start' && detailStyles.splitStart,
+      placement === 'end' && detailStyles.splitEnd,
+      placement === 'hidden' && detailStyles.invisibleFill
+    ).className;
+
   // Keep the browser mounted while another sidebar tab is selected. Managed
   // pages retain DOM state and Electron's native view is only hidden, so tab
   // switching behaves like a browser rather than rebuilding the page.
   const sidebarContent = (
-    <div {...stylex.props(detailStyles.sidebarContentRoot)}>
+    <div
+      {...stylex.props(detailStyles.sidebarContentRoot)}
+      style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: sidePanelSplitRatio } as CSSProperties}
+    >
+      {fixedPanelSplitVisible ? (
+        <SidePanelSplitHandle
+          ratio={sidePanelSplitRatio}
+          label={t('sessions.sidebar.resizeSplit', 'Resize split view')}
+          onRatioChange={setSidePanelSplitRatio}
+          onDraggingChange={setSidePanelSplitResizing}
+        />
+      ) : null}
       {previewAllowed && activeBrowserSession && openedSidebarTabs.includes('browser') ? (
         <div
           className={
@@ -6915,24 +7136,36 @@ const SessionDetail = ({
       ) : null}
       {activeIosSimulatorSession && openedSidebarTabs.includes('ios-simulator') ? (
         <div
-          className={
-            stylex.props(
-              detailStyles.absoluteFill,
-              activeSidebarTab !== 'ios-simulator' && detailStyles.invisibleFill
-            ).className
-          }
-          aria-hidden={activeSidebarTab !== 'ios-simulator'}
+          className={getFixedPanelFillClassName(iosSimulatorPlacement)}
+          aria-hidden={iosSimulatorPlacement === 'hidden'}
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={activeSidebarTab === 'ios-simulator' && isSidebarVisible}
+            active={iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' && activeSidebarTab !== 'ios-simulator' ? (
+      {activeAndroidEmulatorSession && openedSidebarTabs.includes('android-emulator') ? (
+        <div
+          className={getFixedPanelFillClassName(androidEmulatorPlacement)}
+          aria-hidden={androidEmulatorPlacement === 'hidden'}
+        >
+          <SessionDevicePreviewPanel
+            platform="android"
+            session={activeAndroidEmulatorSession}
+            active={androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
+            onAttachScreenshot={(file) =>
+              handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
+            }
+          />
+        </div>
+      ) : null}
+      {activeSidebarTab !== 'browser' &&
+      activeSidebarTab !== 'ios-simulator' &&
+      activeSidebarTab !== 'android-emulator' ? (
         <div {...stylex.props(detailStyles.absoluteFill)}>{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
@@ -7022,6 +7255,7 @@ const SessionDetail = ({
         isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
+      onRestoreSession: handleRestoreCurrentSession,
       className: stylex.props(detailStyles.rootFill).className,
       hideHeader: true,
       toolbar: chatSession.id === sessionId ? desktopToolbar : undefined,
@@ -7030,7 +7264,8 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
-      onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
+      onOpenIosSimulator: () => handleOpenIosSimulator(),
+      onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,
@@ -7212,6 +7447,9 @@ const SessionDetail = ({
         closeTabLabel={(tabLabel) =>
           t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
         }
+        split={effectiveSidePanelSplit}
+        onTabsSplit={handleSidePanelTabsSplit}
+        onTabUnsplit={handleSidePanelTabUnsplit}
         moreSlot={
           <SessionFileActionsMenu
             filePath={activeViewerFilePath}
@@ -7273,7 +7511,7 @@ const SessionDetail = ({
         sidebarOpen={isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
-        sidebarMinWidthRequest={prSidebarWidthRequest}
+        sidebarMinWidthRequest={sidebarWidthRequest}
         sidebarRestoreSeq={sidebarRestoreSeq}
       />
       {/* These dialogs live at the desktop root too (the mobile branch renders its own
@@ -7315,4 +7553,15 @@ const SessionDetail = ({
   );
 };
 
-export default SessionDetail;
+export default function SessionDetailWithHistoryAccess(props: Parameters<typeof SessionDetail>[0]) {
+  return (
+    <SessionHistoryAccessBoundary
+      sessionId={props.sessionId}
+      urlTab={props.urlTab}
+      onMobileBack={props.onMobileBack}
+      onMobilePresented={props.onMobilePresented}
+    >
+      <SessionDetail {...props} />
+    </SessionHistoryAccessBoundary>
+  );
+}

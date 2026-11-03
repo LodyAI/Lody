@@ -23,6 +23,8 @@ older view stays refused. `ensureCurrent(view)` repeats the in-process check
 for a view obtained earlier. Freshness is relative to this device's own
 history; global freshness still depends on the log not hiding records.
 
+`canWriteRetainedEpoch(epoch)` checks only the optional durable local observation journal, without reading the source. Product content bindings use it only after a genuinely missing current key. The fifteen-minute first-observation deadline, conservative clock continuity and notice policy are defined in the [owner decision](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md); this method grants no device or role permission. Missing journal support keeps strict current-key writes.
+
 ## LedgerFeed
 
 _Requires `WorkspaceScope`, `LedgerFeedStore`. Options: origin, expected

@@ -22,6 +22,9 @@
   fail at their public boundary, and only contractually
   best-effort background effects may skip. Both halves are enforced by
   `scripts/check-platform-boundaries.mjs` + `tests/local-platform-zero-cloud.test.ts`.
+- A `--paired-workspace` machine port reads only its own workspace plan, with its device
+  credential (`e2eeMachinePairing.workspaceEntitlement`), for the cooperative quotas;
+  it never borrows an account API key.
 - Client-visible RPC references come from public `@lody/cloud-api`; generated server
   declarations and private workspace packages are forbidden. Prime the token provider
   before reading `getGatewayBaseUrl()`, and never let runtime transports or Machine RPC
@@ -49,6 +52,21 @@
 
 - INVARIANT: agent PATH merges keep the session's `gh` shim dir first
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
+
+## Encrypted workspace catalog
+
+- `local-workspace-catalog.ts` keeps encrypted discovery in account/machine-bound
+  `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
+  Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
+  the sidecar or account/machine-bound `.e2ee-invalid` marker.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
+  Persist ordinary remote-list results; return degraded receipts with current auth/revocation
+  checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
+  writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
+  v1 fields; stale sidecars cannot bootstrap. Fleet keeps scoped recoverable issues, bounded
+  retries and pending signature until healthy receipt.
 
 ## Local Loro data plane
 

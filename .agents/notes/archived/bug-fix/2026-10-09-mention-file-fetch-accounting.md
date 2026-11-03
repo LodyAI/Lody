@@ -1,6 +1,7 @@
 # Count shared mention file failures at the request
 
 Status: implemented
+Archived: 2026-11-02
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/1359
 
@@ -18,7 +19,7 @@ aggregate telemetry volume.
 
 ## Evidence and decision
 
-The [earlier cache decision](2026-09-23-portal-full-restyle.md#follow-up-reductions)
+The [earlier cache decision](../../implemented/bug-fix/2026-09-23-portal-full-restyle.md#follow-up-reductions)
 introduced memory / IndexedDB caching and in-flight sharing. Each hook's catch
 still captured an event, and the PostHog object was a fetch-effect dependency.
 File discovery runs for hydration even with the menu closed. GitHub fetching

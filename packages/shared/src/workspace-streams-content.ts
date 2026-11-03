@@ -96,6 +96,7 @@ export function encryptedWorkspaceResolver(
 /** Shared feature verdicts: schedules use protected CRDT; minimal presence stays plaintext. */
 export type WorkspaceRestrictedFeature =
   | 'schedules'
+  | 'automations'
   | 'preview-comments'
   | 'code-collab-index'
   | 'shortcuts'

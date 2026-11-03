@@ -8,6 +8,11 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./automations": {
+      "types": "./src/automations/index.ts",
+      "import": "./src/automations/index.ts"
+    },
+    "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",

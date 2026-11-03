@@ -17,6 +17,8 @@ _需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。_
 
 然后推进钉；检查点不变时不写入。钉写入失败时，较新的视图仍记在内存中，旧视图继续被拒绝。`ensureCurrent(view)` 对较早获得的视图重复进程内检查。新鲜度只相对于本设备自己的历史；全局新鲜度仍依赖日志不隐藏记录。
 
+`canWriteRetainedEpoch(epoch)` 只检查可选的持久本地观察日志，不读取 source。产品内容绑定仅在当前 key 真实缺失时使用。十五分钟首次观察截止时间、保守的时钟连续性和提示规则见 [owner 取舍](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.zh.md)；该方法不授予设备或角色权限。缺少日志支持时仍要求当前 key。
+
 ## LedgerFeed
 
 _需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。_

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import type { SessionMeta, SessionId, SessionPullRequestMeta } from '@lody/shared';
 
 import {
-  getLatestPullRequest,
   getPullRequestNumber,
   getPullRequestRepoFullName,
   getSessionGitHubState,
@@ -111,7 +110,7 @@ describe('getSessionGitHubState', () => {
   });
 
   it('uses append order when compact PR meta has no reportedAt field', () => {
-    const latest = getLatestPullRequest(
+    const latest = getSessionGitHubState(
       createSession({
         pullRequests: [
           {
@@ -124,7 +123,7 @@ describe('getSessionGitHubState', () => {
           },
         ],
       })
-    );
+    ).latestPr;
 
     expect(latest?.url).toBe('https://github.com/loro-dev/lody/pull/2');
   });
@@ -133,6 +132,18 @@ describe('getSessionGitHubState', () => {
     const pr = {
       url: 'https://github.com/loro-dev/lody/pull/123/files',
       status: 'open' as const,
+    };
+
+    expect(getPullRequestNumber(pr)).toBe(123);
+    expect(getPullRequestRepoFullName(pr)).toBe('loro-dev/lody');
+  });
+
+  it('prefers the URL over stale legacy number and repository fields', () => {
+    const pr = {
+      url: 'https://github.com/loro-dev/lody/pull/123',
+      status: 'open' as const,
+      number: 9,
+      repository: 'loro-dev/other',
     };
 
     expect(getPullRequestNumber(pr)).toBe(123);

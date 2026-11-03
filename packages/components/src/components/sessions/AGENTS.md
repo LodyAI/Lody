@@ -57,6 +57,9 @@ Read parent rules and linked context.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
 - Read receipts require per-surface `isVisible`, never mere mounting.
+- Every user management action uses `useSessionActions`; its shared guard checks current Repo metadata for every affected target before side effects, including contained/opened sessions.
+- Encrypted history uses the bound runtime's document access without expanding machine/project execution indexes. Unavailable targets mount only the document reader, without machine probes or RPC. [Boundary](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
+- Window-top history headers reuse the shared drag-region helper and exempt interactive controls, so workspace drag strips cannot cover their buttons.
 - Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
   keep prose whole, cap thinking rather than drop it, toast every omission, and
@@ -103,6 +106,8 @@ Read parent rules and linked context.
   items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
   ownership appears only in details. Scheduled drafts live in the composer, never the bar.
 - Stage icons stay inert; reserve colour for genuine status; no pulses.
+- Reported preview requests enable simulator actions. One platform opens directly;
+  iOS + Android share a chooser on desktop and mobile, targeting the main conversation.
 - Open preview stays gated on a real reported target; repository actions are
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
   below the reply.
@@ -143,3 +148,5 @@ Read parent rules and linked context.
 
 - Stories render real components and only mock data; appearance lives in production.
   Keep stories minimal; verify UI changes in the app.
+
+Automation identity markers follow [their source rules](automation/AGENTS.md).

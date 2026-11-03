@@ -275,7 +275,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                           })
                         )
                       )
-                        return yield* fail('conflict');
+                        return yield* fail('history-conflict');
                       const value = yield* status(lease.session);
                       yield* guard(id, expected);
                       if (lease.closing || pending.closed) return yield* fail('closed');
@@ -485,12 +485,27 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
             const snapshot = yield* session.ledgerState(),
               view = snapshot.view,
               exported = yield* Effect.fromResult(exportVerifiedState(view));
+            const approvalOriginals = yield* session.approvalOriginals();
             const borrowed = yield* readLocalRecords(view);
             const rows: { position: number; record: Uint8Array }[] = [];
             let previous = -1,
               bytes = 0;
             if (borrowed.length > 16384) return yield* fail('corrupt');
-            for (const original of borrowed) {
+            let localPosition = -1;
+            for (const row of borrowed) {
+              if (!Number.isSafeInteger(row.position) || row.position <= localPosition)
+                return yield* fail('corrupt');
+              localPosition = row.position;
+            }
+            const present = new Set(borrowed.map((row) => row.position));
+            const originals = [
+              ...borrowed,
+              ...approvalOriginals.flatMap((record, position) =>
+                position < view.length && !present.has(position) ? [{ position, record }] : []
+              ),
+            ].sort((a, b) => a.position - b.position);
+            if (originals.length > 16384) return yield* fail('corrupt');
+            for (const original of originals) {
               const record = original.record,
                 position = original.position;
               if (

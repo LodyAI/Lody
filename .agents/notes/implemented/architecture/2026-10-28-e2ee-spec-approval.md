@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance. On 2026-10-31 the owner approved the recovery vault Spec revision recorded below.
+Owner Zixuan Chen (zxch3n) approved the listed E2EE Spec revisions on 2026-10-28 and the exact client custody Spec revision below on 2026-10-29. The permission ledger approval covers only confirmed or implemented portions; unresolved format details require separate review before ledger v1 is frozen. Desktop custody requires real-device acceptance before product activation. Client custody approval establishes intent, not platform acceptance. On 2026-10-31 the owner approved the recovery vault Spec revision recorded below, on 2026-11-01 the account-wide personal device pairing increments, and on 2026-11-02 the machine sharing Spec.
 
 ## Decision
 
@@ -55,3 +55,57 @@ On 2026-10-31, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, e
 6. A successful restore notifies the account's active devices and email; there is no forced R replacement, owner approval or cooldown.
 
 Approval establishes intent only, not implementation, deployment or real-device acceptance. The private backend gap remains: no `e2eeRecoveryVault` storage, Recovery credential registration, R-authenticated mailbox access or restore notification. The recovery vault remains outside the MVP.
+
+## Whitepaper 2026-10-31 revision
+
+On 2026-10-31, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, approved the [whitepaper](../../../../specs/e2ee/whitepaper.md) revision of [PR #2145](https://github.com/LodyAI/Lody/pull/2145) at commit `7efe3f2c05253a98bb5f8c3034c26b48f7a165a0`. The approved [English text](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.md) has Git blob `4421440f723aa15171a2c6a71ee10be9b6829ccd`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/7efe3f2c05253a98bb5f8c3034c26b48f7a165a0/specs/e2ee/whitepaper.zh.md) has Git blob `a324c87d687adfa5a11617064eada76005f4633c`.
+
+The scope is the alignment found by a three-way read-only audit of the whitepaper against `main` (audit `c990a689` plus #2143), together with new statements of current behavior:
+
+- Web personal-device custody per the approved client custody Spec; the recovery vault (approved 2026-10-31) and desktop custody approvals, with their implementation limits.
+- The Streams epoch-key provider, snapshot join and safety-code UI status, history versus execution permission (#2143), and billing and disabled legacy interfaces.
+- An owner decision on rotation, favoring availability and backend cost: when the current key is installed, new content uses the verified current epoch. After a new epoch is published, a device without the current key may keep sealing at its latest retained published epoch for at most 15 minutes; after that, new writes fail and can be retried. The backend does not enforce the content epoch. Removed or revoked devices may read new content sealed at the old epoch during that window.
+
+Machine sharing plan A is outside this revision. Approval records intent, not implementation, deployment or real-device acceptance; the 15-minute grace is implemented separately.
+
+## Account-wide personal device pairing
+
+On 2026-11-01, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, explicitly approved the account-wide personal device pairing increments of [PR #2182](https://github.com/LodyAI/Lody/pull/2182) at revision `65db7d694a6979a0dc8e380815ca033eeddb958c`.
+
+| File | Approved Git blob |
+| --- | --- |
+| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md) | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
+| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md) | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
+| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md) | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
+| [`specs/e2ee/desktop-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.zh.md) | `c4b74bd01d78df7b1f01a43e114c7435d20c358d` |
+| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md) | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
+| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md) | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md) | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md) | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
+
+The approved revision is `65db7d69`. Later commits change only approval metadata in these files: increment headings and status lines, the whitepaper's approved-revision line, approval links, and the section anchors that follow the renamed headings. They do not change the approved requirements.
+
+The scope covers these points:
+
+- **Starting a request.** Opening an encrypted workspace without an identity starts a request automatically on desktop and mobile. Web requires the user to choose "Request access".
+- **Pairing string.** A one-time 128-bit secret is shown as a QR code and a 28-character Crockford base32 string. Request and approval HMACs derived from it detect any key substituted by the service.
+- **Approvers.** Any active personal device of the same user may approve. Machines and recovery devices may not.
+- **Before signing.**
+  - The approver shows a fixed warning.
+  - The confirmation names the target device and lists the workspaces to join, each deselectable.
+  - The device name is labeled as provided by the requester, and the location as an approximate server estimate.
+- **After approval.** The user's devices and the account email receive a "new device added" notice with a revoke link.
+- **Ghost-pairing limit.** The threat model states that the holder of the secret cannot tell an attacker's device the user was talked into approving from the user's own device.
+- **Expiry and one-time use.**
+  - Each client checks the request's MAC-covered expiry, at most 10 minutes, and persists the terminal states and used secrets it knows.
+  - Requests are rate-limited per account.
+  - One-time use is guaranteed only within local state plus that expiry.
+- **One approval for the account.** Approval signs the existing per-workspace personal `AdmitDevice` records. The batch is journaled and resumable, never re-signs, and has no cross-workspace atomicity.
+- **Manual pairing** uses the same string.
+- **Client custody.** Mobile may start automatically and Web requires explicit confirmation. Any personal device may approve.
+
+Approval records intent only, not implementation, deployment or real-device acceptance. Revocation and removal semantics are unchanged.
+
+## Machine sharing
+
+On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.

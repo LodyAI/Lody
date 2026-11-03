@@ -22,6 +22,62 @@ describe('GitHub PR live reads', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reads GitHub stack membership and retains it if the stack details fail', async () => {
+    const pr = {
+      number: 42,
+      node_id: 'PR_42',
+      title: 'Layer',
+      state: 'open',
+      html_url: 'https://github.com/owner/repo/pull/42',
+      base: { ref: 'layer-1' },
+      head: { ref: 'layer-2', sha: 'abc' },
+      user: null,
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+      stack: { number: 7, position: 2, size: 2, base: { ref: 'main' } },
+    };
+    let failStack = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith('/pulls/42')) return new Response(JSON.stringify(pr));
+        if (failStack) return new Response('', { status: 503 });
+        return new Response(
+          JSON.stringify({
+            pull_requests: [
+              {
+                number: 41,
+                title: 'First',
+                state: 'closed',
+                draft: false,
+                merged_at: '2026-01-01',
+              },
+              { number: 42, title: 'Layer', state: 'open', draft: false, merged_at: null },
+            ],
+          })
+        );
+      })
+    );
+    const result = await githubFetchPullRequestDetails('', 'owner/repo', 42);
+    expect(result.stack).toEqual({
+      number: 7,
+      position: 2,
+      size: 2,
+      baseRef: 'main',
+      pullRequests: [
+        { number: 41, title: 'First', state: 'closed', draft: false, merged: true },
+        { number: 42, title: 'Layer', state: 'open', draft: false, merged: false },
+      ],
+    });
+    failStack = true;
+    expect((await githubFetchPullRequestDetails('', 'owner/repo', 42)).stack).toEqual({
+      number: 7,
+      position: 2,
+      size: 2,
+      baseRef: 'main',
+    });
+  });
+
   it('reads public PR comments without an Authorization header', async () => {
     vi.stubGlobal(
       'fetch',

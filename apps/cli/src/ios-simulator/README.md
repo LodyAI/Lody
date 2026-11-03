@@ -1,7 +1,8 @@
 # Simulator preview implementation
 
-`service.ts` owns ephemeral operations, `control-leases.ts` excludes competing
-sessions across workspaces, and `devices.ts` is the simctl boundary. Lifecycle RPC
+`service.ts` adapts the legacy iOS wire contract to the shared
+[device preview core](../device-preview/README.md), which owns ephemeral operations
+and machine-wide platform-scoped leases. `devices.ts` is the simctl boundary. Lifecycle RPC
 uses the shared `iosSimulator: 1` capability and `ios-simulator/control` command
 union. Browser owns a separate service and separate transport instances.
 

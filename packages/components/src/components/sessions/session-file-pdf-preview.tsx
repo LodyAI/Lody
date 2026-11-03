@@ -229,9 +229,27 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
     };
     const handleRotationChanging = (event: RotationChangingEvent) =>
       setRotation(event.pagesRotation);
+    // PDF.js does not re-fit preset scales when the panel opens or resizes.
+    // Wait for a usable scrollport, then keep the selected fit mode in sync.
+    const fitToContainer = () => {
+      if (!pdfViewer.pdfDocument || container.clientWidth === 0 || container.clientHeight === 0) {
+        return;
+      }
+      const scaleValue = pdfViewer.currentScaleValue;
+      if (scaleValue === null) {
+        pdfViewer.currentScaleValue = 'page-width';
+      } else if (isFitMode(scaleValue)) {
+        pdfViewer.currentScaleValue = scaleValue;
+      } else {
+        pdfViewer.update();
+      }
+    };
+    const resizeObserver = new ResizeObserver(fitToContainer);
+    resizeObserver.observe(container);
+
     const handlePagesInit = () => {
-      pdfViewer.currentScaleValue = 'page-width';
       setPageCount(pdfViewer.pagesCount);
+      fitToContainer();
     };
     const handleFindMatchesCount = (event: FindMatchesCountEvent) =>
       setMatchesCount(event.matchesCount);
@@ -300,6 +318,7 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
     return () => {
       disposed = true;
       rangeTransport?.abort();
+      resizeObserver.disconnect();
       eventBus.off('pagechanging', handlePageChanging);
       eventBus.off('scalechanging', handleScaleChanging);
       eventBus.off('rotationchanging', handleRotationChanging);

@@ -358,10 +358,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
         </div>
       ) : null}
       <div
-        className={cn(
-          'min-w-0 flex-1 overflow-hidden',
-          stylex.props(queueSurface.text, props.roomy && queueSurface.roomyText).className
-        )}
+        className={cn('min-w-0 flex-1 overflow-hidden', stylex.props(queueSurface.text).className)}
         style={{
           display: '-webkit-box',
           // A narrow sheet keeps every row to one line, like the phone layout.

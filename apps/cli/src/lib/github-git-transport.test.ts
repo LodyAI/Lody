@@ -345,6 +345,71 @@ process.exit(child.status ?? 1);
     }
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'repairs broken cached Git helper links without replacing existing helpers',
+    () => {
+      const execPath = path.join(directory, 'current-git');
+      fs.mkdirSync(execPath);
+      for (const name of ['git-stale-helper', 'git-valid-helper', 'git-regular-helper']) {
+        fs.writeFileSync(path.join(execPath, name), `current ${name}\n`);
+      }
+
+      const stale = path.join(directory, 'git-stale-helper');
+      const valid = path.join(directory, 'git-valid-helper');
+      const regular = path.join(directory, 'git-regular-helper');
+      const retained = path.join(directory, 'retained-helper');
+      fs.writeFileSync(retained, 'retained link target\n');
+      fs.symlinkSync(path.join(directory, 'removed-git', 'git-stale-helper'), stale);
+      fs.symlinkSync(retained, valid);
+      fs.writeFileSync(regular, 'retained regular file\n');
+
+      ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+        probeExecPathOnce: () => execPath,
+      });
+
+      expect(fs.readFileSync(stale, 'utf8')).toBe('current git-stale-helper\n');
+      expect(fs.realpathSync(stale)).toBe(fs.realpathSync(path.join(execPath, 'git-stale-helper')));
+      expect(fs.readlinkSync(valid)).toBe(retained);
+      expect(fs.readFileSync(regular, 'utf8')).toBe('retained regular file\n');
+      expect(fs.lstatSync(path.join(directory, 'git')).isFile()).toBe(true);
+      expect(fs.lstatSync(path.join(directory, 'git-remote-https')).isFile()).toBe(true);
+
+      ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+        probeExecPathOnce: () => {
+          throw new Error('A valid marker must be reused');
+        },
+      });
+      expect(fs.readFileSync(stale, 'utf8')).toBe('current git-stale-helper\n');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'preserves a helper link when its target cannot be inspected',
+    () => {
+      const execPath = path.join(directory, 'current-git');
+      const blocked = path.join(directory, 'inaccessible');
+      const target = path.join(directory, 'git-restricted-helper');
+      fs.mkdirSync(execPath);
+      fs.mkdirSync(blocked);
+      fs.writeFileSync(path.join(execPath, 'git-restricted-helper'), 'current helper\n');
+      fs.writeFileSync(path.join(blocked, 'helper'), 'existing helper\n');
+      fs.symlinkSync(path.join(blocked, 'helper'), target);
+      fs.chmodSync(blocked, 0o000);
+
+      try {
+        expect(() =>
+          ensureGitHubGitTransport(directory, '/workspace/broker', process.execPath, {
+            probeExecPathOnce: () => execPath,
+          })
+        ).toThrowError(expect.objectContaining({ code: 'EACCES' }));
+        expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+      } finally {
+        fs.chmodSync(blocked, 0o700);
+      }
+      expect(fs.readFileSync(target, 'utf8')).toBe('existing helper\n');
+    }
+  );
+
   describe('exec-path probe resilience', () => {
     const markerPath = () => path.join(directory, 'lody-git-transport.json');
     const spawnError = (code: string) =>

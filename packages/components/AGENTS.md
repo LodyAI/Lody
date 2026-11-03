@@ -9,6 +9,7 @@ mobile surfaces. Background for the rules below:
 
 ## General rules
 
+- Native shells do not emit `$pageview` or `$pageleave`; browser page tracking remains enabled. Mention file-fetch failures stay visible to consumers but are not analytics events. Authenticated account readiness is represented by `app/active`, not a second `onboarding/account_ready` event.
 - Regenerate TanStack routes after changing route files.
 - Use `pnpm --filter @lody/components dev` to generate and format the route tree
   with Oxfmt before CI compares it with the committed file.
@@ -37,6 +38,10 @@ mobile surfaces. Background for the rules below:
   and retain incomplete owners until actual close before reusing that binding.
   Electron counts unlabeled readers per window and workspace, so the control page
   and RuntimeProvider each release one settled acquisition exactly once.
+- Encrypted visible indexes add other members' machines only from the host's verified
+  sharing view (`useEncryptedSharedMachines`), never server machine tables. Keep them out
+  of Convex-authorized probes; automatic writers and machine-RPC surfaces use
+  `withoutEncryptedSharedMachines`. [Decision](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
 - A descriptor marked `public` can run before authentication and must expose only an
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use

@@ -281,3 +281,110 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it('resumes a replacement interrupted between selecting the candidate and re-pointing progress', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'lab-workspace-replace-'));
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const f = yield* makeLabScenarioFixture(join(root, 'fixture'));
+          const body = ok(decodeRecord(f.records[0]!)).body;
+          if (body.type !== 'genesis') throw new Error('actual-genesis');
+          const storage = yield* makeLabRecoveryVaultStore({
+            path: join(root, 'vault.sqlite'),
+            mode: 'create',
+          });
+          const created = yield* createRecoveryVault({
+            locator: 'https://synthetic.invalid/vault',
+            ...storage,
+          });
+          let delivery: KeyDistributor['Service'] | undefined;
+          // Simulate a crash after the journal records the selected candidate and
+          // before the progress record is re-pointed to it.
+          let journalWrites = 0,
+            interruptProgress = false;
+          const progressKey = /\/workspace\/[0-9a-f]+\/[0-9a-f]+$/;
+          const local: typeof storage.local = {
+            ...storage.local,
+            compareAndSwap: (key, expected, next) => {
+              if (key.includes('/replacement/') && ++journalWrites === 2) interruptProgress = true;
+              else if (interruptProgress && progressKey.test(key)) {
+                interruptProgress = false;
+                return Effect.succeed('Conflict' as const);
+              }
+              return storage.local.compareAndSwap(key, expected, next);
+            },
+          };
+          const owner = yield* openLabWorkspaceSession({
+            ...f.input('owner', 'create'),
+            documents: f.input('owner', 'create').documents.filter((row) => row.model !== 'flock'),
+            recoveryConfiguration: ({ distribution }) => {
+              delivery = distribution;
+              return Effect.succeed({
+                vault: created.vault,
+                local,
+                membershipId: body.membershipId,
+                trust: {
+                  source: 'independently witnessed actual original genesis',
+                  genesisRecord: new Uint8Array(f.records[0]!),
+                  head: hex(f.point().head.toBytes()),
+                  length: f.point().length,
+                },
+                fetchCurrentEnvelope: (_recipient, epoch, identity) =>
+                  Effect.scoped(
+                    Effect.gen(function* () {
+                      const native = yield* makeLabHttpIdentity({
+                        baseUrl: f.host.baseUrl,
+                        genesis: f.genesis,
+                      });
+                      const auth = yield* native.authenticate(identity);
+                      const mailbox = yield* makeLabMailboxRemote({
+                        url: auth.url,
+                        fetch: auth.fetch,
+                      });
+                      let page = yield* mailbox.fetch(epoch, null, 100);
+                      if (page.items.length === 0) {
+                        yield* delivery!.reconcileCurrentEpoch(100);
+                        yield* delivery!.resumePendingDeliveries(100);
+                        page = yield* mailbox.fetch(epoch, null, 100);
+                      }
+                      const row = page.items[0];
+                      if (!row) throw new Error('actual-R-envelope-required');
+                      return {
+                        sender: ok(
+                          Bytes.signingPublicKey(new Uint8Array(Buffer.from(row.sender, 'hex')))
+                        ),
+                        frame: row.frame,
+                      };
+                    })
+                  ),
+                registerRecoveryCredential: () => Effect.void,
+              });
+            },
+          });
+          yield* owner.createDocument('loro');
+          expect(yield* owner.recovery.setup()).toMatchObject({ outcome: 'Committed' });
+          const request = { requestId: 'replace-after-crash', compromised: false };
+          expect(yield* Effect.result(owner.recovery.replace(request))).toMatchObject({
+            _tag: 'Failure',
+            failure: { code: 'conflict' },
+          });
+
+          expect(yield* owner.recovery.replace(request)).toMatchObject({
+            paired: true,
+            envelopeAvailable: true,
+            recoverable: true,
+          });
+          // Status reads the progress reference, so `paired` proves it is the
+          // admitted replacement and not the revoked original.
+          const index = yield* created.vault.readIndex();
+          expect(index.value.entries.filter((ref) => !ref.retired)).toHaveLength(1);
+          yield* owner.close();
+        })
+      )
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

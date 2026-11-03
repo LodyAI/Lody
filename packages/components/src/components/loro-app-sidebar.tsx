@@ -1,3 +1,5 @@
+import { SidebarPullRequests } from './sidebar-pull-requests';
+import { resolveSessionPullRequests } from '@lody/shared';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -160,6 +162,7 @@ import { placeProjectGroups } from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
+  selectSidebarTaskSessions,
   buildSidebarOpenerRowResolver,
   getEffectiveSessionActivitySummary,
   getEffectiveLatestMessageAt,
@@ -203,7 +206,6 @@ import { useStableNow } from '@/hooks/use-stable-now';
 import { useSidebarWorkspaceNavigation } from './sidebar-workspaces';
 import {
   SessionOpenedByTreeRow,
-  SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -636,18 +638,27 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
             has one, with a faint worktree glyph just to its left; the Archive
             button replaces it on desktop hover. */}
-        <div className={lineBoxClassName}>
+        <div
+          className={
+            showMetaLine && showBranchNames && showPr ? 'flex self-stretch' : lineBoxClassName
+          }
+        >
           <SidebarRowEndSlot
             sessionId={session.id}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
+            restOnSecondLine={showMetaLine && showBranchNames && showPr}
+            interactiveRest={showBranchNames && showPr}
             restIcon={
-              showPr || showWorktreeIcon ? (
+              (showPr && showBranchNames) || showWorktreeIcon ? (
                 <span className="flex items-center gap-1.5">
                   <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
-                  {showPr ? (
-                    <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
+                  {showPr && showBranchNames ? (
+                    <SidebarPullRequests
+                      alignWithBranch={showMetaLine && showBranchNames}
+                      pullRequests={resolveSessionPullRequests(session)}
+                    />
                   ) : null}
                 </span>
               ) : undefined
@@ -1408,7 +1419,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   defaultSessionTitle={defaultSessionTitle}
                   projectName={inProject ? project.name : null}
                   machineName={
-                    inProject ? trimmedMachineName : (resolveMachineName?.(session.machineId) ?? null)
+                    inProject
+                      ? trimmedMachineName
+                      : (resolveMachineName?.(session.machineId) ?? null)
                   }
                   author={resolveSessionAuthor?.(session) ?? null}
                   isSelected={session.id === selectedSessionId}
@@ -1659,10 +1672,11 @@ export function LoroAppSidebar({
   );
   const workspaceDataReady = workspaceDataScope?.status === 'ready';
   const scopedWorkspaceId = workspaceDataReady ? workspaceDataScope.workspaceId : null;
-  const { sessions, allActiveSessions } = useVisibleSessionMetas({
-    workspaceId: scopedWorkspaceId,
-    enabled: workspaceDataReady,
-  });
+  const { sessions, allActiveSessions, workspaceHistoryReadable, historyOnlySessionIds } =
+    useVisibleSessionMetas({
+      workspaceId: scopedWorkspaceId,
+      enabled: workspaceDataReady,
+    });
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
@@ -1794,8 +1808,18 @@ export function LoroAppSidebar({
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const rejectHistoryWrite = useCallback(
+    (ids: string[]) => {
+      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
+        return false;
+      toast.info(t('sessions.historyMachineUnavailable'));
+      return true;
+    },
+    [historyOnlySessionIds, workspaceHistoryReadable, t]
+  );
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
+      if (rejectHistoryWrite([sessionId])) return;
       void archiveSessionWithConfirmation(sessionId as SessionId)
         .then(async (archived) => {
           if (!archived || !workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
@@ -1808,21 +1832,27 @@ export function LoroAppSidebar({
           toast.error(error instanceof Error ? error.message : String(error));
         });
     },
-    [archiveSessionWithConfirmation, router, workspaceSlug]
+    [archiveSessionWithConfirmation, rejectHistoryWrite, router, workspaceSlug]
   );
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      void setSessionPinned(sessionId as SessionId, nextPinned);
+      if (rejectHistoryWrite([sessionId])) return;
+      void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
-    [setSessionPinned]
+    [rejectHistoryWrite, setSessionPinned]
   );
 
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
-      void markSessionUnread(sessionId as SessionId);
+      if (rejectHistoryWrite([sessionId])) return;
+      void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
-    [markSessionUnread]
+    [markSessionUnread, rejectHistoryWrite]
   );
 
   const sessionById = useMemo(() => {
@@ -2016,11 +2046,15 @@ export function LoroAppSidebar({
   const tasks = useMemo(() => {
     const sourceSessions = sessionsListLoading ? [] : sessions;
     return buildSidebarTaskRows(
-      sourceSessions.filter(
-        (session) => session.project?.kind !== 'local' || session.projectRun !== undefined
-      )
+      selectSidebarTaskSessions(sourceSessions, visibleLocalProjectMap, workspaceHistoryReadable)
     );
-  }, [buildSidebarTaskRows, sessions, sessionsListLoading]);
+  }, [
+    buildSidebarTaskRows,
+    sessions,
+    sessionsListLoading,
+    visibleLocalProjectMap,
+    workspaceHistoryReadable,
+  ]);
 
   const chatSessions = useMemo(
     () => tasks.filter((task) => !task.repoFullName && !task.projectGroup),
@@ -2048,9 +2082,10 @@ export function LoroAppSidebar({
   const sendStates = useAtomValue(sessionSendStatesAtom);
   const handleRenameSession = useCallback(
     (sessionId: string, nextTitle: string) => {
+      if (rejectHistoryWrite([sessionId])) return Promise.resolve();
       return updateSessionTitle(sessionId as SessionId, nextTitle);
     },
-    [updateSessionTitle]
+    [rejectHistoryWrite, updateSessionTitle]
   );
   const [repoCollapseState, setRepoCollapseState] = useAtom(repoCollapseStateAtom);
   const [repoOrder, setRepoOrder] = useAtom(repoOrderAtom);
@@ -2123,6 +2158,7 @@ export function LoroAppSidebar({
 
   const handleArchiveProjectChats = useCallback(
     (sessionIds: string[]) => {
+      if (rejectHistoryWrite(sessionIds)) return;
       void (async () => {
         for (const sessionId of sessionIds) {
           await archiveSession(sessionId as SessionId);
@@ -2137,7 +2173,7 @@ export function LoroAppSidebar({
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [archiveSession, router, selectedSessionId, workspaceSlug]
+    [archiveSession, rejectHistoryWrite, router, selectedSessionId, workspaceSlug]
   );
 
   const handleRevealProject = useCallback(
@@ -2556,6 +2592,12 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        pullRequests: task.pullRequests,
+        prUrl: task.prUrl,
+        prStatus: task.prStatus,
+        prCiState: task.prCiState,
+        prReadiness: task.prReadiness,
+        prNumber: task.prNumber,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2587,6 +2629,7 @@ export function LoroAppSidebar({
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
         prNumber: task.prNumber,
+        pullRequests: task.pullRequests,
         prUrl: task.prUrl ?? null,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
@@ -2625,6 +2668,7 @@ export function LoroAppSidebar({
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
         prNumber: task.prNumber,
+        pullRequests: task.pullRequests,
         prUrl: task.prUrl ?? null,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
@@ -2677,7 +2721,10 @@ export function LoroAppSidebar({
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
             prNumber: prInfo.number,
+            pullRequests: resolveSessionPullRequests(session),
             prUrl: prInfo.url,
+            addedLines: session.diffStats?.allChange?.add,
+            deletedLines: session.diffStats?.allChange?.del,
             openedBySessionId: session.openedBySessionId ?? null,
             openedByRowSessionId:
               session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),

@@ -38,6 +38,7 @@ import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthSignOut } from './convex-provider';
 import { isElectronRenderer } from '@/lib/electron';
 import { cloudPlatformApi, useCloudPlatformClient } from './cloud-platform-api';
+import { accountPairingHints, withAccountPairingCode } from '@/lib/e2ee-account-pairing-ipc';
 import { createCloudE2eeWorkspaces } from './cloud-e2ee-workspaces';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -47,10 +48,12 @@ import { installAttachmentWorkspaceAccess } from '@/lib/attachment-workspace-acc
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
+import { mintAutomationControlProof } from '@/lib/automation-control-api';
 
 const CLOUD_HTTP_PORT = {
   authBaseUrl: import.meta.env.VITE_CONVEX_SITE_URL || null,
   serverBaseUrl: import.meta.env.VITE_API_BASE_URL || null,
+  mintAutomationControlProof,
 } as const;
 
 function toWorkspaceSummary(
@@ -275,6 +278,31 @@ export function CloudPlatformProvider({
                 native.claimPersonalJoin(workspaceId, pairingSessionId),
               cancelPersonalJoin: (workspaceId, pairingSessionId) =>
                 native.cancelPersonalJoin(workspaceId, pairingSessionId),
+              requestAccountPairing: (input) =>
+                withAccountPairingCode(
+                  native.requestAccountPairing(input, accountPairingHints(workspacesStore.get()))
+                ),
+              accountPairingRequest: () =>
+                withAccountPairingCode(
+                  native.accountPairingRequest(accountPairingHints(workspacesStore.get()))
+                ),
+              cancelAccountPairing: () => withAccountPairingCode(native.cancelAccountPairing()),
+              accountPairingCode: () => withAccountPairingCode(native.accountPairingCode()),
+              inspectAccountPairing: (pairingString) =>
+                withAccountPairingCode(
+                  native.inspectAccountPairing(
+                    pairingString,
+                    accountPairingHints(workspacesStore.get())
+                  )
+                ),
+              approveAccountPairing: (input) =>
+                withAccountPairingCode(
+                  native.approveAccountPairing(input, accountPairingHints(workspacesStore.get()))
+                ),
+              declineAccountPairing: (input) =>
+                withAccountPairingCode(
+                  native.declineAccountPairing(input, accountPairingHints(workspacesStore.get()))
+                ),
               removeMember: (workspaceId, membershipId) =>
                 native.removeMember(workspaceId, membershipId),
               setMemberRole: (workspaceId, membershipId, role) =>
@@ -341,7 +369,7 @@ export function CloudPlatformProvider({
         await readOrganization().refetchOrganizations();
       },
     });
-  }, [cloudClient, electron, portableRuntime, readOrganization, sessionStore]);
+  }, [cloudClient, electron, portableRuntime, readOrganization, sessionStore, workspacesStore]);
 
   const provider = useMemo<PlatformProvider>(
     () => ({

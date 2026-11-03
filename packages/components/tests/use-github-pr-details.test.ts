@@ -641,6 +641,27 @@ describe('useGitHubPrDetails target isolation', () => {
     expect((await refreshed)?.pullRequest.title).toBe('After merge');
   });
 
+  it('bypasses the browser cache on open and when the server reports newer PR data', async () => {
+    const input = { workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 };
+    await renderHook(input);
+    await waitForResult(
+      (result) =>
+        result.state === 'ready' &&
+        !result.isRevalidating &&
+        githubMocks.githubFetchCheckRuns.mock.calls.length === 1
+    );
+    expect(githubMocks.githubFetchPullRequestDetails.mock.calls[0]?.[3]).toEqual({
+      cache: 'reload',
+    });
+    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
+
+    githubMocks.githubFetchCheckRuns.mockClear();
+    identityMocks.versions = { checkRunsUpdatedAt: Date.now() + 60_000 } as never;
+    await renderHook({ ...input });
+    await waitForResult(() => githubMocks.githubFetchCheckRuns.mock.calls.length === 1);
+    expect(githubMocks.githubFetchCheckRuns.mock.calls[0]?.[3]).toEqual({ cache: 'reload' });
+  });
+
   it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
     const refreshedPullRequest = createPullRequest(1, {
       title: 'Refreshed pull request',
@@ -900,7 +921,7 @@ describe('useGitHubPrDetails target isolation', () => {
     });
     await waitForResult((result) => result.data?.pullRequest.number === 1);
 
-    let mergePromise: Promise<void> | null = null;
+    let mergePromise: Promise<boolean> | null = null;
     await act(async () => {
       mergePromise = currentResult?.mergePullRequest('merge') ?? null;
     });
@@ -928,6 +949,72 @@ describe('useGitHubPrDetails target isolation', () => {
 
     expect(currentResult?.data?.pullRequest.number).toBe(2);
     expect(currentResult?.data?.pullRequest.merged).toBe(false);
+    await expect(mergePromise).resolves.toBe(false);
+  });
+
+  it('reports a merge as done only when GitHub merged the PR', async () => {
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
+
+    githubMocks.githubMergePullRequest.mockResolvedValueOnce({
+      sha: '',
+      merged: false,
+      message: 'Base branch was modified',
+    });
+    let notMerged: boolean | undefined;
+    await act(async () => {
+      notMerged = await currentResult?.mergePullRequest('merge');
+    });
+    expect(notMerged).toBe(false);
+    expect(currentResult?.data?.pullRequest.merged).toBe(false);
+
+    githubMocks.githubMergePullRequest.mockResolvedValueOnce({
+      sha: 'merged-sha',
+      merged: true,
+      message: 'merged',
+    });
+    let merged: boolean | undefined;
+    await act(async () => {
+      merged = await currentResult?.mergePullRequest('merge');
+    });
+    expect(merged).toBe(true);
+    expect(currentResult?.data?.pullRequest.merged).toBe(true);
+  });
+
+  it('reports ready-for-review as not done when the PR cannot be addressed', async () => {
+    githubMocks.githubFetchPullRequestDetails.mockImplementation(
+      async (_token: string, _repoFullName: string, prNumber: number) =>
+        createPullRequest(prNumber, { draft: true, nodeId: '' })
+    );
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
+
+    let done: boolean | undefined;
+    await act(async () => {
+      done = await currentResult?.markReadyForReview();
+    });
+    expect(done).toBe(false);
+    expect(githubMocks.githubMarkPullRequestReadyForReview).not.toHaveBeenCalled();
+  });
+
+  it('polls pending mergeability past the browser HTTP cache', async () => {
+    vi.useFakeTimers();
+    githubMocks.githubFetchPullRequestDetails.mockImplementation(
+      async (_token: string, _repoFullName: string, prNumber: number) =>
+        createPullRequest(prNumber, { mergeable: null, mergeableState: 'unknown' })
+    );
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
+
+    githubMocks.githubFetchPullRequestDetails.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalled();
+    for (const call of githubMocks.githubFetchPullRequestDetails.mock.calls) {
+      expect(call[3]).toEqual({ cache: 'reload' });
+    }
   });
 
   it('silently recovers from an apparent session expiry instead of showing the auth error', async () => {

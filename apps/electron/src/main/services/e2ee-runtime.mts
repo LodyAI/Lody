@@ -53,6 +53,7 @@ import {
   KeyMailbox,
   InstalledKeyStore,
   LedgerFeedStore,
+  LedgerFeedInvalidation,
   LedgerPinStore,
   LedgerViewSource,
   LedgerViewSourceError,
@@ -91,6 +92,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'invalid-input'
     | 'corrupt'
     | 'snapshot-history-required'
+    | 'key-update-required'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
@@ -160,9 +162,13 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
         return fail(
           error.message === 'e2ee_machine_not_owned' ? 'machine_not_owned' : 'machine_not_shared'
         )
+      // An unverifiable sharing policy is not a ledger failure.
+      if (error instanceof Error && error.message === 'e2ee_machine_sharing_unavailable')
+        return fail('sharing_unavailable')
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
+      if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
       if (reason === 'invalid-input') return fail('invalid-input')
@@ -589,6 +595,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               sqliteLedgerFeedStore({ path: join(directory, name), mode: 'create-or-open' })
             )
           )
+        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const openFeed = (
           name: string,
           origin: Parameters<typeof LedgerFeed.layer>[0]['origin'],
@@ -601,7 +608,15 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               origin,
               expected,
               budget: { maxRecords: 1_000_000, maxBytes: 64 * 1024 * 1024 }
-            }).pipe(Layer.provideMerge(journaledFeedStore(name)), Layer.provideMerge(base))
+            }).pipe(
+              Layer.provideMerge(journaledFeedStore(name)),
+              Layer.provideMerge(
+                Layer.succeed(LedgerFeedInvalidation, {
+                  invalidate: () => sharingOwner?.invalidate()
+                })
+              ),
+              Layer.provideMerge(base)
+            )
             const result = yield* Effect.result(Layer.buildWithScope(layer, feedScope))
             if (Result.isFailure(result)) {
               yield* Scope.close(feedScope, Exit.void)
@@ -852,7 +867,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
         let roundAgain = false
         let closing = false
-        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const networkAbort = new AbortController()
         const stop = () => {
           closing = true
@@ -1062,7 +1076,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               signer: device,
               ledger: () => verified.current(),
               readEpochKey: (epoch) => history.read(epoch)
-            }).pipe(Scope.provide(scope))
+            }).pipe(Effect.provideService(VerifiedLedger, verified), Scope.provide(scope))
             bindings.set(descriptor.resource, value)
           }
           return value
@@ -1185,7 +1199,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
         })
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
-          sharing.invalidate()
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
           if (
@@ -1668,6 +1681,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.personalPairing.invitation(session)
           )
         ),
+      signAccountAdmission: (
+        workspaceId: string,
+        row: {
+          signingPublicKey: Uint8Array
+          encryptionPublicKey: Uint8Array
+          possessionProof: Uint8Array
+        }
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.signAccount(row)
+          )
+        ),
+      accountInvitation: (workspaceId: string, record: Uint8Array) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.accountInvitation(record)
+          )
+        ),
       resetLocalPairing: (workspaceId: string, resetId: string) =>
         withPairing(workspaceId, (pairing) => pairing.reset(resetId)),
       localPairingContext: (workspaceId: string) =>
@@ -1777,12 +1809,26 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               ? (machineId) =>
                   Effect.gen(function* () {
                     const status = yield* entry.status()
-                    return (yield* entry.sharing.authorize(
+                    // A retained verified withdrawal answers locally; only a newer
+                    // verified read (machine-sharing views) can release it.
+                    if (
+                      yield* entry.sharing.knownDenial(
+                        machineId,
+                        status.signingPublicKey ?? '',
+                        undefined
+                      )
+                    )
+                      return false
+                    const decision = yield* entry.sharing.authorize(
                       machineId,
                       status.signingPublicKey ?? '',
                       undefined,
                       withSharingHistory(entry, workspaceId, remote, readHistory)
-                    )).allowed
+                    )
+                    // An unverifiable policy is not a known withdrawal.
+                    if (!decision.allowed && decision.reason === 'policy-unavailable')
+                      return yield* Effect.fail(new Error('e2ee_machine_sharing_unavailable'))
+                    return decision.allowed
                   })
               : undefined
           )

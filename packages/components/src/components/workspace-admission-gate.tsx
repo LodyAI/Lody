@@ -101,6 +101,7 @@ export function WorkspaceAdmissionGate({
     return (
       <RouteMessage
         gate={null}
+        testId="workspace-device-revoked"
         title={t('e2ee.devices.revokedTitle')}
         description={t('e2ee.devices.revoked')}
         actionLabel={t('e2ee.devices.pairAgain')}
@@ -114,6 +115,7 @@ export function WorkspaceAdmissionGate({
     return (
       <RouteMessage
         gate={null}
+        testId="workspace-access-removed"
         title={t('e2ee.members.removedTitle')}
         description={t('e2ee.members.removed')}
       />

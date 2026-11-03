@@ -111,6 +111,18 @@ describe('inserting a path mention from outside the composer', () => {
     expect(ranges).toEqual([{ value: 'src/components/', start: 0, end: 15, kind: 'dir' }]);
   });
 
+  it('moves existing mention ranges when an external quote atom is inserted before them', async () => {
+    await render('');
+    await insert('src');
+    await act(async () => {
+      expect(handle?.insertExternalMention({ text: '[Quote]', id: 'quote-1', at: 0 })).toBe(true);
+    });
+    await render(value);
+    expect(value).toBe('[Quote]@src ');
+    expect(ranges).toContainEqual({ value: 'src/', start: 7, end: 11, kind: 'dir' });
+    expect(ranges).toContainEqual({ value: 'quote-1', start: 0, end: 7, kind: 'pasted_text' });
+  });
+
   it('appends to an existing draft with one separating space', async () => {
     await render('look at');
 

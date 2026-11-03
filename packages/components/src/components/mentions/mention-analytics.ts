@@ -31,16 +31,6 @@ export type MentionGithubFetchErrorCode =
   | 'aborted'
   | 'unknown';
 
-/**
- * Normalized local file fetch error codes (spec §8e: cli_not_running /
- * api_unavailable). The local source is the Electron/CLI IPC bridge.
- */
-export type MentionLocalFetchErrorCode =
-  | 'cli_not_running'
-  | 'api_unavailable'
-  | 'aborted'
-  | 'unknown';
-
 function toMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -78,18 +68,6 @@ export function normalizeGithubFetchErrorCode(err: unknown): MentionGithubFetchE
   return 'unknown';
 }
 
-export function normalizeLocalFetchErrorCode(err: unknown): MentionLocalFetchErrorCode {
-  const message = toMessage(err).toLowerCase();
-  if (message.includes('cli_not_running') || message.includes('cli not running')) {
-    return 'cli_not_running';
-  }
-  if (message.includes('unavailable') || message.includes('api_unavailable')) {
-    return 'api_unavailable';
-  }
-  if (message.includes('abort')) return 'aborted';
-  return 'unknown';
-}
-
 /**
  * Non-PII repo surrogate. Public repos can be sent as-is (already public on
  * GitHub); private repos are hashed so we can still group by repo without
@@ -119,50 +97,6 @@ function withBase(
     ...props,
   };
 }
-
-// All mention events are tier B (one user action / one menu open = one event)
-// except fetch errors which are tier A (`*_failed` churn-attribution, full).
-// capturePostHogEvent already null-guards the client and sanitizes properties,
-// so these helpers are side-effect-only and never throw into product code.
-
-export function captureMentionFileFetchError(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { errorCode: MentionGithubFetchErrorCode; repo: string | null; durationMs?: number | null }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/file/fetch_error',
-    withBase(
-      {
-        error_code: props.errorCode,
-        repo: props.repo,
-        duration_ms: props.durationMs ?? null,
-      },
-      base
-    )
-  );
-}
-
-export function captureMentionFileLocalFetchError(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { errorCode: MentionLocalFetchErrorCode; sourceKind: 'local' | 'worktree' }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/file/local_fetch_error',
-    withBase({ error_code: props.errorCode, source_kind: props.sourceKind }, base)
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Single `@` two-level menu
-//
-// One menu replaced the four per-trigger menus, so these carry a `category`
-// dimension instead of living in per-type event families. Together they give
-// the first-level -> second-level funnel: menu_open -> category_enter -> select.
-// ---------------------------------------------------------------------------
 
 export function captureMentionMenuOpen(
   postHog: PostHogAnalyticsClient | null | undefined,

@@ -33,8 +33,11 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
   Tailwind wins same-property conflicts; keep it only for groups, menu-open and focus states.
 - Desktop work/wait/unread/send status belongs only in `SessionRowStatusIndicator`
-  inside `SidebarRowEndSlot`, never the leading slot; it replaces resting `Mergeable`,
-  worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
+  inside `SidebarRowEndSlot`. On two-line Session rows it stays on the title line while
+  the PR control remains accessible on the metadata line when Show Branch is enabled
+  ([decision](../../../../.agents/notes/implemented/feature/2026-11-02-sidebar-pull-requests.md));
+  otherwise hide the row's PR control. On single-line rows activity replaces resting
+  `Mergeable`, worktree or mobile time. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
 - Never hide a Session through nesting: missing, cross-section, cycling, or
@@ -112,3 +115,17 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
+
+
+## Automation markers
+
+- Key workspace, machine, invitation, membership and composer controls expose
+  stable `data-testid` values independent of translated labels. Repeated rows keep
+  the existing full identity attribute (`data-settings-machine-id`,
+  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
+  `data-agent-config-id`).
+  These are public identifiers, never invitation tokens, credentials or key bytes.
+- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
+  it is not execution permission. Tests must still bind the workspace and observe
+  the required content or control surface. Preserve existing semantic/identity
+  attributes so older harnesses continue to work.

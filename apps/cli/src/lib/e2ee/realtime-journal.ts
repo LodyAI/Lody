@@ -419,7 +419,15 @@ export class RealtimeJournal {
       db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
       position, frame, digest FROM realtime_responses LIMIT 0`).all();
     } catch (cause) {
-      throw new RealtimeJournalError('unsupported_schema', cause);
+      if (
+        cause instanceof Error &&
+        'code' in cause &&
+        cause.code === 'SQLITE_ERROR' &&
+        (cause.message.startsWith('no such table: ') ||
+          cause.message.startsWith('no such column: '))
+      )
+        throw new RealtimeJournalError('unsupported_schema', cause);
+      throw cause;
     }
   }
 

@@ -52,7 +52,8 @@ jobs:
         if: steps.setup.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          pnpm install --frozen-lockfile --ignore-scripts
+          # prune tracks hard links; macOS cloned imports would be removed.
+          pnpm install --frozen-lockfile --ignore-scripts --package-import-method=hardlink
           # The fallback restore may carry packages from older lockfiles.
           pnpm store prune
 

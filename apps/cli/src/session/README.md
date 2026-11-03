@@ -15,6 +15,14 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Automation ownership
+
+[Session authority](session-automation-authority.ts) admits actions requested by
+[Automations](../automations/README.md). Execution stages typed outcomes before
+Inbox release; the durable source reconciles release without replaying requests.
+Native recovery preserves the exact conversation and launch binding. Archive uses
+existing admission/rewrite barriers, including parent admission held by child
+executions; it never treats an idle metadata label as release proof.
 ## ACP command exit
 
 `terminal-manager.ts` records the direct process's `exit` status immediately.
@@ -503,6 +511,20 @@ settled cursor into the next chunk. Publication still polls for later events and
 reloads foreign work. A retained goal value is reusable only for the same host
 and freshly observed cursor. See the
 [append CPU investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-append-cpu-structure.md).
+
+GC inspects goals through synchronous Loro fields or Roost's certified projection
+and reverse logical pages. See the
+[goal-query decision and measurements](../../../../.agents/notes/implemented/architecture/2026-10-30-application-memory-attribution.md).
+
+Owners advertising `sessionHistoryInspection` v2 serve metadata, goals, limited
+transcripts and replay in one owner task. General selection validates a digest of
+query fields rather than requiring unrelated body revisions to remain unchanged.
+Older owners retain the single-`readAll` compatibility path; v2 failures propagate
+without that fallback. Certified goals and recovery replay avoid preparing unrelated
+query fields; replay formats ordered members individually on the owner. Transcript
+queries reuse visibility flags for unchanged records. Sparse membership edits
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an

@@ -1,3 +1,8 @@
+import {
+  AndroidEmulatorCommandSchema,
+  AndroidEmulatorRequestSchema,
+  AndroidEmulatorResponseSchema,
+} from './android-emulator';
 import { SessionFileRootIdSchema } from './project-path';
 import { FileDownloadRequestSchema, FileDownloadResponseSchema } from './file-download';
 import { ProjectLocalMemberProbeSchema } from './workspace-project';
@@ -93,6 +98,14 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       inputConfig: z.record(z.string(), z.unknown()),
       notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
       notificationProvenancePending: z.boolean().optional(),
+      // Daemon-hosted tools use the frozen sender without rereading input history.
+      // The legacy socket handler omits this field for older strict readers.
+      sender: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('user') }).strict(),
+          z.object({ kind: z.literal('agent'), sessionId: SessionIdSchema }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
 ]);
@@ -149,6 +162,16 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/control'),
     params: IosSimulatorRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/agent-control'),
+    params: z
+      .object({ sessionId: SessionIdSchema, command: AndroidEmulatorCommandSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('android-emulator/control'),
+    params: AndroidEmulatorRequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
@@ -440,6 +463,7 @@ export const LocalMachineRpcResultSchema = z.union([
   ProjectProbeLocalMemberResultSchema,
   MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
+  AndroidEmulatorResponseSchema,
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
   SessionToolResultSchema,

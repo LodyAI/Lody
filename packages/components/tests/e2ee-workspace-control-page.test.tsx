@@ -278,8 +278,10 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
       (node) => node.textContent === key
     ) as HTMLElement;
   expect(action('e2ee.members.promote')).toBeDefined();
+  expect(document.querySelector('[data-testid="e2ee-member-role"]')?.getAttribute('data-membership-id')).toBe(member.membershipId);
   await act(async () => action('e2ee.members.remove').click());
   expect(remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="e2ee-member-remove-dialog"]')?.getAttribute('data-membership-id')).toBe(member.membershipId);
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
     'e2ee.members.removeDescription'
   );

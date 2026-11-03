@@ -1,4 +1,5 @@
-import type { IosSimulatorExterior } from '@lody/shared';
+import { useDevicePreviewPlatform } from './device-preview-platform';
+import type { AndroidEmulatorQuality, IosSimulatorExterior } from '@lody/shared';
 import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
@@ -56,6 +57,7 @@ export type IosSimulatorPanelBlocker =
   | 'offline';
 
 export type IosSimulatorPanelViewProps = {
+  quality?: { onChange: (value: AndroidEmulatorQuality) => void };
   deviceExterior?: { udid: string; geometry: IosSimulatorExterior; imageUrl: string };
   machineName: string;
   blocker: IosSimulatorPanelBlocker | null;
@@ -390,6 +392,7 @@ export function IosSimulatorPanelView({
   onStart,
   onCancel,
   onStop,
+  quality,
   onRestore,
   onRetry,
   onCopyDiagnostics,
@@ -404,6 +407,7 @@ export function IosSimulatorPanelView({
   const { t } = useTranslation();
   const stateLabel = useIosSimulatorDeviceStateLabel();
   const errorCopy = useIosSimulatorErrorCopy();
+  const platform = useDevicePreviewPlatform();
   const runtimes = catalog.phase === 'ready' ? catalog.runtimes : [];
   const devices = catalog.phase === 'ready' ? catalog.devices : [];
   const deviceByUdid = new Map(devices.map((device) => [device.udid, device]));
@@ -414,6 +418,10 @@ export function IosSimulatorPanelView({
   const busy = pendingAction !== null;
   const buttonLabel = useIosSimulatorButtonLabel();
   const bezel = (controls?.viewMode ?? 'device') === 'device';
+  const controlsWithQuality =
+    controls && quality && status.phase === 'ready'
+      ? { ...controls, quality: { onChange: quality.onChange, disabled: busy } }
+      : controls;
 
   const copyDiagnosticsButton = (
     <Button type="button" variant="ghost" size="small" onClick={onCopyDiagnostics}>
@@ -488,10 +496,17 @@ export function IosSimulatorPanelView({
           title={t('sessions.iosSimulator.catalog.emptyTitle', 'No simulators on {{machine}}', {
             machine: machineName,
           })}
-          detail={t(
-            'sessions.iosSimulator.catalog.emptyDetail',
-            'Add one in Xcode under Window › Devices and Simulators, then refresh.'
-          )}
+          detail={
+            platform === 'android'
+              ? t(
+                  'sessions.androidEmulator.emptyDetail',
+                  'Create an AVD in Android Studio Device Manager, then refresh.'
+                )
+              : t(
+                  'sessions.iosSimulator.catalog.emptyDetail',
+                  'Add one in Xcode under Window › Devices and Simulators, then refresh.'
+                )
+          }
         >
           {refreshButton}
         </Message>
@@ -725,12 +740,17 @@ export function IosSimulatorPanelView({
             />
           </div>
         ) : null}
-        {controls && controlsLayout === 'menu' ? (
-          <IosSimulatorControls layout="menu" {...controls} />
+        {status.phase === 'ready' && blocker === null ? (
+          <Button type="button" variant="secondary" size="small" disabled={busy} onClick={onStop}>
+            {t('sessions.iosSimulator.action.stop', 'Stop preview')}
+          </Button>
+        ) : null}
+        {controlsWithQuality && controlsLayout === 'menu' ? (
+          <IosSimulatorControls layout="menu" {...controlsWithQuality} />
         ) : null}
       </div>
-      {controls && controlsLayout === 'toolbar' ? (
-        <IosSimulatorControls layout="toolbar" {...controls} />
+      {controlsWithQuality && controlsLayout === 'toolbar' ? (
+        <IosSimulatorControls layout="toolbar" {...controlsWithQuality} />
       ) : null}
       <div {...stylex.props(styles.stage)}>{renderStage()}</div>
     </div>

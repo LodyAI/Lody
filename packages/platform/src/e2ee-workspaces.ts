@@ -9,6 +9,7 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
+import type { E2eeAccountPairingRuntime } from './e2ee-account-pairing';
 import type { ReadonlyStore } from './store';
 import type { PlatformSessionState } from './provider';
 
@@ -95,7 +96,8 @@ export interface E2eeRuntimeStatus {
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The host's own public export, for ledger display without another replay. */
+/** The host's own public export. Complete originals can recover prefix hashes
+ * omitted by retained-state serialization at the same head and state digest. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
@@ -119,7 +121,7 @@ export interface E2eeManagementState {
   }[];
 }
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
-export interface E2eeWorkspaceRuntime {
+export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   readMachineSharing?(

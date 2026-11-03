@@ -76,9 +76,9 @@ The encrypted adapter enables Meta, Loro documents and the owning workspace/mach
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
 
-New content seals select the verified current epoch inside core, never an older
-renderer hint. Missing current keys fail for retry; keep already sealed old frames
-and historical reads. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+New content seals prefer installed current keys inside core, never renderer hints.
+Only genuine absence permits retained published keys within the durable fifteen-minute
+observation budget; exhaustion fails for retry. Keep sealed old frames and history. See the [sealing decision](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 
 All installed/candidate binding fields are authenticated AAD and encrypted in the
 core payload. For new workspaces, use `prepareDevice` only for local genesis signing, then
@@ -118,7 +118,15 @@ server labels never establish native identity. [Decision](../../../../.agents/no
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
 clear the removed marker only after verifying a different retained signing key.
-Only the exact server code `e2ee_device_revoked` (`E2eeDeviceRevokedError`) is a
-device revocation. It reuses the same device-bound receipt and cleanup, records its
-reason, and reports `e2ee_device_revoked` until a re-pair replaces the key.
+Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly
+credential-bound endpoints may produce `E2eeMemberRemovedError`/`E2eeDeviceRevokedError`.
+JWT, transport, parsing and unrelated endpoint failures never authorize cleanup,
+even with matching codes or types. The account boundary projects typed results,
+including causes, to their exact codes with the `accessLoss` marker.
+Revocation uses the device-bound removal receipt and cleanup, records its reason,
+and remains terminal until re-pairing replaces the key. Failed local operations,
+including dispatch, confirm loss through this device's credential.
+Dispatch still requires its calling reader. Temporary status hosts drain outside
+the account lock on every exit, including failed identity rechecks, unless another
+reader owns them.
 [Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md).

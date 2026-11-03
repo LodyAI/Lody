@@ -14,6 +14,9 @@ import {
   Duration,
 } from 'effect';
 import { importBrowserDevice, type BrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
+import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
+import { makePortableAccountPairingApprover } from '../../src/account-requester';
+import { decodePersonalInvitation } from '../../src/pairing';
 import {
   browserClientCustody,
   browserClientWriter,
@@ -80,6 +83,7 @@ import {
   type PersonalPairingOffer,
   type PersonalExchange,
   type PersonalExchangeResponse,
+  accountPairingOffer,
 } from '../../src';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -119,6 +123,7 @@ let offer: PersonalPairingOffer,
 let databasePrefix = 'personal';
 const FIXED_NOW = 1_800_000_000_000;
 let fixedClock: Clock.Clock;
+let graceElapsed = 0;
 let controlledClock:
   | {
       advance(ms: number): Effect.Effect<void>;
@@ -154,6 +159,7 @@ export async function boot(
   controlledClose = false,
   prefix = 'personal'
 ) {
+  graceElapsed = 0;
   databasePrefix = prefix;
   mode = input;
   events = [];
@@ -207,12 +213,12 @@ export async function boot(
       } else controlledClock = undefined;
       fixedClock = yield* Clock.clockWith((clock) =>
         Effect.succeed({
-          currentTimeMillisUnsafe: () => FIXED_NOW,
-          currentTimeMillis: Effect.succeed(FIXED_NOW),
+          currentTimeMillisUnsafe: () => FIXED_NOW + graceElapsed,
+          currentTimeMillis: Effect.sync(() => FIXED_NOW + graceElapsed),
           currentTimeNanosUnsafe: () => BigInt(FIXED_NOW) * 1_000_000n,
           currentTimeNanos: Effect.succeed(BigInt(FIXED_NOW) * 1_000_000n),
-          monotonicTimeNanosUnsafe: () => 0n,
-          monotonicTimeNanos: Effect.succeed(0n),
+          monotonicTimeNanosUnsafe: () => BigInt(graceElapsed) * 1_000_000n,
+          monotonicTimeNanos: Effect.sync(() => BigInt(graceElapsed) * 1_000_000n),
           sleep: controlledSleep ?? clock.sleep.bind(clock),
         })
       );
@@ -273,7 +279,7 @@ export async function boot(
               bucketId: badToken ? 'lody' : 'protected-fixture',
               gatewayBaseUrl: 'https://streams.example.test',
               expiresIn: 900,
-              expiresAt: FIXED_NOW + 900000,
+              expiresAt: FIXED_NOW + graceElapsed + 900000,
             };
           }),
         custody: (binding, candidateRequest) =>
@@ -457,6 +463,32 @@ export async function boot(
       });
       const remote = PersonalHostRemote.of({
         accountId: 'account',
+        ...(localStorage.getItem('qualify-approval-history')
+          ? {
+              history: (_credential: Uint8Array) =>
+                Effect.gen(function* () {
+                  if (localStorage.getItem('synthetic-offline'))
+                    return yield* new LedgerFeedError({ code: 'native-unavailable' });
+                  const historyRecords = localStorage.getItem('truncate-approval-history')
+                    ? records.slice(0, 1)
+                    : records;
+                  return [
+                    {
+                      workspaceId: offer.workspaceId,
+                      genesisHash: offer.genesisHash,
+                      checkpoint: {
+                        length: historyRecords.length,
+                        headHash: toHex(hashRecordBytes(historyRecords.at(-1)!).toBytes()),
+                      },
+                      startIndex: 0,
+                      recordsHex: historyRecords.map(toHex),
+                      position: 'opaque/' + records.length,
+                      nextCursor: null,
+                    },
+                  ];
+                }),
+            }
+          : {}),
         exchange: (request: PersonalExchange) =>
           Effect.gen(function* () {
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
@@ -714,6 +746,161 @@ export async function invoke(action: string) {
               localStorage.setItem('initial-invitation', invitation);
             return true;
           }
+          // Account-wide pairing: no per-workspace offer; the endorser arrives with the approval.
+          case 'accountPrepare':
+            return yield* host.prepareAccount({
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            });
+          case 'accountApproveAndAccept': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            const receipt = yield* signLedgerSnapshot({
+              signer: owner,
+              ledger: () => Effect.succeed(view()),
+            });
+            const invitationHex = encodePersonalInvitation({
+              ...receipt,
+              workspaceId: offer.workspaceId,
+              offset: 'opaque/' + records.length,
+            });
+            yield* host.acceptAccount({
+              ...pin,
+              invitationHex,
+              endorser: toHex(owner.publicKey.toBytes()),
+            });
+            return true;
+          }
+          // A Member approver cannot sign a snapshot: install from the full history.
+          case 'accountApproveByHistory': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            yield* host.acceptAccountHistory({
+              ...pin,
+              pages: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: { length: records.length, headHash: toHex(view().head.toBytes()) },
+                  startIndex: 0,
+                  recordsHex: records.map(toHex),
+                  position: 'opaque/' + records.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+            return true;
+          }
+          case 'accountOpen':
+            if (session) yield* session.close();
+            session = yield* host.open(
+              accountPairingOffer(host.scope, {
+                genesisRecordHex: offer.genesisRecordHex,
+                membershipId: offer.membershipId,
+              })
+            );
+            return true;
+          // This admitted device approves another new device of the same account.
+          case 'accountApproveNewDevice': {
+            const fresh = yield* importBrowserDevice({
+              signingPrivate: new Uint8Array(32).fill(14),
+              encryptionPrivate: new Uint8Array(32).fill(15),
+            }).pipe(Scope.provide(scope));
+            const proof = yield* prepareDeviceAdmission({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+              encryptionPublicKey: fresh.enc,
+              kind: 'personal',
+              signer: fresh,
+            });
+            const approver = makePortableAccountPairingApprover({
+              workspaces: () => [
+                { workspaceId: offer.workspaceId, name: 'Alpha', genesisHash: offer.genesisHash },
+              ],
+              session: () => Effect.succeed(session!),
+              // The service appends the original under the account's authentication.
+              appendRecord: (request) =>
+                Effect.sync(() => {
+                  records.push(fromHex(request.recordHex));
+                  retain();
+                }),
+            });
+            const [workspace] = yield* approver();
+            const signed = yield* workspace!.sign({
+              genesis: fromHex(offer.genesisHash),
+              signingPublicKey: fresh.publicKey.toBytes(),
+              encryptionPublicKey: fresh.enc.toBytes(),
+              possessionProof: proof.possessionSignature.toBytes(),
+              credentialHash: new Uint8Array(32).fill(0x66),
+            });
+            const before = yield* session!.accountApproval.settle(signed.record);
+            yield* workspace!.append(
+              signed.requestId,
+              signed.record,
+              new Uint8Array(32).fill(0x66)
+            );
+            const invitation = yield* workspace!.invitation(signed.record);
+            // The new device's own check: the snapshot verifies for this approver.
+            yield* Effect.fromResult(
+              verifyWorkspaceInvitationSnapshot(
+                {
+                  workspaceId: offer.workspaceId,
+                  genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+                  endorser: session!.binding.device,
+                },
+                decodePersonalInvitation(toHex(invitation!))
+              )
+            );
+            const access = yield* workspace!.access();
+            return {
+              before,
+              length: records.length,
+              invitation: invitation !== null,
+              access: access.workspaceId === offer.workspaceId && access.credential.length === 64,
+            };
+          }
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);
@@ -802,7 +989,10 @@ export async function invoke(action: string) {
             );
           case 'resumeForeign':
             return yield* session!.resume();
+          case 'forkBeforeApproval':
           case 'addMachine': {
+            const machineId = action === 'forkBeforeApproval' ? 'fork-machine' : 'fixture-machine';
+            if (action === 'forkBeforeApproval') records = records.slice(0, 1);
             const machine = yield* importBrowserDevice({
               signingPrivate: new Uint8Array(32).fill(12),
               encryptionPrivate: new Uint8Array(32).fill(13),
@@ -812,14 +1002,14 @@ export async function invoke(action: string) {
               membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
               encryptionPublicKey: machine.enc,
               kind: 'machine',
-              machineId: 'fixture-machine',
+              machineId,
               signer: machine,
             });
             const proposal = Result.getOrThrow(
               prepareLedgerCommand(view(), owner.publicKey, {
                 _tag: 'AdmitDevice',
                 kind: 'machine',
-                machineId: 'fixture-machine',
+                machineId,
                 replaces: null,
                 signingPublicKey: machine.publicKey,
                 encryptionPublicKey: machine.enc,
@@ -847,6 +1037,12 @@ export async function invoke(action: string) {
             return yield* session!.status();
           case 'wrongOffer':
             return yield* host.prepare({ ...offer, genesisHash: '77'.repeat(32) });
+          case 'graceLastMillisecond':
+            graceElapsed = 899_999;
+            return true;
+          case 'graceExpired':
+            graceElapsed = 900_000;
+            return true;
           case 'rotateRemote': {
             const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72))),
               genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
@@ -1119,9 +1315,11 @@ export async function bootRuntime(withSharing = false) {
           : Effect.succeed({ userId: runtimeAccount, source: 'offline' as const }),
       ledgerRecords: (checked) =>
         Effect.succeed(
-          records
-            .slice(checked.historyStart, checked.length)
-            .map((record, index) => ({ position: checked.historyStart + index, record }))
+          localStorage.getItem('empty-local-originals')
+            ? []
+            : records
+                .slice(checked.historyStart, checked.length)
+                .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);
@@ -1143,6 +1341,24 @@ export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
     switch (action) {
+      case 'observeCheckpoint':
+        value = {
+          genesisHash: offer.genesisHash,
+          length: view().length,
+          headHash: toHex(view().head.toBytes()),
+        };
+        localStorage.setItem('pre-approval-checkpoint', JSON.stringify(value));
+        break;
+      case 'openObserved': {
+        const status = await runtime.open(
+          offer.workspaceId,
+          JSON.parse(localStorage.getItem('pre-approval-checkpoint')!),
+          'account'
+        );
+        runtimeLease = status.readerOwner;
+        value = status;
+        break;
+      }
       case 'prepare':
         value = await runtime.preparePersonalJoin!(offer);
         break;

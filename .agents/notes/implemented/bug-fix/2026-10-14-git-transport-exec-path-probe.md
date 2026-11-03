@@ -48,6 +48,16 @@ mismatched-but-usable marker remains an emergency layout source when the probe
 fails: its recorded Git is still a working Git, and regenerating identical
 adapters from it beats failing startup on a transient error.
 
+Helper materialization removes a dangling symbolic link from the managed shim
+directory before recreating it against the selected Git layout. `existsSync`
+follows the link and alone cannot distinguish it from a vacant destination;
+leaving the link in place makes both the link and copy fallbacks fail. A failed
+existence check can also mean permission denial, so removal requires a missing
+target error; other filesystem errors remain visible. Existing usable links and
+regular files remain untouched, and credential adapters retain their existing
+ownership. This does not reconcile usable helpers from an older installation when
+that installation still exists.
+
 ## Alternatives
 
 - **Retry only**: leaves startup exposed whenever the pressure outlives the
