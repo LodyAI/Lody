@@ -113,6 +113,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarPrimaryViewAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
@@ -141,6 +142,10 @@ import {
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
+import {
+  SidebarPrimaryViewSwitcher,
+  SidebarProjectList,
+} from '@/components/project-hub/sidebar-project-list';
 import { Button } from '@lody/ui/button';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -342,6 +347,14 @@ function isHomeRoute(pathname: string, workspaceSlug: string | null): boolean {
       : pathname;
 
   return normalizedPath.startsWith('/chat');
+}
+
+function getSelectedProjectId(pathname: string, workspaceSlug: string | null): string | null {
+  if (!workspaceSlug) return null;
+  const prefix = `/${workspaceSlug}/projects/`;
+  if (!pathname.startsWith(prefix)) return null;
+  const id = pathname.slice(prefix.length).split('/')[0];
+  return id ? decodeURIComponent(id) : null;
 }
 
 function isArchiveRoute(pathname: string, workspaceSlug: string | null): boolean {
@@ -3690,6 +3703,45 @@ export function LoroAppSidebar({
     openSettings('github');
   }, [closeMobileDrawer, openSettings, workspaceSlug]);
 
+  // --- Project hub prototype ---
+  const [primaryView, setPrimaryView] = useAtom(sidebarPrimaryViewAtom);
+  const selectedProjectId = useMemo(
+    () => getSelectedProjectId(location.pathname, workspaceSlug),
+    [location.pathname, workspaceSlug]
+  );
+  const projectHubRows = useMemo(
+    () => withSessionSendStates(projectGroupTasks, (row) => row.sessionId, sendStates),
+    [projectGroupTasks, sendStates]
+  );
+  const handleSelectProject = useCallback(
+    (projectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/projects/$projectId',
+        params: { workspaceName: workspaceSlug, projectId },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+  const handleCreateProject = useCallback(
+    () => requestProjectEditor({ kind: 'create', onCreated: handleSelectProject }),
+    [handleSelectProject, requestProjectEditor]
+  );
+  const primaryViewSwitcher = (
+    <SidebarPrimaryViewSwitcher value={primaryView} onChange={setPrimaryView} />
+  );
+  const primaryViewContent =
+    primaryView === 'projects' ? (
+      <SidebarProjectList
+        projects={workspaceProjects}
+        rows={projectHubRows}
+        selectedProjectId={selectedProjectId}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+      />
+    ) : undefined;
+
   // --- Keyboard navigation integration ---
   const keyboardNavLocalSections = useMemo<SidebarNavigationLocalSection[]>(() => {
     const result: SidebarNavigationLocalSection[] = [];
@@ -3906,6 +3958,8 @@ export function LoroAppSidebar({
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
         topContent={sidebarTopContent ?? undefined}
+        primaryViewSwitcher={primaryViewSwitcher}
+        primaryViewContent={primaryViewContent}
         desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}

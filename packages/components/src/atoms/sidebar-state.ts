@@ -307,6 +307,22 @@ export const sidebarLastWidthAtom = atomWithStorage<number>(
 );
 
 // ============================================================================
+// Sidebar primary view (Projects vs Chats) — project hub prototype
+// ============================================================================
+
+export type SidebarPrimaryView = 'projects' | 'chats';
+
+/**
+ * Transitional switch between the project hub (one card per Project; opening
+ * one shows its coordinator conversation and sub-conversation board) and the
+ * existing conversation list. Chats stays the default until the hub replaces it.
+ */
+export const sidebarPrimaryViewAtom = atomWithStorage<SidebarPrimaryView>(
+  'lody-sidebar-primary-view',
+  'chats'
+);
+
+// ============================================================================
 // Sidebar Organize Mode (Workspace vs Updated)
 // ============================================================================
 
