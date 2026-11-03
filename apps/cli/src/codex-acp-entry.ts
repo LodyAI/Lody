@@ -3,6 +3,6 @@ if (!process.env.CODEX_PATH?.trim()) {
   process.exit(1);
 }
 
-await import('acp-extension-codex');
+await import('acp-extension-codex/dist/lody.js');
 
 export {};
