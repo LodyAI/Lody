@@ -49,6 +49,10 @@ import {
   type RepoWatchHandle,
 } from 'loro-repo';
 import { createWorkspaceRepoStorage } from './workspace-repo-storage';
+import {
+  reportWorkspaceCloseFailure,
+  type WorkspaceCloseStage,
+} from './workspace-close-diagnostics';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -793,6 +797,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
+  let disposeAttempt: Promise<void> | null = null;
+  let uncertainRepoClose = false;
+  const closedSteps = new Set<WorkspaceCloseStage>();
+  const reportedCloseFailures = new Set<WorkspaceCloseStage>();
+  const closeStep = async (stage: WorkspaceCloseStage, close: () => void | Promise<void>) => {
+    if (closedSteps.has(stage)) return;
+    try {
+      await close();
+      closedSteps.add(stage);
+    } catch (error) {
+      if (!reportedCloseFailures.has(stage)) {
+        reportedCloseFailures.add(stage);
+        reportWorkspaceCloseFailure(stage, error);
+      }
+      throw error;
+    }
+  };
   const sessionReaderAbort = new AbortController();
   const sessionReaderWakeListeners = new Set<() => void>();
   let reconnectingStatusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -5439,121 +5460,130 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const dispose = () => {
-    if (disposePromise) {
-      return disposePromise;
-    }
+    if (disposeAttempt) return disposeAttempt;
+    // loro-repo marks itself destroyed before closing its children. A failed
+    // terminal destroy has no retry/drain receipt; its later no-op is not proof.
+    if (uncertainRepoClose) return disposePromise!;
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
-    disposePromise = Promise.resolve().then(async () => {
-      egressAbort.abort(new Error('Runtime disposed'));
-      await encryptedDispatch?.close();
-      sessionReaderAbort.abort();
-      windowBootstrap?.close();
-      sharedWindowDocuments.clear();
-      streamsTokenAbort?.abort();
+    const attempt = Promise.resolve().then(async () => {
+      await closeStep('dispatch', async () => {
+        await encryptedDispatch?.close();
+      });
+      await closeStep('readers', () => {
+        sessionReaderAbort.abort();
+        windowBootstrap?.close();
+        sharedWindowDocuments.clear();
+        streamsTokenAbort?.abort();
+      });
       const reconnectsClosed = Promise.all([
         localReconnectLoop?.close(),
         cloudReconnectLoop?.close(),
         webAttachReconnectLoop?.close(),
       ]);
       // Held sends are in memory only: closing the workspace drops them.
-      await pendingSends.dispose();
+      void reconnectsClosed.catch(() => {});
+      await closeStep('pending-input', () => pendingSends.dispose());
       // Cancel and join send I/O while its cache, transport and repo still exist.
-      await sendResources.dispose();
-      cancelDelayedBackgroundSyncStart?.();
-      cancelDelayedBackgroundSyncStart = null;
-      cancelDelayedStartupAcpCapabilitiesRefresh?.();
-      cancelDelayedStartupAcpCapabilitiesRefresh = null;
-      startupAcpCapabilitiesRefreshAbortController?.abort();
-      startupAcpCapabilitiesRefreshAbortController = null;
-      backgroundSyncCoordinator?.stop();
-      backgroundSyncCoordinator = null;
-      backgroundSyncHighWaterStore?.close();
-      backgroundSyncHighWaterStore = null;
-      eagerSyncWorkerClient?.dispose();
-      eagerSyncWorkerClient = null;
-      localReconnectLoop?.stop();
-      cloudReconnectLoop?.stop();
-      webAttachReconnectLoop?.stop();
-      if (reconnectBackstopTimer) {
-        clearInterval(reconnectBackstopTimer);
-        reconnectBackstopTimer = null;
-      }
-      untrackPresenceSync();
-      unsubscribeStartupAcpCapabilitiesPresence();
-      unsubscribePresenceSyncState?.();
-      untrackMachineMonitorSync();
-      untrackPromptSuggestionSync();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      transportReady.reject(new Error('Runtime disposed'));
-
-      for (const pending of pendingSessionCreateResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionCreateResponses.clear();
-      sessionCreateResponseCache.clear();
-
-      for (const pending of pendingSessionCancelResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionCancelResponses.clear();
-
-      for (const pending of pendingSessionChatResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionChatResponses.clear();
-
-      for (const pending of pendingMachineStatusResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingMachineStatusResponses.clear();
-
-      for (const pending of pendingMachinePingResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingMachinePingResponses.clear();
-
-      machineAcpBinaryStatusRegistry.clearAll();
-      machineAcpBinaryInstallRegistry.clearAll();
-      machineAcpAuthenticateRegistry.clearAll();
-      machineAcpBinaryProgressListeners.clear();
-      machineAcpBinaryProgressSnapshots.clear();
-      machineAcpAuthenticationProgressListeners.clear();
-      for (const machineId of machineProtocolCapabilitiesReads.keys()) {
-        invalidateMachineProtocolCapabilities(machineId);
-      }
-      machineProtocolCapabilitiesCache.clear();
-      machineProtocolCapabilitiesReads.clear();
-
-      for (const handle of watchHandles) {
-        try {
-          handle.unsubscribe();
-        } catch {
-          // ignore
+      await closeStep('send-resources', () => sendResources.dispose());
+      await closeStep('listeners', () => {
+        cancelDelayedBackgroundSyncStart?.();
+        cancelDelayedBackgroundSyncStart = null;
+        cancelDelayedStartupAcpCapabilitiesRefresh?.();
+        cancelDelayedStartupAcpCapabilitiesRefresh = null;
+        startupAcpCapabilitiesRefreshAbortController?.abort();
+        startupAcpCapabilitiesRefreshAbortController = null;
+        backgroundSyncCoordinator?.stop();
+        backgroundSyncCoordinator = null;
+        backgroundSyncHighWaterStore?.close();
+        backgroundSyncHighWaterStore = null;
+        eagerSyncWorkerClient?.dispose();
+        eagerSyncWorkerClient = null;
+        localReconnectLoop?.stop();
+        cloudReconnectLoop?.stop();
+        webAttachReconnectLoop?.stop();
+        if (reconnectBackstopTimer) {
+          clearInterval(reconnectBackstopTimer);
+          reconnectBackstopTimer = null;
         }
-      }
-      watchHandles.length = 0;
+        untrackPresenceSync();
+        unsubscribeStartupAcpCapabilitiesPresence();
+        unsubscribePresenceSyncState?.();
+        untrackMachineMonitorSync();
+        untrackPromptSuggestionSync();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        transportReady.reject(new Error('Runtime disposed'));
 
-      await sessionStoreCache.disposeAll();
-      await previewVisualCommentStoreCache.disposeAll();
-      await scheduleStoreCache.disposeAll();
+        for (const pending of pendingSessionCreateResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionCreateResponses.clear();
+        sessionCreateResponseCache.clear();
+
+        for (const pending of pendingSessionCancelResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionCancelResponses.clear();
+
+        for (const pending of pendingSessionChatResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionChatResponses.clear();
+
+        for (const pending of pendingMachineStatusResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingMachineStatusResponses.clear();
+
+        for (const pending of pendingMachinePingResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingMachinePingResponses.clear();
+
+        machineAcpBinaryStatusRegistry.clearAll();
+        machineAcpBinaryInstallRegistry.clearAll();
+        machineAcpAuthenticateRegistry.clearAll();
+        machineAcpBinaryProgressListeners.clear();
+        machineAcpBinaryProgressSnapshots.clear();
+        machineAcpAuthenticationProgressListeners.clear();
+        for (const machineId of machineProtocolCapabilitiesReads.keys()) {
+          invalidateMachineProtocolCapabilities(machineId);
+        }
+        machineProtocolCapabilitiesCache.clear();
+        machineProtocolCapabilitiesReads.clear();
+
+        for (const handle of watchHandles) {
+          try {
+            handle.unsubscribe();
+          } catch {
+            // ignore
+          }
+        }
+        watchHandles.length = 0;
+      });
+
+      await closeStep('doc-stores', async () => {
+        await sessionStoreCache.disposeAll();
+        await previewVisualCommentStoreCache.disposeAll();
+        await scheduleStoreCache.disposeAll();
+      });
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
-        await codeCollabFileIndexCache.dispose();
+        await closeStep('file-index', () => codeCollabFileIndexCache.dispose());
       } catch (error) {
         codeCollabFileIndexCacheDisposeError = error;
       }
 
       let teardownTransportError: unknown = null;
       try {
-        await teardownTransport();
+        await closeStep('transport', () => teardownTransport());
       } catch (error) {
         if (!isDestroyedError(error)) {
           teardownTransportError = error;
@@ -5562,46 +5592,54 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       // Teardown first fences/removes live bindings; SDK work can then unwind.
       // Joining includes superseded generations, not just the latest attach.
-      await Promise.allSettled([
-        ...pendingWebAttaches,
-        metaRoomJoinPromise,
-        localTransportAttachPromise,
-        localStartupPromise,
-        initialTokenAttachPromise,
-      ]);
-      await reconnectsClosed;
-      // No reconnect sweep can add work after its loop has closed. Timed-out
-      // attempts may still be running, including attempts from earlier sweeps.
-      await Promise.allSettled(pendingCloudRejoins);
+      await closeStep('io-drain', async () => {
+        await Promise.allSettled([
+          ...pendingWebAttaches,
+          metaRoomJoinPromise,
+          localTransportAttachPromise,
+          localStartupPromise,
+          initialTokenAttachPromise,
+        ]);
+        await reconnectsClosed;
+        // No reconnect sweep can add work after its loop has closed. Timed-out
+        // attempts may still be running, including attempts from earlier sweeps.
+        await Promise.allSettled(pendingCloudRejoins);
+      });
       if (window.repo === repo) delete window.repo;
 
-      let destroyError: unknown = null;
-      try {
-        await repo.destroy();
-      } catch (error) {
-        if (!isDestroyedError(error)) {
-          destroyError = error;
-        }
-      }
-
-      if (destroyError) {
-        throw destroyError;
-      }
+      // Keep the Repo available to the retained cleanup owner until every
+      // transport/cache close succeeded. Never destroy it to mask a failure.
       if (teardownTransportError) {
         throw teardownTransportError;
       }
       if (codeCollabFileIndexCacheDisposeError) {
         throw codeCollabFileIndexCacheDisposeError;
       }
+      await closeStep('repo', async () => {
+        try {
+          await repo.destroy();
+        } catch (error) {
+          uncertainRepoClose = repo.destroyed;
+          throw error;
+        }
+      });
+    });
+    // disposePromise remains a permanent admission fence between attempts.
+    disposePromise = disposeAttempt = attempt;
+    // Fence readers before a metadata-ready continuation can win against close.
+    egressAbort.abort(new Error('Runtime disposed'));
+    sessionReaderAbort.abort();
+    void attempt.catch(() => {
+      if (disposeAttempt === attempt) disposeAttempt = null;
     });
     // A rejected disposal keeps the owner live: it never reports a closed transport.
     if (transportEffects)
-      void disposePromise.then(
+      void attempt.then(
         () => transportEffects.ownerClosed(true),
         () => transportEffects.ownerClosed(false)
       );
 
-    return disposePromise;
+    return attempt;
   };
 
   // When the page becomes visible again (e.g. after mobile sleep/wake, tab switch),

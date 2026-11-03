@@ -549,6 +549,67 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('retries a failed transport close without releasing the Repo or reviving its runtime', async () => {
+    const failure = new Error('temporary transport close failure');
+    const entered = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    let transportClosed = false,
+      repoClosed = false;
+    mocks.presenceStop.mockRejectedValueOnce(failure).mockImplementationOnce(async () => {
+      entered.resolve();
+      await released.promise;
+      transportClosed = true;
+    });
+    mocks.destroy.mockImplementationOnce(async () => {
+      if (!transportClosed) throw new Error('Repo released before transport');
+      repoClosed = true;
+    });
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    expect(repoClosed).toBe(false);
+    const retry = runtime.dispose();
+    expect(runtime.dispose()).toBe(retry);
+    try {
+      await entered.promise;
+      expect(repoClosed).toBe(false);
+      await runtime.setAuthToken('cannot-reactivate');
+      expect(cloudAttachCalls()).toEqual([]);
+    } finally {
+      released.resolve();
+      await retry;
+    }
+    expect(repoClosed).toBe(true);
+    await expect(runtime.dispose()).resolves.toBeUndefined();
+  });
+
+  it('does not treat a later Repo.destroy no-op as proof after uncertain terminal destruction', async () => {
+    const failure = new Error('terminal storage close outcome unknown');
+    let terminalDestroyEntered = false;
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    Object.defineProperty(runtime.repo, 'destroyed', { get: () => terminalDestroyEntered });
+    mocks.destroy.mockImplementationOnce(async () => {
+      terminalDestroyEntered = true;
+      throw failure;
+    });
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    // Matches the installed SDK: after setting destroyed, the next call can be a no-op.
+    mocks.destroy.mockResolvedValueOnce(undefined);
+    await expect(runtime.dispose()).rejects.toBe(failure);
+    expect(terminalDestroyEntered).toBe(true);
+    await runtime.setAuthToken('cannot-reactivate');
+    expect(cloudAttachCalls()).toEqual([]);
+  });
+
   it('joins a late token result and never publishes its Streams client after close', async () => {
     const entered = Promise.withResolvers<void>();
     const token = Promise.withResolvers<string>();
