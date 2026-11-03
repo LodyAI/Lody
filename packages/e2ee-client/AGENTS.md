@@ -14,6 +14,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Retain first request, approval and claim originals before network; reverify keys,
   credentials and approval on reopen. Never re-sign or switch a session on unknown
   results. Only independently verified current ledger admission permits receiving keys.
+- Optional history qualification retains signed pages under the same identity/session,
+  rechecks the original snapshot and preserves its origin and rollback pin. A cached
+  proof or checksum is never authority; missing raw bodies do not imply a fork.
 - Keep genuine ledger and historical reads usable under independent key/repair failures.
   New seals prefer the installed current epoch inside core, never a cached hint.
   Only a genuinely missing key permits retained-published-key writes within core’s

@@ -1,6 +1,7 @@
 import { checkWorkflowEvidence } from '../sources/workflows';
 import {
   getMachineRoomId,
+  getServerNow,
   getSessionRoomId,
   hasPendingUserTurnActivation,
   isLoroRepoDocDeleted,
@@ -24,6 +25,7 @@ import {
 } from '@lody/shared/automations';
 import { z } from 'zod';
 import type { Lody } from '@/lib/lody';
+import type { SessionDocument } from '@/lib/loro/doc';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
 import { createSessionBackend } from '@/session/session-backend';
@@ -433,6 +435,23 @@ export class AutomationSessionActionsLegacy {
     };
     return { state: 'resolved', prepared: json({ kind: 'create', input: prepared }) };
   }
+  /** Wake an idle dispatch watcher with causal proof of the queued input. */
+  private async signalQueue(doc: SessionDocument): Promise<void> {
+    if (!doc.handle) throw new Error('AUTOMATION_QUEUE_DOCUMENT_UNAVAILABLE');
+    const frontiers = doc.handle.doc.frontiers();
+    const meta = (await this.manager.repo.getDocMeta(doc.roomId))?.meta as SessionMeta | undefined;
+    const updatedAt = Math.max(
+      getServerNow(),
+      (meta?.messageQueueUpdatedAt ?? 0) + 1,
+      (meta?.messageQueueCheckedAt ?? 0) + 1
+    );
+    await this.manager.repo.upsertDocMeta(doc.roomId, {
+      messageQueueUpdatedAt: updatedAt,
+      messageQueueUpdateVersion: { updatedAt, frontiers },
+    });
+    await this.manager.repo.flush();
+  }
+
   async submit(receipt: AutomationReceipt): Promise<ActionResult> {
     const allowed = await this.authorize(receipt);
     if (allowed.value !== 'yes') return { state: 'blocked', reason: allowed.reason };
@@ -482,6 +501,10 @@ export class AutomationSessionActionsLegacy {
     const promotion = await backend.getQueuePromotionRecord(receipt.id);
     if (promotion || (prior.state === 'ready' && prior.turn.status !== 'prepared'))
       return { state: 'queued' };
+    if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id)) {
+      await this.signalQueue(doc);
+      return { state: 'queued' };
+    }
     const preparedInput =
       receipt.prepared?.kind === 'create'
         ? (receipt.prepared.input as unknown as PreparedSessionInput)
@@ -516,7 +539,7 @@ export class AutomationSessionActionsLegacy {
         agentType: config.agentType,
       },
     });
-    await this.manager.repo.flush();
+    await this.signalQueue(doc);
     return { state: 'queued' };
   }
   async reconcile(receipt: AutomationReceipt): Promise<ActionResult> {
@@ -561,8 +584,12 @@ export class AutomationSessionActionsLegacy {
       if (meta.processingUserMsgId === receipt.turnId) return { state: 'running' };
       if (read.turn.status !== 'prepared') return { state: 'queued' };
     }
-    if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id))
+    if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id)) {
+      // The process may have stopped after writing the row but before publishing
+      // its activation. Re-signal the same row; never enqueue a second input.
+      await this.signalQueue(doc);
       return { state: 'queued' };
+    }
     const disposition = this.authority.inputDisposition(
       receipt.sessionId as SessionId,
       receipt.turnId

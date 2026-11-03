@@ -1,5 +1,5 @@
 /** Platform-neutral personal-device product composition. No app activation or authenticated backend is supplied by default. */
-export { makePersonalDeviceHost } from './host';
+export { makePersonalDeviceHost, accountPairingOffer, ACCOUNT_PAIRING_ENDORSER } from './host';
 export {
   PersonalHostPlatform,
   PersonalHostRemote,
@@ -22,6 +22,8 @@ export {
   type PersonalPairingRequest,
 } from './pairing';
 export { verifyPersonalHistory } from './admission';
+/** Local custody payload construction only; the packet never crosses the UI. */
+export { credentialPacket } from './identity';
 export { personalLedgerControl, type PersonalLedgerOrigin } from './ledger';
 
 export {

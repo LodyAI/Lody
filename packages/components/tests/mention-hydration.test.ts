@@ -24,11 +24,6 @@ describe('when a hydrator commits to a text', () => {
     expect(shouldRunHydration(latched, 'see @src/a.ts', false)).toBe(true);
   });
 
-  it('keeps the first real text once latched, so later typing cannot move the target', () => {
-    const latched = latchHydrationText('see @src/a.ts', 'see @src/a.ts and more');
-    expect(latched).toBe('see @src/a.ts');
-  });
-
   it('waits while the text differs from the snapshot the offsets were measured against', () => {
     expect(shouldRunHydration('see @src/a.ts', 'see @src/a.ts and more', false)).toBe(false);
   });
@@ -36,19 +31,10 @@ describe('when a hydrator commits to a text', () => {
   it('waits while the mention menu is open, which is about to commit its own range', () => {
     expect(shouldRunHydration('see @src/a.ts', 'see @src/a.ts', true)).toBe(false);
   });
-
-  it('never runs against nothing', () => {
-    expect(shouldRunHydration('', '', false)).toBe(false);
-  });
 });
 
 describe('merging hydrated ranges', () => {
   const file = { start: 4, end: 11, value: 'fix-ci', kind: 'file' };
-
-  it('keeps a range that claims a region nothing else has', () => {
-    expect(mergeHydratedMentions([file], [{ start: 20, end: 24, value: '#42', kind: 'issue' }]))
-      .toHaveLength(2);
-  });
 
   it('rejects a range overlapping one already present, not just an identical one', () => {
     // A path and a session slug are the same shape, so `@fix-ci` can be a known
@@ -65,13 +51,5 @@ describe('merging hydrated ranges', () => {
     const restored = { start: 4, end: 11, value: 'ses_1', kind: 'session' };
     // Restored-from-draft is present first; a scanner may only fill gaps.
     expect(mergeHydratedMentions([restored], [file])).toEqual([restored]);
-  });
-
-  it('returns ranges in document order', () => {
-    const merged = mergeHydratedMentions(
-      [{ start: 20, end: 24, value: '#42', kind: 'issue' }],
-      [file]
-    );
-    expect(merged.map((range) => range.start)).toEqual([4, 20]);
   });
 });

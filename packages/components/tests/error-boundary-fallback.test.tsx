@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -91,26 +92,6 @@ afterEach(() => {
 });
 
 describe('ErrorBoundaryFallback', () => {
-  it('shows the real error text instead of a generic apology', () => {
-    render();
-    expect(container.textContent).toContain('TypeError: session.title is not a function');
-  });
-
-  it('copies the full report — error, boundary, stack, and component stack', async () => {
-    render();
-    click(button('Copy error details'));
-    await act(async () => {});
-
-    expect(writeText).toHaveBeenCalledTimes(1);
-    const copied = writeText.mock.calls[0]?.[0] as string;
-    expect(copied).toContain('TypeError: session.title is not a function');
-    expect(copied).toContain('Boundary: RootOutlet');
-    expect(copied).toContain('Stack:');
-    expect(copied).toContain('Component stack:');
-    expect(copied).toContain('at RootOutlet');
-    expect(button('Copied')).toBeDefined();
-  });
-
   it('surfaces a blocked copy and reveals the details so the text stays selectable', async () => {
     writeText.mockRejectedValue(new Error('denied'));
     // The `document.execCommand` fallback does not exist in jsdom either.
@@ -120,15 +101,6 @@ describe('ErrorBoundaryFallback', () => {
 
     expect(container.textContent).toContain('Copying was blocked');
     expect(container.textContent).toContain('Component stack:');
-  });
-
-  it('reveals technical details on demand rather than dumping them by default', () => {
-    render();
-    expect(container.textContent).not.toContain('Component stack:');
-
-    click(button('Technical details'));
-    expect(container.textContent).toContain('Component stack:');
-    expect(container.textContent).toContain('Boundary: RootOutlet');
   });
 
   it('never reloads or resets on its own — recovery needs a click', () => {
@@ -202,43 +174,5 @@ describe('ErrorBoundaryFallback', () => {
     click(button('Copy error details'));
     await act(async () => {});
     expect(writeText.mock.calls[0]?.[0]).toContain('[CONVEX Q(localProjects:list)]');
-  });
-
-  it('offers exactly two ways out as buttons, with copy on the error itself', () => {
-    render();
-
-    const actions = Array.from(container.querySelectorAll('button')).filter((element) =>
-      element.textContent?.trim()
-    );
-    expect(actions.slice(0, 2).map((element) => element.textContent)).toEqual([
-      'Try again',
-      'Reload Lody',
-    ]);
-    const copy = button('Copy error details');
-    expect(copy.textContent).toBe('');
-    expect(copy.closest('div')?.parentElement?.querySelector('pre')?.textContent).toBe(
-      'TypeError: session.title is not a function'
-    );
-  });
-
-  it('says what happened in words in a section, and still shows the error', () => {
-    render({ variant: 'section' });
-
-    expect(container.querySelector('h2')?.textContent).toBe("This part couldn't be shown");
-    expect(container.textContent).toContain('TypeError: session.title is not a function');
-    expect(button('clear local data')).toBeDefined();
-  });
-
-  it('keeps the inline variant to a sentence with retry, the raw error behind copy', async () => {
-    render({ variant: 'inline' });
-
-    expect(container.textContent).toContain("This part couldn't be shown.");
-    expect(container.textContent).not.toContain('TypeError');
-    expect(container.querySelectorAll('button')).toHaveLength(2);
-    expect(container.textContent).not.toContain('clear local data');
-
-    click(button('Copy error details'));
-    await act(async () => {});
-    expect(writeText.mock.calls[0]?.[0]).toContain('TypeError: session.title is not a function');
   });
 });

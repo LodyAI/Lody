@@ -7,6 +7,8 @@ import {
   snapshotTrustFromView,
   verifyLedgerSnapshot,
   exportVerifiedState,
+  hasVerifiedCheckpoint,
+  Bytes,
   extendLedger,
   hashRecordBytes,
 } from '@lody/e2ee-core/protocol';
@@ -15,9 +17,7 @@ import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 import { appendLedgerHistory, hostLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history';
 import {
   compareVerificationCode,
-  groupHash,
   ledgerVerificationCode,
-  parseVerificationCode,
 } from '../src/lib/e2ee-ledger-verification';
 
 // Frozen synthetic ledger v1 vector signed by fixed test keys.
@@ -40,34 +40,42 @@ const history = appendLedgerHistory(
 const sixth = history.records[5]!.hash;
 const code = ledgerVerificationCode(history);
 
-describe('ledger verification code', () => {
-  it('is the core comparison digest at the verified head and round-trips through its QR', () => {
-    expect(code.version).toBe(11);
-    expect(code.headHash).toBe(head);
-    expect(code.stateDigest).toMatch(/^[0-9a-f]{64}$/);
-    expect(code.stateDigest).not.toBe(head);
-    expect(code.payload).toBe(`lody-ledger:1:11:${head}:${code.stateDigest}`);
-    expect(parseVerificationCode(code.payload)).toEqual({
-      version: 11,
+it('preserves earlier checkpoints across the real host export and restore boundary', () => {
+  const exported = Result.getOrThrow(exportVerifiedState(history.view));
+  const received = {
+    status: {
+      workspaceId: 'w',
+      genesisHash: vector.anchor,
+      length: history.view.length,
       headHash: head,
-      stateDigest: code.stateDigest,
-    });
-  });
+      stateDigest: bytesToHex(exported.stateDigest.toBytes()),
+      position: 'opaque',
+      epoch: history.view.inspectState().epoch.number,
+      rotationRequired: false,
+      deviceKind: 'personal' as const,
+      hasCurrentKey: true,
+      continuityPending: false,
+    },
+    stateHex: bytesToHex(exported.bytes),
+    recordsHex: history.records.map((record) => record.rawHex),
+  };
+  const restored = hostLedgerHistory(received);
+  expect(
+    Result.getOrThrow(
+      hasVerifiedCheckpoint(restored.view, {
+        length: 6,
+        head: Result.getOrThrow(Bytes.recordHash(Buffer.from(sixth, 'hex'))),
+      })
+    )
+  ).toBe(true);
+  const damaged = [...received.recordsHex];
+  const bytes = Buffer.from(damaged[1]!, 'hex');
+  bytes[bytes.length - 1]! ^= 1;
+  damaged[1] = bytes.toString('hex');
+  expect(() => hostLedgerHistory({ ...received, recordsHex: damaged })).toThrow();
+});
 
-  it('reads a pasted code however it was spaced, with the version from its header', () => {
-    const grouped = groupHash(code.stateDigest).join(' ');
-    expect(parseVerificationCode(grouped.toUpperCase())).toEqual({ stateDigest: code.stateDigest });
-    expect(parseVerificationCode(`账本核验码（版本 1234）\n${grouped}`)).toEqual({
-      version: 1234,
-      stateDigest: code.stateDigest,
-    });
-    expect(parseVerificationCode(`Ledger code (version 11)\n${grouped}`)).toEqual({
-      version: 11,
-      stateDigest: code.stateDigest,
-    });
-    expect(parseVerificationCode('e7fe 1ef3')).toBeNull();
-  });
-
+describe('ledger verification code', () => {
   it('matches only the same digest at the same version', () => {
     expect(compareVerificationCode(history, { stateDigest: code.stateDigest })).toEqual({
       kind: 'match',

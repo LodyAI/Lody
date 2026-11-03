@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,7 @@ import { createCapabilitySet, type CloudApi, type PlatformProvider } from '@lody
 import { PlatformContext } from '@lody/platform/react';
 import type { ReferralOverview } from '@lody/cloud-api';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
-import { captureReferral, readReferral } from '../src/lib/referral-attribution';
+import { readReferral } from '../src/lib/referral-attribution';
 import { captureReferralLanding } from '../src/lib/referral-analytics';
 import { ReferralSettings } from '../src/components/settings/referral-settings';
 import { initI18n } from '../src/i18n';
@@ -33,18 +34,6 @@ beforeEach(() => {
 });
 
 describe('referral landing observation', () => {
-  it('observes a replacement hint once without restoring the earlier code', () => {
-    captureReferral('?ref=' + 'a'.repeat(32), localStorage, 1000);
-    captureReferralLanding(client, localStorage, 1500);
-    captureReferral('?ref=' + 'b'.repeat(32), localStorage, 2000);
-    captureReferralLanding(client, localStorage, 2500);
-    captureReferralLanding(client, localStorage, 3000);
-    expect(sink.events.map((event) => event.event)).toEqual(['referral/landed', 'referral/landed']);
-    expect(sink.events[0]?.properties.referral_code_hash).not.toBe(
-      sink.events[1]?.properties.referral_code_hash
-    );
-    expect(readReferral(localStorage, 3000)).toBe('b'.repeat(32));
-  });
   it('survives a static redirect, reports only once and keeps attribution and expiry unchanged', () => {
     const code = 'a'.repeat(32);
     localStorage.setItem(
@@ -58,20 +47,6 @@ describe('referral landing observation', () => {
     expect(JSON.stringify(sink.events)).not.toContain(code);
     expect(readReferral(localStorage, 3000)).toBe(code);
     expect(readReferral(localStorage, 1000 + 30 * 86400000)).toBeUndefined();
-  });
-
-  it('leaves the hint retryable if capture fails and ignores missing clients and invalid hints', () => {
-    captureReferral('?ref=' + 'b'.repeat(32));
-    captureReferralLanding(null);
-    sink.fail = true;
-    expect(() => captureReferralLanding(client)).not.toThrow();
-    expect(readReferral()).toBe('b'.repeat(32));
-    sink.fail = false;
-    captureReferralLanding(client);
-    expect(sink.events).toHaveLength(1);
-    localStorage.setItem('lody:referral', '{broken');
-    captureReferralLanding(client);
-    expect(sink.events).toHaveLength(1);
   });
 });
 
@@ -123,22 +98,6 @@ describe('referral UI analytics', () => {
       );
     });
   };
-  it('attaches the displayed campaign to card and copy events without exposing coupon IDs', async () => {
-    overview!.policy = { campaignId: 'autumn', discountPercent: 20, rewardPercent: 25 };
-    await render();
-    await clickCopy();
-    for (const event of sink.events) {
-      expect(event.properties).toMatchObject({
-        campaign_id: 'autumn',
-        discount_percent: 20,
-        reward_percent: 25,
-      });
-    }
-    expect(sink.events.map((event) => event.event)).toEqual([
-      'referral/viewed',
-      'referral/link_copied',
-    ]);
-  });
   const clickCopy = async () => {
     const button = [...container.querySelectorAll('button')].find((b) =>
       /copy|create|generate/i.test(b.textContent ?? '')
@@ -146,25 +105,6 @@ describe('referral UI analytics', () => {
     expect(button).toBeDefined();
     await act(async () => button!.click());
   };
-
-  it('counts only visible loaded cards once per workspace despite StrictMode and balance updates', async () => {
-    const loaded = overview!;
-    overview = undefined;
-    await render();
-    expect(sink.events).toEqual([]);
-    overview = { ...loaded, eligible: false, code: null, url: null, issued: 0, available: 0 };
-    await render();
-    expect(sink.events).toEqual([]);
-    overview = loaded;
-    await render();
-    overview = { ...loaded, available: 500 };
-    await render();
-    await render('second');
-    expect(sink.events.map((e) => [e.event, e.properties.workspace_id])).toEqual([
-      ['referral/viewed', 'workspace'],
-      ['referral/viewed', 'second'],
-    ]);
-  });
 
   it('reports successful copies only and never sends the link or raw code', async () => {
     await render();

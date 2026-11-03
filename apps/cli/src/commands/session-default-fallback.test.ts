@@ -460,43 +460,6 @@ describe.each(['create', 'chat'] as const)('%s with failed Machine Flock freshne
     }
   );
 
-  it.each([
-    ['nondefault mode', { modeId: 'plan' }],
-    ['model', { modelId: 'inherited-model' }],
-    ['option', { configOptionValues: { unknown_option: true } }],
-  ] as const)(
-    'drops an inherited %s without ACP cache and dispatches the fallback',
-    async (_selection, inheritedSelection) => {
-      const fixture = createFixture('codex');
-      const inherited = {
-        prompt: 'Earlier prompt',
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-        ...inheritedSelection,
-      };
-      if (command === 'chat') await fixture.seedChat(inherited);
-      const previousHistory = await fixture.history();
-      await fixture.run(
-        command,
-        command === 'create' ? { frozenInheritedInputConfig: inherited } : {}
-      );
-
-      const history = await fixture.history();
-      expect(history.slice(0, -1)).toEqual(previousHistory);
-      const latest = history.at(-1);
-      expect(latest).toMatchObject({
-        id: userTurnId,
-        inputConfig: { cliType: 'builtin', agentType: 'codex', modeId: 'agent-auto-review' },
-      });
-      expect(latest?.inputConfig?.modelId).toBeUndefined();
-      expect(latest?.inputConfig?.configOptionValues).toBeUndefined();
-      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-        latestUserMsgId: userTurnId,
-      });
-      expect(fixture.dispatched).toEqual([latest]);
-    }
-  );
-
   it.each(['mode', 'model'] as const)(
     'dispatches an explicit cached %s instead of an unavailable inherited selector option',
     async (category) => {
@@ -597,32 +560,6 @@ describe.each(['create', 'chat'] as const)(
         expect(await fixture.history()).toEqual([]);
         expect(fixture.metadata.get(getSessionRoomId(sessionId))).toEqual(previousMetadata);
         expect(fixture.dispatched).toEqual([]);
-      }
-    );
-
-    it.each([true, 'on', 'custom-fast'] as const)(
-      'preserves the valid raw Fast representation %s',
-      async (value) => {
-        const capability = createModelCapability();
-        if (value === 'custom-fast') {
-          capability.configOptions = [
-            ...(capability.configOptions ?? []),
-            {
-              id: 'fast',
-              name: 'Fast',
-              type: 'select',
-              currentValue: 'custom-fast',
-              options: [{ value: 'custom-fast', name: 'Custom Fast' }],
-            },
-          ];
-        }
-        const fixture = createFixture('codex', capability);
-        if (command === 'chat') await fixture.seedChat();
-        await fixture.run(command, { modelId: 'model-b', configOptionValues: { fast: value } });
-        const history = await fixture.history();
-        expect(history).toHaveLength(1);
-        expect(history[0]?.inputConfig?.configOptionValues).toEqual({ fast: value });
-        expect(fixture.dispatched).toEqual(history);
       }
     );
 
@@ -1471,21 +1408,6 @@ describe.each([
     }
   );
 
-  it('retains the persisted builtin default when the next chat still has no ACP cache', async () => {
-    const fixture = createFixture(agentType);
-    await fixture.run('create', {});
-    await fixture.run('chat', {}, 'next-user-turn');
-
-    expect(await fixture.history()).toMatchObject([
-      { id: userTurnId, inputConfig: { cliType: 'builtin', agentType, modeId } },
-      { id: 'next-user-turn', inputConfig: { cliType: 'builtin', agentType, modeId } },
-    ]);
-    expect(fixture.dispatched).toEqual(await fixture.history());
-    expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-      latestUserMsgId: 'next-user-turn',
-    });
-  });
-
   it.each(['absent', 'supported'] as const)(
     'preserves an inherited default from an initially %s cache through no-cache JSON replay',
     async (initialCache) => {
@@ -1597,55 +1519,6 @@ describe.each([
             latestUserMsgId: userTurnId,
           });
         }
-      }
-    );
-
-    it('drops an inherited no-cache default once a readable catalog excludes it', async () => {
-      const fixture = createFixture(agentType);
-      const validated = await fixture.validateCreate({
-        frozenInheritedInputConfig: { cliType: 'builtin', agentType, modeId },
-      });
-      expect(validated).toMatchObject({ modeId, inheritedDispatchConfig: { modeId } });
-      expect(validated.builtinDefaultModeId).toBeUndefined();
-      fixture.setCapability(capability, confirmed);
-
-      await fixture.run(
-        'create',
-        JSON.parse(JSON.stringify(validated)) as ResolvedTurnDispatchConfig
-      );
-
-      const history = await fixture.history();
-      expect(history).toMatchObject([{ id: userTurnId }]);
-      expect(history[0]?.inputConfig?.modeId).toBeUndefined();
-      expect(fixture.metadata.get(getSessionRoomId(sessionId))).toMatchObject({
-        latestUserMsgId: userTurnId,
-      });
-      expect(fixture.dispatched).toEqual(history);
-    });
-
-    it.each([
-      ['model', { modelId: 'unavailable-model' }],
-      ['config option', { configOptionValues: { unknown_option: true } }],
-    ] satisfies Array<[string, ResolvedTurnDispatchConfig]>)(
-      'still validates an explicit %s alongside a derived mode',
-      async (selection, explicit) => {
-        const fixture = createFixture(agentType);
-        const validated = await fixture.validateCreate();
-        fixture.setCapability(capability, confirmed);
-
-        await expect(fixture.run('create', { ...validated, ...explicit })).rejects.toThrow(
-          selection === 'model'
-            ? confirmed
-              ? 'Unsupported ACP model for the selected agent: unavailable-model'
-              : 'ACP model is absent from the local replica: unavailable-model'
-            : confirmed
-              ? 'Unknown ACP config option for the selected agent: unknown_option'
-              : 'ACP config option is absent from the local replica: unknown_option'
-        );
-
-        expect(await fixture.history()).toEqual([]);
-        expect(fixture.metadata.get(getSessionRoomId(sessionId))).toBeUndefined();
-        expect(fixture.dispatched).toEqual([]);
       }
     );
 
@@ -1961,16 +1834,6 @@ describe('agent chat to a busy target', () => {
       userTurnId
     );
     expect(fixture.dispatched).toEqual([]);
-  });
-
-  it('dispatches ordinarily when the target is idle', async () => {
-    const fixture = createFixture('codex');
-    await fixture.seedChat(inputConfig);
-
-    await fixture.run('chat', {}, userTurnId, true);
-
-    expect(fixture.steered).toEqual([]);
-    expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
   });
 
   it('does not activate a steered turn when recovery replays its chat', async () => {

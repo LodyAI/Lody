@@ -36,8 +36,15 @@ Spec。
 编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标的 agent 接受 steer，无论在本机还是另一台
 Machine 上运行，`lody_session_chat` 和
 `lody_session_chat_many` 就把输入 steer 进当前 turn，不受用户排队或引导偏好
-影响，也不管当前 turn 由谁发起。被 steer 的输入有自己的回复，作为 Operation
-结果；被它打断的更早 turn 在该处结束。
+影响，也不管当前 turn 由谁发起。目标 agent 无法确认 steer 时，输入排队成为它的
+下一个普通 turn。被 steer 的输入有自己的回复，作为它自己的 Operation 结果。
+
+steer 是交接正在进行的工作，而不是让它失败。被委派的输入，其运行中的 turn 交接给
+steer 进来的输入后，经由该后继 turn 继续推进。它的 Operation 在工作完成时完成，
+结果是后继 turn 的最终回复；不会仅因被 steer 而报告 `TARGET_FAILED`。
+
+每次被接受的 chat 都返回投递回执，说明实际发生了什么：`steered`、带排队位置的
+`queued`，或者发给空闲目标的 `dispatched`。steer 回退到排队时报告 `queued`。
 
 本机能证明未送达的 steer 与人类发送一样转为下一个普通 turn。送达不确定时绝不重放：
 该项以不可重试的 `STEER_DELIVERY_UNKNOWN` 失败，由发起请求的 Agent 决定是否重发。
@@ -51,6 +58,47 @@ steer 请求再独立等待五秒响应，与 UI 一致。建连超时回退后�
 `apps/cli/src/commands/session.ts` 中的 `sendSessionChatResult`、其测试
 `session-default-fallback.test.ts`，以及 `apps/cli/src/orchestration/coordinator-workflow.ts`
 中的项协调。远端回退取舍见[决策记录](../.agents/notes/implemented/feature/2026-11-02-cross-machine-agent-steer.zh.md)。
+
+## 协调多个会话
+
+一个 Agent 在多台 Machine 上协调十几个长时间运行的会话。它需要知道每个会话在做什么、
+委派的工作为什么停了，而不必通读完整记录或去 Machine 上查进程。Lody 负责让这些状态
+可观察；两项工作是否重复由协调 Agent 自己判断，因为任务无法枚举成固定的 key。Lody
+不认领任务、不加锁，也不以重复为由拒绝发送。
+
+- **按 PR 反查。** `lody_session_list` 可按 PR 链接或编号过滤，使用会话元数据
+  `pullRequests`，不打开会话房间。
+- **身份而非内容。** 列表和状态项带上标题、关联的 PR 和分支，不带任何消息正文：
+  消息内容的摘要不得写入会话元数据。
+- **实时活动。** `lody_session_status_many` 在查询时向拥有忙碌会话的 Machine 询问
+  turn 开始时间、最近输出时间、当前动作和排队输入。这些数据不发布到 presence 通道。
+  Machine 无法回答时，状态保留现有的 `idle`/`busy`，活动为 `unknown`。
+- **发送者来源。** Agent 发出的输入在交给目标 agent 时带一段 Lody 说明，写明来源
+  会话并声明它不是人类输入。人类输入不变。说明在执行时由记录的作者生成，不写入历史。
+- **引用原话。** Agent 转述人类指令时可以引用原消息，Lody 附上从历史核对过的原文及
+  其记录的作者。无法解析的引用标为未验证转述照常投递，而不是被拒绝。没有委托 token。
+- **失败原因。** 失败的目标保留顶层错误码，并附加带类型的原因：额度耗尽及来自既有
+  容量观测的恢复时间、Machine 离线、用户停止，或附带原始信息的 agent 错误。无法分类
+  的失败归为 agent 错误，从不猜测原因。
+- **结果时间。** 完成结果带上输入的发送时间，以及期间目标又收到了几条输入。Lody 不
+  把结果标为已作废；是否过时由协调 Agent 判断。
+- **历史读取。** `lody_session_history` 接受 `direction`（默认 `backward` 从新到旧分页，
+  或 `forward` 从最早开始）、`role`、`since` 和 `maxChars`。游标保存绝对位置，后来的
+  输入不会让分页错位。超过 `maxChars` 的文本被截断并带上 `truncated` 与原始长度，
+  而不是被丢弃。
+- **短会话 ID。** 工作区内唯一的会话 ID 前缀解析为该会话。有歧义的前缀以
+  `SESSION_ID_AMBIGUOUS` 失败，并列出最多八个带 ID 和标题的候选。
+- **排队输入。** 请求方可以列出、撤回或替换自己尚未开始的排队输入。已开始的输入
+  返回 `ALREADY_STARTED`，这条路径从不取消它。
+- **Machine 资源。** `lody_machine_list` 报告 agent 额度及恢复时间和磁盘用量。Lody
+  不管理也不报告 agent 自己持有的锁。
+
+这些新增能力通过设计避免错误，而不是增加关卡。不确定的观测降级为 `unknown` 或提示
+字段；只有无法完成的请求才失败。新的失败原因是带标签的 Effect 错误，只在 MCP 边界
+序列化为 `{code, cause, retryable}`。
+
+不在范围内：Lody 管理的资源锁、复审提示词模板（Agent Role 已带固定指令）、先存档
+再取消的接口，以及修改完成结果输出（它已不含工具调用）。
 
 ## 会话创建配置
 
@@ -165,6 +213,10 @@ Stop、新输入接受和实际提交使用同一个会话准入。支持 Inbox 
 `apps/cli/src/session/session-execution-service.ts`，协调恢复位于
 `apps/cli/src/orchestration/operation-coordinator.ts`。对应测试覆盖连接失败、claim 和结算
 竞争、重启以及结果过期。
+
+steer 交接完成依据会话 `steerOperationLedger` 中已应用的记录（`coordinator-model.ts`
+中的 `findSteerSuccessor`），由 `operation-coordinator.test.ts` 的 `steer handoff` 用例覆盖。
+投递回执和“协调多个会话”一节是尚未实现的预期行为；状态仍只有 `idle`/`busy`。
 
 本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。

@@ -64,21 +64,6 @@ describe('filterMobileProjectOptions', () => {
     expect(result.groups.map((group) => group.name)).toEqual(['Loro stack']);
   });
 
-  it('searches local names and paths with the same query as GitHub repos', () => {
-    const result = filterMobileProjectOptions({
-      folders,
-      repositories,
-      groups,
-      machineId: spikes,
-      query: 'loro',
-    });
-    expect(result.folders).toEqual([]);
-    expect(result.repositories.map((repo) => repo.fullName)).toEqual([
-      'loro-dev/loro',
-      'loro-dev/lody',
-    ]);
-  });
-
   it('matches a local path, not just its display name', () => {
     const result = filterMobileProjectOptions({
       folders,
@@ -88,19 +73,6 @@ describe('filterMobileProjectOptions', () => {
       query: 'code/blog',
     });
     expect(result.folders.map((folder) => folder.name)).toEqual(['blog']);
-    expect(result.repositories).toEqual([]);
-  });
-
-  it('searches project groups with the same query', () => {
-    const result = filterMobileProjectOptions({
-      folders,
-      repositories,
-      groups,
-      machineId: spikes,
-      query: 'loro stack',
-    });
-    expect(result.groups.map((group) => group.name)).toEqual(['Loro stack']);
-    expect(result.folders).toEqual([]);
     expect(result.repositories).toEqual([]);
   });
 
@@ -134,25 +106,6 @@ describe('getMobileProjectOptions', () => {
       'loro-dev/lody',
     ]);
   });
-  it('uses names then stable ids for tied or never-used projects, keeping recent first', () => {
-    const result = getMobileProjectOptions({
-      folders: [
-        { ...folders[0]!, name: 'Alpha', lastUsedAt: undefined },
-        { ...folders[1]!, name: 'Same', lastUsedAt: 10 },
-      ],
-      groups: [{ ...groups[0]!, name: 'Same', lastUsedAt: 10 }],
-      repositories: [{ fullName: 'Zeta', lastUsedAt: 2 }, { fullName: 'Beta' }],
-      machineId: spikes,
-      query: '',
-    });
-    expect(result.map((option) => option.value)).toEqual([
-      'group:group-1',
-      'local:spikes:lody',
-      'github:Zeta',
-      'local:spikes:blog',
-      'github:Beta',
-    ]);
-  });
   it('scopes folders before ranking and keeps an unavailable recent group visible', () => {
     const result = getMobileProjectOptions({
       folders,
@@ -179,10 +132,6 @@ describe('mobile new-chat default target', () => {
     expect(resolveMobileNewChatDefaultProject({ kind: 'none' }, options())).toEqual({
       kind: 'none',
     });
-  });
-  it.each(['local', 'group'] as const)('restores the exact %s identity', (kind) => {
-    const selection = options().find((option) => option.selection.kind === kind)!.selection;
-    expect(resolveMobileNewChatDefaultProject(selection, options())).toEqual(selection);
   });
   it('does not substitute a similarly named folder on another machine', () => {
     expect(

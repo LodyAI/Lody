@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Effect, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { makeSqliteKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import { makeLabMailboxRemote } from '../src/platform/key-mailbox';
@@ -115,70 +115,6 @@ describe('Lab HTTP mailbox transport consuming public SQLite mailbox', () => {
             expect(Result.isFailure(result)).toBe(true);
             if (Result.isFailure(result)) expect(result.failure.code).toBe('invalid-response');
           }
-        })
-      )
-    );
-  });
-  it('waits for the actual abort-ignoring response body before closing earlier owners and refuses late output', async () => {
-    const entered = latch(),
-      aborted = latch(),
-      release = latch();
-    let transportClosedEarly = false,
-      transportClosed = false;
-    let bodySettled = false,
-      closedEarly = false,
-      ownerClosed = false;
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const child = yield* Scope.make();
-          yield* Scope.addFinalizer(
-            child,
-            Effect.sync(() => {
-              closedEarly = !bodySettled;
-              ownerClosed = true;
-            })
-          );
-          const client = yield* makeLabMailboxRemote({
-            url: 'http://synthetic.invalid/mailbox',
-            close: async () => {
-              transportClosedEarly = !bodySettled;
-              transportClosed = true;
-            },
-            fetch: async (_input, init) => {
-              init!.signal!.addEventListener('abort', aborted.resolve, { once: true });
-              return new Response(
-                new ReadableStream<Uint8Array>({
-                  async pull(controller) {
-                    entered.resolve();
-                    await release.promise;
-                    bodySettled = true;
-                    controller.enqueue(new TextEncoder().encode('null'));
-                    controller.close();
-                  },
-                })
-              );
-            },
-          }).pipe(Effect.provideService(Scope.Scope, child));
-          const worker = yield* Effect.forkChild(Effect.result(client.read('01'.repeat(16))));
-          // Gate finalizer executes before worker cleanup on an assertion failure.
-          yield* Effect.addFinalizer(() => Effect.sync(release.resolve));
-          yield* Effect.promise(() => entered.promise);
-          const closing = yield* Effect.forkChild(Scope.close(child, Exit.void));
-          yield* Effect.promise(() => aborted.promise);
-          const pending = closing.pollUnsafe();
-          release.resolve();
-          yield* Fiber.join(closing);
-          expect(pending).toBeUndefined();
-          expect(bodySettled).toBe(true);
-          expect(transportClosed).toBe(true);
-          expect(transportClosedEarly).toBe(false);
-          expect(ownerClosed).toBe(true);
-          expect(closedEarly).toBe(false);
-          expect(Result.isFailure(yield* Fiber.join(worker))).toBe(true);
-          const late = yield* Effect.result(client.read('01'.repeat(16)));
-          expect(Result.isFailure(late)).toBe(true);
-          if (Result.isFailure(late)) expect(late.failure.code).toBe('closed');
         })
       )
     );

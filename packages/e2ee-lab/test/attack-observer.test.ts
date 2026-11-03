@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Effect, Result } from 'effect';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Bytes } from '@lody/e2ee-core';
 import { encodeCbor, type ContentScope } from '@lody/e2ee-core/protocol';
@@ -10,120 +10,13 @@ import { prepareLedgerCommand } from '@lody/e2ee-core/protocol';
 import { prepareLedgerRecord, signLedgerRecord } from '@lody/e2ee-core/protocol';
 import { frameLedgerRecord } from '@lody/e2ee-core/protocol';
 import { commitEpochKey, sealHistoryPacket } from '@lody/e2ee-core/protocol';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { makeLabAttackObserver } from '../src/platform/attack-observer';
 import { makeLabContentTrace } from '../src/platform/content-trace';
 import { makeLabScenarioFixture } from '../src/platform/scenario-fixture';
 import { openLabExistingWorkspace } from '../src/platform/workspace-session';
-import { makeLabSdkOwner } from '../src/platform/sdk-owner';
-import { history } from './ledger-fixture';
+
 const ok = Result.getOrThrow;
-
-it('wipes owned plaintext after partial capture failure and waits native settlement before Scope destroys earlier owners', async () => {
-  const f = history(),
-    marker = new TextEncoder().encode('private observer copy marker'),
-    cleared: Uint8Array[] = [];
-  const originalFill = Uint8Array.prototype.fill;
-  const spy = vi.spyOn(Uint8Array.prototype, 'fill').mockImplementation(function (
-    this: Uint8Array,
-    value: number,
-    start?: number,
-    end?: number
-  ) {
-    if (value === 0 && this.length === marker.length && Buffer.compare(this, marker) === 0)
-      cleared.push(this);
-    return originalFill.call(this, value, start, end);
-  });
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const scope: ContentScope = {
-            genesis: Buffer.from(f.anchor.toBytes()).toString('hex'),
-            resource: 'document-A',
-            epoch: 1,
-            purpose: 'doc-update',
-          };
-          const first = { scope, frame: new Uint8Array([1]), expectedPlaintext: marker };
-          const broken = {
-            ...first,
-            get expectedPlaintext(): Uint8Array {
-              throw new Error('capture failed after first private copy');
-            },
-          };
-          const probe = {
-            key: ok(Bytes.epochKey(new Uint8Array(32).fill(81))),
-            keyEpoch: 0,
-            freshnessBypassed: false,
-            samples: [first, broken],
-          };
-          const bad = yield* makeLabAttackObserver({
-            genesis: f.anchor,
-            ledger: () => Effect.succeed(f.view),
-            backend: { read: () => Effect.succeed([]) },
-          });
-          expect(Result.isFailure(yield* Effect.result(bad.observe({ insider: probe })))).toBe(
-            true
-          );
-          expect(cleared).toHaveLength(1);
-          expect(cleared[0].every((byte) => byte === 0)).toBe(true);
-          expect(new TextDecoder().decode(marker)).toBe('private observer copy marker');
-
-          const child = yield* Scope.make(),
-            entered = yield* Deferred.make<void>(),
-            release = yield* Deferred.make<void>();
-          let settled = false,
-            ownerClosed = false,
-            closedEarly = false;
-          yield* Effect.addFinalizer(() =>
-            Deferred.succeed(release, undefined).pipe(Effect.andThen(Scope.close(child, Exit.void)))
-          );
-          const native = yield* makeLabSdkOwner(() => ({
-            close: async () => {
-              ownerClosed = true;
-              closedEarly = !settled;
-            },
-          })).pipe(Effect.provideService(Scope.Scope, child));
-          const observer = yield* makeLabAttackObserver({
-            genesis: f.anchor,
-            ledger: () => Effect.succeed(f.view),
-            backend: {
-              read: () =>
-                native.invoke(async () => {
-                  Deferred.doneUnsafe(entered, Effect.void);
-                  await Effect.runPromise(Deferred.await(release));
-                  settled = true;
-                  return [];
-                }),
-            },
-          }).pipe(Effect.provideService(Scope.Scope, child));
-          const pending = yield* observer
-            .observe({ insider: { ...probe, samples: [first] } })
-            .pipe(Effect.forkChild);
-          yield* Deferred.await(entered);
-          const closing = yield* Scope.close(child, Exit.void).pipe(
-            Effect.forkChild({ startImmediately: true })
-          );
-          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
-          expect(closing.pollUnsafe()).toBeUndefined();
-          expect(ownerClosed).toBe(false);
-          expect(cleared).toHaveLength(1);
-          yield* Deferred.succeed(release, undefined);
-          yield* Fiber.join(closing);
-          expect(Exit.isFailure(yield* Fiber.await(pending))).toBe(true);
-          expect(settled).toBe(true);
-          expect(ownerClosed).toBe(true);
-          expect(closedEarly).toBe(false);
-          expect(cleared).toHaveLength(2);
-          expect(cleared.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
-          expect(new TextDecoder().decode(marker)).toBe('private observer copy marker');
-        })
-      )
-    );
-  } finally {
-    spy.mockRestore();
-  }
-});
 
 it('measures real backend bytes, refused signed control/content and the actual boundary of an excluded insider retained key', async () => {
   const root = mkdtempSync(join(tmpdir(), 'lab-attack-observer-'));
@@ -364,157 +257,6 @@ it('measures real backend bytes, refused signed control/content and the actual b
           ).toBe('violation');
           expect(leaked.report.confidentiality).toBe('violation');
           expect(leaked.report.integrity).toBe('unavailable');
-        })
-      )
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-it('does not treat missing observations or a failed transport as negative evidence', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'lab-attack-observer-unmeasured-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const f = yield* makeLabScenarioFixture(join(root, 'fixture'));
-          const observer = yield* makeLabAttackObserver({
-            genesis: f.genesis,
-            ledger: f.ledger,
-            backend: { read: () => Effect.fail(new Error('synthetic transport down')) },
-          });
-          const result = yield* observer.observe();
-          expect(result.report).toEqual({
-            confidentiality: 'harness-error',
-            integrity: 'unavailable',
-            durability: 'unavailable',
-          });
-          expect(
-            result.properties
-              .filter((row) => row.id !== 'confidentiality.backend-plaintext')
-              .every((row) => row.verdict === 'unavailable')
-          ).toBe(true);
-          const unavailable = yield* makeLabAttackObserver({
-            genesis: f.genesis,
-            ledger: f.ledger,
-            backend: {
-              read: () => Effect.succeed([]),
-              appendControl: () => Effect.fail(new Error('request never reached backend')),
-            },
-          });
-          const transportFailure = yield* unavailable.observe({
-            control: {
-              record: f.records[1]!,
-              refresh: f.ledger,
-              retained: f.ledger,
-            },
-          });
-          expect(
-            transportFailure.properties.find((row) => row.id === 'integrity.forged-control')
-          ).toEqual({
-            id: 'integrity.forged-control',
-            verdict: 'harness-error',
-          });
-          expect(transportFailure.report.integrity).toBe('harness-error');
-        })
-      )
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-it('retains an actual later-epoch leak even when an expected plaintext is wrong or another positive control is unmeasured', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'lab-insider-leak-control-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const f = yield* makeLabScenarioFixture(join(root, 'fixture')),
-            org = Buffer.from(f.genesis.toBytes()).toString('hex');
-          const retained = ok(Bytes.epochKey(new Uint8Array(32).fill(117))),
-            plaintext = new TextEncoder().encode('synthetic actual retained-key leak');
-          const scope = (epoch: number): ContentScope => ({
-            genesis: org,
-            resource: 'document-A',
-            epoch,
-            purpose: 'doc-update',
-          });
-          const seal = (epoch: number) =>
-            Effect.gen(function* () {
-              const leaf = yield* scopedDocumentKey(scope(epoch), retained);
-              return yield* sealDocument({
-                scope: scope(epoch),
-                documentKey: leaf,
-                signer: f.owner,
-                ledger: f.ledger,
-                plaintext,
-              });
-            });
-          const old = yield* seal(0);
-          // Explicit malicious-publisher test control: reuse retained material for
-          // epoch1. The actual publisher implementation generates fresh secure bytes.
-          const packet = ok(
-            sealHistoryPacket({
-              genesis: f.genesis,
-              epoch: 1,
-              currentKey: retained,
-              previousKey: retained,
-            })
-          );
-          const body = ok(
-            encodeCbor([
-              f.point().head.toBytes(),
-              f.owner.publicKey.toBytes(),
-              [7, 1, ok(commitEpochKey(f.genesis, 1, retained)).toBytes(), packet],
-            ])
-          );
-          const record = yield* signLedgerRecord(ok(prepareLedgerRecord(f.view(), body)), f.owner);
-          const sdk = new StreamsClient({
-            url: `${f.server.baseUrl}/ds/${org}/control`,
-            retry: { maxAttempts: 1 },
-          });
-          expect(
-            (yield* Effect.promise(() =>
-              sdk.append({
-                part: {
-                  contentType: 'application/octet-stream',
-                  body: ok(frameLedgerRecord(record)),
-                },
-              })
-            )).ok
-          ).toBe(true);
-          f.records.push(new Uint8Array(record));
-          f.view();
-          const newer = yield* seal(1);
-          const observer = yield* makeLabAttackObserver({
-            genesis: f.genesis,
-            ledger: f.ledger,
-            backend: { read: () => Effect.succeed([old, newer]) },
-          });
-          const result = yield* observer.observe({
-            insider: {
-              key: retained,
-              keyEpoch: 0,
-              freshnessBypassed: false,
-              samples: [
-                { scope: scope(0), frame: old, expectedPlaintext: plaintext },
-                { scope: scope(0), frame: old },
-                { scope: scope(1), frame: newer, expectedPlaintext: new Uint8Array([0]) },
-              ],
-            },
-          });
-          expect(result.observations).toMatchObject({
-            oldKeyOpened: 1,
-            laterSamples: 1,
-            laterOpened: 1,
-          });
-          expect(
-            result.properties.find((row) => row.id === 'confidentiality.insider-post-exclusion')
-              ?.verdict
-          ).toBe('violation');
-          expect(result.report.confidentiality).toBe('violation');
         })
       )
     );

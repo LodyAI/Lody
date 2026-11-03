@@ -514,6 +514,8 @@ export interface SessionChatInputAreaProps {
     options?: SessionSendMessageOptions
   ) => Promise<boolean>;
   onStop: () => void | Promise<void>;
+  /** Restore the archived workspace using the host's existing lifecycle action. */
+  onRestoreSession?: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
   /** When provided and conversation is empty, the agent config badge becomes a selector. */
   onAgentConfigChange?: (selection: AgentSelection) => void;
@@ -624,6 +626,7 @@ export const SessionChatInputArea = memo(
       onConfigOptionChange,
       onSendMessage,
       onStop,
+      onRestoreSession,
       onRemoveQueueItem: _onRemoveQueueItem,
       onAgentConfigChange,
       agentRoleControl,
@@ -639,6 +642,22 @@ export const SessionChatInputArea = memo(
     ref: React.ForwardedRef<SessionChatInputAreaHandle>
   ) {
     const { t, i18n } = useTranslation();
+    const [restoring, setRestoring] = useState(false);
+    const restoringRef = useRef(false);
+    const handleRestore = useCallback(async () => {
+      if (!onRestoreSession || restoringRef.current) return;
+      restoringRef.current = true;
+      setRestoring(true);
+      try {
+        await onRestoreSession();
+      } catch (error) {
+        console.error('Failed to restore archived conversation', error);
+        toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      } finally {
+        restoringRef.current = false;
+        setRestoring(false);
+      }
+    }, [onRestoreSession, t]);
     const intlLocale = useMemo(
       () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
       [i18n.language, i18n.resolvedLanguage]
@@ -2430,53 +2449,65 @@ export const SessionChatInputArea = memo(
       </div>
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
-    const primaryActionNode = showStopButton ? (
-      <Button
-        onClick={() => {
-          void onStop();
-        }}
-        variant="ghost"
-        size={isMobile ? 'medium' : 'small'}
-        shape="pill"
-        icon
-        aria-label={t('sessions.stop')}
-        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
-      >
-        <span
-          {...stylex.props(
-            styles.stopGlyph,
-            isMobile ? styles.stopGlyphMobile : styles.stopGlyphDesktop
+    const primaryActionNode =
+      isArchived && onRestoreSession ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size={isMobile ? 'medium' : 'small'}
+          disabled={restoring}
+          onClick={() => void handleRestore()}
+        >
+          {restoring ? <Spinner size="small" /> : null}
+          {t('archive.restore', 'Restore session')}
+        </Button>
+      ) : showStopButton ? (
+        <Button
+          onClick={() => {
+            void onStop();
+          }}
+          variant="ghost"
+          size={isMobile ? 'medium' : 'small'}
+          shape="pill"
+          icon
+          aria-label={t('sessions.stop')}
+          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+        >
+          <span
+            {...stylex.props(
+              styles.stopGlyph,
+              isMobile ? styles.stopGlyphMobile : styles.stopGlyphDesktop
+            )}
+            aria-hidden="true"
+          />
+        </Button>
+      ) : (
+        <Button
+          data-testid="composer-send"
+          type="button"
+          icon
+          variant="ghost"
+          size={isMobile ? 'medium' : 'small'}
+          shape="pill"
+          onClick={() => {
+            void sendMessage();
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+          disabled={!hasSendableContent || isSendActionDisabled}
+          aria-label={
+            isExternalHistoryRefreshing && externalHistorySyncLabel
+              ? externalHistorySyncLabel
+              : t('sessions.send')
+          }
+          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+        >
+          {submissionPending || isExternalHistoryRefreshing ? (
+            <Spinner size={isMobile ? 'medium' : 'small'} />
+          ) : (
+            <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
           )}
-          aria-hidden="true"
-        />
-      </Button>
-    ) : (
-      <Button
-        data-testid="composer-send"
-        type="button"
-        icon
-        variant="ghost"
-        size={isMobile ? 'medium' : 'small'}
-        shape="pill"
-        onClick={() => {
-          void sendMessage();
-        }}
-        onMouseDown={(event) => event.preventDefault()}
-        disabled={!hasSendableContent || isSendActionDisabled}
-        aria-label={
-          isExternalHistoryRefreshing && externalHistorySyncLabel
-            ? externalHistorySyncLabel
-            : t('sessions.send')
-        }
-        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
-      >
-        {submissionPending || isExternalHistoryRefreshing ? (
-          <Spinner size={isMobile ? 'medium' : 'small'} />
-        ) : (
-          <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
-        )}
-      </Button>
-    );
+        </Button>
+      );
 
     const scheduledAction =
       scheduled.at && scheduled.available && !isArchived && !submissionPending

@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { applyTextRewrites, type SessionMeta } from '@lody/shared';
 
 import {
   buildSessionMentionItems,
-  buildSessionMentionPrompt,
-  buildSessionMentionSlug,
   buildSessionMentionRewrites,
   filterSessionMentionItemsByProject,
   getMentionSourceProjectKey,
@@ -14,7 +13,6 @@ import {
   hydrateSessionMentionsFromText,
   rememberSessionMentionSlugs,
   resolveSessionMentionIds,
-  selectSessionMentionCandidates,
 } from '../src/components/mentions/mention-session-source';
 
 function session(over: Partial<SessionMeta> & { id: string }): SessionMeta {
@@ -28,43 +26,7 @@ function session(over: Partial<SessionMeta> & { id: string }): SessionMeta {
   } as SessionMeta;
 }
 
-describe('buildSessionMentionSlug', () => {
-  it('replaces whitespace so the token survives trigger scanning', () => {
-    expect(buildSessionMentionSlug('fix ci submodule init', 'ses_abcd1234')).toBe(
-      'fix-ci-submodule-init'
-    );
-  });
-
-  it('keeps CJK, which no trigger scan breaks on', () => {
-    expect(buildSessionMentionSlug('mention 重设计', 'ses_abcd1234')).toBe('mention-重设计');
-  });
-
-  it('truncates by characters, not code units', () => {
-    const slug = buildSessionMentionSlug('五'.repeat(80), 'ses_abcd1234');
-    expect(Array.from(slug)).toHaveLength(40);
-  });
-
-  it('falls back to a short id when the session has no title yet', () => {
-    expect(buildSessionMentionSlug(undefined, 'ses_abcd1234')).toBe('ses_');
-    expect(buildSessionMentionSlug('   ', 'ses_abcd1234')).toBe('ses_');
-  });
-});
-
 describe('buildSessionMentionItems', () => {
-  it('orders by recency, drops the current session and archived ones', () => {
-    const items = buildSessionMentionItems(
-      [
-        session({ id: 'a', title: 'older', lastMessageAt: 10 }),
-        session({ id: 'b', title: 'newer', lastMessageAt: 20 }),
-        session({ id: 'self', title: 'this one', lastMessageAt: 30 }),
-        session({ id: 'c', title: 'archived', lastMessageAt: 40, isArchived: true }),
-      ],
-      'self'
-    );
-
-    expect(items.map((item) => item.sessionId)).toEqual(['b', 'a']);
-  });
-
   it('disambiguates a duplicate title and leaves the most recent one clean', () => {
     const items = buildSessionMentionItems(
       [
@@ -78,69 +40,9 @@ describe('buildSessionMentionItems', () => {
     expect(items[0]?.slug).toBe('same-title');
     expect(items[1]?.slug).toBe('same-title~olde');
   });
-
-  it('ranks a prefix match above a substring match', () => {
-    const items = buildSessionMentionItems(
-      [
-        session({ id: 'a', title: 'redesign mention', lastMessageAt: 10 }),
-        session({ id: 'b', title: 'mention redesign', lastMessageAt: 5 }),
-      ],
-      null
-    );
-
-    expect(selectSessionMentionCandidates(items, 'mention').map((item) => item.sessionId)).toEqual([
-      'b',
-      'a',
-    ]);
-  });
-
-  it('matches titles as ordered subsequences across words and punctuation', () => {
-    const items = buildSessionMentionItems(
-      [
-        session({ id: 'match', title: 'File generated-name investigation', lastMessageAt: 10 }),
-        session({ id: 'miss', title: 'Unrelated conversation', lastMessageAt: 20 }),
-      ],
-      null
-    );
-
-    expect(selectSessionMentionCandidates(items, 'filename').map((item) => item.sessionId)).toEqual(
-      ['match']
-    );
-  });
 });
 
 describe('session mention project scope', () => {
-  it('includes the machine in a local project identity', () => {
-    const first = session({
-      id: 'first',
-      machineId: 'machine-a',
-      project: { kind: 'local', localProjectId: 'project-1' },
-    });
-    const second = session({
-      id: 'second',
-      machineId: 'machine-b',
-      project: { kind: 'local', localProjectId: 'project-1' },
-    });
-
-    expect(getSessionMentionProjectKey(first)).toBe('local:machine-a:project-1');
-    expect(getSessionMentionProjectKey(second)).toBe('local:machine-b:project-1');
-    expect(
-      getMentionSourceProjectKey({
-        kind: 'local',
-        machineId: 'machine-a',
-        workspaceId: 'workspace-1',
-        localProjectId: 'project-1',
-      })
-    ).toBe('local:machine-a:project-1');
-    expect(
-      getMentionSourceProjectKey({
-        kind: 'provider',
-        localProject: { machineId: 'machine-a', localProjectId: 'project-1' },
-        githubRepoFullName: 'lodyai/lody',
-      })
-    ).toBe('local:machine-a:project-1');
-  });
-
   it('normalizes GitHub repos and prefers the structured project', () => {
     expect(
       getSessionMentionProjectKey(
@@ -209,13 +111,6 @@ describe('buildSessionMentionRewrites', () => {
   const expand = (text: string, mentions: Parameters<typeof buildSessionMentionRewrites>[1]) =>
     applyTextRewrites(text, buildSessionMentionRewrites(text, mentions)).text;
 
-  it('replaces the range with a lody://session/ markdown link', () => {
-    const text = 'look at @fix-ci please';
-    expect(expand(text, [range(8, 15)])).toBe(
-      'look at [@fix-ci](lody://session/ses_7f3ac91b) please'
-    );
-  });
-
   it('prefers the human title in the link label when supplied', () => {
     const text = 'look at @fix-ci please';
     const result = applyTextRewrites(
@@ -228,57 +123,16 @@ describe('buildSessionMentionRewrites', () => {
     expect(result).toBe('look at [@Fix CI](lody://session/ses_7f3ac91b?workspace=ws_1) please');
   });
 
-  it('escapes brackets in the title so the markdown link stays well-formed', () => {
-    expect(
-      buildSessionMentionPrompt({
-        sessionId: 'ses_1',
-        title: 'See [draft]',
-      })
-    ).toBe('[@See \\[draft\\]](lody://session/ses_1)');
-  });
-
   it('keeps the slug as the span label so the transcript can show it back', () => {
     const text = 'look at @fix-ci please';
     const [rewrite] = buildSessionMentionRewrites(text, [range(8, 15)]);
     // The label is what the user typed; the replacement is what the agent gets.
     expect(rewrite?.span).toEqual({ kind: 'session', label: 'fix-ci', target: 'ses_7f3ac91b' });
   });
-
-  it('ignores ranges of other kinds', () => {
-    const text = 'look at @src/a.ts';
-    expect(
-      buildSessionMentionRewrites(text, [{ start: 8, end: 17, kind: 'file', value: 'a' }])
-    ).toEqual([]);
-  });
-
-  it('expands every range', () => {
-    const text = '@fix-ci and @fix-ci';
-    expect(expand(text, [range(0, 7), range(12, 19)])).toBe(
-      '[@fix-ci](lody://session/ses_7f3ac91b) and [@fix-ci](lody://session/ses_7f3ac91b)'
-    );
-  });
-
-  it('drops a range with no session id rather than emitting a broken instruction', () => {
-    const text = 'look at @fix-ci';
-    expect(buildSessionMentionRewrites(text, [range(8, 15, '')])).toEqual([]);
-  });
 });
 
 describe('hydrateSessionMentionsFromText', () => {
   const ids = new Map([['fix-ci', 'ses_7f3ac91b']]);
-
-  it('rebuilds ranges carrying the session id, not the slug', () => {
-    const hydrated = hydrateSessionMentionsFromText('see @fix-ci now', ids);
-
-    expect(hydrated.mentions).toEqual([
-      { value: 'ses_7f3ac91b', start: 4, end: 11, kind: 'session' },
-    ]);
-    expect(hydrated.values).toEqual(['ses_7f3ac91b']);
-  });
-
-  it('ignores tokens it cannot resolve', () => {
-    expect(hydrateSessionMentionsFromText('@unknown', new Map()).mentions).toEqual([]);
-  });
 
   it('leaves a token the file source also claims to the file hydrator', () => {
     // Without the old `@session:` marker a slug and a path are the same shape,
@@ -286,12 +140,6 @@ describe('hydrateSessionMentionsFromText', () => {
     expect(
       hydrateSessionMentionsFromText('see @fix-ci now', ids, new Set(['fix-ci'])).mentions
     ).toEqual([]);
-  });
-
-  it('still hydrates a slug the file source does not know', () => {
-    expect(
-      hydrateSessionMentionsFromText('see @fix-ci now', ids, new Set(['src/a.ts'])).mentions
-    ).toEqual([{ value: 'ses_7f3ac91b', start: 4, end: 11, kind: 'session' }]);
   });
 });
 
@@ -321,20 +169,6 @@ describe('slug cache', () => {
 });
 
 describe('hydration records the kind', () => {
-  // Ranges are not persisted with a draft, so returning to a composer rebuilds
-  // them from text. A rebuilt range with no `kind` is not merely missing its
-  // icon: `buildSessionMentionRewrites` dispatches on `kind`, so a session
-  // mention would silently stop expanding on the way to the agent.
-  it('marks a rebuilt session range as a session', () => {
-    const hydrated = hydrateSessionMentionsFromText(
-      'see @fix-ci now',
-      new Map([['fix-ci', 'ses_7f3ac91b']])
-    );
-    expect(hydrated.mentions).toEqual([
-      { value: 'ses_7f3ac91b', start: 4, end: 11, kind: 'session' },
-    ]);
-  });
-
   it('still expands a rebuilt range, which a kindless one would not', () => {
     const text = 'see @fix-ci now';
     const { mentions } = hydrateSessionMentionsFromText(

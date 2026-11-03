@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto'
-import {
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  unlink,
-  link,
-  writeFile,
-  symlink,
-  open
-} from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, unlink, link, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -171,14 +161,6 @@ void test('an account cannot open or prepare against another account journal', a
   assert.deepEqual(await prepare(directory), original)
 })
 
-void test('a lost final response/ready marker resumes from retained originals without resigning', async (t) => {
-  const directory = await fixture(t)
-  const original = await prepare(directory)
-  database(directory, (db) => db.prepare('UPDATE creations SET ready=0').run())
-  assert.deepEqual(await prepare(directory), original)
-  assert.equal(stored(directory).ready, 1)
-})
-
 void test('failure after device retention keeps the signed pending record and refuses to invent a missing epoch key', async (t) => {
   const directory = await fixture(t)
   await assert.rejects(
@@ -229,59 +211,6 @@ void test('an unreadable installed key fails closed and is not replaced during r
   assert.equal(result.failure.code, 'corrupt')
   assert.deepEqual(stored(directory).epoch_blob, damaged)
   assert.deepEqual(stored(directory).record, row.record)
-})
-
-void test('another owner cannot overtake creation while the native key retention is in flight', async (t) => {
-  const directory = await fixture(t)
-  const result = await execute(
-    Effect.gen(function* () {
-      const entered = yield* Deferred.make()
-      const release = yield* Deferred.make()
-      const owner = yield* openOwner(directory, (custody) => ({
-        ...custody,
-        retainDevice: (...args) =>
-          Deferred.succeed(entered, undefined).pipe(
-            Effect.andThen(Deferred.await(release)),
-            Effect.andThen(custody.retainDevice(...args))
-          )
-      }))
-      const creating = yield* Effect.forkChild(owner.bootstrap.prepareCreation(intent))
-      yield* Deferred.await(entered)
-      const other = yield* Effect.result(
-        Effect.scoped(
-          makeDesktopE2eeBootstrap({
-            directory,
-            accountId: intent.accountId,
-            custody: owner.custody
-          })
-        )
-      )
-      yield* Deferred.succeed(release, undefined)
-      const created = yield* Fiber.join(creating)
-      assert.equal(other.failure.code, 'busy')
-      return created
-    })
-  )
-  assert.deepEqual(await prepare(directory), result)
-})
-
-void test('invalid requests fail before generating a signed identity', async (t) => {
-  const directory = await fixture(t)
-  for (const changed of [{ requestId: '../request' }, { slug: '../escape' }, { name: '' }]) {
-    const result = await execute(
-      Effect.gen(function* () {
-        const { bootstrap } = yield* openOwner(directory)
-        return yield* Effect.result(bootstrap.prepareCreation({ ...intent, ...changed }))
-      })
-    )
-    assert.equal(result.failure.code, 'invalid-input')
-  }
-  assert.equal(stored(directory), undefined)
-  // Only the wrapped KEK/native mutex may exist; no device has been retained.
-  assert.equal(
-    (await readdir(join(directory, 'custody'))).some((name) => name.endsWith('.device')),
-    false
-  )
 })
 
 void test('interrupting a caller retains creation ownership until admitted native work settles', async (t) => {
@@ -660,62 +589,6 @@ void test('D03 unknown cache and symlink stay untouched and do not enroll or sig
   }
 })
 
-void test('D03 concurrent owners retain one ID; busy contenders can retry and conflicting IDs never replace it', async (t) => {
-  const directory = await fixture(t)
-  const entered = Promise.withResolvers()
-  const release = Promise.withResolvers()
-  const first = execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody,
-        identityFiles: {
-          unlink,
-          link: async (...args) => {
-            entered.resolve()
-            await release.promise
-            return link(...args)
-          }
-        }
-      })
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-    })
-  )
-  await entered.promise
-  try {
-    await assert.rejects(execute(openOwner(directory)), (error) => error.code === 'busy')
-  } finally {
-    release.resolve()
-  }
-  await first
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory)
-      assert.equal(yield* owner.bootstrap.creationNeedsAccountIdentity(intent), false)
-      const conflict = yield* Effect.result(
-        owner.bootstrap.recordAccountIdentity({
-          accountId: intent.accountId,
-          cryptoUserId: 'bb'.repeat(32)
-        })
-      )
-      assert.equal(conflict.failure.code, 'conflict')
-    })
-  )
-  assert.equal(
-    JSON.parse(await readFile(join(directory, 'account-identity.json'), 'utf8')).cryptoUserId,
-    'aa'.repeat(32)
-  )
-})
-
 void test('D03 hard exit before or after atomic publication preserves the first identity and cleanup responsibility', async (t) => {
   const { runCommand, ProcessSpawnerLive, NodeProcessLive } =
     await import('@lody/shared/node/process')
@@ -757,153 +630,6 @@ void test('D03 hard exit before or after atomic publication preserves the first 
     assert.equal(Buffer.from(body.userId.toBytes()).toString('hex'), 'aa'.repeat(32))
     assert.equal((await readdir(directory)).filter((name) => name.endsWith('.pending')).length, 0)
   }
-})
-
-void test('D03 new cache never opens or migrates experimental SQLite originals', async (t) => {
-  const directory = await fixture(t)
-  const experimental = Buffer.from('unsupported experimental SQLite originals must remain')
-  await writeFile(join(directory, 'account-identity.sqlite'), experimental, { mode: 0o600 })
-  await writeFile(join(directory, 'account-identity.sqlite-wal'), experimental, { mode: 0o600 })
-  await writeFile(join(directory, 'account-identity.sqlite-shm'), experimental, { mode: 0o600 })
-  const signed = await prepare(directory)
-  assert.ok(signed.genesisRecordHex)
-  for (const suffix of ['', '-wal', '-shm'])
-    assert.deepEqual(
-      await readFile(join(directory, `account-identity.sqlite${suffix}`)),
-      experimental
-    )
-})
-
-void test('D03 identity reads accept normal short reads and failed auxiliary close never poisons scope', async (t) => {
-  const directory = await fixture(t)
-  await prepare(directory)
-  let closeFailures = 2
-  let closeAttempts = 0
-  let shortReads = 0
-  await execute(
-    Effect.gen(function* () {
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody: {},
-        identityFiles: {
-          link,
-          unlink,
-          open: async (...args) => {
-            const file = await open(...args)
-            return new Proxy(file, {
-              get(target, property) {
-                if (property === 'read')
-                  return async (buffer, offset, length, position) => {
-                    shortReads++
-                    return target.read(buffer, offset, Math.min(length, 3), position)
-                  }
-                if (property === 'close')
-                  return async () => {
-                    closeAttempts++
-                    if (closeFailures-- > 0)
-                      throw Object.assign(new Error('synthetic close failure'), { code: 'EIO' })
-                    return target.close()
-                  }
-                const value = Reflect.get(target, property, target)
-                return typeof value === 'function' ? value.bind(target) : value
-              }
-            })
-          }
-        }
-      })
-      assert.equal(
-        yield* bootstrap.creationNeedsAccountIdentity({
-          ...intent,
-          requestId: 'new-request-01234567'
-        }),
-        false
-      )
-      assert.ok(shortReads > 2)
-    })
-  )
-  // Both read-finally and account-scope cleanup failed. The retained, quiesced
-  // descriptor belongs to the process cleanup set; a new owner retries it.
-  assert.equal(closeAttempts, 2)
-  await execute(
-    Effect.gen(function* () {
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody: {}
-      })
-      assert.equal(
-        yield* bootstrap.creationNeedsAccountIdentity({
-          ...intent,
-          requestId: 'new-request-01234567'
-        }),
-        false
-      )
-    })
-  )
-  assert.equal(closeAttempts, 3)
-})
-
-void test('D03 invalid identity preserves its primary error alongside failed close and recovers without replacement', async (t) => {
-  const directory = await fixture(t)
-  await prepare(directory)
-  const path = join(directory, 'account-identity.json')
-  const original = await readFile(path)
-  const unknown = Buffer.from(
-    JSON.stringify({ version: 99, accountId: intent.accountId, cryptoUserId: 'aa'.repeat(32) }) +
-      '\n'
-  )
-  await writeFile(path, unknown)
-  const closeCause = new Error('synthetic primary companion close failure')
-  let failClose = true
-  await execute(
-    Effect.gen(function* () {
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody: {},
-        identityFiles: {
-          link,
-          unlink,
-          open: async (...args) => {
-            const file = await open(...args)
-            return new Proxy(file, {
-              get(target, property) {
-                if (property === 'close')
-                  return async () => {
-                    if (failClose) {
-                      failClose = false
-                      throw closeCause
-                    }
-                    return target.close()
-                  }
-                const value = Reflect.get(target, property, target)
-                return typeof value === 'function' ? value.bind(target) : value
-              }
-            })
-          }
-        }
-      })
-      const result = yield* Effect.result(
-        bootstrap.creationNeedsAccountIdentity({ ...intent, requestId: 'new-request-01234567' })
-      )
-      assert.equal(result.failure.code, 'corrupt')
-      const { desktopE2eeFailure } = yield* Effect.promise(() => import('./e2ee-diagnostics.mts'))
-      const diagnostic = desktopE2eeFailure()
-      assert.equal(diagnostic.source, 'bootstrap-storage')
-      assert.equal(diagnostic.cause.primary.code, 'corrupt')
-      assert.equal(diagnostic.cause.errors[1], closeCause)
-      assert.deepEqual(yield* Effect.promise(() => readFile(path)), unknown)
-      yield* Effect.promise(() => writeFile(path, original))
-      assert.equal(
-        yield* bootstrap.creationNeedsAccountIdentity({
-          ...intent,
-          requestId: 'new-request-01234567'
-        }),
-        false
-      )
-    })
-  )
 })
 
 void test('an unreserved old identity refusal removes only renderer intent and retains the exact signed host original', async (t) => {

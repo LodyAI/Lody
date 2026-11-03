@@ -19,14 +19,12 @@ import {
 const state = vi.hoisted(() => ({
   turns: [] as SessionHistory[],
   enabled: false,
-  settingsUnavailable: false,
   setTweak: vi.fn(),
 }));
 vi.mock('../src/components/sessions/use-local-session-continuation', () => ({
   useLocalSessionContinuation: () => ({
     recoveryEnabled: state.enabled,
     busy: false,
-    settingsUnavailable: state.settingsUnavailable,
     setTweak: state.setTweak,
   }),
 }));
@@ -77,7 +75,6 @@ describe('Claude quota recovery action', () => {
   beforeEach(() => {
     state.turns = [user, failure];
     state.enabled = false;
-    state.settingsUnavailable = false;
     state.setTweak.mockReset();
     getDefaultStore().set(userAtom, { id: 'owner' } as never);
     getDefaultStore().set(localMachineIdAtom, 'machine' as never);
@@ -108,14 +105,6 @@ describe('Claude quota recovery action', () => {
     await render();
     expect(container.textContent).toContain('Automatic capacity recovery is enabled');
     expect(container.querySelector('button')).toBeNull();
-  });
-  it('hides the optional recovery offer while its settings are unavailable', async () => {
-    state.settingsUnavailable = true;
-    await render();
-    expect(container.textContent).toBe('');
-    state.settingsUnavailable = false;
-    await render();
-    expect(container.textContent).toContain('Enable automatic recovery');
   });
   it('does not offer recovery on an old failure or after a new user input', async () => {
     await render('older');

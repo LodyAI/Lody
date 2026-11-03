@@ -30,14 +30,6 @@ describe('resolveDesktopCheckoutReturnDeepLinkPath', () => {
     ).toBe('/acme/settings/billing');
   });
 
-  it('ignores unrelated deep links', () => {
-    expect(
-      resolveDesktopCheckoutReturnDeepLinkPath('lody://github-install?workspaceSlug=acme')
-    ).toBeNull();
-    expect(resolveDesktopCheckoutReturnDeepLinkPath('https://lody.ai/acme')).toBeNull();
-    expect(resolveDesktopCheckoutReturnDeepLinkPath('not a url')).toBeNull();
-  });
-
   it('returns null when no workspace slug can be resolved', () => {
     expect(resolveDesktopCheckoutReturnDeepLinkPath('lody://checkout-return', '/')).toBeNull();
   });

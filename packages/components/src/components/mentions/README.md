@@ -28,8 +28,9 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   and the detail pane does not scroll. See the
   [description sizing decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-20-mention-description-space.md).
 - `file-at-mention.tsx` and `mention-project-file-source.ts` load file paths and
-  provide draft hydration. GitHub discovery uses the shared cache and request-level
-  failure observer; see [fetch contract](../../../../../specs/mention-file-fetch.md). [`file-search/`](file-search/README.md) owns the
+  provide draft hydration. GitHub discovery shares its cache and in-flight request;
+  fetch failures remain visible without analytics reporting. See the
+  [fetch contract](../../../../../specs/mention-file-fetch.md). [`file-search/`](file-search/README.md) owns the
   cancellable Worker, React lifecycle, and bounded path ranking.
 - `mention-session-source.ts` owns session slugs, candidates, the slug → id cache,
   hydration, the drop-time insertion, and the before-send expansion. Transfer

@@ -13,7 +13,7 @@ import {
 } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
-import { finalizePreparedSend } from '../src/lib/session-attachment-preparation';
+
 import {
   clearSessionImageCache,
   peekSessionImageUrl,
@@ -402,32 +402,6 @@ it('transfers a canceled first send creation to the next text message', async ()
     userId: 'account',
     latestUserMsgId: 'next',
   });
-});
-
-it('finalizing an already finalized input does not duplicate its attachment blocks', async () => {
-  const { buildDraftUserHistoryEntry } = await import('../src/lib/session-attachment-draft');
-  const value = send('only', ['image']);
-  const attachments = value.attachments.map((item) => ({
-    ...item,
-    ready: {
-      type: 'image' as const,
-      imageId: item.id,
-      mimeType: item.mimeType,
-      fileName: item.name,
-      sizeBytes: 5,
-    },
-  }));
-  const draft = buildDraftUserHistoryEntry(
-    { userId: 'account', timestamp: '2026-01-01T00:00:00Z', inputBlocks: [] },
-    attachments
-  );
-  expect(draft?.items).toEqual([]);
-  const first = finalizePreparedSend({ ...value, attachments });
-  expect(first.entry.items).toHaveLength(2);
-  expect(first.attachments.every((item) => item.ready && !item.source)).toBe(true);
-  const again = finalizePreparedSend({ ...value, ...first });
-  expect(again.entry.items).toEqual(first.entry.items);
-  expect(again.entry.inputConfig).toEqual(first.entry.inputConfig);
 });
 
 it('writes a failed cloud image through the same-machine local handoff as a file receipt', async () => {

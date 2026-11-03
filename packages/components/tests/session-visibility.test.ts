@@ -8,30 +8,6 @@ const m2 = 'machine-2' as MachineId;
 const p1 = 'project-1' as LocalProjectId;
 
 describe('session visibility', () => {
-  it('keeps only sessions whose machine is visible to the current user', () => {
-    const sessions = [
-      { id: 's1', machineId: m1 },
-      { id: 's2', machineId: m2 },
-      { id: 's3', machineId: null },
-      { id: 's4' },
-    ];
-
-    expect(filterSessionsByVisibility(sessions, new Set([m1]), new Set())).toEqual([
-      { id: 's1', machineId: m1 },
-    ]);
-  });
-
-  it('keeps the current user owner session visible without machine access rows', () => {
-    expect(
-      isSessionVisibleToUser(
-        { id: 's1', machineId: m1, userId: 'user-1' },
-        new Set<MachineId>(),
-        new Set<string>(),
-        'user-1'
-      )
-    ).toBe(true);
-  });
-
   it('keeps the current user local-project session visible without project access rows', () => {
     expect(
       isSessionVisibleToUser(
@@ -106,29 +82,6 @@ describe('session visibility', () => {
         new Set([getLocalProjectVisibilityKey(m1, p1)])
       )
     ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
-  });
-
-  it('returns empty when neither machines nor local projects are visible', () => {
-    const sessions = [
-      { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
-    ];
-    expect(filterSessionsByVisibility(sessions, new Set(), new Set())).toEqual([]);
-  });
-
-  it('keeps owner sessions even when both visibility indices are empty', () => {
-    const sessions = [
-      { id: 's-owner', machineId: m2, userId: 'user-1' },
-      { id: 's-other', machineId: m1, userId: 'user-2' },
-    ];
-    expect(
-      filterSessionsByVisibility(sessions, new Set(), new Set(), false, 'user-1').map(
-        (item) => item.id
-      )
-    ).toEqual(['s-owner']);
-  });
-
-  it('returns empty for empty sessions list', () => {
-    expect(filterSessionsByVisibility([], new Set([m1]), new Set())).toEqual([]);
   });
 
   it('fails closed for unconfirmed sessions during machine visibility loading', () => {

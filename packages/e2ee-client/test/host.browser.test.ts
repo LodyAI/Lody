@@ -35,6 +35,122 @@ const record = (result: Awaited<ReturnType<typeof call>>) => {
   return result.value as Record<string, unknown>;
 };
 it.each(['chromium', 'webkit'] as const)(
+  'portable host joins through account-wide pairing with genuine custody in %s',
+  async (engine) => {
+    const dir = await mkdtemp(join(tmpdir(), 'lody-account-host-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        platform: 'browser',
+        bundle: true,
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        metafile: true,
+        logLevel: 'silent',
+      });
+      expect(Object.values(output.metafile!.outputs).flatMap((o) => o.imports)).toEqual([]);
+      expect(
+        Object.keys(output.metafile!.inputs).some((s) =>
+          /(?:node-sqlite|e2ee-node|electron)/.test(s)
+        )
+      ).toBe(false);
+      const file = join(dir, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      context = await browser.launchPersistentContext(join(dir, 'profile'), { headless: true });
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot());
+      // One identity per workspace, prepared before any approver is known and reused.
+      const prepared = await call(page, 'accountPrepare');
+      expect(prepared.ok, JSON.stringify(prepared)).toBe(true);
+      expect(await call(page, 'accountPrepare')).toEqual(prepared);
+      // The owner admits it and signs a snapshot; the host installs it for that endorser.
+      const accepted = await call(page, 'accountApproveAndAccept');
+      expect(accepted.ok, JSON.stringify(accepted)).toBe(true);
+      const opened = await call(page, 'accountOpen');
+      expect(opened.ok, JSON.stringify(opened)).toBe(true);
+      expect(record(await call(page, 'ledger')).length).toBe(2);
+      expect((await call(page, 'keyRound')).ok).toBe(true);
+      const sealed = await call(page, 'seal');
+      expect(sealed.ok, JSON.stringify(sealed)).toBe(true);
+      // The paired portable device now approves a further device: it signs the
+      // admission, the append settles from the verified ledger, and its snapshot
+      // invitation verifies for it as endorser.
+      const approved = await call(page, 'accountApproveNewDevice');
+      expect(approved.ok, JSON.stringify(approved)).toBe(true);
+      expect(approved.value).toEqual({
+        before: 'unknown',
+        length: 3,
+        invitation: true,
+        access: true,
+      });
+    } finally {
+      await context?.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'portable host joins from full history when a Member approves in %s',
+  async (engine) => {
+    const dir = await mkdtemp(join(tmpdir(), 'lody-account-history-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        platform: 'browser',
+        bundle: true,
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        metafile: true,
+        logLevel: 'silent',
+      });
+      expect(Object.values(output.metafile!.outputs).flatMap((o) => o.imports)).toEqual([]);
+      expect(
+        Object.keys(output.metafile!.inputs).some((s) =>
+          /(?:node-sqlite|e2ee-node|electron)/.test(s)
+        )
+      ).toBe(false);
+      const file = join(dir, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      context = await browser.launchPersistentContext(join(dir, 'profile'), { headless: true });
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot());
+      expect((await call(page, 'accountPrepare')).ok).toBe(true);
+      // No snapshot invitation: the device verifies the full signed history instead.
+      const accepted = await call(page, 'accountApproveByHistory');
+      expect(accepted.ok, JSON.stringify(accepted)).toBe(true);
+      const opened = await call(page, 'accountOpen');
+      expect(opened.ok, JSON.stringify(opened)).toBe(true);
+      expect(record(await call(page, 'ledger')).length).toBe(2);
+      expect((await call(page, 'keyRound')).ok).toBe(true);
+    } finally {
+      await context?.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
   'portable personal host uses genuine custody, stores, approval and mailbox in %s',
   async (engine) => {
     const dir = await mkdtemp(join(tmpdir(), 'lody-personal-host-'));

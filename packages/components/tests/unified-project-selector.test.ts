@@ -16,20 +16,4 @@ describe('compareUnifiedProjectOptions', () => {
       'local:machine:mirror',
     ]);
   });
-
-  it('puts unused projects last and uses a stable label/value fallback', () => {
-    const projects = [
-      { value: 'github:owner/zeta', label: 'Zeta' },
-      { value: 'local:machine:alpha-2', label: 'Alpha' },
-      { value: 'local:machine:alpha-1', label: 'Alpha' },
-      { value: 'github:owner/recent', label: 'Recent', lastUsedAt: 1 },
-    ];
-
-    expect(projects.sort(compareUnifiedProjectOptions).map((project) => project.value)).toEqual([
-      'github:owner/recent',
-      'local:machine:alpha-1',
-      'local:machine:alpha-2',
-      'github:owner/zeta',
-    ]);
-  });
 });

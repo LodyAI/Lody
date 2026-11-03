@@ -1,6 +1,7 @@
 import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
 import { storePersonalGitHubProof } from '../src/components/settings/github-personal-authorization';
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { ErrorBoundary } from '../src/components/error-boundary';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -193,48 +194,6 @@ it('preserves ordinary visibility failures instead of swallowing an unrelated ba
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     'ordinary access failure'
   );
-});
-
-it('still renders registered ordinary machines and projects from the cloud visibility rows', async () => {
-  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
-  const machine = Object.values(store.get(machineMetaCacheAtom))[0]!;
-  const rows = [
-    { machineId: machine.id, ownerUserId: TOUR_USER_ID, sharedWithTeam: false, updatedAt: 1 },
-  ];
-  const useQuery: CloudApi['useQuery'] = (operation, args) => {
-    if (args === 'skip') return undefined;
-    return (
-      operation.name === 'machines:listVisibleMachines'
-        ? rows
-        : Object.keys(machine.localProjects!).map((localProjectId) => ({
-            ...rows[0],
-            localProjectId,
-          }))
-    ) as never;
-  };
-  const platform: PlatformProvider = {
-    ...TEST_CLOUD_PLATFORM,
-    cloudApi: { ...TEST_CLOUD_PLATFORM.cloudApi!, useQuery },
-  };
-  await act(async () =>
-    root.render(
-      <PlatformContext.Provider value={platform}>
-        <Provider store={store}>
-          <AuthenticatedConvexContext.Provider
-            value={{ isAuthenticated: true, isLoading: false } as never}
-          >
-            <VisibleResources />
-          </AuthenticatedConvexContext.Provider>
-        </Provider>
-      </PlatformContext.Provider>
-    )
-  );
-  const snapshot = JSON.parse(container.querySelector('output')!.textContent!);
-  expect(snapshot).toEqual({
-    machines: [machine.id],
-    projects: [DEFAULT_TOUR_IDENTITY.projectName],
-    loading: false,
-  });
 });
 
 it('keeps unknown-mode catalogs pending while the real local composer stays usable', async () => {

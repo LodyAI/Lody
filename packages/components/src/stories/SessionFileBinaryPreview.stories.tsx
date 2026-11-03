@@ -238,6 +238,8 @@ export const AttachedImageMarkup: Story = {
       const context = canvas.getContext('2d')!;
       context.fillStyle = '#fff';
       context.fillRect(0, 0, 800, 400);
+      // Exercise transparent source images when the marked-up result is flattened.
+      context.clearRect(0, 0, 16, 16);
       context.fillStyle = '#2563eb';
       context.fillRect(40, 40, 720, 100);
       context.fillStyle = '#111';
@@ -247,6 +249,52 @@ export const AttachedImageMarkup: Story = {
         canvas.toBlob((value) => resolve(value!), 'image/png')
       );
       return { file: new File([blob], 'screenshot.png', { type: 'image/png' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const AnimatedAttachedImageMarkup: Story = {
+  args: { path: 'animated.gif' },
+  loaders: [
+    async () => {
+      // Two synthetic frames: red followed by blue.
+      const data = atob(
+        'R0lGODlhCAAIAPAAAP8AAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAACAAIAAACB4SPqcvtXQAAIfkEAGQAAAAsAAAAAAgACACAAAD/AAAAAgeEj6nL7V0AADs='
+      );
+      const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0));
+      return { file: new File([bytes], 'animated.gif', { type: 'image/gif' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const LargeAttachedImageMarkup: Story = {
+  args: { path: 'large.jpg' },
+  loaders: [
+    async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const context = canvas.getContext('2d')!;
+      const pixels = context.createImageData(canvas.width, canvas.height);
+      let random = 0x6d2b79f5;
+      for (let index = 0; index < pixels.data.length; index += 4) {
+        for (let channel = 0; channel < 3; channel++) {
+          random ^= random << 13;
+          random ^= random >>> 17;
+          random ^= random << 5;
+          pixels.data[index + channel] = random & 255;
+        }
+        pixels.data[index + 3] = 255;
+      }
+      context.putImageData(pixels, 0, 0);
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((value) => resolve(value!), 'image/jpeg', 0.7)
+      );
+      const file = new File([blob], 'large.jpg', { type: 'image/jpeg' });
+      (window as Window & { markupSourceFile?: File }).markupSourceFile = file;
+      return { file };
     },
   ],
   render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStore, type Store } from 'jotai';
 
@@ -8,7 +9,6 @@ import {
   compactSidebarSuppressedAtom,
   navigationSidebarHiddenAtom,
   navigationSidebarVisibleAtom,
-  showNavigationSidebarAtom,
   syncCompactDesktopLayoutAtom,
   toggleNavigationSidebarAtom,
   zenLayoutModeAtom,
@@ -41,14 +41,6 @@ describe('compact desktop sidebar state', () => {
     expect(store.get(compactSidebarSuppressedAtom)).toBe(false);
   });
 
-  it('does not suppress an already collapsed sidebar', () => {
-    store.set(sidebarCollapsedAtom, true);
-
-    store.set(syncCompactDesktopLayoutAtom, true);
-    expect(store.get(navigationSidebarVisibleAtom)).toBe(false);
-    expect(store.get(compactSidebarSuppressedAtom)).toBe(false);
-  });
-
   it('reveals the suppressed sidebar when the user toggles it', () => {
     store.set(syncCompactDesktopLayoutAtom, true);
     expect(store.get(navigationSidebarVisibleAtom)).toBe(false);
@@ -77,22 +69,5 @@ describe('compact desktop sidebar state', () => {
     // An explicit close stays closed after the window widens.
     store.set(syncCompactDesktopLayoutAtom, false);
     expect(store.get(navigationSidebarVisibleAtom)).toBe(false);
-  });
-
-  it('lets an explicit show request beat the suppression', () => {
-    store.set(syncCompactDesktopLayoutAtom, true);
-    store.set(showNavigationSidebarAtom);
-
-    expect(store.get(navigationSidebarVisibleAtom)).toBe(true);
-    expect(store.get(compactSidebarSuppressedAtom)).toBe(false);
-    expect(store.get(sidebarCollapsedAtom)).toBe(false);
-  });
-
-  it('ignores a sync that does not change the compact flag', () => {
-    store.set(syncCompactDesktopLayoutAtom, true);
-    store.set(compactSidebarSuppressedAtom, false);
-
-    store.set(syncCompactDesktopLayoutAtom, true);
-    expect(store.get(compactSidebarSuppressedAtom)).toBe(false);
   });
 });

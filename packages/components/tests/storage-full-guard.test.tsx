@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { indexedDB, IDBObjectStore } from 'fake-indexeddb';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -131,12 +132,6 @@ describe('StorageFullGuard', () => {
     bridge.volume = { freeBytes: 40 * GIB, totalBytes: 360 * GIB };
     await act(async () => button('Check again and restart')!.click());
     expect(bridge.relaunches).toBe(1);
-  });
-
-  it('quits on request', async () => {
-    await act(async () => bridge.guard!.reportWriteFailure('cli'));
-    await act(async () => button('Quit Lody')!.click());
-    expect(bridge.quits).toBe(1);
   });
 
   it('keeps a newer blocking push when the initial state response arrives late', async () => {

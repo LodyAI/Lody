@@ -48,6 +48,23 @@ also checks the returned synchronous fence and the current ledger generation.
 Every new start checks its actual localProjectId; the RPC receipt alone never
 starts an agent. Withdrawal leaves already-started work running.
 
+Desktop ledger ingest retires RAM policies only when the genuine verified view's
+`(length, head hash)` changes. An unchanged page, replay or transport cursor does
+not renew the policy's original freshness stamp or clear it. The optional
+workspace-scoped `LedgerFeedInvalidation` port synchronously retires grants in the
+same non-yielding segment that publishes the durably appended verified view.
+Member/device/role and epoch changes all change this signed prefix. Machine
+generation derives only from its verified admission/replacement records, so a new
+generation cannot escape the same invalidation. Independent policy revisions and
+observed withdrawals retain their existing resource-specific invalidation.
+
+Each latest-policy read captures a RAM invalidation generation. A read that was
+already in flight when ledger invalidation occurred cannot republish its policy
+or revive its issued fence; it reports `sharing_unavailable` and a later operation
+may retry. No lock or new wait spans ledger, network or crypto work. A malformed
+input grants no authority; rejected history retains the existing workspace-close
+fence. This does not change withdrawal semantics, TTL or UI polling frequency.
+
 Owner re-signing may read an authenticated historical body after its signer was
 revoked. It preserves the complete project list and signs a new explicit intent
 with a current personal device; that historical body never supplies execution

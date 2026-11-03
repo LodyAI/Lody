@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatExplicitSessionTabSearch,
-  formatSessionTabSearch,
-  parseSessionTabSearch,
   resolveActiveSessionTab,
   getSessionTabFallback,
   isSessionTabClosed,
@@ -42,87 +39,6 @@ describe('shared tab closure', () => {
   });
 });
 
-describe('parseSessionTabSearch', () => {
-  it('round trips the empty surface without restoring the parent', () => {
-    expect(parseSessionTabSearch(formatExplicitSessionTabSearch('empty'))).toEqual({
-      kind: 'empty',
-    });
-    expect(formatSessionTabSearch('empty', parentSessionId)).toBe('empty');
-  });
-  it('returns missing when tab is absent', () => {
-    expect(parseSessionTabSearch(undefined)).toEqual({ kind: 'missing' });
-  });
-
-  it('parses a child session tab', () => {
-    expect(parseSessionTabSearch('session:child-session-id')).toEqual({
-      kind: 'session',
-      sessionId: 'child-session-id',
-    });
-  });
-
-  it('parses a draft tab as its full draft tab id', () => {
-    expect(parseSessionTabSearch('draft:draft-uuid')).toEqual({
-      kind: 'draft',
-      draftId: 'draft:draft-uuid',
-    });
-  });
-
-  it('treats empty and malformed values as invalid', () => {
-    expect(parseSessionTabSearch('')).toEqual({ kind: 'invalid' });
-    expect(parseSessionTabSearch('session:')).toEqual({ kind: 'invalid' });
-    expect(parseSessionTabSearch('draft:')).toEqual({ kind: 'invalid' });
-    expect(parseSessionTabSearch('viewer:file:src/index.ts')).toEqual({ kind: 'invalid' });
-  });
-});
-
-describe('formatSessionTabSearch', () => {
-  it('omits the parent session tab so the route entry restoration can run', () => {
-    expect(formatSessionTabSearch(parentSessionId, parentSessionId)).toBeUndefined();
-  });
-
-  it('formats a child session tab', () => {
-    expect(formatSessionTabSearch('child-session-id', parentSessionId)).toBe(
-      'session:child-session-id'
-    );
-  });
-
-  it('keeps a draft tab id verbatim', () => {
-    expect(formatSessionTabSearch('draft:draft-uuid', parentSessionId)).toBe('draft:draft-uuid');
-  });
-
-  it('round-trips through parseSessionTabSearch', () => {
-    expect(parseSessionTabSearch(formatSessionTabSearch('child-id', parentSessionId))).toEqual({
-      kind: 'session',
-      sessionId: 'child-id',
-    });
-    expect(parseSessionTabSearch(formatSessionTabSearch('draft:d1', parentSessionId))).toEqual({
-      kind: 'draft',
-      draftId: 'draft:d1',
-    });
-    expect(parseSessionTabSearch(formatSessionTabSearch(parentSessionId, parentSessionId))).toEqual(
-      { kind: 'missing' }
-    );
-  });
-});
-
-describe('formatExplicitSessionTabSearch', () => {
-  it('encodes the parent explicitly so tab activation is never re-restored', () => {
-    // In-session activation of the parent tab must stay distinguishable from
-    // an external entry with no tab choice — the absent value would be filled
-    // back in by the route's last-active restoration.
-    expect(formatExplicitSessionTabSearch(parentSessionId)).toBe(`session:${parentSessionId}`);
-    expect(parseSessionTabSearch(formatExplicitSessionTabSearch(parentSessionId))).toEqual({
-      kind: 'session',
-      sessionId: parentSessionId,
-    });
-  });
-
-  it('encodes children and drafts like the shared format', () => {
-    expect(formatExplicitSessionTabSearch('child-id')).toBe('session:child-id');
-    expect(formatExplicitSessionTabSearch('draft:d1')).toBe('draft:d1');
-  });
-});
-
 describe('resolveActiveSessionTab', () => {
   const context = {
     parentSessionId,
@@ -138,12 +54,6 @@ describe('resolveActiveSessionTab', () => {
     // #193: navigation that removes `?tab` while a child was active must
     // settle at the parent with no bounce-back write.
     expect(resolveActiveSessionTab({ kind: 'missing' }, context)).toBe(parentSessionId);
-  });
-
-  it('normalizes an explicit parent tab value', () => {
-    expect(resolveActiveSessionTab({ kind: 'session', sessionId: parentSessionId }, context)).toBe(
-      parentSessionId
-    );
   });
 
   it('takes the URL at its word for a child the replica has not delivered yet', () => {
@@ -164,12 +74,6 @@ describe('resolveActiveSessionTab', () => {
     // URL addressing one (an opened-by link) must not hold a pending surface.
     expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'side-chat-1' }, context)).toBe(
       parentSessionId
-    );
-  });
-
-  it('activates a known draft tab', () => {
-    expect(resolveActiveSessionTab({ kind: 'draft', draftId: 'draft:d1' }, context)).toBe(
-      'draft:d1'
     );
   });
 

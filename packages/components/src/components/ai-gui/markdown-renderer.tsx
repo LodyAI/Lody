@@ -92,6 +92,7 @@ import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { rehypeHeadingAnchors } from './markdown-heading-anchors';
 import { createMarkdownParseCache } from '@/lib/markdown-parse-cache';
+import { PrRemoteImage, PrRemoteImageContext } from './pr-remote-image';
 
 /**
  * Conversation surfaces provide this capability at their boundary. Rendering
@@ -1422,6 +1423,7 @@ const createMarkdownComponents = ({
 function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
   const resources = useContext(MarkdownFileResourcesContext);
+  const prRemoteImage = useContext(PrRemoteImageContext);
   // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
@@ -1450,6 +1452,16 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
     resolveMarkdownImagePath(resources.documentPath, props.src) !== null
   ) {
     return <MarkdownFileImage src={props.src} alt={props.alt} />;
+  }
+  if (prRemoteImage && typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true) {
+    const src = typeof props.src === 'string' ? props.src : '';
+    const httpsSrc = src.startsWith('//') ? `https:${src}` : src;
+    if (/^https:\/\//i.test(httpsSrc)) {
+      // A recycled row must not carry one-image consent to a different URL.
+      return <PrRemoteImage key={httpsSrc} src={httpsSrc} alt={props.alt} />;
+    }
+    // A local/inline image cannot smuggle an external request through srcset.
+    return <SizedMarkdownImage {...props} srcSet={undefined} />;
   }
   return <SizedMarkdownImage {...props} />;
 }
@@ -1548,6 +1560,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   headingAnchors = false,
   compact = false,
   muted = false,
+  allowImages = true,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1564,6 +1577,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   compact?: boolean;
   /** Use secondary text color without changing prose typography. */
   muted?: boolean;
+  /** Keep images as alt text on surfaces that do not load message attachments. */
+  allowImages?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1612,27 +1627,29 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     canvasLabel,
   });
 
-  const currentComponents = useMemo(
-    () =>
-      createMarkdownComponents({
-        copyAgentFileLabel,
-        openAgentFileLabel,
-        onAgentFileLinkClick,
-        getAgentFileLinkContextMenuItems,
-        readonly: readonly !== null,
-        headingAnchors,
-        compact,
-      }),
-    [
+  const currentComponents = useMemo(() => {
+    const components = createMarkdownComponents({
       copyAgentFileLabel,
-      getAgentFileLinkContextMenuItems,
-      onAgentFileLinkClick,
       openAgentFileLabel,
-      readonly,
+      onAgentFileLinkClick,
+      getAgentFileLinkContextMenuItems,
+      readonly: readonly !== null,
       headingAnchors,
       compact,
-    ]
-  );
+    });
+    return allowImages
+      ? components
+      : { ...components, img: ({ alt }: MarkdownImageProps) => <span>{alt}</span> };
+  }, [
+    allowImages,
+    copyAgentFileLabel,
+    getAgentFileLinkContextMenuItems,
+    onAgentFileLinkClick,
+    openAgentFileLabel,
+    readonly,
+    headingAnchors,
+    compact,
+  ]);
 
   const components = useSelectionStableValue(currentComponents);
   const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;

@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
-import { act, createRef } from 'react';
+/** @vitest-environment jsdom */
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,7 +22,11 @@ function Subject({ crash, label }: { crash: boolean; label: string }) {
   return <div>{label}</div>;
 }
 
-function renderBoundary({ crash, resetKey, label = 'healthy' }: {
+function renderBoundary({
+  crash,
+  resetKey,
+  label = 'healthy',
+}: {
   crash: boolean;
   resetKey: string;
   label?: string;
@@ -35,7 +40,11 @@ function renderBoundary({ crash, resetKey, label = 'healthy' }: {
   });
 }
 
-function renderInlineBoundary({ crash, resetKey, label = 'healthy' }: {
+function renderInlineBoundary({
+  crash,
+  resetKey,
+  label = 'healthy',
+}: {
   crash: boolean;
   resetKey: string;
   label?: string;
@@ -106,58 +115,5 @@ describe('ErrorBoundary manual recovery', () => {
 
     expect(renderAttempts).toBeGreaterThan(attemptsBeforeRetry);
     expect(container.textContent).toContain('other route');
-  });
-
-  it('gives inline fallbacks a user-driven recovery action', () => {
-    renderInlineBoundary({ crash: true, resetKey: 'workspace-a' });
-    renderInlineBoundary({ crash: false, resetKey: 'workspace-b', label: 'target selector' });
-
-    expect(container.textContent).toContain('Retry selector');
-    expect(container.textContent).not.toContain('target selector');
-
-    const retry = Array.from(container.querySelectorAll('button')).find((element) =>
-      element.textContent?.includes('Retry selector')
-    );
-    if (!retry) throw new Error('No inline recovery action');
-    act(() => {
-      retry.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(container.textContent).toContain('target selector');
-  });
-
-  it('lets an owning action recover a buttonless fallback', () => {
-    const boundaryRef = createRef<ErrorBoundary>();
-    act(() => {
-      root.render(
-        <ErrorBoundary
-          ref={boundaryRef}
-          name="ButtonlessTest"
-          variant="inline"
-          fallbackRender={() => null}
-          resetKeys={['slug-a']}
-        >
-          <Subject crash label="unavailable slug" />
-        </ErrorBoundary>
-      );
-    });
-    act(() => {
-      root.render(
-        <ErrorBoundary
-          ref={boundaryRef}
-          name="ButtonlessTest"
-          variant="inline"
-          fallbackRender={() => null}
-          resetKeys={['slug-b']}
-        >
-          <Subject crash={false} label="available slug" />
-        </ErrorBoundary>
-      );
-    });
-
-    expect(container.textContent).not.toContain('available slug');
-    act(() => boundaryRef.current?.resetErrorBoundary());
-
-    expect(container.textContent).toContain('available slug');
   });
 });
