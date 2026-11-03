@@ -78,6 +78,9 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     alignSelf: 'flex-start',
+    // The note is a chip, not a band: without an explicit fit-content width a
+    // block parent stretches it to the whole conversation column.
+    width: 'fit-content',
     gap: space[1.5],
     maxWidth: '100%',
     minHeight: 26,

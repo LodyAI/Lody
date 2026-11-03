@@ -7,6 +7,8 @@ import {
   type DiscoveryResource,
 } from '@/lib/resource-discovery';
 
+const resourceGetInputSchema = z.object({ id: z.string().trim().min(1) }).strict();
+
 export function registerDiscoveryTools(
   registerTool: ReturnType<typeof createSessionToolRegistrar>,
   withDiscovery: <T>(read: (discovery: ResourceDiscovery) => Promise<T>) => Promise<T>
@@ -65,7 +67,7 @@ export function registerDiscoveryTools(
       `lody_${resource}_get`,
       {
         description: `Read one ${resource} by stable id from its list tool. CATALOG_SYNCING is retryable.`,
-        inputSchema: z.object({ id: z.string().trim().min(1) }).strict(),
+        inputSchema: resourceGetInputSchema,
         annotations: { readOnlyHint: true },
       },
       (args) => result((discovery) => discovery.get(resource, args.id))

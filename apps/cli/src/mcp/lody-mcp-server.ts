@@ -79,6 +79,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
+  type LodyOperationSnapshot,
   type SessionTurnInputConfig,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
@@ -106,7 +107,7 @@ import {
   composeAgentRolePrompt,
   loadWorkspaceAgentRoleCatalog,
 } from '@/lib/agent-role-create';
-import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
 import {
@@ -122,6 +123,7 @@ import {
   resolveTurnDispatchConfig,
   readSessionMcpIdsForAuthoring,
   sendSessionChatResult,
+  type SessionChatDelivery,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -178,6 +180,16 @@ const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
 const FILE_UPLOAD_TOOL_NAME = 'lody_upload_files';
 const FEEDBACK_TOOL_NAME = 'lody_feedback';
 const MCP_CONFIGURE_TOOL_NAME = 'lody_mcp_configure';
+const SessionShareToolInputSchema = z
+  .object({
+    requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    purpose: z.string().trim().min(1).max(280),
+    sessionIds: z
+      .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
+      .max(31)
+      .optional(),
+  })
+  .strict();
 const SESSION_CREATE_OPTIONS_TOOL_NAME = 'lody_session_create_options';
 const SESSION_CREATE_TOOL_NAME = 'lody_session_create';
 const SESSION_CHAT_TOOL_NAME = 'lody_session_chat';
@@ -833,6 +845,13 @@ const SessionChatManyToolInputSchema = z
 
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
+const OperationBatchGetToolInputSchema = z
+  .object({
+    batchId: z.string().uuid(),
+    cursor: z.string().max(2048).optional(),
+    limit: z.number().int().min(1).max(50).default(20),
+  })
+  .strict();
 
 const SessionArchiveToolInputSchema = z.object({ sessionId: z.string().trim().min(1) }).strict();
 
@@ -1661,26 +1680,53 @@ const resolveSessionLiveWorkingFromSignals = (
   });
 };
 
+/** Bounded first-sync wait for reading another Machine's transcript once. */
+const REMOTE_SESSION_HISTORY_SYNC_WAIT_MS = 8_000;
+
+/**
+ * Reads another Machine's Session doc without keeping its cloud room joined.
+ * This Machine's own Sessions keep the shared cached doc that execution uses.
+ */
+const readSessionDocForMcp = async <T>(
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  localMachineId: string,
+  read: (sessionDoc: SessionDocument) => Promise<T>,
+  remoteSyncTimeoutMs: number
+): Promise<T> =>
+  session.machineId === localMachineId
+    ? await read(await manager.getOrCreateSessionDoc(session.id))
+    : await manager.readSessionDocTransiently(session.id, read, { remoteSyncTimeoutMs });
+
 const readSessionExecutionSnapshot = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
-  live: SessionLiveWorking
-): Promise<SessionExecutionSnapshot> => {
-  const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
-  const backend = await createSessionBackend(sessionDoc, session);
-  const [directory, queue] = await Promise.all([
-    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
-    backend.getMessageQueue(),
-  ]);
-  const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
-  const queuedTurnCount =
-    queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
-  return resolveSessionExecutionSnapshot({
-    live,
-    ...(activeTurnId ? { activeTurnId } : {}),
-    queuedTurnCount,
-  });
-};
+  live: SessionLiveWorking,
+  localMachineId: string
+): Promise<SessionExecutionSnapshot> =>
+  await readSessionDocForMcp(
+    manager,
+    session,
+    localMachineId,
+    async (sessionDoc) => {
+      const backend = await createSessionBackend(sessionDoc, session);
+      const [directory, queue] = await Promise.all([
+        backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+        backend.getMessageQueue(),
+      ]);
+      const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
+      const queuedTurnCount =
+        queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+      return resolveSessionExecutionSnapshot({
+        live,
+        ...(activeTurnId ? { activeTurnId } : {}),
+        queuedTurnCount,
+      });
+    },
+    // Status does not wait: presence and RPC carry liveness, and the briefly
+    // retained room refreshes the replica for the next read.
+    0
+  );
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1915,7 +1961,8 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
     const matches: Array<{
       session: SessionMeta;
       live: SessionLiveWorking;
-      execution: SessionExecutionSnapshot;
+      /** Undefined when the doc could not be read; the summary uses `live`. */
+      execution: SessionExecutionSnapshot | undefined;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
     for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
@@ -1934,13 +1981,22 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
           nowMs,
           rpc: liveStatuses.get(session.id),
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, live);
+        // One unreadable Session doc must not fail the whole page. Its summary
+        // falls back to the live presence/RPC signal, as without a doc read.
+        const execution = await readSessionExecutionSnapshot(
+          manager,
+          session,
+          live,
+          auth.machineId
+        ).catch(() => undefined);
         return { session, live, execution };
       });
       matches.push(
         ...entries.filter(
           (entry) =>
-            !input.executionState || entry.execution.executionState === input.executionState
+            !input.executionState ||
+            (entry.execution?.executionState ?? (entry.live.working ? 'busy' : 'idle')) ===
+              input.executionState
         )
       );
     }
@@ -1951,7 +2007,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
         sessionSummaryForMcp(session, {
           currentUserId: auth.userId,
           live,
-          executionState: execution.executionState,
+          ...(execution ? { executionState: execution.executionState } : {}),
         })
       ),
       ...(matches.length > page.length && last
@@ -2024,7 +2080,19 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
           nowMs,
           rpc: live,
         });
-        const execution = await readSessionExecutionSnapshot(manager, session, liveWorking);
+        let execution: SessionExecutionSnapshot;
+        try {
+          execution = await readSessionExecutionSnapshot(
+            manager,
+            session,
+            liveWorking,
+            auth.machineId
+          );
+        } catch (error) {
+          // Items are independently fallible: report this one with its original
+          // classification instead of failing every sibling.
+          return { sessionId, ok: false as const, error: normalizeMcpError(error) };
+        }
         return {
           sessionId,
           ok: true as const,
@@ -2081,17 +2149,24 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         false
       );
     }
-    const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const backend = await createSessionBackend(sessionDoc, session);
-    // Bounded business paging: `limit` counts displayable turns, the cursor is a
-    // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-    return await buildSessionHistoryForReader({
-      sessionId,
-      history: backend.history,
-      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-      ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-      maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-    });
+    return await readSessionDocForMcp(
+      manager,
+      session,
+      auth.machineId,
+      async (sessionDoc) => {
+        const backend = await createSessionBackend(sessionDoc, session);
+        // Bounded business paging: `limit` counts displayable turns, the cursor is a
+        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+        return await buildSessionHistoryForReader({
+          sessionId,
+          history: backend.history,
+          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+        });
+      },
+      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+    );
   });
 };
 
@@ -2240,6 +2315,7 @@ type InvokingTurnContext = {
   frozenInputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const buildInvocationIdentity = (source: InvokingTurnSource): InvocationIdentity => {
@@ -2263,6 +2339,7 @@ type InvokingTurnSource = {
   inputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   notificationProvenancePending?: boolean;
+  sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
 const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
@@ -2290,6 +2367,7 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     inputConfig,
     notificationOriginTurnIds: active.notificationOriginTurnIds ?? [],
     notificationProvenancePending: active.notificationProvenancePending,
+    sender: active.sender,
   };
 };
 
@@ -2357,6 +2435,7 @@ const resolveInvokingTurnContext = async (
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
+    sender: source.sender,
     notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
@@ -2430,7 +2509,10 @@ const activeOperationItem = (
 const markOperationItemInputDurable = (item: LodyOperationItemResult): LodyOperationItemResult =>
   item.status === 'active' ? { ...item, inputDurable: true } : item;
 
-const snapshotOperation = (requesterSessionId: SessionId, operationId: string): Promise<unknown> =>
+const snapshotOperation = (
+  requesterSessionId: SessionId,
+  operationId: string
+): Promise<LodyOperationSnapshot> =>
   withOperationStore((store) => store.snapshot(store.get(requesterSessionId, operationId)));
 
 const assertDifferentMcpSession = (
@@ -2449,12 +2531,14 @@ const reverseChatError = (): LodyOperationStoreError =>
     false
   );
 
-/** Read only the exact input owned by the active invocation, never earlier conversation turns. */
+/** Prefer the frozen sender; only unresolved provenance needs the exact input history. */
 const readInvokingChatSender = async (
   manager: LoroDocumentManager,
   session: SessionMeta,
   invoking: InvokingTurnContext
 ): Promise<string | undefined> => {
+  if (invoking.sender?.kind === 'agent') return invoking.sender.sessionId;
+  if (invoking.sender?.kind === 'user') return undefined;
   const doc = await manager.getOrCreateSessionDoc(session.id);
   const backend = await createSessionBackend(doc);
   const input = await backend.history.readTurn(invoking.identity.sourceTurnId);
@@ -3230,6 +3314,9 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           materializationClaimToken
         )
       );
+      const snapshot = await snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
+      // Response-only receipt: never persisted, so older readers are unaffected.
+      return result.delivery ? { ...snapshot, delivery: result.delivery } : snapshot;
     }
     return snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
   });
@@ -3848,6 +3935,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (accepted.operation.state === 'finished') {
       return await withOperationStore((store) => store.snapshot(accepted.operation));
     }
+    const deliveryByIndex: Array<SessionChatDelivery | undefined> = [];
     const nextItems = await mapWithConcurrency(
       accepted.operation.items,
       5,
@@ -3870,7 +3958,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           );
         }
         try {
-          await sendSessionChatResult(
+          const sent = await sendSessionChatResult(
             auth,
             workspace,
             manager,
@@ -3895,6 +3983,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               materializationClaimToken
             )
           );
+          deliveryByIndex[index] = sent.delivery;
           return markOperationItemInputDurable(storedItem);
         } catch {
           // See create_many above: post-acceptance transport failure is
@@ -3908,7 +3997,12 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       args.operationId,
       nextItems
     );
-    return snapshotOperation(ctx.sessionId as SessionId, args.operationId);
+    const snapshot = await snapshotOperation(ctx.sessionId as SessionId, args.operationId);
+    // Response-only receipts for items sent by this call, in item order.
+    const deliveries = deliveryByIndex.flatMap((delivery, index) =>
+      delivery ? [{ index, delivery }] : []
+    );
+    return deliveries.length > 0 ? { ...snapshot, deliveries } : snapshot;
   });
 };
 
@@ -4148,16 +4242,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       title: 'Request a conversation share',
       description:
         'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
-      inputSchema: z
-        .object({
-          requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
-          purpose: z.string().trim().min(1).max(280),
-          sessionIds: z
-            .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
-            .max(31)
-            .optional(),
-        })
-        .strict(),
+      inputSchema: SessionShareToolInputSchema,
     },
     async (args, extra) => {
       try {
@@ -4538,7 +4623,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn on this Machine receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn. A steer hands the running work forward; work delegated earlier still completes with the final reply. The response delivery field reports steered, queued (runs after the current turn) or dispatched (target was idle); it is absent when uncertain or on retries. A failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4631,7 +4716,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn on this Machine receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn, including on another Machine, receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn. The response deliveries list gives {index, delivery} (steered, queued or dispatched) for items sent by this call; an item is absent when uncertain or on retries. A failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4710,13 +4795,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       description:
         'Read a fixed batch of completed Operation results for the invoking Session and user. Page omitted results without starting another task. Oversized members are returned as member-json fragments; concatenate jsonChunk in offset order and parse once complete.',
       annotations: { readOnlyHint: true },
-      inputSchema: z
-        .object({
-          batchId: z.string().uuid(),
-          cursor: z.string().max(2048).optional(),
-          limit: z.number().int().min(1).max(50).default(20),
-        })
-        .strict(),
+      inputSchema: OperationBatchGetToolInputSchema,
     },
     async (args) => {
       try {

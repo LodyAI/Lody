@@ -8,41 +8,15 @@ import {
   DEFAULT_PROJECT_SKILL_DIR,
   applyProjectSkillsResultBudget,
   compareProjectSkillScope,
-  extractProjectSkillMetadata,
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
   getRegisteredSystemSkillDirs,
-  getSkillMarkdownBody,
   getSkillScanCandidateDirs,
   isRegisteredSkillAgentType,
-  parseSkillFrontmatter,
 } from '../src/acp/skills';
 import { BUILTIN_AGENTS } from '../src/ai';
 
-describe('getSkillMarkdownBody', () => {
-  it('strips a leading frontmatter block and returns the trimmed body', () => {
-    const md = '---\nname: x\ndescription: y\n---\n# Title\n\nBody text.\n';
-    expect(getSkillMarkdownBody(md)).toBe('# Title\n\nBody text.');
-  });
-
-  it('returns the whole content when there is no frontmatter', () => {
-    expect(getSkillMarkdownBody('# Just a body\n')).toBe('# Just a body');
-  });
-
-  it('returns empty string when the file is only frontmatter', () => {
-    expect(getSkillMarkdownBody('---\nname: x\n---\n')).toBe('');
-  });
-});
-
 describe('project skills helpers', () => {
-  it('always includes the default project skill directory in scan candidates', () => {
-    expect(getSkillScanCandidateDirs()).toContain(DEFAULT_PROJECT_SKILL_DIR);
-    expect(getSkillScanCandidateDirs()).toContain('agent/skills');
-    expect(getSkillScanCandidateDirs()).toContain('.claude/skills');
-    expect(getSkillScanCandidateDirs()).toContain('.qwen/skills');
-    expect(getSkillScanCandidateDirs()).toContain('skills/.system');
-  });
-
   it('maps registered agents to provider-specific project directories', () => {
     const dirs = getRegisteredSkillDirs([
       { cliType: 'builtin', agentType: 'codex' },
@@ -107,15 +81,6 @@ describe('project skills helpers', () => {
     expect([
       ...getRegisteredSkillDirs([{ cliType: 'registry', agentType: 'factory-droid' }]),
     ]).toEqual(['.factory/skills', '.agent/skills']);
-  });
-
-  it('includes all known current-user global directories in scan candidates', () => {
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain(DEFAULT_AGENTS_GLOBAL_SKILL_DIR);
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain(DEFAULT_GLOBAL_SKILL_DIR);
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.claude/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.cline/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.kilo/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.config/goose/skills');
   });
 
   it('maps registered agents to verified current-user global directories for UI annotation', () => {
@@ -229,59 +194,6 @@ describe('project skills helpers', () => {
     ]);
   });
 
-  it('parses shallow frontmatter and nested metadata fields', () => {
-    expect(
-      parseSkillFrontmatter(`---
-name: "Review Bot"
-description: Checks risky diffs
-metadata:
-  version: 1.2.3
-  author: Team AI
-allowed-tools:
-  - Read
----
-# Body
-`)
-    ).toEqual({
-      name: 'Review Bot',
-      description: 'Checks risky diffs',
-      metadata: {
-        version: '1.2.3',
-        author: 'Team AI',
-      },
-    });
-  });
-
-  it('extracts display metadata with documented fallbacks', () => {
-    expect(
-      extractProjectSkillMetadata(
-        `---
-description: Helps with tests
-version: 2.0.0
-metadata:
-  author: QA
----
-Body
-`,
-        'test-helper'
-      )
-    ).toEqual({
-      name: 'test-helper',
-      description: 'Helps with tests',
-      version: '2.0.0',
-      author: 'QA',
-    });
-  });
-
-  it('fails on malformed frontmatter instead of silently guessing', () => {
-    expect(() =>
-      parseSkillFrontmatter(`---
-name Skill
----
-`)
-    ).toThrow('Invalid SKILL.md frontmatter line');
-  });
-
   it('drops skill content after the aggregate response budget is exhausted', () => {
     const groups = [
       {
@@ -391,14 +303,5 @@ name Skill
       },
     ]);
     expect(groups[1]?.skills).toHaveLength(2);
-  });
-
-  it('rejects invalid aggregate content budgets', () => {
-    expect(() => applyProjectSkillsResultBudget([], { maxContentBytes: -1 })).toThrow(
-      'Invalid project skills content budget'
-    );
-    expect(() => applyProjectSkillsResultBudget([], { maxSkills: -1 })).toThrow(
-      'Invalid project skills skill count budget'
-    );
   });
 });

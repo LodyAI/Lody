@@ -98,6 +98,14 @@ export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('
       inputConfig: z.record(z.string(), z.unknown()),
       notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
       notificationProvenancePending: z.boolean().optional(),
+      // Daemon-hosted tools use the frozen sender without rereading input history.
+      // The legacy socket handler omits this field for older strict readers.
+      sender: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('user') }).strict(),
+          z.object({ kind: z.literal('agent'), sessionId: SessionIdSchema }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
 ]);

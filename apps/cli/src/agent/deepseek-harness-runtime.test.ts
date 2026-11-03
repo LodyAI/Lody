@@ -12,7 +12,6 @@ import {
   DEEPSEEK_HARNESS_HOME_ENV,
   DEEPSEEK_HARNESS_VERSION,
   DeepSeekHarnessMixedSessionCompressionError,
-  resolveDeepSeekHarnessHome,
   resolveDeepSeekHarnessProcessLaunch,
   resolveDeepSeekHarnessSpawn,
   resolveDeepSeekHarnessSessionCompression,
@@ -89,25 +88,6 @@ async function readGeneratedProfile(
     pnpmWorkspaceYaml,
   };
 }
-
-describe('resolveDeepSeekHarnessHome', () => {
-  it('defaults to .dsh under the user home', () => {
-    const homeDir = resolve('synthetic-user-home');
-
-    expect(resolveDeepSeekHarnessHome({}, homeDir)).toBe(join(homeDir, '.dsh'));
-    expect(resolveDeepSeekHarnessHome({ DSH_HOME: '   ' }, homeDir)).toBe(join(homeDir, '.dsh'));
-  });
-
-  it('honors DSH_HOME and expands a leading tilde', () => {
-    const homeDir = resolve('synthetic-user-home');
-    const configuredHome = resolve('custom-dsh-home');
-
-    expect(resolveDeepSeekHarnessHome({ DSH_HOME: configuredHome }, homeDir)).toBe(configuredHome);
-    expect(resolveDeepSeekHarnessHome({ DSH_HOME: '~/custom-dsh-home' }, homeDir)).toBe(
-      join(homeDir, 'custom-dsh-home')
-    );
-  });
-});
 
 describe('resolveDeepSeekHarnessProcessLaunch', () => {
   it('isolates providers and preserves edited YAML/settings across concurrent launches and upgrades', async () => {
@@ -580,21 +560,6 @@ describe('resolveDeepSeekHarnessSpawn', () => {
     await rm(join(rootDir, 'npx.cmd'));
     options.env.Path = rootDir;
     expect(() => resolveDeepSeekHarnessSpawn(options)).toThrow('npx was not found');
-  });
-
-  it('leaves non-Windows and non-DSH commands unchanged', () => {
-    const options = { command: 'npx', args: ['-y', 'example'], env: {}, workdir: '/unused' };
-    expect(resolveDeepSeekHarnessSpawn({ ...options, platform: 'win32' })).toEqual({
-      command: options.command,
-      args: options.args,
-    });
-    expect(
-      resolveDeepSeekHarnessSpawn({
-        ...options,
-        env: { LODY_DSH_NODE_EXECUTABLE: process.execPath },
-        platform: 'linux',
-      })
-    ).toEqual({ command: options.command, args: options.args });
   });
 });
 

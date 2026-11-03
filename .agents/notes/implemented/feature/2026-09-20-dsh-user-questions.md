@@ -40,6 +40,11 @@ Without notes support, clients retain replacement-only Other. The adapter
 restores original ids and removes only its own synthetic option from answers.
 Plan-review detail is included in the question body and approval remains an
 explicit option label; there is no automatic Plan/permission transition.
+The generic question card renders that body with the existing Markdown renderer,
+including in answered history. The ACP form does not identify a separate plan
+body, so this formatting applies to question text from every provider. Images
+render as alt text in this surface, preserving its previous no-image-load behavior.
+This avoids introducing a provider-specific wire marker or changing answers.
 
 Native `userQuestions.ask` remains responsible for `CALLER_NOT_LIVE` and
 `DELEGATED_CALLER`. Scoped registration plus exact ACP ownership prevents cross-

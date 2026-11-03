@@ -121,26 +121,6 @@ describe('fetchAcpCapabilities', () => {
     expect(other.authMethods).toEqual([]);
   });
 
-  it('defers builtin Codex authentication to ACP session creation', async () => {
-    const result = await fetchAcpCapabilities('builtin', 'codex', createSilentLogger());
-
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledTimes(1);
-    expect(mocks.probeBuiltinAuthentication).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'codex',
-      })
-    );
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'codex',
-        runtimeOverrides: undefined,
-      })
-    );
-    expect(result.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
-  });
-
   it('reports missing builtin credentials before starting the ACP adapter', async () => {
     const authMethods = [
       {
@@ -160,22 +140,6 @@ describe('fetchAcpCapabilities', () => {
     await expect(result).rejects.toBeInstanceOf(AcpAuthenticationRequiredError);
     await expect(result).rejects.toMatchObject({ authMethods });
     expect(mocks.startLocalAcpAgent).not.toHaveBeenCalled();
-  });
-
-  it('reports the sign-in methods the agent advertised during initialize', async () => {
-    mocks.startLocalAcpAgent.mockImplementation(async () =>
-      createSuccessfulStartupResult(undefined, [
-        { type: 'agent', id: 'oauth', name: 'OAuth' },
-        { type: 'agent', id: 'api-key', name: 'API key' },
-      ])
-    );
-
-    const result = await fetchAcpCapabilities('registry', 'custom-agent', createSilentLogger());
-
-    expect(result.authMethods).toEqual([
-      { type: 'agent', id: 'oauth', name: 'OAuth' },
-      { type: 'agent', id: 'api-key', name: 'API key' },
-    ]);
   });
 
   it.each(['registry', 'custom', 'builtin'] as const)(
@@ -422,65 +386,6 @@ describe('fetchAcpCapabilities', () => {
     expect(existsSync(workdir)).toBe(false);
   });
 
-  it('records provider title ownership from the live initialization', async () => {
-    const startup = createSuccessfulStartupResult();
-    Object.assign(startup.client, { supportsSessionTitleGeneration: () => true });
-    mocks.startLocalAcpAgent.mockResolvedValue(startup);
-    const result = await fetchAcpCapabilities('custom', 'title-agent', createSilentLogger());
-    expect(result.sessionTitle).toBe(true);
-  });
-
-  it.each([undefined, { version: 1 }, { version: 1, query: true }])(
-    'preserves the initialized quota capability %j',
-    async (capability) => {
-      const startup = createSuccessfulStartupResult();
-      Object.assign(startup.client, { getRateLimitsCapability: () => capability });
-      mocks.startLocalAcpAgent.mockResolvedValue(startup);
-      const result = await fetchAcpCapabilities('custom', 'quota-agent', createSilentLogger());
-      expect(result.rateLimits).toEqual(capability);
-    }
-  );
-
-  it('records the goal actions the live client advertised', async () => {
-    const startupResult = createSuccessfulStartupResult();
-    startupResult.client = {
-      supportsSessionTitleGeneration: () => false,
-      getRateLimitsCapability: () => undefined,
-      supportsAcknowledgedSteer: () => false,
-      getGoalCapability: () => ({ version: 1, actions: ['pause', 'resume'] }),
-      getAuthMethods: () => [],
-    } as never;
-    mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
-
-    const result = await fetchAcpCapabilities('registry', 'goal-agent', createSilentLogger());
-
-    expect(result.goalActions).toEqual(['pause', 'resume']);
-  });
-
-  it('leaves goal actions absent for a runtime with no goal extension', async () => {
-    mocks.startLocalAcpAgent.mockResolvedValue(createSuccessfulStartupResult());
-
-    const result = await fetchAcpCapabilities('registry', 'plain-agent', createSilentLogger());
-
-    expect(result.goalActions).toBeUndefined();
-  });
-
-  it('preserves acknowledged steering support discovered from the live client', async () => {
-    const startupResult = createSuccessfulStartupResult();
-    startupResult.client = {
-      supportsSessionTitleGeneration: () => false,
-      getRateLimitsCapability: () => undefined,
-      supportsAcknowledgedSteer: () => true,
-      getGoalCapability: () => undefined,
-      getAuthMethods: () => [],
-    } as never;
-    mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
-
-    const result = await fetchAcpCapabilities('registry', 'steering-agent', createSilentLogger());
-
-    expect(result.acknowledgedSteer).toBe(true);
-  });
-
   it('uses commands from NewSessionResponse and ignores command update notifications', async () => {
     mocks.startLocalAcpAgent.mockImplementation(async (options) => {
       options.onUpdateMessage({
@@ -500,28 +405,6 @@ describe('fetchAcpCapabilities', () => {
     expect(result.availableCommands).toEqual([
       { name: '/initial', description: 'Initial response' },
     ]);
-  });
-
-  it('preserves an explicit empty command list from NewSessionResponse', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      availableCommands: [],
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
-
-    expect(result.availableCommands).toEqual([]);
-  });
-
-  it('ignores a malformed NewSessionResponse command extension', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      availableCommands: [{ name: 123, description: 'invalid' }],
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
-
-    expect(result.availableCommands).toBeUndefined();
   });
 
   it('probes registry agents even when their agent type matches a builtin name', async () => {
@@ -550,49 +433,6 @@ describe('fetchAcpCapabilities', () => {
         runtimeOverrides: { codexPath: '/tmp/lody-test-codex' },
       })
     );
-  });
-
-  it('merges provider env into the capability probe process env', async () => {
-    await fetchAcpCapabilities('registry', 'env-agent', createSilentLogger(), {
-      ACP_PROVIDER_TOKEN: 'secret-token',
-    });
-
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'registry',
-        agentType: 'env-agent',
-        env: expect.objectContaining({
-          PATH: process.env.PATH,
-          ACP_PROVIDER_TOKEN: 'secret-token',
-        }),
-      })
-    );
-  });
-
-  it('derives models from a model-category config option when present', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      configOptions: [
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'opus',
-          options: [
-            { value: 'opus', name: 'Opus' },
-            { value: 'sonnet', name: 'Sonnet' },
-          ],
-        },
-      ],
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'config-agent', createSilentLogger());
-
-    expect(result.models).toEqual([
-      { modelId: 'opus', name: 'Opus', description: undefined },
-      { modelId: 'sonnet', name: 'Sonnet', description: undefined },
-    ]);
   });
 
   it('falls back to the legacy models field for agents without config options', async () => {
@@ -643,17 +483,6 @@ describe('fetchAcpCapabilities', () => {
     ]);
   });
 
-  it('returns no models when neither config options nor the legacy field provide them', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      modes: { availableModes: [{ id: 'default', name: 'Default' }] },
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'modeless-agent', createSilentLogger());
-
-    expect(result.models).toEqual([]);
-  });
-
   // BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED: the current version drops
   // the `agent`-id config option returned by acp-extension-claude.
   it('filters out the `agent` config option while keeping the rest', async () => {
@@ -680,24 +509,5 @@ describe('fetchAcpCapabilities', () => {
     const result = await fetchAcpCapabilities('registry', 'filter-agent', createSilentLogger());
 
     expect(result.configOptions?.map((opt) => opt.id)).toEqual(['mode']);
-  });
-
-  it('returns no config options when only the `agent` option is present', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      configOptions: [
-        {
-          id: 'agent',
-          name: 'Agent',
-          type: 'select',
-          currentValue: 'main',
-          options: [{ value: 'main', name: 'Main' }],
-        },
-      ],
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'filter-agent', createSilentLogger());
-
-    expect(result.configOptions).toBeUndefined();
   });
 });

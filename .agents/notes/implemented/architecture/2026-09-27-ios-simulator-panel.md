@@ -1,7 +1,7 @@
 # iOS simulator side panel
 
 Status: implemented
-Translation: current
+Translation: pending
 
 [中文](2026-09-27-ios-simulator-panel.zh.md)
 
@@ -596,9 +596,9 @@ open the simulator sidebar on an unconsumed hint. Mobile keeps explicit opening.
 SessionStorage remembers consumption per session for the current browser tab, with a
 mounted-view fallback when storage is unavailable; switching sessions, remounting or
 manually closing the sidebar must not repeatedly open the same hint. A new operation
-can open it again. A Side Chat binds its exact originating Session, with the override
-fenced to the parent and selected top conversation; it never starts its parent's
-preview. No global polling or parsing agent output is introduced.
+can open it again. Side Chats and child tabs bind the main conversation's preview. The daemon
+authorizes both identities on the same machine before resolving ownership, while
+responses retain the original request identity and child cleanup stays independent. No global polling or parsing agent output is introduced.
 
 Tests cover accepted/reused starts and publication failure, simulator-only and combined
 composer actions, and desktop/mobile consumption across session switches and remounts.
@@ -638,3 +638,29 @@ its rotation control toggles native orientation rather than promising a signed
 quarter-turn. SDK/AVD installation remains user-owned. The verified server is
 prepared for the public runtime channel; public source cannot deploy the external
 channel or authorize a new operation in the external proof signer.
+
+### Shared binding and idle recovery
+
+The main conversation owns both simulator bindings, so selecting a child or draft
+tab does not remount a different preview. Agent starts publish their discovery hint
+on the same main conversation. Independent opened sessions retain separate bindings.
+
+Android still releases unattended capture after 30 seconds, leaving the AVD running.
+The adapter distinguishes viewer idleness from native exit. The existing operation
+retains only a resume marker; a foreground session-current status request joins
+cleanup, then uses the same serialized start and lease acquisition path. Concurrent
+reopens share the replacement. Stop clears the marker eagerly, cleanup failure
+disables recovery, and another conversation's lease returns occupied. Agent status
+and exact-operation polls never resume. No background retry loop or wire field is
+added. This preserves resource release rather than holding capture alive while hidden.
+
+Local Android defaults to Clear; remote defaults to Balanced. An agent's first
+viewer determines the default, and idle recovery preserves an explicit quality choice.
+The Promise lifecycle remains in the shared core: migrating it would also require
+its existing gateway, proxy and native adapter ownership, outside this fix.
+
+Deterministic coverage exercises shared child occupancy, eager Stop during reopen,
+concurrent recovery, occupied devices, retained quality, and local/remote UI defaults.
+The current native Android smoke could not reach a first frame: scrcpy startup
+exited at the existing 30-second connection deadline. Desktop tab switching and
+sidebar restoration with the rebuilt app remain unverified.

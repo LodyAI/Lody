@@ -1,4 +1,11 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ComponentPropsWithRef,
+} from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle } from 'lucide-react';
@@ -276,6 +283,15 @@ export {
   type ScheduleRowContext,
 } from './schedule-list';
 
+export type SchedulePromptProps = Omit<ComponentPropsWithRef<'textarea'>, 'value' | 'onChange'> & {
+  value: string;
+  onValueChange: (value: string) => void;
+};
+
+function PlainSchedulePrompt({ onValueChange, ...props }: SchedulePromptProps) {
+  return <textarea {...props} onChange={(event) => onValueChange(event.target.value)} />;
+}
+
 export type ScheduleFormValue = {
   title: string;
   prompt: string;
@@ -316,6 +332,7 @@ export function ScheduleForm({
   agentBar,
   contextBar,
   contextNote,
+  renderPrompt,
   destination,
   issues = [],
   saving,
@@ -328,6 +345,8 @@ export function ScheduleForm({
   onSave,
 }: {
   initial: ScheduleFormValue;
+  /** Connected hosts supply the shared mention editor without coupling the view to catalogs. */
+  renderPrompt?: (props: SchedulePromptProps) => ReactNode;
   /** IANA zone of the machine that runs the schedule. */
   timeZone?: string;
   /** That machine's name, for "Next runs … (MacBook Pro time)". */
@@ -441,27 +460,23 @@ export function ScheduleForm({
             </div>
             <div {...stylex.props(styles.separator)} />
             <div {...stylex.props(styles.promptWrap)}>
-              {/* A bare field inside the composer-style box, like the title
-                  input: the box is the edge, so this is not a styled Textarea. */}
-              <textarea
-                ref={promptRef}
-                required
-                rows={4}
-                aria-label={t('schedules.prompt', 'What should the Agent do?')}
-                aria-invalid={attempted && promptMissing ? true : undefined}
-                placeholder={t(
+              {(renderPrompt ?? ((props) => <PlainSchedulePrompt {...props} />))({
+                ref: promptRef,
+                required: true,
+                rows: 4,
+                'aria-label': t('schedules.prompt', 'What should the Agent do?'),
+                'aria-invalid': attempted && promptMissing ? true : undefined,
+                placeholder: t(
                   'schedules.promptPlaceholder',
                   'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
-                )}
-                // Grows with its text from 4 lines to half the window, then
-                // scrolls; no resize handle. `field-sizing` is CSS-only (Chromium).
-                {...stylex.props(
+                ),
+                ...stylex.props(
                   styles.prompt,
                   attempted && promptMissing && styles.promptIssueSpace
-                )}
-                value={value.prompt}
-                onChange={(event) => setValue({ ...value, prompt: event.target.value })}
-              />
+                ),
+                value: value.prompt,
+                onValueChange: (prompt) => setValue((current) => ({ ...current, prompt })),
+              })}
               {attempted && promptMissing ? (
                 // Floats in the corner so it never narrows the text.
                 <FieldIssueMark

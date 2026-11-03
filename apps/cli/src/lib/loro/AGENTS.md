@@ -31,6 +31,13 @@ Rules:
   existence index (`lib/loro/repo-existence.ts`), or a purpose-built local index
   (example: `session/session-fork-operation-store.ts`). Open docs only for the
   filtered candidates, under a concurrency bound (`mapWithConcurrency`, 4).
+- Observation reads of another Machine's Session use
+  `LoroDocumentManager.readSessionDocTransiently`: it reads a cached doc in
+  place, otherwise opens a temporary wrapper outside `sessions` and destroys it.
+  The room stays joined only until its first sync or `TRANSIENT_DOC_ROOM_RETAIN_MS`,
+  so slow rooms still converge and no one-off read holds the room forever. A
+  failed wrapper cleanup never replaces the completed read
+  ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
 - To drop a doc you opened for inspection, first prove no other holder adopted
   it: `LoroDocumentManager.sessions` is a shared cache with **no refcounting**,
   and `cleanSessionDoc`/`destroy` disposes every holder's mirror/subscriptions
@@ -101,7 +108,9 @@ observer-lease driven; never start OS probes permanently or persist snapshots.
 ## Catalog readers
 
 Share Promise Repo; close readers first. Timeouts end waiters.
-Retry baseline errors in-place. Role writes confirm remote sync.
+Retry baseline errors in-place. Only metadata and the workspace Flock stay joined;
+any other catalog is released after `TRANSIENT_CATALOG_IDLE_MS` without a read
+and stops retrying then. Role writes confirm remote sync.
 Default MCP fallback requires an actual persisted remote cursor for that workspace
 Flock, not local rows or an empty checkpoint generation. Keep the pinned SQLite
 checkpoint reader read-only; cover receipt, restart and purge through real Streams
@@ -143,3 +152,10 @@ session reconciles/minute. Backoff is flap-aware for the same reason: health tha
 not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
 charges the attempt counter instead of resetting it, and `force` must not clear that
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
+
+Health follows the meta room. While it is joined, an aggregate `disconnected`
+means one doc or Flock room failed: health reads `rooms-degraded`, a backed-off
+per-room sweep (1s to 30s) retries that room, and cloud side effects keep running. Never
+schedule a transport-wide reconnect for it; one room that never finished its
+initial sync did that every two minutes
+([note](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).

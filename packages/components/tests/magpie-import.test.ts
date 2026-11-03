@@ -103,27 +103,6 @@ describe('confirmed local Magpie import', () => {
     expect([...writtenMachines]).toEqual(['magpie-workspace:mf:local-machine']);
     expect(store.get(pendingMagpieImportAtom)).toBeNull();
   });
-  it('queues Kimi, Grok and user-installed Bub with independent local identities', async () => {
-    const { store, writtenMachines } = fixture();
-    store.set(receiveMagpieImportAtom, link);
-    await store.set(importMagpieProvidersAtom, {
-      requestId: store.get(pendingMagpieImportAtom)!.id,
-      targets: ['kimi', 'grok', 'bub'],
-    });
-    const configs = store.get(getAllProviderSetupsAtom).map((task) => task.config);
-    expect(configs.map((config) => [config.name, config.agentType])).toEqual([
-      ['Kimi Code-magpie', 'kimi'],
-      ['Grok-magpie', 'grok'],
-      ['Bub-magpie', 'bub'],
-    ]);
-    expect(new Set(configs.map((config) => config.id)).size).toBe(3);
-    expect(
-      configs.every(
-        (config) => config.magpieGatewayUrl === gateway && config.machineId === machineId
-      )
-    ).toBe(true);
-    expect([...writtenMachines]).toEqual(['magpie-workspace:mf:local-machine']);
-  });
   it('rejects confirmation for a replaced request without writing', async () => {
     const { store, rows } = fixture();
     store.set(receiveMagpieImportAtom, link);

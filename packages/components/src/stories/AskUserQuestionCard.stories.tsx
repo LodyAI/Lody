@@ -62,6 +62,26 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const AnswerWithNote: Story = { render: (args) => <Interactive meta={args.meta} /> };
+export const PlanReview: Story = {
+  render: (args) => <Interactive meta={args.meta} />,
+  args: {
+    meta: {
+      source: 'lody',
+      version: 1,
+      allowCustomAnswer: false,
+      questions: [
+        {
+          id: 'plan',
+          header: 'Plan review',
+          question:
+            'Approve this plan?\n\n## Implementation\n\n- Update the **parser**\n- Run the tests\n\n| Step | Result |\n| --- | --- |\n| Check | Pass |',
+          multiSelect: false,
+          options: [{ label: 'Approve' }, { label: 'Reject' }],
+        },
+      ],
+    },
+  },
+};
 export const Readonly: Story = {};
 export const SecretNote: Story = {
   args: {

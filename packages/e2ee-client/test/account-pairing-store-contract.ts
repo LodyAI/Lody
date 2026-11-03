@@ -1,10 +1,25 @@
 import { Effect, Exit } from 'effect';
-import { expect, it } from 'vitest';
 import type { AccountPairingStore } from '../src/account-pairing';
 
-/** Semantics every `AccountPairingStore` implementation must keep. Shared by the
- * in-memory reference and the IndexedDB adapter. */
-export function accountPairingStoreContract(make: () => Promise<AccountPairingStore>) {
+const same = (actual: unknown, expected: unknown, label: string) => {
+  const encode = (value: unknown) =>
+    JSON.stringify(value, (_key, item) => (item instanceof Uint8Array ? [...item] : item));
+  if (encode(actual) !== encode(expected))
+    throw new Error(`${label}: expected ${encode(expected)}, got ${encode(actual)}`);
+};
+const expect = (actual: unknown) => ({
+  toBe: (expected: unknown) => same(actual, expected, 'toBe'),
+  toEqual: (expected: unknown) => same(actual, expected, 'toEqual'),
+  toBeNull: () => same(actual, null, 'toBeNull'),
+});
+
+/** Semantics every `AccountPairingStore` implementation must keep, as named checks
+ * that throw on failure. They run under vitest and inside a real browser page. */
+export function accountPairingStoreChecks(
+  make: () => Promise<AccountPairingStore>
+): [string, () => Promise<void>][] {
+  const checks: [string, () => Promise<void>][] = [];
+  const it = (name: string, check: () => Promise<void>) => void checks.push([name, check]);
   const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
   const request = (lookupId: string, fill: number) => ({
     lookupId,
@@ -77,4 +92,5 @@ export function accountPairingStoreContract(make: () => Promise<AccountPairingSt
     expect(await run(store.admission('w1', '11'.repeat(32)))).toBeNull();
     expect(await run(store.admissionCount('l1'))).toBe(0);
   });
+  return checks;
 }

@@ -6,7 +6,7 @@ import {
   type AccountPairingRequestRecord,
   type AccountPairingStore,
 } from '../src/account-pairing';
-import { accountPairingStoreContract } from './account-pairing-store-contract';
+import { accountPairingStoreChecks } from './account-pairing-store-contract';
 
 /** Reference store for tests: the same semantics as the durable adapters. */
 function memoryStore(): AccountPairingStore {
@@ -61,11 +61,14 @@ function memoryStore(): AccountPairingStore {
 }
 
 describe('account pairing store contract (reference)', () => {
-  accountPairingStoreContract(async () => memoryStore());
+  for (const [name, check] of accountPairingStoreChecks(async () => memoryStore())) it(name, check);
 });
 
 describe('portable account pairing workflow', () => {
-  it('runs request, approval and install with platform-neutral crypto and a store port', async () => {
+  it.each([
+    ['an Admin approver with a snapshot invitation', new Uint8Array([7]), 'w1'],
+    ['a Member approver through full history', null, 'history:w1'],
+  ] as const)('runs request, approval and install for %s', async (_, invitation, install) => {
     const fill = (byte: number, size = 32) => new Uint8Array(size).fill(byte);
     const requests = new Map<string, Record<string, unknown>>();
     const approvals = new Map<string, unknown[]>();
@@ -119,6 +122,7 @@ describe('portable account pairing workflow', () => {
                 credentialHash: fill(0x60),
               }),
             accept: () => Effect.sync(() => void installed.push('w1')),
+            acceptHistory: () => Effect.sync(() => void installed.push('history:w1')),
           },
         ]),
     });
@@ -137,7 +141,7 @@ describe('portable account pairing workflow', () => {
             signingPublicKey: fill(0x70),
             sign: () => Effect.succeed({ requestId: 'admit-1', record: new Uint8Array([9, 9]) }),
             append: () => Effect.void,
-            invitation: () => Effect.succeed(new Uint8Array([7])),
+            invitation: () => Effect.succeed(invitation),
             access: () => Effect.succeed({ workspaceId: 'w1', credential: '99'.repeat(32) }),
           },
         ]),
@@ -154,6 +158,6 @@ describe('portable account pairing workflow', () => {
     );
     expect(result.workspaces).toEqual([{ workspaceId: 'w1', outcome: 'admitted' }]);
     expect((await Effect.runPromise(requester.accountPairingRequest()))?.status).toBe('joined');
-    expect(installed).toEqual(['w1']);
+    expect(installed).toEqual([install]);
   });
 });

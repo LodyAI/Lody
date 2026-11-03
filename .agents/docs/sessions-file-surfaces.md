@@ -185,7 +185,9 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   notice with its file actions. The viewer starts at fit width and offers page
   thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
   and expandable search. Thumbnail rendering follows the visible sidebar range;
-  file actions remain in the existing side-panel menu.
+  file actions remain in the existing side-panel menu. The PDF viewer owns its
+  scrollport in a definite-height panel and reapplies fit zoom on resize; see
+  [PDF side-panel layout](../notes/implemented/bug-fix/2026-10-24-pdf-side-panel-layout.md).
   Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
   export for the main-thread fallback. Clear the viewer document before aborting
   its lifetime. The PDF.js patch makes global selection listeners belong to all
@@ -227,7 +229,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   the surface discards unfinished preparation. Context uses existing expandable
   text drafts and images use existing attachments. These are captured snapshots,
   without revision-aware source navigation. Existing image drafts can be marked
-  up and replaced after acceptance. See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
+  up and replaced after acceptance. Markup exports a size-bounded JPEG on white;
+  attachments sent without accepting markup keep their original format, and document crops stay PNG.
+  See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+  and [markup JPEG decision](../notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the

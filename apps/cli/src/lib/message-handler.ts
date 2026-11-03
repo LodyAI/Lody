@@ -3348,6 +3348,25 @@ export class MessageHandler {
         ) {
           throw new Error('Simulator session access denied.');
         }
+        const parentSessionId = record.meta.parentSessionId;
+        if (parentSessionId === undefined || parentSessionId === null) return request.sessionId;
+        if (typeof parentSessionId !== 'string' || !parentSessionId) {
+          throw new Error('Invalid simulator parent session.');
+        }
+        const parent = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(parentSessionId as SessionId)
+        );
+        if (
+          !parent?.meta ||
+          isLoroRepoDocDeleted(parent) ||
+          parent.meta.isArchived ||
+          parent.meta.parentSessionId ||
+          parent.meta.machineId !== this.machineId ||
+          parent.meta.userId !== request.requestedByUserId
+        ) {
+          throw new Error('Simulator parent session access denied.');
+        }
+        return parentSessionId;
       },
     };
     this.iosSimulatorService = new IosSimulatorService({
@@ -7264,18 +7283,22 @@ export class MessageHandler {
       case 'session/get-active-invocation-context': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        return invocation
-          ? {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: true as const,
-              ...invocation,
-            }
-          : {
-              type: 'session/active-invocation-context' as const,
-              sessionId,
-              active: false as const,
-            };
+        if (!invocation) {
+          return {
+            type: 'session/active-invocation-context' as const,
+            sessionId,
+            active: false as const,
+          };
+        }
+        // Session tools consume sender in-process. Keep the legacy socket shape
+        // unchanged: older MCP processes parse this response with a strict schema.
+        const { sender: _sender, ...legacyInvocation } = invocation;
+        return {
+          type: 'session/active-invocation-context' as const,
+          sessionId,
+          active: true as const,
+          ...legacyInvocation,
+        };
       }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession(

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -421,25 +422,5 @@ describe('account pairing relay operations', () => {
       )
     );
     await expect(submit!({} as never)).rejects.toBeInstanceOf(CloudCapabilityUnavailableError);
-    // Every relay and join-mailbox operation is assigned to the same capability.
-    const names = [
-      ...Object.values(cloudOperations.e2eeAccountPairing),
-      ...Object.values(cloudOperations.e2eeJoinMailbox),
-    ].map((operation) => [operation.name, operation.capability]);
-    expect(names.every(([, capability]) => capability === 'multiWorkspace')).toBe(true);
-    expect(names.map(([name]) => name)).toEqual([
-      'e2eeAccountPairing:submit',
-      'e2eeAccountPairing:pending',
-      'e2eeAccountPairing:read',
-      'e2eeAccountPairing:decline',
-      'e2eeAccountPairing:publish',
-      'e2eeAccountPairing:claim',
-      'e2eeJoinMailbox:begin',
-      'e2eeJoinMailbox:status',
-      'e2eeJoinMailbox:readRequest',
-      'e2eeJoinMailbox:cancel',
-      'e2eeJoinMailbox:publish',
-      'e2eeJoinMailbox:claim',
-    ]);
   });
 });

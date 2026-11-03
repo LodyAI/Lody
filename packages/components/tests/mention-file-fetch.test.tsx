@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { GitHubAuthError } from '@lody/shared';
@@ -18,7 +19,7 @@ vi.mock('../src/lib/github-token', () => ({
     run('token'),
 }));
 import { useRepoFilePaths } from '../src/components/mentions/file-at-mention';
-import { normalizeGithubFetchErrorCode } from '../src/components/mentions/mention-analytics';
+
 import { clearRepoFilePathsMemoryCache } from '../src/lib/repo-file-paths-cache';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -40,7 +41,7 @@ afterEach(async () => {
   state.fetch.mockReset();
   state.client = { capture: vi.fn() };
 });
-it('shows failure in both consumers, counts once after an observer unmounts, and ignores client churn', async () => {
+it('keeps shared failures visible and retryable without analytics, including after unmount', async () => {
   let reject!: (error: unknown) => void;
   state.fetch.mockReturnValue(
     new Promise((_, r) => {
@@ -60,9 +61,7 @@ it('shows failure in both consumers, counts once after an observer unmounts, and
     reject(new GitHubAuthError());
   });
   expect(container.textContent).toBe('error:error:');
-  expect(state.client.capture.mock.calls.map(([name, props]) => [name, props.error_code])).toEqual([
-    ['mention/file/fetch_error', 'auth_failed'],
-  ]);
+  expect(state.client.capture.mock.calls).toEqual([]);
   state.client = { capture: vi.fn() };
   await act(async () =>
     root.render(
@@ -86,10 +85,18 @@ it('shows failure in both consumers, counts once after an observer unmounts, and
   await act(async () => {
     reject(new Error('GitHub API error: 429'));
   });
-  expect(state.client.capture.mock.calls.map(([name, props]) => [name, props.error_code])).toEqual([
-    ['mention/file/fetch_error', 'rate_limited'],
-  ]);
+  expect(state.client.capture.mock.calls).toEqual([]);
   expect(container.textContent).toBe('');
+
+  state.fetch.mockResolvedValueOnce({
+    defaultBranch: 'main',
+    headSha: 'b',
+    paths: ['recovered.ts'],
+    truncated: false,
+  });
+  await act(async () => root.render(<Probe key="recovered" />));
+  expect(container.textContent).toBe('ready:recovered.ts');
+  expect(state.client.capture.mock.calls).toEqual([]);
 });
 it('does not retain another repository paths when the next repository fails', async () => {
   state.fetch.mockResolvedValueOnce({
@@ -103,11 +110,4 @@ it('does not retain another repository paths when the next repository fails', as
   state.fetch.mockRejectedValueOnce(new Error('GitHub API error: 404'));
   await act(async () => root.render(<Probe repo="org/other" />));
   expect(container.textContent).toBe('error:');
-});
-it('classifies actual typed auth failures and HTTP rate limits without relying on token wording', () => {
-  expect(normalizeGithubFetchErrorCode(new GitHubAuthError())).toBe('auth_failed');
-  expect(normalizeGithubFetchErrorCode(new Error('GitHub API error: 429'))).toBe('rate_limited');
-  expect(normalizeGithubFetchErrorCode(new Error('GitHub API error: 403 denied'))).toBe(
-    'forbidden'
-  );
 });

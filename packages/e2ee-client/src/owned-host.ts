@@ -191,6 +191,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         binding: raw.binding,
         close: () => closeSession(state),
         ledger: () => call(raw.ledger()),
+        approvalOriginals: () => call(raw.approvalOriginals()),
         refresh: () => call(raw.refresh()),
         keyRound: () => call(raw.keyRound()),
         status: () => call(raw.status()),
@@ -211,6 +212,15 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         updateMachineSharing: (...args: Parameters<RawSession['updateMachineSharing']>) =>
           call(raw.updateMachineSharing(...args)),
         ledgerState: () => call(raw.ledgerState()),
+        accountApproval: Object.freeze({
+          sign: (...args: Parameters<RawSession['accountApproval']['sign']>) =>
+            call(raw.accountApproval.sign(...args)),
+          settle: (...args: Parameters<RawSession['accountApproval']['settle']>) =>
+            call(raw.accountApproval.settle(...args)),
+          invitation: (...args: Parameters<RawSession['accountApproval']['invitation']>) =>
+            call(raw.accountApproval.invitation(...args)),
+          access: () => call(raw.accountApproval.access()),
+        }),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>
@@ -288,6 +298,12 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
     begin: (...args: Parameters<RawHost['begin']>) => run(host!.begin(...args)),
     claim: (...args: Parameters<RawHost['claim']>) => run(host!.claim(...args)),
     cancel: (...args: Parameters<RawHost['cancel']>) => run(host!.cancel(...args)),
+    prepareAccount: (...args: Parameters<RawHost['prepareAccount']>) =>
+      run(host!.prepareAccount(...args)),
+    acceptAccount: (...args: Parameters<RawHost['acceptAccount']>) =>
+      run(host!.acceptAccount(...args)),
+    acceptAccountHistory: (...args: Parameters<RawHost['acceptAccountHistory']>) =>
+      run(host!.acceptAccountHistory(...args)),
     open: (...args: Parameters<RawHost['open']>) =>
       run(
         Effect.acquireUseRelease(

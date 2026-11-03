@@ -52,8 +52,8 @@ Decision and rationale:
 - `iosSimulatorPreviewRequestId` is a UUID-only agent-start discovery hint, not live
   status or authority. It enables the composer action. Visible desktop conversations
   consume each request once per browser tab in sessionStorage; mobile stays opt-in.
-  Side Chat actions bind the exact originating Session; the panel owner override is
-  fenced to its parent/top-tab selection. Closing the sidebar never starts/stops a device.
+  All child tabs and Side Chats share the main conversation's preview binding.
+  Closing the sidebar never starts/stops a device.
 
 - Connection mode names are Realtime / Compatibility, never infer P2P from WebRTC.
   Optional viewer diagnostics are allowlisted and accepted only after the existing
@@ -66,6 +66,6 @@ Decision and rationale:
   supported controls. Android IDs are exact AVD names on the wire.
 
 - Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
-  the current operation. Android starts Balanced and exposes quality switching while ready, inside the controls' More menu; switching
+  the current operation. Android starts Clear on the local machine and Balanced remotely, and exposes quality switching while ready inside the controls' More menu; switching
   replaces the capture operation, not the AVD. Send quality only to hosts advertising
   `androidEmulatorQuality: 1`; old hosts receive no new field.

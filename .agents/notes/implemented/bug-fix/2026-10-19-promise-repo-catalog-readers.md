@@ -29,7 +29,9 @@ timeout, detach and acquisition coverage is retained against the scoped owner.
 
 Workspace startup starts metadata and workspace readers in the background.
 Requests admit one reader per authorized Machine Flock. Same-key requests share
-acquisition, capped retry and baseline. The genuine SDK adapter acquires
+acquisition, capped retry and baseline. Readers other than metadata and the
+workspace Flock are released after an idle window and stop retrying then
+([room lifetime](2026-11-02-cross-machine-read-room-lifetime.md)). The genuine SDK adapter acquires
 `acquireFlockDoc` plus `joinFlockDocRoom`; metadata uses `joinMetaRoom`. The explicit
 replica lease prevents unload from replacing the object while read; room interest
 supplies live updates. No second Repo, storage owner or native wrapper is created.

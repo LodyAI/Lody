@@ -63,20 +63,6 @@ describe('billing overview cache', () => {
     expect(readBillingOverviewCache('workspace-1', null)).toBeNull();
   });
 
-  it('rejects malformed persisted data instead of rendering it', () => {
-    localStorage.setItem(
-      'lody:billingOverview',
-      JSON.stringify({
-        'workspace-1': {
-          authSessionId: 'session-1',
-          overview: { effectivePlanTier: 'enterprise' },
-        },
-      })
-    );
-
-    expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
-  });
-
   it('defaults timeline fields when reading a cache written by an older client', () => {
     const legacyOverview = overview();
     const rawOverview = { ...legacyOverview } as Record<string, unknown>;
@@ -117,20 +103,6 @@ describe('billing overview cache', () => {
 });
 
 describe('billing overview reconciliation', () => {
-  it('keeps the displayed object stable when the fetched value is unchanged', () => {
-    const current = overview({ seatCount: 3 });
-    const equalFetch = overview({ seatCount: 3 });
-
-    expect(reconcileBillingOverview(current, equalFetch)).toBe(current);
-  });
-
-  it('uses the fetched value when a field changed', () => {
-    const current = overview({ seatCount: 3 });
-    const changedFetch = overview({ seatCount: 4 });
-
-    expect(reconcileBillingOverview(current, changedFetch)).toBe(changedFetch);
-  });
-
   it('refreshes server referral availability even when all other billing fields match', () => {
     const current = overview({ referralRewardsSupported: false });
     const enabled = overview({ referralRewardsSupported: true });

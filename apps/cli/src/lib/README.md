@@ -74,7 +74,9 @@ Unlisted requests retain their existing ordering. [Local control lane decision](
   native transfer. The one-time `git --exec-path` probe result is recorded in a
   `lody-git-transport.json` marker: matching markers skip the probe, transient
   spawn errors retry with bounded backoff, and a probe that still fails reuses
-  any usable recorded layout rather than blocking session startup.
+  any usable recorded layout rather than blocking session startup. Materialization
+  replaces confirmed dangling helper links while preserving usable entries and
+  reporting other filesystem errors.
 
 - `gh-pr-create-script.ts` — REST creation for managed `gh pr create/new` with
   explicit title and body/body-file; retains the selected credential for metadata.

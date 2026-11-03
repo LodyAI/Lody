@@ -213,6 +213,7 @@ import {
   type MobileProjectFileBrowserHandle,
 } from '@/components/files/mobile-project-file-browser';
 import { buildSessionLink } from '@lody/shared/session-link';
+import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
@@ -1977,20 +1978,8 @@ const SessionDetail = ({
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
-  // Simulator follows the selected conversation unless explicitly opened by a
-  // Side Chat. Keep that origin while the side panel switches away from the chat.
-  const [iosSimulatorTarget, setIosSimulatorTarget] = useState<{
-    parentId: SessionId;
-    tabId: SessionId | undefined;
-    sessionId: SessionId;
-  } | null>(null);
-  const simulatorOwnerSession =
-    iosSimulatorTarget?.parentId === sessionId &&
-    iosSimulatorTarget.tabId === activeBrowserSession?.id
-      ? ([activeBrowserSession, ...visibleSideSessions].find(
-          (candidate) => candidate?.id === iosSimulatorTarget.sessionId
-        ) ?? activeBrowserSession)
-      : activeBrowserSession;
+  // Device previews belong to the main conversation, across child and draft tabs.
+  const simulatorOwnerSession = activeSession;
   const iosSimulatorMachine = useAtomValue(
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
@@ -3242,11 +3231,19 @@ const SessionDetail = ({
   }, [activeSession, currentWorkspaceId, deleteArchivedSession, handleBackToList, repoFullName, t]);
 
   const handleCopyUrl = useCallback(
-    async (successMessage?: string, failureMessage?: string) => {
+    async (
+      successMessage?: string,
+      failureMessage?: string,
+      linkFormat: 'https' | 'deeplink' = 'https'
+    ) => {
       try {
-        if (!currentWorkspaceId || !activeSessionTabId) throw new Error('Session is not ready');
+        if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
+          throw new Error('Session is not ready');
+        }
         await navigator.clipboard.writeText(
-          buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+          linkFormat === 'deeplink'
+            ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+            : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
         );
         captureSessionDetailEvent('session/share_link_copied');
         toast.success(successMessage ?? t('sessions.urlCopied', 'Session URL copied to clipboard'));
@@ -3255,7 +3252,7 @@ const SessionDetail = ({
         toast.error(failureMessage ?? t('sessions.copyFailed', 'Unable to copy'));
       }
     },
-    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId]
+    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId, workspaceSlug]
   );
 
   const handleRequestShareSession = useCallback(
@@ -4082,35 +4079,15 @@ const SessionDetail = ({
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
 
-  const handleOpenIosSimulatorForSession = useCallback(
-    (targetSessionId: SessionId) => {
-      setIosSimulatorTarget({
-        parentId: sessionId,
-        tabId: activeBrowserSession?.id,
-        sessionId: targetSessionId,
-      });
-      handleOpenIosSimulator();
-    },
-    [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
-  );
-
-  const handleOpenAndroidEmulatorForSession = useCallback(
-    (targetSessionId: SessionId) => {
-      setIosSimulatorTarget({
-        parentId: sessionId,
-        tabId: activeBrowserSession?.id,
-        sessionId: targetSessionId,
-      });
-      if (isMobile) {
-        setAndroidEmulatorOpen(true);
-      } else {
-        revealRightSidebar();
-        activateSidebarTab('android-emulator');
-        semanticRouterRef.current?.activate('side-panel');
-      }
-    },
-    [sessionId, activeBrowserSession?.id, isMobile, revealRightSidebar, activateSidebarTab]
-  );
+  const handleOpenAndroidEmulator = useCallback(() => {
+    if (isMobile) {
+      setAndroidEmulatorOpen(true);
+    } else {
+      revealRightSidebar();
+      activateSidebarTab('android-emulator');
+      semanticRouterRef.current?.activate('side-panel');
+    }
+  }, [isMobile, revealRightSidebar, activateSidebarTab]);
 
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
@@ -6335,6 +6312,14 @@ const SessionDetail = ({
         void handleCopyUrl();
       },
     });
+    mobileMenuActions.push({
+      id: 'copy-deeplink',
+      icon: <Link {...stylex.props(detailStyles.icon14)} />,
+      label: t('sessions.copyDeepLink', 'Copy deeplink'),
+      onClick: () => {
+        void handleCopyUrl(undefined, undefined, 'deeplink');
+      },
+    });
     // Share-as-image arms message selection inside the chat surface, so it is
     // only offered while that surface is the one on screen: a draft has no
     // conversation and a viewer tab covers the rows being picked.
@@ -6538,8 +6523,8 @@ const SessionDetail = ({
                   )}
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
-                  onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
-                  onOpenAndroidEmulator={() => handleOpenAndroidEmulatorForSession(tabSession.id)}
+                  onOpenIosSimulator={() => handleOpenIosSimulator()}
+                  onOpenAndroidEmulator={() => handleOpenAndroidEmulator()}
                   onOpenBrowser={
                     previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
                   }
@@ -7270,6 +7255,7 @@ const SessionDetail = ({
         isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
+      onRestoreSession: handleRestoreCurrentSession,
       className: stylex.props(detailStyles.rootFill).className,
       hideHeader: true,
       toolbar: chatSession.id === sessionId ? desktopToolbar : undefined,
@@ -7278,8 +7264,8 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
-      onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
-      onOpenAndroidEmulator: () => handleOpenAndroidEmulatorForSession(chatSession.id),
+      onOpenIosSimulator: () => handleOpenIosSimulator(),
+      onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

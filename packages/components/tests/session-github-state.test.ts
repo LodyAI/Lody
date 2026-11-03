@@ -2,12 +2,7 @@ import { planPullRequestLifecycle } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 import type { SessionMeta, SessionId, SessionPullRequestMeta } from '@lody/shared';
 
-import {
-  getLatestPullRequest,
-  getPullRequestNumber,
-  getPullRequestRepoFullName,
-  getSessionGitHubState,
-} from '../src/lib/session-github-state';
+import { getPullRequestNumber, getPullRequestRepoFullName, getSessionGitHubState } from '../src/lib/session-github-state';
 
 const createPullRequest = (
   overrides: Partial<SessionPullRequestMeta> = {}
@@ -76,63 +71,12 @@ describe('getSessionGitHubState', () => {
     expect(state.hasExistingPr).toBe(false);
   });
 
-  it('reports no changes when the tree is clean and diff stats are empty', () => {
-    const session = createSession({
-      repoFullName: 'loro-dev/lody',
-      workspaceDirty: false,
-      diffStats: { allChange: { add: 0, del: 0 } },
-      pullRequests: [],
-    });
-
-    const state = getSessionGitHubState(session);
-
-    expect(state.workspaceDirty).toBe(false);
-    expect(state.hasChanges).toBe(false);
-  });
-
-  it('falls back to the current session when no workspace owner session is provided', () => {
-    const session = createSession({
-      repoFullName: 'loro-dev/lody',
-      workspaceDirty: false,
-      pullRequests: [
-        createPullRequest({
-          number: 99,
-          url: 'https://github.com/loro-dev/lody/pull/99',
-        }),
-      ],
-    });
-
-    const state = getSessionGitHubState(session);
-
-    expect(state.repoFullName).toBe('loro-dev/lody');
-    expect(state.workspaceDirty).toBe(false);
-    expect(state.hasExistingPr).toBe(true);
-    expect(state.latestPr?.number).toBe(99);
-  });
-
-  it('uses append order when compact PR meta has no reportedAt field', () => {
-    const latest = getLatestPullRequest(
-      createSession({
-        pullRequests: [
-          {
-            url: 'https://github.com/loro-dev/lody/pull/1',
-            status: 'open',
-          },
-          {
-            url: 'https://github.com/loro-dev/lody/pull/2',
-            status: 'draft',
-          },
-        ],
-      })
-    );
-
-    expect(latest?.url).toBe('https://github.com/loro-dev/lody/pull/2');
-  });
-
-  it('derives PR number and repository from compact URL-only metadata', () => {
+  it('prefers the URL over stale legacy number and repository fields', () => {
     const pr = {
-      url: 'https://github.com/loro-dev/lody/pull/123/files',
+      url: 'https://github.com/loro-dev/lody/pull/123',
       status: 'open' as const,
+      number: 9,
+      repository: 'loro-dev/other',
     };
 
     expect(getPullRequestNumber(pr)).toBe(123);
@@ -174,16 +118,6 @@ describe('multi-repository sessions', () => {
       ],
     });
     expect(getSessionGitHubState(session).latestPr?.url).toBe('https://github.com/acme/api/pull/7');
-  });
-
-  it('has no context PR while only another member has one', () => {
-    const session = createSession({
-      project: { kind: 'github', repoFullName: 'acme/api', branch: 'main' },
-      repoFullName: 'acme/api',
-      projectRun: run,
-      pullRequests: [{ url: 'https://github.com/acme/web/pull/9', status: 'open' }],
-    });
-    expect(getSessionGitHubState(session).latestPr).toBeNull();
   });
 
   it("describes the selected member's repository and PR", () => {

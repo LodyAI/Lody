@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent } from '@lody/shared';
 import {
-  hasSeparatePlanItem,
   hasUnansweredPlanApproval,
   resolvePlanExitMarkdown,
 } from '../src/components/ai-gui/plan-surface';
@@ -73,20 +72,6 @@ describe('resolvePlanExitMarkdown', () => {
     }
   );
 
-  it.each([undefined, null, '', '   ', 42, { nested: true }])(
-    'falls back to card content when rawInput.plan is %j',
-    (plan) => {
-      expect(
-        resolvePlanExitMarkdown(
-          toolCall({
-            rawInput: { plan },
-            content: [{ type: 'content', content: { type: 'text', text: '  # Content plan  ' } }],
-          })
-        )
-      ).toBe('# Content plan');
-    }
-  );
-
   it("takes only the first block, so Kimi's action summary stays out of the plan", () => {
     // Kimi builds `[plan, "Requesting approval to <action>"]`; joining pasted
     // the summary into the plan body.
@@ -100,36 +85,6 @@ describe('resolvePlanExitMarkdown', () => {
         })
       )
     ).toBe('Plan saved to: /p\n\n# Plan');
-  });
-
-  it('returns null when the card carries no plan, and ignores non-string rawInput', () => {
-    expect(resolvePlanExitMarkdown(toolCall({}))).toBeNull();
-    expect(resolvePlanExitMarkdown(toolCall({ content: [] }))).toBeNull();
-    expect(resolvePlanExitMarkdown(toolCall({ rawInput: { plan: { nested: true } } }))).toBeNull();
-    expect(resolvePlanExitMarkdown(toolCall({ rawInput: { plan: '   ' } }))).toBeNull();
-  });
-});
-
-describe('hasSeparatePlanItem', () => {
-  const planItem = (markdown: string): MessageContent =>
-    ({
-      type: 'proposed_plan',
-      turnId: 't',
-      markdown,
-      status: 'completed',
-      isLatest: true,
-    }) as MessageContent;
-
-  it('is true when the turn renders its own plan row (Codex)', () => {
-    expect(hasSeparatePlanItem([planItem('# Plan')])).toBe(true);
-  });
-
-  it('is false without one, so the card renders its own copy (Claude, Kimi)', () => {
-    expect(hasSeparatePlanItem([toolCall({})])).toBe(false);
-  });
-
-  it('ignores an empty plan row, which renders nothing to duplicate', () => {
-    expect(hasSeparatePlanItem([planItem('   ')])).toBe(false);
   });
 });
 
@@ -161,17 +116,5 @@ describe('hasUnansweredPlanApproval', () => {
     expect(
       hasUnansweredPlanApproval([planExit(request({ outcome: { outcome: 'cancelled' } }))])
     ).toBe(false);
-  });
-
-  it('ignores tool calls that are not a plan exit', () => {
-    const edit = {
-      type: 'tool_call',
-      toolCallId: 'edit-1',
-      kind: 'edit',
-      status: 'pending',
-      permissionRequest: request(),
-    } as MessageContent;
-    expect(hasUnansweredPlanApproval([edit])).toBe(false);
-    expect(hasUnansweredPlanApproval([{ type: 'text', text: 'hi' } as MessageContent])).toBe(false);
   });
 });

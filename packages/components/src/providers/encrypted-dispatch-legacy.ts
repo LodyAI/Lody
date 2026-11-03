@@ -56,7 +56,7 @@ export function createEncryptedDispatchLegacy(options: {
   let flight: Fiber.Fiber<Channel, unknown> | undefined;
   // E2E-only: count a turn dispatch when the stream client appended its frame.
   const effects = clientLossEffects(options.workspaceId);
-  const dispatches = new Set<string>();
+  const dispatches = new Map<string, { senders: number; appended: boolean }>();
   // Machines whose withdrawal this runtime saw the host verify. Only a later successful
   // preparation clears one; timeouts and unverifiable answers keep it known.
   const withdrawn = new Set<string>();
@@ -68,9 +68,18 @@ export function createEncryptedDispatchLegacy(options: {
         if (property !== 'appendJson' || typeof value !== 'function')
           return typeof value === 'function' ? value.bind(target) : value;
         return async (...args: unknown[]) => {
-          const result: unknown = await value.apply(target, args);
           const id = (args[1] as { id?: unknown } | undefined)?.id;
-          if (typeof id === 'string' && dispatches.delete(id)) effects.turnDispatched();
+          const dispatch = typeof id === 'string' ? dispatches.get(id) : undefined;
+          const result: unknown = await value.apply(target, args);
+          if (
+            typeof id === 'string' &&
+            dispatch &&
+            dispatches.get(id) === dispatch &&
+            !dispatch.appended
+          ) {
+            dispatch.appended = true;
+            effects.turnDispatched();
+          }
           return result;
         };
       },
@@ -192,9 +201,14 @@ export function createEncryptedDispatchLegacy(options: {
               })
             );
           if (!effects) return send();
-          dispatches.add(original.requestId);
+          // A duplicate may settle before the original append. Retain its accounting
+          // until every sender settles, and count chunked requests only once.
+          const dispatch = dispatches.get(original.requestId) ?? { senders: 0, appended: false };
+          dispatches.set(original.requestId, dispatch);
+          dispatch.senders += 1;
           return effects.track('dispatch', send).finally(() => {
-            dispatches.delete(original.requestId);
+            dispatch.senders -= 1;
+            if (dispatch.senders === 0) dispatches.delete(original.requestId);
           });
         },
       };

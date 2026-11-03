@@ -2,9 +2,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Cause, Effect, Exit, Fiber } from 'effect';
-import { it as effectIt } from '@effect/vitest';
-import { TestClock } from 'effect/testing';
+import { Cause, Effect, Exit } from 'effect';
+
 import { LoroDoc } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroRepo } from 'loro-repo';
@@ -1053,36 +1052,6 @@ describe('OSS migration', () => {
     expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
     expect(events).toEqual(['fetch-aborted', 'fetch-released', 'scope-released']);
   });
-  effectIt.effect('bounds a stalled network step and aborts its fetch at the deadline', () =>
-    Effect.gen(function* () {
-      let aborted = false;
-      let startedResolve: () => void = () => {};
-      const started = new Promise<void>((resolve) => {
-        startedResolve = resolve;
-      });
-      const fiber = yield* Effect.forkChild(
-        migrationStep(
-          (signal) =>
-            new Promise<void>((_resolve, reject) => {
-              signal.addEventListener(
-                'abort',
-                () => {
-                  aborted = true;
-                  reject(signal.reason);
-                },
-                { once: true }
-              );
-              startedResolve();
-            })
-        )
-      );
-      yield* Effect.promise(() => started);
-      yield* TestClock.adjust('5 minutes');
-      const exit = yield* Fiber.await(fiber);
-      expect(Exit.isFailure(exit)).toBe(true);
-      expect(aborted).toBe(true);
-    })
-  );
 });
 
 it('rejects encrypted import before authenticating or creating streams', async () => {

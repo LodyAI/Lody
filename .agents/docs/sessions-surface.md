@@ -53,6 +53,9 @@ this page is the full text of the rules summarised there.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,
   `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.
+  Header "Copy URL" uses `buildAppSessionUrl` for the selected conversation’s
+  HTTPS page; "Copy deeplink" uses the workspace-scoped `lody://session/…` address.
+  The mobile menu offers the same two actions. Neither action publishes history.
   Header "Copy path" derives paths from the machine Flock doc `['dotlodyPath']`,
   falling back to local-project `rootPath`; `MachineMeta.workspacePaths[sessionId]` is
   legacy fallback only and must not get new writes.

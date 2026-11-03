@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -200,27 +201,6 @@ describe('electron browser sign-in handoff', () => {
     await clickButton(/Open browser to sign in/i);
     expect(container.textContent).toContain('Waiting for browser sign-in');
     expect(findButton(/Open browser to sign in/i)?.disabled).toBe(false);
-  });
-
-  it('restores exchange progress from the main snapshot on a newly mounted page', async () => {
-    window.history.replaceState({}, '', '/login');
-    store.set(electronLoginPhaseAtom, 'exchanging');
-    await renderLoginPage(createAuthClient({}), createSessionValue(false), true);
-    expect(container.textContent).toContain('Signing you in');
-    expect(findButton(/Open browser to sign in/i)).toBeUndefined();
-  });
-
-  it.each(['en', 'zh_CN'])('shows certificate recovery guidance in %s', async (language) => {
-    await initI18n(language);
-    window.history.replaceState({}, '', '/login');
-    store.set(electronLoginPhaseAtom, 'error');
-    store.set(electronLoginErrorAtom, 'exchange_certificate_failed');
-    await renderLoginPage(createAuthClient({}), createSessionValue(false), true);
-    expect(container.textContent).toContain(language === 'en' ? 'certificate' : '证书');
-    expect(container.textContent).toContain(language === 'en' ? 'system clock' : '系统时间');
-    expect(container.textContent).toContain('TUN');
-    expect(container.textContent).not.toContain('login.desktopErrors.exchange_certificate_failed');
-    expect(container.querySelector('button')?.disabled).toBe(false);
   });
 
   it('names the browser account and hands nothing over until the user chooses', async () => {

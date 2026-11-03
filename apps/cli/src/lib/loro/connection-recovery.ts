@@ -125,7 +125,13 @@ export type LoroStreamsHealth =
   | 'connected'
   /** Meta room joined; at least one other room is mid-join. Not a failure. */
   | 'joining-rooms'
-  /** Meta room degraded, or at least one room is disconnected/errored. */
+  /**
+   * Meta room joined; at least one doc or Flock room is disconnected/errored.
+   * A backed-off per-room sweep owns it. It never starts a transport-wide
+   * reconnect, which would rejoin every room and rescan the workspace (#2194).
+   */
+  | 'rooms-degraded'
+  /** Meta room degraded, or no meta room and the transport is disconnected. */
   | 'recovering';
 
 export class LoroConnectionRecoveryController {
@@ -147,6 +153,9 @@ export class LoroConnectionRecoveryController {
   private metaSource: StreamsRoomBinding | null = null;
   private detachMetaRoomStatusLogger: (() => void) | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private roomSweepTimer: NodeJS.Timeout | null = null;
+  private roomSweepAttempt = 0;
+  private lastRoomSweepScheduledMs: number | null = null;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private activeOperation: Promise<void> | null = null;
   private streamsRecoveryGeneration = 0;
@@ -202,8 +211,14 @@ export class LoroConnectionRecoveryController {
     }
   }
 
+  /**
+   * Cloud-plane reachability for best-effort cloud side effects. A joined meta
+   * room proves the Streams plane is reachable even when one doc or Flock room
+   * is still joining or has failed; that room's state must not mark the whole
+   * machine offline. Without a meta room this falls back to the aggregate.
+   */
   isTransportConnected(): boolean {
-    return this.transportStatus === 'connected';
+    return this.metaRoomStatus === 'joined' || this.transportStatus === 'connected';
   }
 
   isRecovering(): boolean {
@@ -215,6 +230,7 @@ export class LoroConnectionRecoveryController {
     if (!this.isStreamsHealthy()) {
       return 'recovering';
     }
+    if (this.transportStatus === 'disconnected') return 'rooms-degraded';
     return this.transportStatus === 'connected' ? 'connected' : 'joining-rooms';
   }
 
@@ -238,6 +254,10 @@ export class LoroConnectionRecoveryController {
         this.offerStreamsReady(this.metaSub, 'transport-connected');
       }
       this.resetReconnectBackoff('transport-connected');
+      // A later 'connected' does not cancel it: loro-repo reports 'connected'
+      // for any join start or successful sync without re-aggregating, so it
+      // does not prove the failed room recovered.
+      if (status === 'disconnected') this.scheduleRoomSweep();
       return;
     }
     if (status === 'disconnected') {
@@ -365,8 +385,9 @@ export class LoroConnectionRecoveryController {
     // A disconnected transport cannot confirm pending writes within any
     // bounded wait — recovery runs on its own schedule. Answer "not
     // confirmed" immediately instead of burning the timeout on every call
-    // while offline.
-    if (this.transportStatus === 'disconnected') {
+    // while offline. A joined meta room can still confirm its own writes
+    // while an unrelated doc or Flock room makes the aggregate disconnected.
+    if (this.transportStatus === 'disconnected' && this.metaRoomStatus !== 'joined') {
       this.logger.debug(
         `[${this.workspaceId}] Skipping Loro meta sync wait: transport is disconnected (reason=${reason})`
       );
@@ -434,6 +455,7 @@ export class LoroConnectionRecoveryController {
       clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
     }
+    this.cancelRoomSweep();
     this.cancelBackoffReset();
     if (this.metaSyncedThrottleTimer) {
       clearTimeout(this.metaSyncedThrottleTimer);
@@ -658,6 +680,54 @@ export class LoroConnectionRecoveryController {
     );
   }
 
+  /**
+   * A doc or Flock room failed while the meta room stayed joined. Sweep only the
+   * failed rooms soon, backing off while they keep failing, so this Machine's
+   * own room recovers as quickly as a transport reconnect would. The sweep never
+   * reconnects the transport or emits recovery signals, so a stuck room cannot
+   * start workspace rescans. The backoff resets only after failures stop for
+   * twice the maximum delay, so a room that fails again on every sweep backs
+   * off to the maximum instead of being retried every second.
+   */
+  private scheduleRoomSweep(): void {
+    if (this.isCleanedUp || this.roomSweepTimer) return;
+    const maxDelayMs = readTimeoutEnv(
+      'LODY_LORO_AUTO_RECONNECT_MAX_DELAY_MS',
+      DEFAULT_RECONNECT_MAX_DELAY_MS
+    );
+    const now = Date.now();
+    if (
+      this.lastRoomSweepScheduledMs !== null &&
+      now - this.lastRoomSweepScheduledMs >= 2 * maxDelayMs
+    )
+      this.roomSweepAttempt = 0;
+    this.lastRoomSweepScheduledMs = now;
+    const delayMs = computeLoroReconnectDelayMs(this.roomSweepAttempt, {
+      baseDelayMs: readTimeoutEnv(
+        'LODY_LORO_AUTO_RECONNECT_DELAY_MS',
+        DEFAULT_RECONNECT_BASE_DELAY_MS
+      ),
+      maxDelayMs,
+    });
+    this.roomSweepAttempt = Math.min(this.roomSweepAttempt + 1, MAX_RECONNECT_ATTEMPT);
+    this.roomSweepTimer = setTimeout(() => {
+      this.roomSweepTimer = null;
+      this.offer({
+        type: 'reconnect',
+        reason: 'rooms-degraded',
+        options: { logWhenHealthy: false },
+      });
+    }, delayMs);
+    this.roomSweepTimer.unref?.();
+  }
+
+  private cancelRoomSweep(): void {
+    if (this.roomSweepTimer) {
+      clearTimeout(this.roomSweepTimer);
+      this.roomSweepTimer = null;
+    }
+  }
+
   private scheduleReconnect(reason: string): void {
     if (this.isCleanedUp || this.isStreamsHealthy() || this.reconnectTimer) {
       return;
@@ -696,9 +766,12 @@ export class LoroConnectionRecoveryController {
   /**
    * True when nothing needs recovering. `connecting` is deliberately included:
    * it only means some room is mid-join (see {@link LoroStreamsHealth}), and a
-   * lazily-joining room must not be reported as a broken transport. A room that
-   * really failed makes the aggregate `disconnected`, and a broken meta room
-   * shows up in `metaRoomStatus` — both of those still count as unhealthy.
+   * lazily-joining room must not be reported as a broken transport. While the
+   * meta room is joined, an aggregate `disconnected` names one failed doc or
+   * Flock room, not the transport: adapter close and real outages take the meta
+   * room down too. That room is retried by a backed-off per-room sweep. Treating
+   * it as an outage made one room that never finished its initial sync
+   * reconnect the whole workspace about every two minutes (#2194).
    *
    * A 'detached' meta room is healthy-idle: no transport is attached at all
    * (deliberately offline / pre-attach), so there is nothing to recover and
@@ -706,10 +779,8 @@ export class LoroConnectionRecoveryController {
    * the pre-refactor "local-only = healthy" placeholder semantics.
    */
   private isStreamsHealthy(): boolean {
-    return (
-      this.transportStatus !== 'disconnected' &&
-      (this.metaRoomStatus === 'joined' || this.metaRoomStatus === 'detached')
-    );
+    if (this.metaRoomStatus === 'joined') return true;
+    return this.metaRoomStatus === 'detached' && this.transportStatus !== 'disconnected';
   }
 
   private offerStreamsReady(metaSub: RepoRoomSubscription | null, reason: string): void {

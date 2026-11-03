@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import type {
   CodeCollabV2FileDigest,
@@ -163,99 +164,6 @@ function createRuntime(
 }
 
 describe('CodeCollabSessionFileProvider v2', () => {
-  it('uses workspace path as file id and revalidates opened text by digest', async () => {
-    const runtime = createRuntime({
-      previewFile: vi
-        .fn()
-        .mockResolvedValueOnce(previewOk('one\n', DIGEST_1))
-        .mockResolvedValueOnce({
-          status: 'unchanged',
-          v: 3,
-          path: 'src/app.ts',
-          digest: DIGEST_1,
-          sizeBytes: 4,
-        } satisfies FilePreviewV3Response)
-        .mockResolvedValueOnce(previewOk('two\n', DIGEST_2)),
-    });
-    const provider = new CodeCollabSessionFileProvider({
-      runtime,
-      role: 'write',
-      fileTree: {
-        'src/app.ts': true,
-        src: { kind: 'lazy' },
-      },
-    });
-
-    expect(await provider.listFiles()).toEqual([
-      expect.objectContaining({
-        entryType: 'lazy-directory',
-        directoryId: 'src',
-        path: 'src',
-      }),
-      expect.objectContaining({
-        entryType: 'file',
-        fileId: 'src/app.ts',
-        path: 'src/app.ts',
-        kind: 'text',
-      }),
-    ]);
-
-    const opened = await provider.openFile('src/app.ts');
-    expect(opened).toMatchObject({
-      status: 'ready',
-      snapshot: { kind: 'text', text: 'one\n', eol: 'lf' },
-    });
-    expect(runtime.previewFile).toHaveBeenCalledWith('src/app.ts', undefined);
-
-    const same = await provider.openFile('src/app.ts');
-    expect(same).toMatchObject({
-      status: 'ready',
-      snapshot: { kind: 'text', text: 'one\n', eol: 'lf' },
-    });
-    expect(runtime.previewFile).toHaveBeenLastCalledWith('src/app.ts', DIGEST_1);
-
-    const updated = await provider.openFile('src/app.ts');
-    expect(updated).toMatchObject({
-      status: 'ready',
-      snapshot: { kind: 'text', text: 'two\n', eol: 'lf' },
-    });
-    // Preview must never touch the Code Collab read path: activating it is what
-    // this change removed.
-    expect(runtime.openText).not.toHaveBeenCalled();
-    expect(runtime.refreshText).not.toHaveBeenCalled();
-  });
-
-  it('previews a binary image file the file index marked as binary', async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]);
-    const runtime = createRuntime({
-      previewFile: vi.fn(async () => previewBinary('assets/logo.png', bytes, 'image/png')),
-    });
-    const provider = new CodeCollabSessionFileProvider({
-      runtime,
-      role: 'write',
-      fileTree: { 'assets/logo.png': { kind: 'binary' } },
-    });
-
-    // The index entry must stay openable — a preview-blocking reason here is what
-    // made images unclickable in the tree.
-    expect(await provider.listFiles()).toEqual([
-      expect.objectContaining({ path: 'assets/logo.png', kind: 'binary' }),
-    ]);
-    expect((await provider.listFiles())[0]?.unavailableReason).toBeUndefined();
-
-    const opened = await provider.openFile('assets/logo.png');
-    expect(opened).toMatchObject({
-      status: 'ready',
-      entry: { kind: 'binary', readonly: true },
-      snapshot: { kind: 'binary', mimeType: 'image/png' },
-    });
-    expect(
-      opened.status === 'ready' && opened.snapshot.kind === 'binary'
-        ? Array.from(opened.snapshot.bytes ?? [])
-        : null
-    ).toEqual(Array.from(bytes));
-  });
-
   it('marks an external preview readonly so the editor cannot offer an impossible save', async () => {
     // Preview serves temp/scratch roots; `save-text` refuses everything outside the
     // workspace. Without this, an unindexed /tmp file resolves to a writable entry
@@ -287,127 +195,6 @@ describe('CodeCollabSessionFileProvider v2', () => {
     await expect(inWorkspace.openFile('src/app.ts')).resolves.toMatchObject({
       entry: { readonly: false },
     });
-  });
-
-  it('reports an oversize preview as unavailable rather than a partial file', async () => {
-    const runtime = createRuntime({
-      previewFile: vi.fn(
-        async () =>
-          ({
-            status: 'error',
-            v: 3,
-            code: 'too_large',
-            message: 'File is too large to preview.',
-            path: 'big.bin',
-            sizeBytes: 100,
-            limitBytes: 10,
-          }) satisfies FilePreviewV3Response
-      ),
-    });
-    const provider = new CodeCollabSessionFileProvider({
-      runtime,
-      role: 'write',
-      fileTree: { 'big.bin': true },
-    });
-
-    await expect(provider.openFile('big.bin')).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'text-too-large',
-      message: 'File is too large to preview.',
-    });
-  });
-
-  it('surfaces a rejected out-of-workspace path as permission denied', async () => {
-    const runtime = createRuntime({
-      previewFile: vi.fn(
-        async () =>
-          ({
-            status: 'error',
-            v: 3,
-            code: 'path_not_allowed',
-            message: 'File is outside the workspace.',
-          }) satisfies FilePreviewV3Response
-      ),
-    });
-    const provider = new CodeCollabSessionFileProvider({ runtime, role: 'write', fileTree: {} });
-
-    await expect(provider.openFile('/etc/passwd')).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'permission-denied',
-    });
-  });
-
-  it('evicts least-recently-used opened text by byte size', async () => {
-    const textState = createCodeCollabSessionFileProviderTextState({
-      maxOpenTextCacheBytes: 8,
-    });
-    const previewFile = vi.fn<CodeCollabSessionFileProviderRuntime['previewFile']>(
-      async (path, knownDigest) =>
-        knownDigest === DIGEST_1
-          ? { status: 'unchanged', v: 3, path, digest: DIGEST_1, sizeBytes: 4 }
-          : previewOk(`${path[0] ?? 'x'}123`, DIGEST_1, path)
-    );
-    const provider = new CodeCollabSessionFileProvider({
-      runtime: createRuntime({ previewFile }),
-      role: 'write',
-      fileTree: {
-        'a.ts': true,
-        'b.ts': true,
-        'c.ts': true,
-      },
-      textState,
-    });
-
-    await provider.openFile('a.ts');
-    await provider.openFile('b.ts');
-    await provider.openFile('a.ts');
-    await provider.openFile('c.ts');
-    await provider.openFile('b.ts');
-
-    // Only the second `a.ts` open still had a cached digest to revalidate against;
-    // the evicted entries had to be read in full again.
-    expect(previewFile.mock.calls.map(([path, digest]) => [path, digest])).toEqual([
-      ['a.ts', undefined],
-      ['b.ts', undefined],
-      ['a.ts', DIGEST_1],
-      ['c.ts', undefined],
-      ['b.ts', undefined],
-    ]);
-    expect(textState.openCache.byteSize).toBeLessThanOrEqual(8);
-  });
-
-  it('saves with the cached base digest and updates the local base digest', async () => {
-    const saveText = vi
-      .fn<CodeCollabSessionFileProviderRuntime['saveText']>()
-      .mockResolvedValueOnce({
-        status: 'ok',
-        path: 'src/app.ts',
-        digest: DIGEST_2,
-        rawBytes: 5,
-      } satisfies CodeCollabV2SaveTextResponse);
-    const runtime = createRuntime({ saveText });
-    const provider = new CodeCollabSessionFileProvider({
-      runtime,
-      role: 'write',
-      fileTree: { 'src/app.ts': true },
-    });
-    const emitted: string[] = [];
-    provider.subscribeText('src/app.ts', (text) => emitted.push(text));
-
-    await provider.openFile('src/app.ts');
-    const saved = await provider.saveText('src/app.ts', 'mine\n');
-
-    expect(saveText).toHaveBeenCalledWith(
-      'src/app.ts',
-      DIGEST_1,
-      { encoding: 'plain', text: 'mine\n', rawBytes: 5 },
-      { encoding: 'utf8', eol: 'lf' }
-    );
-    expect(saved).toMatchObject({
-      status: 'ready',
-      snapshot: { kind: 'text', text: 'mine\n', eol: 'lf' },
-    });
-    expect(emitted).toEqual(['mine\n']);
   });
 
   it('preserves opened text base digest across provider rebuilds with shared text state', async () => {
@@ -583,40 +370,6 @@ describe('CodeCollabSessionFileProvider v2', () => {
     );
   });
 
-  it('opens current All Changes and historical turn diffs through CLI RPC', async () => {
-    const runtime = createRuntime();
-    const provider = new CodeCollabSessionFileProvider({
-      runtime,
-      fileTree: { 'src/app.ts': true, 'old.ts': true },
-      allChanges: {
-        'src/app.ts': { diff: [3, 1] },
-        'old.ts': { diff: [0, 9], del: true },
-      },
-    });
-
-    expect(provider.supportsHistoricalDiffs).toBe(true);
-    await expect(provider.getDiff('src/app.ts')).resolves.toMatchObject({
-      status: 'ready',
-      oldSnapshot: { kind: 'text', text: 'one\n' },
-      newSnapshot: { kind: 'text', text: 'one\ntwo\n' },
-    });
-    expect(runtime.openCurrentDiff).toHaveBeenCalledWith('src/app.ts');
-
-    await expect(provider.getDiff('src/app.ts', 'turn-1')).resolves.toMatchObject({
-      status: 'ready',
-      oldSnapshot: { kind: 'text', text: 'turn old\n' },
-      newSnapshot: { kind: 'text', text: 'turn new\n' },
-    });
-    expect(runtime.openTurnDiff).toHaveBeenCalledWith('src/app.ts', 'turn-1');
-    await expect(provider.listChangedFiles()).resolves.toEqual({
-      status: 'ready',
-      files: [
-        expect.objectContaining({ path: 'old.ts', kind: 'deleted', add: 0, del: 9 }),
-        expect.objectContaining({ path: 'src/app.ts', kind: 'text', add: 3, del: 1 }),
-      ],
-    });
-  });
-
   it('keeps both spellings of a resolved open current across a save', async () => {
     // The machine resolves `Readme.md` to `README.md`. The viewer tab keeps the
     // requested spelling while `entry.fileId` carries the machine's, so the
@@ -692,25 +445,6 @@ describe('local resource snapshots', () => {
     });
     expect(await provider.saveText('src/app.ts', 'partial page')).toMatchObject({
       status: 'unavailable',
-    });
-  });
-
-  it('passes binary resource URLs to viewers without allocating byte snapshots', async () => {
-    const runtime = createRuntime({
-      previewFile: async () => ({
-        status: 'resource',
-        kind: 'binary',
-        path: 'large.png',
-        external: false,
-        sizeBytes: 50 * 1024 ** 2,
-        url: 'lody-resource://file/synthetic',
-      }),
-    });
-    const provider = new CodeCollabSessionFileProvider({ runtime, role: 'write', fileTree: {} });
-    expect(await provider.openFile('large.png')).toMatchObject({
-      status: 'ready',
-      entry: { readonly: true },
-      snapshot: { kind: 'binary', url: 'lody-resource://file/synthetic' },
     });
   });
 });

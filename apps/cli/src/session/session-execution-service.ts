@@ -5970,6 +5970,7 @@ export class SessionExecutionService {
         inputConfig: SessionTurnInputConfig;
         notificationOriginTurnIds: string[];
         notificationProvenancePending?: boolean;
+        sender?: { kind: 'user' } | { kind: 'agent'; sessionId: SessionId };
       }
     | undefined {
     const runtime = this.turnRuntimeBySession.get(sessionId);
@@ -6001,6 +6002,16 @@ export class SessionExecutionService {
       requesterUserId: invocation.requesterUserId,
       sourceTurnId: invocation.sourceTurnId,
       inputConfig: invocation.inputConfig,
+      ...(invocation.notificationAudience?.kind === 'user'
+        ? { sender: { kind: 'user' as const } }
+        : invocation.notificationAudience?.kind === 'agent'
+          ? {
+              sender: {
+                kind: 'agent' as const,
+                sessionId: invocation.notificationAudience.sessionId,
+              },
+            }
+          : {}),
       notificationOriginTurnIds: this.notificationOrigins(runtime),
       ...((!invocation.notificationAudience ||
         invocation.notificationAudience.kind === 'unknown') &&

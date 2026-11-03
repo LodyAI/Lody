@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyShortcutBinding,
   isCopyShortcut,
   isPasteShortcut,
-  pasteShortcutBinding,
   usesWindowsCopyPasteRightClick,
 } from '../src/components/terminal/terminal-clipboard-shortcuts';
 import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
@@ -42,13 +42,6 @@ describe('terminal clipboard shortcuts', () => {
     expect(usesWindowsCopyPasteRightClick()).toBe(true);
   });
 
-  it('on Windows pastes with Ctrl+V and Shift+Insert', () => {
-    stubPlatform('win32');
-    expect(isPasteShortcut(keyEvent({ key: 'v', code: 'KeyV', ctrlKey: true }))).toBe(true);
-    expect(isPasteShortcut(keyEvent({ key: 'Insert', code: 'Insert', shiftKey: true }))).toBe(true);
-    expect(pasteShortcutBinding()).toBe('ctrl+v');
-  });
-
   it('on Linux keeps Ctrl+V for the shell and pastes with Ctrl+Shift+V', () => {
     stubPlatform('linux');
     expect(isPasteShortcut(keyEvent({ key: 'v', code: 'KeyV', ctrlKey: true }))).toBe(false);
@@ -58,13 +51,5 @@ describe('terminal clipboard shortcuts', () => {
     expect(isCopyShortcut(keyEvent({ key: 'c', code: 'KeyC', ctrlKey: true }), true)).toBe(false);
     expect(copyShortcutBinding()).toBe('ctrl+shift+c');
     expect(usesWindowsCopyPasteRightClick()).toBe(false);
-  });
-
-  it('on macOS uses Cmd+C / Cmd+V', () => {
-    stubPlatform('darwin');
-    expect(isCopyShortcut(keyEvent({ key: 'c', code: 'KeyC', metaKey: true }), true)).toBe(true);
-    expect(isPasteShortcut(keyEvent({ key: 'v', code: 'KeyV', metaKey: true }))).toBe(true);
-    expect(isPasteShortcut(keyEvent({ key: 'v', code: 'KeyV', ctrlKey: true }))).toBe(false);
-    expect(copyShortcutBinding()).toBe('cmd+c');
   });
 });

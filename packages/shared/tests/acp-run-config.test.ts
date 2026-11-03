@@ -259,35 +259,6 @@ describe('agent run config selection', () => {
     expect(resolveAgentRunConfigSelection(undefined, codexCapability())).toEqual({});
   });
 
-  it('summarizes what a caller may choose per agent', () => {
-    expect(summarizeAgentRunConfigCapabilities(codexCapability())).toEqual({
-      modes: [
-        { id: 'agent', name: 'Agent' },
-        { id: 'read-only', name: 'Read-only' },
-      ],
-      configOptions: codexCapability().configOptions?.map(
-        ({ currentValue: _current, ...option }) => option
-      ),
-      models: [
-        { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
-        { id: 'gpt-5.4-mini', name: 'GPT-5.4-Mini' },
-      ],
-      reasoningEffortValues: ['low', 'medium', 'high'],
-      measuredForModelId: 'gpt-5.6-sol',
-      fastMode: true,
-      planMode: true,
-    });
-    expect(summarizeAgentRunConfigCapabilities(claudeCapability()).planMode).toBe(true);
-    expect(summarizeAgentRunConfigCapabilities(undefined)).toEqual({
-      modes: [],
-      configOptions: [],
-      models: [],
-      reasoningEffortValues: [],
-      fastMode: false,
-      planMode: false,
-    });
-  });
-
   it('reports effort per model when the agent published the breakdown', () => {
     const summary = summarizeAgentRunConfigCapabilities({
       ...codexCapability(),

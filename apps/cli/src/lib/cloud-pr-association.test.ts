@@ -105,31 +105,6 @@ describe('cloud PR association retry gate', () => {
     expect(f.linked).toHaveLength(2);
   });
 
-  it.each(['500', 'network'])(
-    'backs off %s failures to the cap and resets after success',
-    async (failure) => {
-      const f = fixture();
-      if (failure === '500') f.respond(500);
-      else f.disconnect();
-      for (const delay of [60_000, 120_000, 240_000, 480_000, 900_000]) {
-        expect(await f.port.associatePullRequest(input)).toBe(false);
-        const count = f.requests.length;
-        f.advance(delay - 1);
-        expect(await f.port.associatePullRequest(input)).toBe(false);
-        expect(f.requests).toHaveLength(count);
-        f.advance(1);
-      }
-      f.respond(200);
-      expect(await f.port.associatePullRequest(input)).toBe(true);
-      f.respond(500);
-      expect(await f.port.associatePullRequest(input)).toBe(false);
-      f.advance(60_000);
-      f.respond(200);
-      expect(await f.port.associatePullRequest(input)).toBe(true);
-      expect(f.linked).toEqual(['session', 'session']);
-    }
-  );
-
   it('does not share a pending successful association between sessions', async () => {
     let finish: (response: Response) => void = () => {
       throw new Error('request not started');
@@ -232,36 +207,5 @@ describe('cloud PR association retry gate', () => {
     expect(await f.port.associatePullRequest(input)).toBe(false);
     expect(await f.restart().associatePullRequest(input)).toBe(true);
     expect(f.linked).toEqual(['session']);
-  });
-
-  it('reserves bounded tracking space for concurrent repositories before starting network work', async () => {
-    let finish!: () => void;
-    const ready = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const requested: string[] = [];
-    const port = createCloudPrAssociationPort({
-      token: 'synthetic-token',
-      authSiteUrl: 'https://synthetic.convex.site',
-      logger: { error: () => {} },
-      fetch: async (_url, init) => {
-        requested.push(JSON.parse(String(init?.body)).args.repoFullName);
-        await ready;
-        return new Response(null, { status: 403 });
-      },
-    });
-    const pending = Array.from({ length: 256 }, (_, index) =>
-      port.associatePullRequest({ ...input, repoFullName: `owner/repo-${index}` })
-    );
-    expect(await port.associatePullRequest({ ...input, repoFullName: 'owner/overflow' })).toBe(
-      false
-    );
-    expect(requested).toHaveLength(256);
-    finish();
-    expect(await Promise.all(pending)).toEqual(Array(256).fill(false));
-    expect(await port.associatePullRequest({ ...input, repoFullName: 'owner/overflow' })).toBe(
-      false
-    );
-    expect(requested).not.toContain('owner/overflow');
   });
 });

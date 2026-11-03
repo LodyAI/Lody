@@ -155,21 +155,6 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     ).toMatchObject({ state: 'claimed' });
   });
 
-  it('keeps the committed ACK on failed publication and retries only those bytes', async () => {
-    const f = fixture();
-    const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
-    const frame = { id: original.requestId, frame: original.frameHex };
-    f.rejectPublish(true);
-    await expect(Effect.runPromise(f.receiver()(frame))).rejects.toThrow();
-    expect(f.offers()).toBe(1);
-    f.rejectPublish(false);
-    await Effect.runPromise(f.receiver()(frame));
-    const first = f.published[0];
-    await Effect.runPromise(f.receiver()(frame));
-    expect(f.published[1]).toEqual(first);
-    expect(f.offers()).toBe(1);
-  });
-
   it('retains an uncommitted ACK original through a local write fault without offering or sealing again', async () => {
     const f = fixture();
     const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));

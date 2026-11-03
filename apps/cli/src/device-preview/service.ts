@@ -19,6 +19,7 @@ type ViewerEndpoint = {
   renew?: () => void;
 };
 type Operation = {
+  resumeAfterIdle?: boolean;
   quality?: AndroidEmulatorQuality;
   state: DevicePreview;
   owner: string;
@@ -39,7 +40,7 @@ export type GatewayContext = {
   iceServers(): Promise<SimulatorIceServer[]>;
 };
 export type DeviceConnection = {
-  closed: Promise<void>;
+  closed: Promise<void | 'idle'>;
   stop(): Promise<void>;
   gateway(context: GatewayContext): Promise<{
     port: number;
@@ -72,7 +73,8 @@ export type DevicePreviewDependencies = {
   iceServers?: (
     sessionId: string
   ) => Promise<{ iceServers: SimulatorIceServer[]; expiresAt: number }>;
-  authorize(request: DeviceRequest): Promise<void>;
+  /** Validates the caller and, for child tabs, their main conversation owner. */
+  authorize(request: DeviceRequest): Promise<void | string>;
   onAgentPreviewStarted?: (sessionId: string, operationId: string) => Promise<void>;
   leases?: DeviceControlLeases;
   now?: () => number;
@@ -120,10 +122,13 @@ export class DevicePreviewService {
     fromAgent: boolean
   ): Promise<DeviceResponse> {
     const base = { sessionId: request.sessionId };
-    const generation = this.generations.get(request.sessionId) ?? 0;
+    let ownerSessionId = request.sessionId;
+    const requestGeneration = this.generations.get(request.sessionId) ?? 0;
+    let generation = requestGeneration;
     const remoteGeneration = this.remoteGeneration;
     const current = () =>
-      generation === (this.generations.get(request.sessionId) ?? 0) &&
+      requestGeneration === (this.generations.get(request.sessionId) ?? 0) &&
+      generation === (this.generations.get(ownerSessionId) ?? 0) &&
       (!remote || (this.remoteEnabled && remoteGeneration === this.remoteGeneration));
     try {
       try {
@@ -132,7 +137,11 @@ export class DevicePreviewService {
           if (!authorizeRemote) throw new Error('Missing remote simulator authorization.');
           await authorizeRemote();
         }
-        await this.deps.authorize(request);
+        const authorizedOwner = await this.deps.authorize(request);
+        if (authorizedOwner && authorizedOwner !== ownerSessionId) {
+          ownerSessionId = authorizedOwner;
+          generation = this.generations.get(ownerSessionId) ?? 0;
+        }
       } catch {
         return {
           ...base,
@@ -143,8 +152,9 @@ export class DevicePreviewService {
       }
       if (!current()) throw new Error('Simulator authorization changed.');
       if (this.disposed || !current()) throw new Error('Simulator service is stopping.');
-      const command = request.command;
-      const owner = JSON.stringify([this.deps.workspaceId, request.sessionId]);
+      let command = request.command;
+      let resumeOperation: Operation | undefined;
+      const owner = JSON.stringify([this.deps.workspaceId, ownerSessionId]);
       if (command.action === 'list') {
         const devices = await this.deps.adapter.list();
         return {
@@ -157,20 +167,21 @@ export class DevicePreviewService {
         };
       }
       if (command.action === 'exterior') {
+        const deviceId = command.id;
         if (fromAgent || !this.deps.adapter.exterior)
           return { ...base, success: false, error: 'unsupported' };
         const readExterior = this.deps.adapter.exterior;
         return await this.serialize('device-exterior', async () => {
           if (this.disposed || !current()) throw new Error('Simulator authorization changed.');
           const devices = await this.deps.adapter.list();
-          if (!devices.some((device) => device.id === command.id))
+          if (!devices.some((device) => device.id === deviceId))
             return { ...base, success: false, error: 'unavailable' as const };
-          let exterior = this.exteriors.get(command.id);
+          let exterior = this.exteriors.get(deviceId);
           if (!exterior) {
             const signal = AbortSignal.any([this.exteriorAbort.signal, AbortSignal.timeout(30000)]);
-            exterior = await readExterior(command.id, signal);
+            exterior = await readExterior(deviceId, signal);
             if (this.exteriors.size >= 16) this.exteriors.clear();
-            this.exteriors.set(command.id, exterior);
+            this.exteriors.set(deviceId, exterior);
           }
           await this.deps.authorize(request);
           if (this.disposed || !current()) throw new Error('Simulator authorization changed.');
@@ -178,19 +189,27 @@ export class DevicePreviewService {
         });
       }
       if (command.action === 'status') {
-        const op = this.operations.get(request.sessionId);
+        const op = this.operations.get(ownerSessionId);
         const matches =
           op && (!command.operationId || op.state.operationId === command.operationId);
         // Agent starts have no viewer location. The first authenticated panel
         // selects its own local/remote plane; agent status reads never attach it.
         if (matches && !fromAgent && !op.abort.signal.aborted) this.attachViewer(op, remote);
-        const preview = matches ? this.snapshot(op, fromAgent ? undefined : remote) : undefined;
-        return { ...base, success: true, preview };
+        if (matches && !fromAgent && !command.operationId && op.resumeAfterIdle) {
+          // Opening a viewer may reconnect an idle capture, just as it attaches
+          // the first viewer to an agent start. Inspection/polls stay read-only.
+          resumeOperation = op;
+          command = { action: 'start', id: op.state.id, quality: op.quality };
+        } else {
+          const preview = matches ? this.snapshot(op, fromAgent ? undefined : remote) : undefined;
+          return { ...base, success: true, preview };
+        }
       }
       // Cancellation is eager, before joining an earlier replacement's cleanup barrier.
       if (command.action === 'stop') {
-        const op = this.operations.get(request.sessionId);
+        const op = this.operations.get(ownerSessionId);
         if (op?.state.operationId === command.operationId) {
+          op.resumeAfterIdle = false;
           op.abort.abort();
           await op.done;
         }
@@ -203,17 +222,25 @@ export class DevicePreviewService {
               : undefined,
         };
       }
-      return await this.serialize(request.sessionId, async () => {
+      const startCommand = command;
+      return await this.serialize(ownerSessionId, async () => {
         if (this.disposed || !current()) throw new Error('Simulator service is stopping.');
-        const existing = this.operations.get(request.sessionId);
+        const existing = this.operations.get(ownerSessionId);
+        if (resumeOperation && existing !== resumeOperation) {
+          return {
+            ...base,
+            success: true,
+            preview: existing ? this.snapshot(existing, remote) : undefined,
+          };
+        }
         if (
           existing &&
           !existing.abort.signal.aborted &&
-          this.deviceKey(existing.state.id) === this.deviceKey(command.id) &&
-          existing.quality === command.quality
+          this.deviceKey(existing.state.id) === this.deviceKey(startCommand.id) &&
+          existing.quality === (startCommand.quality ?? existing.quality)
         ) {
           if (!fromAgent) this.attachViewer(existing, remote, true);
-          else await this.reportAgentPreview(request.sessionId, existing.state.operationId);
+          else await this.reportAgentPreview(ownerSessionId, existing.state.operationId);
           return {
             ...base,
             success: true,
@@ -225,8 +252,15 @@ export class DevicePreviewService {
           await existing.done;
         }
         if (this.disposed || !current()) throw new Error('Simulator authorization changed.');
+        // Stop and failed cleanup can supersede a reopen while it joins cleanup.
+        if (
+          resumeOperation &&
+          (!resumeOperation.resumeAfterIdle || resumeOperation.state.phase === 'failed')
+        ) {
+          return { ...base, success: true, preview: this.snapshot(resumeOperation, remote) };
+        }
         const operationId = randomUUID();
-        if (!this.leases.acquire(this.deviceKey(command.id), owner, operationId))
+        if (!this.leases.acquire(this.deviceKey(startCommand.id), owner, operationId))
           return {
             ...base,
             success: false,
@@ -235,11 +269,11 @@ export class DevicePreviewService {
           };
         const op: Operation = {
           owner,
-          quality: command.quality,
+          quality: startCommand.quality,
           endpoints: new Map(),
           state: {
             operationId,
-            id: command.id,
+            id: startCommand.id,
             phase: 'preparing',
             transport: remote ? 'remote' : 'local',
           },
@@ -261,9 +295,9 @@ export class DevicePreviewService {
           op.timer.unref?.();
         }
         if (!fromAgent) this.attachViewer(op, remote);
-        this.operations.set(request.sessionId, op);
-        op.done = this.run(request.sessionId, op);
-        if (fromAgent) await this.reportAgentPreview(request.sessionId, operationId);
+        this.operations.set(ownerSessionId, op);
+        op.done = this.run(ownerSessionId, op);
+        if (fromAgent) await this.reportAgentPreview(ownerSessionId, operationId);
         return {
           ...base,
           success: true,
@@ -289,6 +323,9 @@ export class DevicePreviewService {
   }
   private attachViewer(op: Operation, remote: boolean, retry = false): void {
     if (op.abort.signal.aborted) return;
+    if (this.deps.adapter.platform === 'android' && op.quality === undefined) {
+      op.quality = remote ? 'balanced' : 'clear';
+    }
     op.attachViewer?.(remote);
     const previous = op.endpoints.get(remote);
     if (previous && !(retry && previous.phase === 'failed')) return;
@@ -354,7 +391,10 @@ export class DevicePreviewService {
       op.state.phase = 'connecting';
       const attachTimer =
         op.viewerAttached && this.deps.adapter.viewerAttachTimeoutMs !== undefined
-          ? setTimeout(() => op.abort.abort(), this.deps.adapter.viewerAttachTimeoutMs)
+          ? setTimeout(() => {
+              op.resumeAfterIdle = true;
+              op.abort.abort();
+            }, this.deps.adapter.viewerAttachTimeoutMs)
           : undefined;
       attachTimer?.unref?.();
       try {
@@ -375,7 +415,10 @@ export class DevicePreviewService {
         signal.removeEventListener('abort', cancelProcessStartup);
       }
       void process.closed.then(
-        () => op.abort.abort(),
+        (reason) => {
+          if (!signal.aborted && reason === 'idle') op.resumeAfterIdle = true;
+          op.abort.abort();
+        },
         () => op.abort.abort()
       );
       const nativeProcess = process;
@@ -496,6 +539,7 @@ export class DevicePreviewService {
       if (results.some((r) => r.status === 'rejected')) {
         op.state.phase = 'failed';
         op.state.message = 'Simulator resource cleanup failed.';
+        op.resumeAfterIdle = false;
       }
       if (op.state.phase !== 'failed') op.state.phase = 'closed';
       // A revoked endpoint cannot send input; an unconfirmed capture may still do so.
@@ -521,7 +565,10 @@ export class DevicePreviewService {
     this.remoteEnabled = false;
     this.remoteGeneration++;
     for (const op of this.operations.values())
-      if (op.endpoints.has(true) || op.state.transport === 'remote') op.abort.abort();
+      if (op.endpoints.has(true) || op.state.transport === 'remote') {
+        op.resumeAfterIdle = false;
+        op.abort.abort();
+      }
   }
   async closeAll(): Promise<void> {
     this.disposed = true;

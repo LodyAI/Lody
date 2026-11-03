@@ -19,6 +19,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
 - Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
   Its four switches bind translated labels and rendered helpers.
+- `SettingsLineTabs` keeps a held tab's full ID on its overflow menu item as
+  `data-settings-tab-overflow-id`; visible tabs retain `data-tab`. Labels may repeat.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for

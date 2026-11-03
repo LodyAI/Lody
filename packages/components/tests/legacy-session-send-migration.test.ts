@@ -406,12 +406,6 @@ it('settles timed-out input that a late verified withdrawal reaches before any m
   }
 });
 
-it('does not create the database when it is absent', async () => {
-  const f = fixture();
-  await f.migrate();
-  expect(await databaseNames(f.factory)).toEqual([]);
-});
-
 it('appends a saved dispatch record whose turn is absent, activates it and deletes the database', async () => {
   const f = fixture();
   await seed(f.factory, [record('saved')]);

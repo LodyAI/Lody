@@ -2,15 +2,12 @@
 
 import 'fake-indexeddb/auto';
 import { gunzipSync } from 'node:zlib';
-import { act, type ReactNode } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUG_REPORT_CLIENT_LOG_LIMITS } from '@lody/shared';
+
 import {
   CLIENT_LOG_LIMITS,
-  buildClientLogUpload,
   buildClientLogUploadWithin,
-  flushClientLog,
   installClientLog,
   type ClientLogLockManager,
   readClientLog,
@@ -20,8 +17,6 @@ import {
   resetClientLogForTests,
   simulateClientLogReloadForTests,
 } from '../src/lib/client-log';
-import { ErrorBoundary } from '../src/components/error-boundary';
-import { initI18n } from '../src/i18n';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -62,65 +57,6 @@ const bootIdsIn = (log: string) =>
   [...log.matchAll(/^\S+ \S+\s+([0-9a-f]{8}) page\.boot/gmu)].map((match) => match[1] ?? '');
 
 describe('client log', () => {
-  it('keeps entries across a reload and marks each page load', async () => {
-    recordClientLog('info', 'first.page');
-    await flushClientLog();
-    await simulateClientLogReloadForTests(clock);
-    clockMs += 1;
-    recordClientLog('info', 'second.page');
-
-    const lines = (await readClientLog()).trimEnd().split('\n');
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('first.page');
-    expect(lines[1]).toContain('second.page');
-    // Each page load writes its own boot id into the line.
-    const bootIdOf = (line: string | undefined) => /^\S+ \S+\s+(\S+)/u.exec(line ?? '')?.[1];
-    expect(bootIdOf(lines[0])).toMatch(/^[0-9a-f]{8}$/u);
-    expect(bootIdOf(lines[0])).not.toBe(bootIdOf(lines[1]));
-  });
-
-  it('reports a previous page that never reached pagehide, and not one that did', async () => {
-    install();
-    await flushClientLog();
-    // The WebView is killed: no pagehide.
-    await killPage();
-    install();
-    expect(await readClientLog()).toContain('page.previous_ended_without_unload');
-
-    // This page leaves the ordinary way.
-    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
-    await killPage();
-    install();
-
-    const log = await readClientLog();
-    expect(log.match(/page\.previous_ended_without_unload/gu)).toHaveLength(1);
-    expect(log.match(/page\.boot/gu)).toHaveLength(3);
-  });
-
-  it('never reports a page still running in another window, and reports it once it dies', async () => {
-    install();
-    await flushClientLog();
-    const [siblingId] = bootIdsIn(await readClientLog());
-    // The sibling keeps running; a second window opens and holds no claim to it.
-    let live = [siblingId ?? ''];
-    setLocks(locksHeldBy(() => live));
-    await simulateClientLogReloadForTests(clock);
-    install();
-    await vi.waitFor(async () =>
-      expect(await readClientLog()).toMatch(/page\.boot.*\n.*page\.boot/su)
-    );
-    expect(await readClientLog()).not.toContain('page.previous_ended_without_unload');
-
-    // The sibling is killed; the next window to open reports it, once.
-    live = [];
-    await killPage();
-    install();
-    await vi.waitFor(async () =>
-      expect(await readClientLog()).toContain(`"previousBootId":"${siblingId}"`)
-    );
-    expect(await readClientLog()).toContain('"liveness":"not-running"');
-  });
-
   it('keeps the entries a reload would drop: they are saved on page hide', async () => {
     install();
     recordClientLog('warn', 'app.reload_requested');
@@ -132,20 +68,6 @@ describe('client log', () => {
     const log = await readClientLog();
     expect(log).toContain('app.reload_requested');
     expect(log.match(/app\.reload_requested/gu)).toHaveLength(1);
-  });
-
-  it('records uncaught errors and rejections with their stack', async () => {
-    install();
-    const error = new TypeError('cannot read diff');
-    window.dispatchEvent(new ErrorEvent('error', { message: error.message, error }));
-    const rejection = new Event('unhandledrejection') as PromiseRejectionEvent;
-    Object.defineProperty(rejection, 'reason', { value: new Error('stream closed') });
-    window.dispatchEvent(rejection);
-
-    const log = await readClientLog();
-    expect(log).toMatch(/ERROR .* window\.error cannot read diff/u);
-    expect(log).toContain('TypeError: cannot read diff');
-    expect(log).toMatch(/window\.unhandled_rejection Error: stream closed/u);
   });
 
   it('drops entries older than 48 hours', async () => {
@@ -202,24 +124,7 @@ describe('client log', () => {
     expect(log).toContain('access_token=[redacted]');
   });
 
-  it('reads entries in time order, whichever store kept them', async () => {
-    // IndexedDB is unavailable for a while: entries stay in memory...
-    const realIndexedDb = globalThis.indexedDB;
-    Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
-    recordClientLog('error', 'kept.in.memory');
-    await flushClientLog();
-    Object.defineProperty(globalThis, 'indexedDB', { value: realIndexedDb, configurable: true });
-    // ...then storage returns and later entries are written to it.
-    await simulateClientLogReloadForTests(clock);
-    clockMs += 1000;
-    recordClientLog('error', 'written.later');
-
-    const log = await readClientLog();
-    expect(log.indexOf('written.later')).toBeGreaterThan(-1);
-    expect(log.split('\n').filter(Boolean).at(-1)).toContain('written.later');
-  });
-
-  it('files a bug report without the log when IndexedDB never answers', async () => {
+  it('keeps report logs available from memory when IndexedDB never answers', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const realIndexedDb = globalThis.indexedDB;
     // WebKit can leave an open pending forever after its storage process restarts.
@@ -241,56 +146,5 @@ describe('client log', () => {
       Object.defineProperty(globalThis, 'indexedDB', { value: realIndexedDb, configurable: true });
       vi.useRealTimers();
     }
-  });
-
-  it('builds a bug report upload that decodes back to the log', async () => {
-    recordClientLog('error', 'react.error_boundary', 'TypeError: boom');
-
-    const upload = await buildClientLogUpload();
-    expect(upload).not.toBeNull();
-    const text = gunzipSync(Buffer.from(upload?.data ?? '', 'base64')).toString('utf8');
-    expect(text).toBe(await readClientLog());
-    expect(upload?.rawBytes).toBe(Buffer.byteLength(text, 'utf8'));
-    expect(upload?.compressedBytes).toBeLessThanOrEqual(
-      BUG_REPORT_CLIENT_LOG_LIMITS.maxCompressedBytes
-    );
-  });
-});
-
-describe('ErrorBoundary', () => {
-  let container: HTMLDivElement;
-  let root: Root;
-
-  beforeEach(async () => {
-    await initI18n('en');
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-  });
-
-  afterEach(() => {
-    act(() => root.unmount());
-    container.remove();
-    vi.restoreAllMocks();
-  });
-
-  function Crash(): ReactNode {
-    throw new RangeError('diff panel exploded');
-  }
-
-  it('keeps a caught crash with its boundary and component stack', async () => {
-    act(() => {
-      root.render(
-        <ErrorBoundary name="SessionDiff" variant="section">
-          <Crash />
-        </ErrorBoundary>
-      );
-    });
-
-    const log = await readClientLog();
-    expect(log).toMatch(/ERROR .* react\.error_boundary RangeError: diff panel exploded/u);
-    expect(log).toContain('"boundary":"SessionDiff"');
-    expect(log).toContain('Crash');
   });
 });

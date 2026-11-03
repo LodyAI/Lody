@@ -93,7 +93,7 @@ Translation: current
 - **位置。** 大致位置按 IP 估算，标注"大致位置，仅供参考"。
 - **手动配对**使用同一个字符串。
 - **范围。** 一次批准覆盖账号下的所有加密工作区，可以取消勾选。
-- **Member 批准方。** Member 无法签名快照邀请，因此它的批准会停在"等待送达"。一个[待批准增量](../../../../specs/e2ee-foundations.zh.md#member-批准方以历史代替快照待批准增量)提议允许不带邀请的批准行，由完整历史验证代替。owner 批准之前不实现。
+- **Member 批准方。** Member 无法签名快照邀请。按[历史增量](../../../../specs/e2ee-foundations.zh.md#member-批准方以历史代替快照已批准增量)，它的批准行不带邀请，新设备改为验证完整历史。
 
 ## 被否决的方案
 
@@ -114,6 +114,7 @@ Translation: current
 
 公开的中继 DTO 位于 [`packages/cloud-api`](../../../../packages/cloud-api/src/e2ee-account-pairing.ts)
 的 `e2eeAccountPairing` 下：提交、待处理列表、按查找 ID 读取、拒绝、发布和领取。
+
 - **权威字节。** 客户端只信任规范的请求字节、批准字节及其标签。状态、设备名、过期时间、位置和工作区路由列表都只是建议性副本，用于路由、限流和通知。
 - **多个批准者。** 领取会返回所有已发布的批准，因为每个批准者只覆盖自己能签名的工作区。
 - **接纳记录。** 接纳记录走现有的账本追加路径。每条邀请行都带上批准者在该工作区的设备访问凭据。
@@ -122,6 +123,7 @@ Translation: current
 
 宿主端口是 [`packages/platform`](../../../../packages/platform/src/e2ee-account-pairing.ts)
 中可选的 `E2eeAccountPairingRuntime`。页面在 [`e2ee-account-pairing.tsx`](../../../../packages/components/src/components/pages/e2ee-account-pairing.tsx)，由开发者模式下的测试功能开关“账号级设备配对”控制。
+
 - **职责归属。** `S`、每个标签的校验、有效期检查、终态记录和签名都由宿主负责。界面在本地校验输入的配对码，只是为了在发出任何网络请求之前指出输入错误；解码出的字节随即清零。
 - **何时显示。** 宿主没有实现这些方法时，界面什么都不显示，原有的按工作区配对仍保留在下方。桌面端已通过 IPC 实现这些方法，Web 和手机宿主还没有。
 
@@ -134,9 +136,10 @@ Translation: current
 ## 桌面宿主
 
 共享的流程位于 [`@lody/e2ee-client/account-pairing`](../../../../packages/e2ee-client/src/account-pairing.ts)，持久状态通过 `AccountPairingStore` 端口存取。[`e2ee-account-pairing.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing.mts) 是桌面端的 SQLite 存储与组装。[`e2ee-account-pairing-host.mts`](../../../../apps/electron/src/main/services/e2ee-account-pairing-host.mts) 把它接到按工作区的宿主上，`E2eeIpc` 再把它暴露给 #2196 定义的宿主接口。
+
 - **工作区列表。** 渲染进程把自己的加密工作区列表作为路由提示传入。宿主会用该工作区自己的账本或请求标签，校验每一个 genesis。
 - **新设备。** 新设备为已验证历史中分配给本账号 crypto user 的那个成员身份提供持有证明。accept 时，它按受标签认证的账本哈希找到接纳记录，把该记录的签名者当作背书者，再通过现有的按工作区加入日志安装邀请。
-- **Member 批准方。** Member 不能为快照背书，所以它的批准会停在"等待送达"。另有一个待批准的 Spec 增量提议改用历史送达，目前没有实现。
+- **Member 批准方。** Member 的邀请端口返回 `null`，因此批准行的邀请摘要为全零（中继正文是一字节占位）。新设备从标签认证的创世记录验证完整签名历史，按认证的记录哈希找到自己的接纳记录，以其签名者为背书方，经按工作区的历史路径安装。带邀请的行仍走快照路径。线格式和中继格式都不变。
 - **安装之后。** 新设备会打开工作区、刷新，并用自己的凭据跑一轮密钥安装，做法与按工作区的 claim 相同。这一步尽力而为：之后打开工作区时还会再执行一次。
 - **运行时条目。** 流程打开的每个运行时条目，如果没有窗口在读该工作区，用完后都会关闭。
 - **未完成的按工作区配对。** 如果有一个无关、未完成的按工作区配对，它的日志行会保留。对应工作区显示为 `blocked`，界面会写出它的名字；完成或取消那次配对后，请求会继续。
@@ -150,3 +153,12 @@ Translation: current
   - 只有本设备自己校验过批准标签后，批准才会发布。它的 `approverSigningPublicKey` 取按 genesis 排序后第一行的签名者；每一行的记录哈希绑定了该工作区实际的签名者。
 - **新设备。** 只有同时满足四个条件，新设备才会安装邀请：批准标签校验通过；批准绑定的是自己的请求摘要；自己的过期时间还没到；邀请摘要一致。中继给出的其他内容一律忽略。
 - **解码。** 中继传来的字节由 core 的严格 `decodePairingRequest` 和 `decodePairingApproval` 解码，只接受规范编码。
+
+## 便携宿主
+
+[`account-requester.ts`](../../../../packages/e2ee-client/src/account-requester.ts) 是手机端和 Web 端的新设备一侧，由个人设备宿主实现。
+
+- **固定 offer。** 便携身份的凭据包绑定一个 offer，但账号级流程是在还不知道批准方的时候就生成身份的。所以每个工作区使用一份固定的账号 offer：包含它的 genesis 记录和成员身份、一个占位背书者（`00…`），以及由工作区 ID 派生的 `pairingSessionId`。之后的每次请求和重新打开都能找到同一个身份和同一份日志，本地凭据格式也不需要改动。
+- **真实背书者。** 批准标签认证了某条准入记录的账本哈希，这条记录的签名者就是真实背书者。它和批准原件一起保存，快照校验和账本起点都用它代替占位值。
+- **身份保护。** 身份保护仍由各平台的 custody 负责：手机端用 Keychain 或 Keystore，Web 端用 web-crypto。
+- **已知限制。** 便携宿主目前还不会报告未完成的按工作区配对，所以这种工作区不会显示为 blocked。

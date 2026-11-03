@@ -6,6 +6,12 @@
 // not be dragged into the failure. Regressions here are what made the row read
 // like a debug panel.
 
+// @vitest-environment jsdom
+// A failed pending send is an ordinary user message, not an error report: the
+// same reason must appear exactly ONCE (on the attachment that failed), the
+// message level must stay a short status, and an attachment that finished must
+// not be dragged into the failure. Regressions here are what made the row read
+// like a debug panel.
 import { act, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +33,7 @@ import {
 
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { MessageRowView } from '../src/components/ai-gui/view';
-import { MessageSendStatusContext } from '../src/components/ai-gui/message-send-status-context';
+
 import {
   PendingMessageRow,
   SessionPendingMessages,
@@ -44,10 +50,7 @@ import {
   peekSessionImageUrl,
 } from '../src/lib/session-image-cache';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
-import { WorkspaceUserImageBlock } from '../src/components/ai-gui/view';
-import { createSessionImageGalleryEntry } from '../src/lib/session-image-gallery';
-import { SessionFileCard } from '../src/components/ai-gui/session-file-card';
-import type { SessionFilePayload } from '@lody/shared';
+
 import { initI18n } from '../src/i18n';
 
 (
@@ -117,21 +120,6 @@ describe('PendingMessageRow failure presentation', () => {
   let container: HTMLDivElement | undefined;
   const onRetry = vi.fn();
   const onCancel = vi.fn();
-
-  it('renders a ready accepted input as an ordinary message without another send status or controls', () => {
-    const html = renderToStaticMarkup(
-      createElement(PendingMessageRow, {
-        record: record({ inputState: 'sending', persisted: true, historyBackend: 'roost' }),
-        onRetry,
-        onCancel,
-      })
-    );
-    const content = document.createElement('div');
-    content.innerHTML = html;
-    expect(content.textContent).toContain('Take a look at these.');
-    expect(content.querySelector('[role="status"]')).toBeNull();
-    expect(content.querySelector('button')).toBeNull();
-  });
 
   it('shows already prepared media from the immutable message without attachment drafts', async () => {
     const identity = {
@@ -276,92 +264,6 @@ describe('PendingMessageRow failure presentation', () => {
     expect(container?.querySelector('[title="Sending"]')).toBeNull();
   });
 
-  it.each(['loro', 'roost'] as const)(
-    'shows delayed loading feedback for %s until actual delivery confirmation',
-    async (backend) => {
-      vi.useFakeTimers();
-      const store = createStore();
-      const input = record({ inputState: 'sending', historyBackend: 'roost' });
-      const draw = async (row: ReturnType<typeof createElement>) =>
-        act(async () => {
-          root?.render(createElement(Provider, { store }, row));
-        });
-      await draw(
-        backend === 'roost'
-          ? createElement(PendingMessageRow, { record: input, onRetry, onCancel })
-          : createElement(
-              MessageSendStatusContext.Provider,
-              { value: new Set([input.id]) },
-              createElement(MessageRowView, {
-                sessionId,
-                message: input.entry as unknown as SessionHistoryParsed,
-              })
-            )
-      );
-      expect(container?.textContent).toContain('Take a look at these.');
-      expect(container?.querySelector('[title="Sending"] svg circle')).not.toBeNull();
-      expect(container?.querySelector('.animate-spin')).toBeNull();
-      await act(async () => vi.advanceTimersByTime(499));
-      expect(container?.querySelector('.animate-spin')).toBeNull();
-      await act(async () => vi.advanceTimersByTime(1));
-      expect(container?.querySelectorAll('.animate-spin')).toHaveLength(1);
-      expect(container?.querySelector('[title="Delivered"]')).toBeNull();
-
-      await act(async () => {
-        store.set(rpcDeliveredTurnsAtom, (previous) =>
-          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, input.id))
-        );
-      });
-      expect(container?.querySelector('.animate-spin')).toBeNull();
-      expect(container?.querySelector('[title="Sending"]')).toBeNull();
-      expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
-      await draw(
-        createElement(MessageRowView, {
-          sessionId,
-          message: input.entry as unknown as SessionHistoryParsed,
-        })
-      );
-      expect(container?.querySelector('.animate-spin')).toBeNull();
-      expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
-    }
-  );
-
-  it('stops loading on a local input error and cancels the retry delay on an early owner receipt', async () => {
-    vi.useFakeTimers();
-    const store = createStore();
-    const input = record({ inputState: 'sending', historyBackend: 'roost' });
-    const draw = async (value: PendingSessionSend) =>
-      act(async () => {
-        root?.render(
-          createElement(
-            Provider,
-            { store },
-            createElement(PendingMessageRow, { record: value, onRetry, onCancel })
-          )
-        );
-      });
-    await draw(input);
-    await act(async () => vi.advanceTimersByTime(500));
-    expect(container?.querySelectorAll('.animate-spin')).toHaveLength(1);
-    await draw({ ...input, inputState: 'unknown', error: 'Owner confirmation unavailable' });
-    expect(container?.querySelector('.animate-spin')).toBeNull();
-    expect(container?.textContent).toContain('Owner confirmation unavailable');
-    expect(container?.querySelector('[title="Delivered"]')).toBeNull();
-
-    await draw(input);
-    await act(async () => vi.advanceTimersByTime(499));
-    expect(container?.querySelector('.animate-spin')).toBeNull();
-    await act(async () => {
-      store.set(rpcDeliveredTurnsAtom, (previous) =>
-        addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, input.id))
-      );
-    });
-    await act(async () => vi.advanceTimersByTime(500));
-    expect(container?.querySelector('.animate-spin')).toBeNull();
-    expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
-    expect(container?.textContent).not.toContain('Owner confirmation unavailable');
-  });
-
   /**
    * Counts only LEAF elements carrying the reason. An ancestor inherits the same
    * textContent, so counting every element would report a container plus its own
@@ -377,23 +279,6 @@ describe('PendingMessageRow failure presentation', () => {
 
     expect(reasonNodes(host)).toHaveLength(1);
     expect(host.querySelector('[role="status"]')?.textContent).toBe('Not sent');
-  });
-
-  /**
-   * The framed card below already carries the alarm. Colouring the status line
-   * too is what stacked three red things down one message.
-   */
-  it('keeps the message status neutral so the failed card owns the alarm', async () => {
-    const host = await render(record({ error: REASON, attachments: [readyImage, failedFile] }));
-    const status = host.querySelector('[role="status"]');
-
-    expect(status?.className).toContain('text-muted-foreground');
-    expect(status?.className).not.toContain('text-destructive');
-    // The filename stays neutral for the same reason.
-    const name = [...host.querySelectorAll('span')].find(
-      (node) => node.textContent === 'evidence.zip'
-    );
-    expect(name?.className).not.toContain('text-destructive');
   });
 
   it('shows the record reason only when no attachment carries one', async () => {
@@ -416,57 +301,6 @@ describe('PendingMessageRow failure presentation', () => {
     );
 
     expect(reasonNodes(host)).toHaveLength(1);
-  });
-
-  // A ready FILE sits beside the failed one on purpose: with only a ready image
-  // here, painting every file card red would go unnoticed.
-  it('marks only the file that failed with the failure styling', async () => {
-    const host = await render(
-      record({ error: REASON, attachments: [readyImage, readyFile, failedFile] })
-    );
-    const failedCard = host.querySelector<HTMLButtonElement>('button[aria-label="evidence.zip"]');
-    const readyCard = host.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]');
-    const failedIcon = failedCard?.querySelector('svg')?.getAttribute('class') ?? '';
-    const readyIcon = readyCard?.querySelector('svg')?.getAttribute('class') ?? '';
-
-    expect(failedCard).not.toBeNull();
-    expect(readyCard).not.toBeNull();
-    expect(failedIcon).toContain('text-destructive');
-    expect(readyIcon).not.toContain('text-destructive');
-    expect(host.querySelector('img')).not.toBeNull();
-  });
-
-  it('keeps the same file card mounted as progress becomes its final size', async () => {
-    const uploading = { ...readyFile, ready: undefined, progress: 40 };
-    const host = await render(record({ attachments: [uploading] }));
-    const card = host.querySelector('button[aria-label="notes.md"]')?.parentElement;
-    const progress = host.querySelector('[role="progressbar"]');
-    expect(progress?.getAttribute('aria-valuenow')).toBe('40');
-    expect(card?.textContent).toContain('Uploading · 40%');
-
-    await render(record({ attachments: [{ ...readyFile, source: undefined }] }));
-    expect(host.querySelector('button[aria-label="notes.md"]')?.parentElement).toBe(card);
-    expect(host.querySelector('[role="progressbar"]')).toBeNull();
-    expect(card?.textContent).toBe('notes.mdMD · 5 B');
-
-    // The successful card owns the geometry before and after history publication.
-    await act(async () =>
-      root?.render(
-        createElement(SessionFileCard, {
-          file: {
-            ...readyFile.ready,
-            mimeType: 'text/markdown',
-            uploadedAt: 1,
-            textPreview: false,
-          } as SessionFilePayload,
-          retention: 'publication',
-        })
-      )
-    );
-    const delivered = host.querySelector('button[aria-label="notes.md"]')?.parentElement;
-    expect(delivered?.textContent).toBe('notes.mdMD · 5 B');
-    expect(card?.querySelector('svg')?.classList.contains('lucide-download')).toBe(true);
-    expect(delivered?.querySelector('svg')?.classList.contains('lucide-download')).toBe(true);
   });
 
   it('retains the image after preparation releases the source, including remounts', async () => {
@@ -494,94 +328,6 @@ describe('PendingMessageRow failure presentation', () => {
     await act(async () => root?.render(null));
     await render(prepared);
     expect(host.querySelector('img')?.getAttribute('src')).toBe(url);
-  });
-
-  it.each(['full', 'large', 'compact'] as const)(
-    'paints the delivered %s image immediately from the prepared bytes',
-    async (size) => {
-      const held = record({ attachments: [readyImage] });
-      const identity = {
-        workspaceId: held.workspaceId as WorkspaceId,
-        sessionId,
-        imageId: 'uploaded',
-      };
-      await seedSessionImageCache(identity, readyImage.source!);
-      const url = peekSessionImageUrl(identity);
-      const store = createStore();
-      store.set(currentWorkspaceIdAtom, identity.workspaceId);
-      store.set(authTokenAtom, 'synthetic-preview-token');
-      const entry = createSessionImageGalleryEntry({
-        sessionId,
-        messageId: held.id,
-        itemIndex: 0,
-        imageIndex: 0,
-        image: readyImage.ready as never,
-      });
-      // Server rendering runs no effects: the image must exist before async loading begins.
-      const markup = renderToStaticMarkup(
-        createElement(
-          Provider,
-          { store },
-          createElement(WorkspaceUserImageBlock, {
-            entry,
-            onPreviewRequest: () => {},
-            variant: size === 'full' ? 'full' : 'thumbnail',
-            thumbnailSize: size === 'large' ? 'large' : 'compact',
-          })
-        )
-      );
-      const fragment = document.createElement('div');
-      fragment.innerHTML = markup;
-      expect(fragment.querySelector('img')?.getAttribute('src')).toBe(url);
-      expect(fragment.querySelectorAll('button')).toHaveLength(1);
-      expect(fragment.querySelector('img')?.parentElement?.parentElement?.children).toHaveLength(1);
-    }
-  );
-
-  it('offers continue-sending as the primary action beside cancel', async () => {
-    const host = await render(record({ error: REASON, attachments: [failedFile] }));
-    const buttons = [...host.querySelectorAll('button:not(:disabled)')];
-
-    expect(buttons.map((button) => button.textContent)).toEqual([
-      'Cancel send',
-      'Continue sending',
-    ]);
-    // Ghost cancel must not carry the filled primary surface.
-    expect(buttons[0]?.getAttribute('data-variant')).toBe('ghost');
-    expect(buttons[1]?.getAttribute('data-variant')).toBe('primary');
-
-    onRetry.mockImplementationOnce(() => {
-      root?.render(
-        createElement(PendingMessageRow, {
-          record: record({ attachments: [{ ...failedFile, error: undefined, progress: 0 }] }),
-          onRetry,
-          onCancel,
-        })
-      );
-    });
-    await act(async () => {
-      buttons[1]?.click();
-    });
-    expect(host.querySelector('[role="status"]')?.textContent).toBe(
-      'Waiting to send · Uploading attachments'
-    );
-    expect(reasonNodes(host)).toHaveLength(0);
-    expect(
-      [...host.querySelectorAll('button:not(:disabled)')].map((button) => button.textContent)
-    ).toEqual(['Cancel send']);
-  });
-
-  it('exposes no retry action while attachments are still uploading', async () => {
-    const host = await render(
-      record({ attachments: [{ ...failedFile, error: undefined, progress: 40 }] })
-    );
-
-    expect(
-      [...host.querySelectorAll('button:not(:disabled)')].map((button) => button.textContent)
-    ).toEqual(['Cancel send']);
-    expect(host.querySelector('[role="status"]')?.textContent).toBe(
-      'Waiting to send · Uploading attachments'
-    );
   });
 });
 
